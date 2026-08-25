@@ -2030,7 +2030,7 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
     description?: string | null;
     scenario: string;
     expectedBehaviors: Array<string>;
-    personas?: Array<string>;
+    personas: Array<string>;
     mockTools?: Array<{
         tool: string;
         delayMs?: number;

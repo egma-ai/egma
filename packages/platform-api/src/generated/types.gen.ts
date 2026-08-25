@@ -5341,7 +5341,7 @@ export type CreateTestData = {
         description?: string | null;
         scenario: string;
         expectedBehaviors: Array<string>;
-        personas?: Array<string>;
+        personas: Array<string>;
         mockTools?: Array<{
             tool: string;
             delayMs?: number;

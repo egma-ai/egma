@@ -16,6 +16,7 @@ import { projectLanding } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   matchesSearch,
+  runBuilderPath,
   runSuitePath,
   suitePagePath,
   shortSuiteId,
@@ -101,19 +102,17 @@ function columnsFor({
     },
     {
       /*
-       * The date sits beside the ⋮ rather than beside the name.
-       *
-       * `8P4-0` gives the name 360px and lets Changed take the rest, because
-       * on the board two more columns — a test count and a last-run verdict —
-       * stand between them. Neither exists in any response, so both are left
-       * out, and an elastic date column would leave 700px of nothing in the
-       * middle of every row. The name takes the room instead, which is what
-       * the board's own proportions do once the two columns are gone.
+       * **Created, not Changed, and nothing else.** `KM4-0` gives the suites
+       * table exactly two columns: what the suite is called, and when it
+       * started. Test counts and last-run verdicts were considered and cut on
+       * 2026-08-24 — a run result is a fact about a run, and Runs is where a
+       * person reads it. The date sits beside the ⋮ rather than beside the
+       * name, so the name takes the room the cut columns left.
        */
-      key: "changed",
-      header: "Changed",
+      key: "created",
+      header: "Created",
       width: "200px",
-      cell: (suite) => <ListInstant instant={suite.updatedAt} />,
+      cell: (suite) => <ListInstant instant={suite.createdAt} />,
     },
     {
       key: "menu",
@@ -184,7 +183,30 @@ function Suites({ projectId }: { readonly projectId: string }) {
       ? undefined
       : `Your ${String(role)} role cannot change test suites. Ask an organization admin to change your role.`;
 
+  /**
+   * The screen's first verb is running a suite.
+   *
+   * `KM4-0` puts "Run a suite" at the far right as the wash primary, with
+   * "Create suite" beside it as the outlined one: the point of a suite is that
+   * it runs, and creating one is what a person does once. The empty screen is
+   * the exception, and it is the truthful one — with no suite to run, the only
+   * honest lead is creating the first.
+   */
   const createAction =
+    role === null ? undefined : (
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={!mayAuthor}
+        {...(whyNot === undefined ? {} : { why: whyNot })}
+        onClick={() => setCreating(true)}
+      >
+        Create suite
+      </Button>
+    );
+
+  /** The empty screen leads with creating, so its button is the wash one. */
+  const firstSuiteAction =
     role === null ? undefined : (
       <Button
         type="button"
@@ -195,6 +217,12 @@ function Suites({ projectId }: { readonly projectId: string }) {
         Create suite
       </Button>
     );
+
+  const runAction = (
+    <Button asChild>
+      <Link href={runBuilderPath(projectId)}>Run a suite</Link>
+    </Button>
+  );
 
   async function remove(suite: TestSuite): Promise<void> {
     setDeleteInFlight(true);
@@ -221,9 +249,12 @@ function Suites({ projectId }: { readonly projectId: string }) {
       <RowMenu label={`Open the menu for ${suite.name}`}>
         {(close) => (
           <>
-            <MenuItem href={suitePagePath(projectId, suite.id)} onClick={close}>
-              Open
-            </MenuItem>
+            {/*
+              No Open: the row's name is the way in, and a menu that repeats it
+              adds a second answer to a question the row already answers
+              (founder's ruling, 2026-08-24). Copy suite id left with it and has
+              no home anywhere for now.
+            */}
             <MenuItem
               disabled={!mayAuthor}
               onClick={() => {
@@ -333,7 +364,7 @@ function Suites({ projectId }: { readonly projectId: string }) {
         <Empty
           title="No test suites yet"
           lead="Create a test suite before you write the first test. A suite is the folder of tests you normally review and run together."
-          action={createAction}
+          action={firstSuiteAction}
         />
       );
     }
@@ -381,7 +412,14 @@ function Suites({ projectId }: { readonly projectId: string }) {
             />
           )
         }
-        action={isEmpty ? undefined : createAction}
+        action={
+          isEmpty ? undefined : (
+            <>
+              {createAction}
+              {runAction}
+            </>
+          )
+        }
       />
       <PageBody>{body()}</PageBody>
 

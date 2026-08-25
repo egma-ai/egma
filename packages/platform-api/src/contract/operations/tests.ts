@@ -168,7 +168,14 @@ const createTestBody = {
     description: nullable(stringSchema),
     ...testContentInput,
   },
-  required: ["suiteId", "name", "scenario", "expectedBehaviors"],
+  /*
+   * **A test names at least one persona from birth.** `personas` joined this
+   * list on 2026-08-24. The server used to substitute the project's default
+   * persona for a missing or empty list, so a test could exist that nobody had
+   * ever said who calls about. The substitution is a refusal now, and the
+   * required list says so before a caller sends anything.
+   */
+  required: ["suiteId", "name", "scenario", "expectedBehaviors", "personas"],
   additionalProperties: false,
 } as const;
 

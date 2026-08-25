@@ -123,7 +123,7 @@ describe("editing what a test checks", () => {
   });
 
   it("versions on a change to the expected behaviors alone", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const sharper = [
       ...rescheduling.expectedBehaviors,
@@ -204,7 +204,7 @@ describe("editing what a test checks", () => {
   });
 
   it("numbers each edit after the last, and keeps every version fetchable by its tstv_ id", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
     const second = await editTest(actingAsAcme(), created.id, {
       expectedVersionId: created.versionId,
       scenario: "They want the Tuesday slot instead.",
@@ -234,7 +234,7 @@ describe("editing what a test checks", () => {
   });
 
   it("validates edited content exactly as created content, and versions nothing", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     await expect(
       editTest(actingAsAcme(), created.id, {
@@ -255,7 +255,7 @@ describe("editing what a test checks", () => {
   });
 
   it("validates edited personas exactly as created ones, and versions nothing", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
     const before = await rowCounts();
 
     await expect(
@@ -270,7 +270,7 @@ describe("editing what a test checks", () => {
   });
 
   it("stores an edited scenario and behaviors trimmed", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const edited = await editTest(actingAsAcme(), created.id, {
       expectedVersionId: created.versionId,
@@ -285,7 +285,7 @@ describe("editing what a test checks", () => {
   });
 
   it("is refused to a viewer, per the permission table", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     await expect(
       editTest(actingAsAcme("viewer"), created.id, {
@@ -298,7 +298,7 @@ describe("editing what a test checks", () => {
 
 describe("renaming a test", () => {
   it("updates name and description and creates no version", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
     const before = await rowCounts();
 
     const renamed = await editTest(actingAsAcme(), created.id, {
@@ -320,7 +320,7 @@ describe("renaming a test", () => {
   });
 
   it("clears the description with null, still without versioning", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const cleared = await editTest(actingAsAcme(), created.id, {
       description: null,
@@ -331,7 +331,7 @@ describe("renaming a test", () => {
   });
 
   it("refuses a blank name", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     await expect(
       editTest(actingAsAcme(), created.id, { name: "   " }),
@@ -339,7 +339,7 @@ describe("renaming a test", () => {
   });
 
   it("renames and versions together when one edit carries both", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const edited = await editTest(actingAsAcme(), created.id, {
       expectedVersionId: created.versionId,
@@ -352,6 +352,13 @@ describe("renaming a test", () => {
   });
 });
 
+/**
+ * **An edit naming no persona is refused, and it used to be answered for.**
+ *
+ * The substitution these cases proved — an empty list quietly taking the
+ * project's default — became a refusal on 2026-08-24, so an edit is held to
+ * exactly what a create is held to.
+ */
 describe("an edit naming no persona", () => {
   it("keeps the set the version already named when the field is absent", async () => {
     const created = await createTest(actingAsAcme(), {
@@ -382,35 +389,39 @@ describe("an edit naming no persona", () => {
     ]);
   });
 
-  it("takes the project's default for an empty list, exactly as a create does", async () => {
+  it("is refused for an empty list, exactly as a create is", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
       personaIds: [nadia, omar],
     });
 
-    const edited = await editTest(actingAsAcme(), created.id, {
-      expectedVersionId: created.versionId,
-      personaIds: [],
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.personas.map((named) => named.id)).toEqual([rita]);
+    await expect(
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        personaIds: [],
+      }),
+    ).rejects.toThrow(/at least one persona/);
   });
 
-  it("is no change at all when the default is already the one named", async () => {
+  it("writes nothing at all when it is refused", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
       personaIds: [rita],
     });
     const before = await rowCounts();
 
-    const saved = await editTest(actingAsAcme(), created.id, {
-      expectedVersionId: created.versionId,
-      personaIds: [],
-    });
+    await expect(
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        personaIds: [],
+      }),
+    ).rejects.toThrow(/at least one persona/);
 
-    expect(saved?.version).toBe(1);
-    expect(saved?.versionId).toBe(created.versionId);
+    // The stored version stands, and no row was written on the way to the
+    // refusal — the same test, at the same version, naming the same caller.
+    const stored = await getTest(actingAsAcme(), created.id);
+    expect(stored?.versionId).toBe(created.versionId);
+    expect(stored?.personas.map((named) => named.id)).toEqual([rita]);
     expect(await rowCounts()).toEqual(before);
   });
 
@@ -463,7 +474,7 @@ describe("one frozen version", () => {
   });
 
   it("fails loudly on a hand-corrupted row, naming the version, rather than leaking", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     // Raw SQL on purpose: the factory can never write this, so the guard is the
     // only thing standing between the row and the caller.
@@ -485,7 +496,7 @@ describe("one frozen version", () => {
 
 describe("tenancy", () => {
   it("edits nothing and returns nothing when another organization asks", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const stolen = await editTest(actingAsGlobex("admin"), created.id, {
       expectedVersionId: created.versionId,
@@ -504,7 +515,7 @@ describe("tenancy", () => {
   });
 
   it("returns nothing to the same customer acting in a sibling project", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     expect(
@@ -534,7 +545,7 @@ describe("tenancy", () => {
   });
 
   it("edits what already exists for a credential acting in no project", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editTest(wholeCustomer, created.id, {

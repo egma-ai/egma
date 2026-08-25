@@ -29,7 +29,9 @@ const TEST_BODY = {
   description: "A caller moves a booking.",
   scenario: "Move Thursday's booking to next week.",
   expectedBehaviors: ["confirms the new time before finishing"],
-  personas: [],
+  // Every test names at least one persona from birth; the project's
+  // Egma-provided caller is the one every project already has.
+  personas: ["Default Persona"],
   mockTools: [],
 } as const;
 
@@ -207,6 +209,63 @@ describe("the Test Suites cutover", () => {
     );
     expect(renamed.statusCode, JSON.stringify(renamed.body)).toBe(200);
     expect(renamed.body.name).toBe("Northside Service");
+  });
+
+  it("refuses a test that names no persona, rather than choosing one for it", async () => {
+    const { key } = await customer("suite_persona_rule");
+    const suite = await createSuite(key, "Northside Ford");
+    const suiteId = String(suite.body.id);
+
+    /*
+     * **The write-time rule, at the seam a caller meets it.** Until 2026-08-24
+     * the server put the project's default persona on a test whose author had
+     * named none — on a create and on an edit alike — so a test could read as
+     * though somebody had said who calls when nobody had. Both shapes of
+     * saying nothing are refused now, in one sentence.
+     */
+    for (const body of [
+      { suiteId, name: "No caller at all", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"] },
+      { suiteId, name: "An empty list", scenario: "The caller asks for Tuesday.", expectedBehaviors: ["Offers Tuesday"], personas: [] },
+    ]) {
+      const refused = await request(api.app, "POST", "/v1/tests", key, body);
+      expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+      expect(refused.body).toEqual({
+        error: "unprocessable",
+        message: "a test needs at least one persona, because a test says who calls",
+      });
+    }
+
+    // Naming one writes, and an edit that would empty the list is refused on
+    // the same grounds — the stored callers stand.
+    const written = await createTest(key, suiteId, "Books an appointment");
+    expect(written.statusCode, JSON.stringify(written.body)).toBe(201);
+    expect(
+      (written.body.personas as { name: string }[]).map((one) => one.name),
+    ).toEqual(["Default Persona"]);
+
+    const emptied = await request(
+      api.app,
+      "PATCH",
+      `/v1/tests/${String(written.body.id)}`,
+      key,
+      { personas: [], expectedVersionId: String(written.body.versionId) },
+    );
+    expect(emptied.statusCode, JSON.stringify(emptied.body)).toBe(422);
+    expect(emptied.body).toEqual({
+      error: "unprocessable",
+      message: "a test needs at least one persona, because a test says who calls",
+    });
+
+    const read = await request(
+      api.app,
+      "GET",
+      `/v1/tests/${String(written.body.id)}`,
+      key,
+    );
+    expect((read.body.personas as { name: string }[]).map((one) => one.name)).toEqual([
+      "Default Persona",
+    ]);
+    expect(read.body.versionId).toBe(written.body.versionId);
   });
 
   it("applies suites, tests, and Mock Tools atomically without creating suite identities", async () => {

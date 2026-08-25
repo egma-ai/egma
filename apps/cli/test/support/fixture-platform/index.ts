@@ -12,6 +12,7 @@ import { apiKeyRoutes, type ApiKeyControls } from "./api-keys.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
 import { mockToolRoutes, type MockToolControls } from "./mock-tools.ts";
+import { personaRoutes, type PersonaControls } from "./personas.ts";
 import { monitoringRoutes, type MonitoringControls } from "./monitoring.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
@@ -27,6 +28,7 @@ export type {
   StartRefusalReason,
 } from "./monitoring.ts";
 export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
+export type { PersonaControls, SeededPersona } from "./personas.ts";
 export type {
   AdvanceStep,
   FixtureGrade,
@@ -58,6 +60,8 @@ export type Platform = FixturePlatform & {
   readonly suites: SuiteControls;
   /** The mock tools this project answers with, authored directly. */
   readonly mocking: MockToolControls;
+  /** Who can call: the shared default every project starts with, and any more. */
+  readonly personas: PersonaControls;
   /** What the simulator would do to a run, done directly and in any order. */
   readonly running: RunControls;
   /**
@@ -80,6 +84,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
   let tests!: TestControls;
   let suites!: SuiteControls;
   let mocking!: MockToolControls;
+  let personas!: PersonaControls;
   let running!: RunControls;
   let projectId!: string;
 
@@ -104,6 +109,11 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
         : { afterCreate: options.afterSuiteCreate }),
     });
     suites = suiteGroup.controls;
+
+    // Every project starts pointing at Egma's shared default persona, so the
+    // fixture's project holds one before anybody authors anything.
+    const personaGroup = personaRoutes({ holdsKey, projectId });
+    personas = personaGroup.controls;
 
     const agentGroup = agentRoutes({ knowsKey: holdsKey, projectId });
     registered = agentGroup.controls;
@@ -168,6 +178,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       monitoringGroup.group,
       apiKeyGroup.group,
       suiteGroup.group,
+      personaGroup.group,
       testGroup.group,
       mockToolGroup.group,
       runGroup.group,
@@ -186,6 +197,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     tests,
     suites,
     mocking,
+    personas,
     running,
     signedInWith(key) {
       device.accept(key);

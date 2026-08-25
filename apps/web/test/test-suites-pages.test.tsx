@@ -12,6 +12,7 @@ import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 const routed = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
   pathname: "/projects/prj_1/tests",
   params: { projectId: "prj_1" } as Record<string, string>,
   search: "",
@@ -21,7 +22,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useParams: () => routed.params,
   useSearchParams: () => new URLSearchParams(routed.search),
-  useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push: routed.push, replace: routed.replace, back: vi.fn() }),
 }));
 
 vi.mock("next/link", () => ({
@@ -64,6 +65,9 @@ function suiteBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** The one caller the grid's fixtures name, because a test says who calls. */
+const PERSONA = { id: "prs_1", name: "Impatient Rita", archivedAt: null };
+
 function testBody(overrides: Record<string, unknown> = {}) {
   return {
     id: "tst_1",
@@ -75,7 +79,8 @@ function testBody(overrides: Record<string, unknown> = {}) {
     versionId: "tstv_1",
     scenario: "The caller books service.",
     expectedBehaviors: ["Offers an available time"],
-    personas: [],
+    personas: [PERSONA],
+    mockTools: [],
     overrideCount: 0,
     revision: "rev_1",
     createdAt: "2026-08-21T10:00:00.000Z",
@@ -118,25 +123,32 @@ function answers(stubs: Record<string, Stub | readonly Stub[]>): void {
   );
 }
 
-function detailAnswers(options: {
+function gridAnswers(options: {
   readonly role?: "admin" | "member" | "viewer";
-  readonly me?: Me;
-  readonly test?: Record<string, unknown>;
+  readonly tests?: readonly Record<string, unknown>[];
   readonly saved?: Stub;
+  readonly created?: Stub;
+  readonly removed?: Stub;
 } = {}): void {
-  const test = options.test ?? testBody();
-  // No version list is stubbed, and that is the point: versioning is hidden
-  // from the interface for launch, so the test page reads the test and its
-  // suite and nothing else. A read of `/v1/tests/tst_1/versions` would fail
-  // here, which is what keeps that true.
+  routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+  routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+  const listed = options.tests ?? [testBody({ personas: [PERSONA] })];
   answers({
-    "/api/me": { status: 200, body: options.me ?? meWith(options.role ?? "admin") },
-    "/v1/tests/tst_1":
-      options.saved === undefined
-        ? { status: 200, body: test }
-        : [{ status: 200, body: test }, options.saved],
+    "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
     "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
-    "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+    "/v1/tests":
+      options.created === undefined
+        ? { status: 200, body: { tests: listed, nextPageToken: null } }
+        : [
+            { status: 200, body: { tests: listed, nextPageToken: null } },
+            options.created,
+          ],
+    ...(options.saved === undefined ? {} : { "/v1/tests/tst_1": options.saved }),
+    ...(options.removed === undefined ? {} : { "/v1/tests/tst_1": options.removed }),
+    "/v1/personas": {
+      status: 200,
+      body: { personas: [PERSONA], nextPageToken: null },
+    },
   });
 }
 
@@ -259,44 +271,34 @@ describe("the suite-first Tests route", () => {
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests/suites/ste_1");
   });
 
-  it("keeps an empty suite and starts its first test in that suite", async () => {
+  it("teaches the first test in the grid and carries only Write a test", async () => {
     routed.pathname = "/projects/prj_1/tests/suites/ste_1";
     routed.params = { projectId: "prj_1", suiteId: "ste_1" };
     answers({
       "/api/me": { status: 200, body: ME },
-      "/v1/test-suites/ste_1": {
-        status: 200,
-        body: {
-          id: "ste_1",
-          projectId: "prj_1",
-          name: "Northside Ford",
-          createdAt: "2026-08-21T10:00:00.000Z",
-          updatedAt: "2026-08-21T10:00:00.000Z",
-        },
-      },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
       "/v1/tests": { status: 200, body: { tests: [], nextPageToken: null } },
     });
 
     render(<TestSuitePage />);
 
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
-    // The suite id left the page with the boards: it is a fact about the
-    // record, and it lives in the rename panel where somebody who needs to
-    // quote it goes to find it.
-    expect(screen.queryByText("ste_1")).toBeNull();
-    expect(screen.getByText("No tests in this suite")).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: "Write a test" })[0]?.getAttribute("href")).toBe(
-      "/projects/prj_1/tests/new?suite=ste_1",
-    );
-    // "Run suite" opens the run builder carrying this suite. Nothing on this
-    // screen starts a run, so there is no control that could.
-    expect(screen.queryByRole("button", { name: /^run/i })).toBeNull();
-    expect(screen.getByRole("link", { name: "Run suite" }).getAttribute("href")).toBe(
-      "/projects/prj_1/runs/new?suite=ste_1",
-    );
+    for (const header of ["Name", "Scenario", "Expected behaviors", "Personas"]) {
+      expect(screen.getByRole("columnheader", { name: header }), header).toBeTruthy();
+    }
+    // An empty suite is the grid and one teaching row, not an empty-state card.
+    expect(screen.getByText("One situation to put the agent in…")).toBeTruthy();
+    expect(screen.getByText("…and who calls.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Write a test" })).toBeTruthy();
+
+    // Suite management moved to the suites list. Nothing here runs, renames or
+    // deletes a suite, and there is no toolbar ⋮ left to hold them.
+    expect(screen.getByRole("button", { name: "Write a test" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Run suite" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open the suite menu" })).toBeNull();
   });
 
-  it("lets a viewer read a suite while every suite write stays inert", async () => {
+  it("lets a viewer read a suite while every test write stays inert", async () => {
     routed.pathname = "/projects/prj_1/tests/suites/ste_1";
     routed.params = { projectId: "prj_1", suiteId: "ste_1" };
     answers({
@@ -304,31 +306,22 @@ describe("the suite-first Tests route", () => {
       "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
       "/v1/tests": {
         status: 200,
-        body: { tests: [testBody()], nextPageToken: null },
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
       },
     });
 
     render(<TestSuitePage />);
 
-    expect(await screen.findByRole("link", { name: "Books service" })).toBeTruthy();
+    expect(await screen.findByText("Books service")).toBeTruthy();
     const write = screen.getByRole("button", { name: "Write a test" });
     expect((write as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(write);
 
-    // Renaming and deleting moved into the suite's own ⋮ menu, so a viewer
-    // meets them there — offered, inert, and with the reason beside them.
-    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
-    for (const name of ["Rename suite", "Delete suite"]) {
-      const item = await screen.findByRole("menuitem", { name });
-      expect((item as HTMLButtonElement).disabled, name).toBe(true);
-      fireEvent.click(item);
-    }
-    expect(
-      screen.getByText(
-        "Your viewer role cannot change test suites. Ask an organization admin to change your role.",
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    // A viewer's grid never wakes: no ghost row to write into, and a click on a
+    // cell leaves the cell as it was.
+    expect(screen.queryByRole("button", { name: "+ Write a test" })).toBeNull();
+    fireEvent.click(screen.getByText("The caller books service."));
+    expect(screen.queryByLabelText("Scenario")).toBeNull();
     expect(sent.some((request) => ["POST", "PATCH", "DELETE"].includes(request.method))).toBe(
       false,
     );
@@ -360,38 +353,36 @@ describe("the suite-first Tests route", () => {
     expect(screen.getByText("ste_2")).toBeTruthy();
   });
 
-  it("renames a suite in place and warns before permanent deletion", async () => {
-    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
-    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
-    const original = {
-      id: "ste_1",
-      projectId: "prj_1",
-      name: "Northside Ford",
-      createdAt: "2026-08-21T10:00:00.000Z",
-      updatedAt: "2026-08-21T10:00:00.000Z",
-    };
+  it("renames and permanently deletes a suite from the suites list row menu", async () => {
+    routed.pathname = "/projects/prj_1/tests";
+    routed.params = { projectId: "prj_1" };
+    const original = suiteBody();
     answers({
       "/api/me": { status: 200, body: ME },
+      "/v1/test-suites": {
+        status: 200,
+        body: { testSuites: [original], nextPageToken: null },
+      },
       "/v1/test-suites/ste_1": [
-        { status: 200, body: original },
         {
           status: 200,
-          body: {
-            ...original,
-            name: "Northside Ford Service",
-            updatedAt: "2026-08-21T10:01:00.000Z",
-          },
+          body: { ...original, name: "Northside Ford Service" },
         },
         { status: 204, body: null },
       ],
-      "/v1/tests": { status: 200, body: { tests: [], nextPageToken: null } },
     });
 
-    render(<TestSuitePage />);
-    expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
+    render(<TestsPage />);
+    expect(await screen.findByRole("link", { name: "Northside Ford" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename suite" }));
+    // Suite management is here and only here: Rename, Run suite, Delete suite,
+    // with no Open — the row's own name is the way in — and no Copy suite id.
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu for Northside Ford" }));
+    expect(
+      (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+    ).toEqual(["Rename", "Run suite", "Delete suite"]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     // The rename surface is a side sheet named by the suite it is about, so
     // the list behind it stays on screen while the name is changed.
     const rename = await screen.findByRole("dialog", { name: "Northside Ford" });
@@ -400,17 +391,21 @@ describe("the suite-first Tests route", () => {
     });
     fireEvent.click(within(rename).getByRole("button", { name: "Save name" }));
 
-    expect(await screen.findByRole("heading", { name: "Northside Ford Service" })).toBeTruthy();
-    expect(sent.find((request) => request.method === "PATCH")).toEqual({
-      path: "/v1/test-suites/ste_1",
-      method: "PATCH",
-      body: { name: "Northside Ford Service" },
+    await waitFor(() => {
+      expect(sent.find((request) => request.method === "PATCH")).toEqual({
+        path: "/v1/test-suites/ste_1",
+        method: "PATCH",
+        body: { name: "Northside Ford Service" },
+      });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open the menu for Northside Ford" }),
+    );
     fireEvent.click(await screen.findByRole("menuitem", { name: "Delete suite" }));
     const deletion = await screen.findByRole("dialog", {
-      name: "Delete Northside Ford Service?",
+      name: "Delete Northside Ford?",
     });
     expect(
       within(deletion).getByText(
@@ -431,315 +426,480 @@ describe("the suite-first Tests route", () => {
         body: undefined,
       });
     });
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests");
   });
 
-  it("writes a test directly into the suite named by the route", async () => {
-    routed.pathname = "/projects/prj_1/tests/new";
+  it("leads the suites screen with Run a suite and shows exactly Name and Created", async () => {
+    routed.pathname = "/projects/prj_1/tests";
     routed.params = { projectId: "prj_1" };
-    routed.search = "suite=ste_1";
     answers({
       "/api/me": { status: 200, body: ME },
-      "/v1/test-suites/ste_1": {
+      "/v1/test-suites": {
         status: 200,
-        body: {
-          id: "ste_1",
-          projectId: "prj_1",
-          name: "Northside Ford",
-          createdAt: "2026-08-21T10:00:00.000Z",
-          updatedAt: "2026-08-21T10:00:00.000Z",
-        },
+        body: { testSuites: [suiteBody()], nextPageToken: null },
       },
-      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
-      // The address draws the suite with the write panel over it, so the suite's
-      // own tests are read before anything is written into it.
-      "/v1/tests": [
-        { status: 200, body: { tests: [], nextPageToken: null } },
-        {
-          status: 201,
-          body: {
-            id: "tst_1",
-            projectId: "prj_1",
-            suiteId: "ste_1",
-            name: "Books service",
-          },
-        },
-      ],
     });
 
-    render(<NewTestPage />);
+    render(<TestsPage />);
 
-    expect(await screen.findByText("In suite Northside Ford")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Books service" } });
-    fireEvent.change(screen.getByLabelText("Scenario"), {
-      target: { value: "The caller asks to book the next service slot." },
+    expect(await screen.findByRole("link", { name: "Northside Ford" })).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent)
+        .filter((header) => header !== "Suite actions"),
+    ).toEqual(["Name", "Created"]);
+    // Running is the screen's first verb, and it reaches the run builder with
+    // no suite chosen — the builder is the screen that picks one.
+    expect(screen.getByRole("link", { name: "Run a suite" }).getAttribute("href")).toBe(
+      "/projects/prj_1/runs/new",
+    );
+    expect(screen.getByRole("button", { name: "Create suite" })).toBeTruthy();
+  });
+
+  it("commits one cell alone, carrying the version it read", async () => {
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          scenario: "The caller books the next service slot.",
+          version: 2,
+          versionId: "tstv_2",
+        }),
+      },
     });
-    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
-      target: { value: "Offers a real available time" },
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    const scenario = screen.getByLabelText("Scenario");
+    fireEvent.change(scenario, {
+      target: { value: "The caller books the next service slot." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Write the test" }));
+    fireEvent.keyDown(scenario, { key: "Enter" });
 
     await waitFor(() => {
-      expect(sent.find((request) => request.path === "/v1/tests" && request.method === "POST"))
-        .toEqual({
+      expect(
+        sent.filter((request) => request.method === "PATCH"),
+      ).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          // One field, and the version it was read at. Nothing else travels,
+          // so the stored name, behaviors and personas keep their values.
+          body: {
+            scenario: "The caller books the next service slot.",
+            expectedVersionId: "tstv_1",
+          },
+        },
+      ]);
+    });
+  });
+
+  it("refuses in place a cell save that would empty a mandatory field", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByText("The caller books service."));
+    const scenario = screen.getByLabelText("Scenario");
+    fireEvent.change(scenario, { target: { value: "   " } });
+    fireEvent.keyDown(scenario, { key: "Enter" });
+
+    expect(
+      await screen.findByText(
+        "A test needs a scenario: the situation the agent is put in. The stored scenario stands.",
+      ),
+    ).toBeTruthy();
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("cannot save an entry row early, and writes exactly one test when it is whole", async () => {
+    gridAnswers({
+      tests: [],
+      created: {
+        status: 201,
+        body: testBody({ personas: [PERSONA], name: "Books service" }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+
+    const save = screen.getByRole("button", { name: "Save test" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      screen.getByText(
+        "Needs a name, a scenario, one expected behavior, and one persona.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
+    });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books service." },
+    });
+    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
+      target: { value: "Offers an available time" },
+    });
+
+    // The sentence shortens as the row fills, and it is always true.
+    expect(await screen.findByText("Needs one persona.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(await screen.findByLabelText("Impatient Rita"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Needs one persona.")).toBeNull();
+    });
+    const ready = screen.getByRole("button", { name: "Save test" });
+    expect((ready as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(ready);
+
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.path === "/v1/tests" && request.method === "POST"),
+      ).toEqual([
+        {
           path: "/v1/tests",
           method: "POST",
           body: {
             suiteId: "ste_1",
             name: "Books service",
-            scenario: "The caller asks to book the next service slot.",
-            expectedBehaviors: ["Offers a real available time"],
-            personas: [],
+            scenario: "The caller books service.",
+            expectedBehaviors: ["Offers an available time"],
+            personas: ["prs_1"],
           },
-        });
+        },
+      ]);
     });
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests/tst_1");
   });
 
-  it("keeps a test in its suite and permanently deletes only that test", async () => {
-    routed.pathname = "/projects/prj_1/tests/tst_1";
-    routed.params = { projectId: "prj_1", testId: "tst_1" };
-    const test = {
-      id: "tst_1",
-      projectId: "prj_1",
-      suiteId: "ste_1",
-      name: "Books service",
-      description: null,
-      version: 1,
-      versionId: "tv_1",
-      scenario: "The caller books service.",
-      expectedBehaviors: ["Offers an available time"],
-      personas: [],
-      overrideCount: 0,
-      revision: "rev_1",
-      createdAt: "2026-08-21T10:00:00.000Z",
-      updatedAt: "2026-08-21T10:00:00.000Z",
-    };
-    answers({
-      "/api/me": { status: 200, body: ME },
-      "/v1/tests/tst_1": [
-        { status: 200, body: test },
-        { status: 204, body: null },
-      ],
-      "/v1/test-suites/ste_1": {
-        status: 200,
-        body: {
-          id: "ste_1",
-          projectId: "prj_1",
-          name: "Northside Ford",
-          createdAt: "2026-08-21T10:00:00.000Z",
-          updatedAt: "2026-08-21T10:00:00.000Z",
-        },
-      },
-      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+  it("asks once before discarding what was typed into an entry row", async () => {
+    gridAnswers({ tests: [] });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    render(<TestDetailPage />);
-
-    const suiteLink = await screen.findByRole("link", { name: "Northside Ford" });
-    expect(suiteLink.getAttribute("href")).toBe("/projects/prj_1/tests/suites/ste_1");
-    expect(screen.queryByRole("button", { name: "Clone" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Move test" })).toBeNull();
-    expect(screen.queryByText(/applies to agents/i)).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Delete test" }));
-    const deletion = await screen.findByRole("dialog", { name: "Delete this test?" });
+    const asked = await screen.findByRole("dialog", { name: "Discard this test?" });
     expect(
-      within(deletion).getByText(
-        "“Books service” leaves the Northside Ford suite. Nobody can author or run it after this.",
+      within(asked).getByText(
+        "What you typed is not saved.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(asked).getByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Save test" })).toBeNull();
+    });
+    expect(sent.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("deletes one test from its row menu, after naming what would go", async () => {
+    gridAnswers({ removed: { status: 204, body: null } });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu for Books service" }));
+    // The row offers one thing, and the four columns stay the test's content.
+    expect(
+      (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+    ).toEqual(["Delete test"]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete test" }));
+    const asked = await screen.findByRole("dialog", { name: "Delete this test?" });
+    expect(
+      within(asked).getByText(
+        "“Books service” leaves this suite. Nobody can author or run it after this.",
       ),
     ).toBeTruthy();
     expect(
-      within(deletion).getByText(
+      within(asked).getByText(
         "Runs that already ran it keep their results and transcripts.",
       ),
     ).toBeTruthy();
-    fireEvent.click(within(deletion).getByRole("button", { name: "Delete test" }));
-
-    await waitFor(() => expect(sent.find((request) => request.method === "DELETE")).toEqual({
-      path: "/v1/tests/tst_1",
-      method: "DELETE",
-      body: undefined,
-    }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests/suites/ste_1");
-  });
-
-  it("saves identity with its revision and keeps newer typing in both edit areas", async () => {
-    routed.pathname = "/projects/prj_1/tests/tst_1";
-    routed.params = { projectId: "prj_1", testId: "tst_1" };
-    let finishSave: () => void = () => undefined;
-    const saving = new Promise<void>((resolve) => {
-      finishSave = resolve;
-    });
-    answers({
-      "/api/me": { status: 200, body: ME },
-      "/v1/tests/tst_1": [
-        { status: 200, body: testBody() },
-        {
-          status: 200,
-          body: testBody({ name: "Renamed", revision: "rev_2" }),
-          waitFor: saving,
-        },
-      ],
-      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
-      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
-    });
-
-    render(<TestDetailPage />);
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Renamed" },
-    });
-    fireEvent.change(screen.getByLabelText("Scenario"), {
-      target: { value: "Keep this unsaved scenario" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(within(asked).getByRole("button", { name: "Delete test" }));
 
     await waitFor(() => {
-      expect(
-        sent.filter(
-          (request) => request.path === "/v1/tests/tst_1" && request.method === "PATCH",
-        ),
-      ).toHaveLength(1);
+      expect(sent.find((request) => request.method === "DELETE")).toEqual({
+        path: "/v1/tests/tst_1",
+        method: "DELETE",
+        body: undefined,
+      });
     });
-    const body = sent.find(
-      (request) => request.path === "/v1/tests/tst_1" && request.method === "PATCH",
-    )?.body as Record<string, unknown>;
-    expect(body).toMatchObject({
-      name: "Renamed",
-      description: null,
-      expectedRevision: "rev_1",
+    await waitFor(() => {
+      expect(screen.queryByText("Books service")).toBeNull();
     });
-    expect(body).not.toHaveProperty("expectedVersionId");
+  });
 
+  it("focuses the entry row from the toolbar and from the retired write address", async () => {
+    gridAnswers({ tests: [] });
+
+    render(<TestSuitePage />);
+
+    // The toolbar's own button: the entry row opens with the caret in Name,
+    // and the address does not move.
+    fireEvent.click(await screen.findByRole("button", { name: "Write a test" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+    });
+    expect(routed.push).not.toHaveBeenCalled();
+
+    cleanup();
+    sent = [];
+
+    // The retired write address lands on the same row, in the same place.
+    routed.pathname = "/projects/prj_1/tests/new";
+    routed.params = { projectId: "prj_1" };
+    routed.search = "suite=ste_1";
+    gridAnswers({ tests: [] });
+    routed.pathname = "/projects/prj_1/tests/new";
+    routed.params = { projectId: "prj_1" };
+
+    render(<NewTestPage />);
+
+    expect(await screen.findByRole("button", { name: "Save test" })).toBeTruthy();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+    });
+  });
+
+  it("keeps a cell's Escape inside that cell while an entry row is open", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
     fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Keep this in-flight identity edit" },
+      target: { value: "A row in progress" },
     });
-    finishSave();
+
+    // Wake an existing test's cell, type into it, and press Escape there.
+    // Scoped to that row: the open entry row has cells of the same names.
+    const row = screen.getByText("The caller books service.").closest("tr");
+    if (row === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(row).getByText("The caller books service."));
+    const scenario = within(row).getByLabelText("Scenario");
+    fireEvent.change(scenario, { target: { value: "Something else entirely." } });
+    fireEvent.keyDown(scenario, { key: "Escape" });
+
+    // The cell reverted and nothing was sent; the entry row is untouched and
+    // no discard dialog was raised over a row nobody asked to throw away.
+    expect(screen.getByText("The caller books service.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save test" })).toBeTruthy();
+    expect(
+      (screen.getAllByLabelText("Name")[0] as HTMLInputElement).value,
+    ).toBe("A row in progress");
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("opens one persona picker at a time", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    expect(await screen.findAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+
+    // Waking the row's own Personas cell opens its picker and leaves exactly
+    // one standing — the entry row's does not survive beside it.
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
 
     await waitFor(() => {
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-        "Keep this in-flight identity edit",
-      );
+      expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
     });
-    expect((screen.getByLabelText("Scenario") as HTMLTextAreaElement).value).toBe(
-      "Keep this unsaved scenario",
-    );
   });
 
-  it("lets a viewer read a test while every test write stays inert", async () => {
-    routed.pathname = "/projects/prj_1/tests/tst_1";
-    routed.params = { projectId: "prj_1", testId: "tst_1" };
-    detailAnswers({ role: "viewer" });
-
-    render(<TestDetailPage />);
-
-    const name = await screen.findByLabelText("Name");
-    expect((name as HTMLInputElement).value).toBe("Books service");
-    expect((name as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Scenario") as HTMLTextAreaElement).disabled).toBe(true);
-    for (const label of ["Save settings", "Save version", "Delete test"]) {
-      const control = screen.getByRole("button", { name: label });
-      expect((control as HTMLButtonElement).disabled, label).toBe(true);
-      expect(control.getAttribute("title"), label).toContain("viewer role cannot");
-      fireEvent.click(control);
-    }
-    for (const retired of ["Clone", "Archive", "Restore", "Move test"]) {
-      expect(screen.queryByRole("button", { name: retired })).toBeNull();
-    }
-    expect(sent.some((request) => ["POST", "PATCH", "DELETE"].includes(request.method))).toBe(
-      false,
-    );
-  });
-
-  it("sends the content version token and keeps the refused draft intact", async () => {
-    routed.pathname = "/projects/prj_1/tests/tst_1";
-    routed.params = { projectId: "prj_1", testId: "tst_1" };
-    const message = "This test version changed after you opened it.";
-    detailAnswers({
+  it("saves a name against the revision it read, not the version", async () => {
+    gridAnswers({
       saved: {
-        status: 409,
-        body: { error: "version_conflict", message },
+        status: 200,
+        body: testBody({ personas: [PERSONA], name: "Books a service", revision: "rev_2" }),
       },
     });
 
-    render(<TestDetailPage />);
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this identity draft" },
-    });
-    fireEvent.change(screen.getByLabelText("Scenario"), {
-      target: { value: "Keep this refused scenario" },
-    });
-    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
-      target: { value: "Keeps this refused behavior" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+    render(<TestSuitePage />);
 
-    expect(await screen.findByText(message)).toBeTruthy();
-    expect(
-      screen.getByText("Cannot save · the test changed since you opened it"),
-    ).toBeTruthy();
-    const body = sent.find(
-      (request) => request.path === "/v1/tests/tst_1" && request.method === "PATCH",
-    )?.body as Record<string, unknown>;
-    expect(body).toEqual({
-      scenario: "Keep this refused scenario",
-      expectedBehaviors: ["Keeps this refused behavior"],
-      personas: [],
-      expectedVersionId: "tstv_1",
+    // A blur commits exactly as Enter does, and a name is identity: it carries
+    // the revision it was read at and mints no version.
+    fireEvent.click(await screen.findByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.blur(name);
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { name: "Books a service", expectedRevision: "rev_1" },
+        },
+      ]);
     });
-    expect(body).not.toHaveProperty("expectedRevision");
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Keep this identity draft",
-    );
-    expect((screen.getByLabelText("Scenario") as HTMLTextAreaElement).value).toBe(
-      "Keep this refused scenario",
-    );
-    expect((screen.getByLabelText("Expected behavior 1") as HTMLTextAreaElement).value).toBe(
-      "Keeps this refused behavior",
+  });
+
+  it("lands a late cell save on its own cell, never on the one now being typed in", async () => {
+    // A's PATCH is held open. While it hangs, the caret moves to B and types.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: {
+          tests: [
+            testBody({ personas: [PERSONA] }),
+            testBody({
+              id: "tst_2",
+              versionId: "tstv_2",
+              revision: "rev_2",
+              name: "Cancels service",
+              scenario: "The caller cancels.",
+              personas: [PERSONA],
+            }),
+          ],
+          nextPageToken: null,
+        },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({ personas: [PERSONA], scenario: "A saved late." }),
+        waitFor: held,
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    // Commit A — the request hangs.
+    const rowA = (await screen.findByText("Books service")).closest("tr");
+    if (rowA === null) throw new Error("row A is not on screen");
+    fireEvent.click(within(rowA).getByText("The caller books service."));
+    const scenarioA = within(rowA).getByLabelText("Scenario");
+    fireEvent.change(scenarioA, { target: { value: "A saved late." } });
+    fireEvent.keyDown(scenarioA, { key: "Enter" });
+
+    // The caret moves to B and types, while A is still in flight.
+    const rowB = screen.getByText("Cancels service").closest("tr");
+    if (rowB === null) throw new Error("row B is not on screen");
+    fireEvent.click(within(rowB).getByText("The caller cancels."));
+    const scenarioB = within(rowB).getByLabelText("Scenario");
+    fireEvent.change(scenarioB, { target: { value: "B, half typed" } });
+
+    // Now A answers. B must keep both its wake and every word typed into it.
+    release();
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    });
+    const stillB = screen.getByText("Cancels service").closest("tr");
+    if (stillB === null) throw new Error("row B left the grid");
+    expect((within(stillB).getByLabelText("Scenario") as HTMLTextAreaElement).value).toBe(
+      "B, half typed",
     );
   });
 
-  it("protects a dirty test across links, project switches, and browser unload", async () => {
+  it("reads every page of personas, so a later one can be found and picked", async () => {
+    const LATER = { id: "prs_2", name: "Careful Chris", archivedAt: null };
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": [
+        { status: 200, body: { tests: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: testBody({ personas: [LATER], name: "Books service" }),
+        },
+      ],
+      // Two pages, and the wanted persona is on the second one.
+      "/v1/personas": [
+        { status: 200, body: { personas: [PERSONA], nextPageToken: "prs_1" } },
+        { status: 200, body: { personas: [LATER], nextPageToken: null } },
+      ],
+    });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+
+    // A page-two persona is listed, findable by search, and pickable.
+    expect(await screen.findByLabelText("Careful Chris")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search personas"), {
+      target: { value: "Careful" },
+    });
+    expect(screen.queryByLabelText("Impatient Rita")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Careful Chris"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
+    });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books service." },
+    });
+    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
+      target: { value: "Offers an available time" },
+    });
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save test" }));
+
+    await waitFor(() => {
+      expect(
+        sent.find((request) => request.path === "/v1/tests" && request.method === "POST"),
+      ).toMatchObject({ body: { personas: ["prs_2"] } });
+    });
+  });
+
+  it("lands the retired test address on that test's suite grid", async () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     routed.params = { projectId: "prj_1", testId: "tst_1" };
-    detailAnswers({
-      me: meWith("admin", [
-        { id: "prj_1", name: "Receptionists", slug: "receptionists" },
-        { id: "prj_2", name: "Outbound", slug: "outbound" },
-      ]),
+    answers({
+      "/api/me": { status: 200, body: ME },
+      "/v1/tests/tst_1": { status: 200, body: testBody({ personas: [PERSONA] }) },
     });
 
     render(<TestDetailPage />);
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this test edit" },
+
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith(
+        "/projects/prj_1/tests/suites/ste_1",
+      );
     });
-
-    const parent = within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole(
-      "link",
-      { name: "Tests" },
-    );
-    fireEvent.click(parent);
-    expect(routed.push).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    const leaving = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(leaving);
-    expect(leaving.defaultPrevented).toBe(true);
-
-    const projectSelector = screen.getAllByRole("button", {
-      name: /^Organization Acme, project Receptionists/u,
-    })[0];
-    if (projectSelector === undefined) throw new Error("project selector missing");
-    fireEvent.click(projectSelector);
-    fireEvent.click(within(screen.getByRole("menu")).getByText("Outbound"));
-
-    expect(routed.push).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/tests");
+    // The full page is gone: nothing here edits the test it resolved.
+    expect(screen.queryByLabelText("Scenario")).toBeNull();
   });
 
   it("keeps duplicate suite names and disambiguates them only in the run picker", async () => {

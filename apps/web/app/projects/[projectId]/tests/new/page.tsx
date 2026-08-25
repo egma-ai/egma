@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 
-import { Button } from "@/components/ui/button";
 import { testsPagePath } from "../../../../../lib/test-suites.ts";
-import { Empty } from "../../../../../ui/page-state.tsx";
+import { Loading } from "../../../../../ui/page-state.tsx";
 import {
   AppShell,
   PageBody,
@@ -15,36 +14,33 @@ import {
 import { SuiteScreen } from "../suite-screen.tsx";
 
 /**
- * Writing a test.
+ * Writing a test, which is the suite's grid with its entry row already open.
  *
- * **This route draws the suite with the write-a-test panel open over it**,
- * which is what `ATG-0` shows: the list a test is being added to stays on
- * screen behind the panel. It is still a route rather than a piece of state on
- * the suite page, so the address a person is sent, the Back button, and every
- * walk that opens `?suite=` directly all keep working.
+ * **The write-a-test sheet is retired.** A test is written in the grid's entry
+ * row now, so this address draws the suite the address names and opens that
+ * row — the same screen the suite's own address draws, one row further on. It
+ * stays a real address because links to it were copied while the sheet existed.
  *
  * With no suite in the address there is nothing to write into, and the answer
- * is the same as it has always been: choose one first.
+ * is the suites screen: every test belongs to one suite for its whole life, so
+ * choosing the suite is the first thing that has to happen.
  */
 export default function NewTestPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
   const suiteId = useSearchParams().get("suite");
+
+  useEffect(() => {
+    if (suiteId === null) router.replace(testsPagePath(projectId));
+  }, [router, projectId, suiteId]);
 
   if (suiteId === null) {
     return (
       <AppShell>
         <ProductPage>
-          <PageHeader title="Write a test" />
+          <PageHeader title="Tests" />
           <PageBody>
-            <Empty
-              title="Choose a test suite first"
-              lead="Every test belongs to one suite for its full lifetime. Open a suite, then write the test there."
-              action={
-                <Button asChild variant="secondary">
-                  <Link href={testsPagePath(projectId)}>Open test suites</Link>
-                </Button>
-              }
-            />
+            <Loading what="test suites" />
           </PageBody>
         </ProductPage>
       </AppShell>

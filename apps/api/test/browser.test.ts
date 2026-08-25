@@ -2878,7 +2878,8 @@ describe("the complete product, walked in order in a second project", () => {
         ),
       );
       suiteAddress = walk.url();
-      await saysWithin(walk, "No tests in this suite");
+      // An empty suite is the grid and its one teaching row.
+      await saysWithin(walk, "One situation to put the agent in…");
       expect(await walk.innerText("main")).toContain("Support reception");
     },
     SETTLE,
@@ -2888,23 +2889,25 @@ describe("the complete product, walked in order in a second project", () => {
     "writes a test inside that suite, with the persona who calls about it",
     async () => {
       await walk.goto(suiteAddress);
-      await walk.getByRole("link", { name: "Write a test" }).first().click();
-      await walk.waitForURL(testWriterAddress());
-      // The writer is the side sheet the boards draw, over the suite it writes
-      // into: the block label is what the page says, and the panel's own
-      // sub-line is which suite this test will belong to.
-      await saysWithin(walk, "EXPECTED BEHAVIORS");
-      expect(await walk.innerText("main")).toContain("In suite Support reception");
-
-      await walk.fill("#test-name", "Reschedules a booked appointment");
-      await walk.fill(
-        "#test-scenario",
-        "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+      // The grid's ghost row is where a test is written now: the side sheet and
+      // the test full page retired on 2026-08-24, and the entry row opens in
+      // place on the suite's own address.
+      const writeResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/v1/tests",
       );
+      await walk.getByRole("button", { name: "+ Write a test" }).click();
+      await walk
+        .getByRole("textbox", { name: "Name" })
+        .fill("Reschedules a booked appointment");
+      await walk
+        .getByRole("textbox", { name: "Scenario" })
+        .fill(
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+        );
       for (let at = 1; at < expectedBehaviors.length; at += 1) {
-        await walk
-          .getByRole("button", { name: "Add a behavior" })
-          .click();
+        await walk.getByRole("button", { name: "+ Add a behavior" }).click();
       }
       for (const [at, behavior] of expectedBehaviors.entries()) {
         await walk
@@ -2917,27 +2920,28 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.getByRole("button", { name: "Choose agents" }).count(),
         "a test has no agent assignment",
       ).toBe(0);
-      await walk.getByRole("button", { name: "Choose personas" }).click();
+
+      // Save cannot fire early, and the disabled button says exactly what is
+      // still missing — here, the persona nobody has named yet.
+      await saysWithin(walk, "Needs one persona.");
+      await walk.getByRole("button", { name: "+ Add a persona" }).click();
       await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
       await walk.getByRole("button", { name: "Done" }).click();
-      await walk.getByRole("button", { name: "Write the test" }).click();
+      await walk.getByRole("button", { name: "Save test" }).click();
 
-      await walk.waitForURL(new RegExp(`/projects/${second}/tests/tst_[^/]+$`));
-      testAddress = walk.url();
+      const written = await writeResponse;
+      expect(written.status(), await written.text()).toBe(201);
+      const body = (await written.json()) as { id: string };
+      testAddress = `${origin}${at("tests", body.id)}`;
+
+      // One click, one create, and the row is an ordinary grid row on the same
+      // address — writing a test never navigated anywhere.
+      expect(walk.url()).toBe(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
-      // Read off the control rather than the page's text: the behavior is in a
-      // box somebody can edit, and a textarea's value is not part of what a
-      // page says.
       expect(
-        await walk
-          .getByRole("textbox", { name: "Expected behavior 1" })
-          .inputValue(),
-      ).toBe(expectedBehaviors[0]);
-      expect(
-        await walk
-          .getByRole("textbox", { name: "Expected behavior 7" })
-          .inputValue(),
-      ).toBe(expectedBehaviors[6]);
+        await walk.getByRole("button", { name: "Save test" }).count(),
+        "the entry row closed when its one save landed",
+      ).toBe(0);
     },
     SETTLE,
   );
@@ -3221,11 +3225,17 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Reschedules a booked appointment",
       },
       {
+        // The retired write-a-test address, kept as a deep link: it lands on
+        // the suite's grid with the entry row already OPEN. The suite's name
+        // would be there either way, so the proof reads the commit bar, which
+        // only an open entry row draws.
         what: "Write a test",
         address: testWriterAddress(),
-        says: "In suite Support reception",
+        says: "Save test",
       },
       {
+        // The retired test address, kept as a deep link: it resolves the
+        // test's suite and lands on that suite's grid.
         what: "one test",
         address: testAddress,
         says: "Reschedules a booked appointment",
@@ -4099,9 +4109,12 @@ describe("the complete product, walked in order in a second project", () => {
         const field = Math.round(await heightOf(walk, "#agent-name"));
         expect(field).toBe(tokens.control);
 
-        await walk.goto(testWriterAddress());
-        await reactHasTakenOver(walk, "form");
-        expect(Math.round(await heightOf(walk, "#test-name"))).toBe(field);
+        // The tests grid draws no form of its own — its cells are the form —
+        // so the paired reading is the suite sheet's own field.
+        await walk.goto(at("tests"));
+        await reactHasTakenOver(walk, "main");
+        await walk.getByRole("button", { name: "Create suite" }).click();
+        expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(field);
 
         // And a transcript is dense: its turns are lines rather than cards.
         await walk.goto(`${origin}${conversation}`);
