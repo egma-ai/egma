@@ -427,14 +427,21 @@ export default function TranscriptPage({
               </span>
               <Badge variant={errored > 0 ? "failure" : "success"}>
                 {/*
-                  The dot the hand-drawn chip carried as `::before`, kept. It is
-                  `bg-current` and the same circle either way, so it separates
-                  nothing on its own — `Recorded` and `1 error` are what say which
-                  state this is. It is the chip's mark, not its meaning.
+                  The mark the hand-drawn chip carried as `::before`, kept —
+                  and **a square, not a dot**. Every status marker in the
+                  product is a square (`DESIGN.md`, developer decision
+                  2026-08-24): it follows the one-radius rule rather than
+                  sitting outside it, and it keeps the single round shape left
+                  in the system meaning one thing, a radio button.
+
+                  It is `bg-current` and the same square either way, so it
+                  separates nothing on its own — `Recorded` and `1 error` are
+                  what say which state this is. It is the chip's mark, not its
+                  meaning.
                 */}
                 <span
                   aria-hidden="true"
-                  className="size-1.5 shrink-0 rounded-chip bg-current"
+                  className="size-1.5 shrink-0 bg-current"
                 />
                 {errored === 0 ? DETAIL.recorded : DETAIL.errors(errored)}
               </Badge>
