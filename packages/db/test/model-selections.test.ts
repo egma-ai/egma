@@ -7,6 +7,7 @@ import {
   type ProviderCatalogEntry,
 } from "../src/models/catalog.ts";
 import {
+  RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
   personaModelsFromRow,
@@ -177,10 +178,17 @@ describe("one complete persona model selection", () => {
     },
   );
 
-  it("does not expand the separate grader model policy", () => {
+  it("uses Terra for new graders while old frozen grader models stay readable", () => {
+    expect(RECOMMENDED_GRADER_MODEL).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    });
     expect(
       validGraderModel({ provider: "openai", model: "gpt-4o-mini" }),
     ).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+    expect(
+      validGraderModel({ provider: "openai", model: "gpt-5.6-terra" }),
+    ).toEqual({ provider: "openai", model: "gpt-5.6-terra" });
     expect(() =>
       validGraderModel({ provider: "openai", model: "gpt-4o" }),
     ).toThrow(/supported grader model/i);

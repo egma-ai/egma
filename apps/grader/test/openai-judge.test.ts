@@ -1,9 +1,18 @@
+import {
+  GRADER_DEFINITION_CATALOG,
+  PREDEFINED_GRADERS,
+  RECOMMENDED_GRADER_MODEL,
+} from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
-
+import {
+  judgeFor,
+  type Judge,
+  type JudgeInput,
+  type JudgeQuestion,
+  type ResolvedJudge,
+} from "../src/judge/index.ts";
 import { openaiJudge } from "../src/judge/openai.ts";
-import type { JudgeInput, JudgeQuestion } from "../src/judge/index.ts";
 
 /**
  * The OpenAI provider's wire, without the wire.
@@ -80,7 +89,12 @@ function judgeWith(...responses: readonly Answering[]) {
 
   return {
     calls,
-    judge: openaiJudge({ provider: "openai", model: "gpt-4.1-mini", key: A_KEY }),
+    judge: openaiJudge({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "none",
+      key: A_KEY,
+    }),
   };
 }
 
@@ -104,7 +118,8 @@ describe("one judge call", () => {
     expect(headers["authorization"]).toBe(`Bearer ${A_KEY}`);
 
     const body = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gpt-4.1-mini");
+    expect(body["model"]).toBe("gpt-5.6-terra");
+    expect(body["reasoning_effort"]).toBe("none");
     // The same conversation and the same criterion should get the same decision
     // twice, as far as a model can promise that at all.
     expect(body["temperature"]).toBe(0);
@@ -131,6 +146,33 @@ describe("one judge call", () => {
         },
       },
     });
+  });
+
+  it("resolves the release default and its provider settings from one catalog entry", () => {
+    const configured: ResolvedJudge[] = [];
+    const neverAsked: Judge = async () => {
+      throw new Error("this test only resolves the judge");
+    };
+
+    judgeFor(
+      RECOMMENDED_GRADER_MODEL,
+      { openai: A_KEY },
+      {
+        openai(resolved) {
+          configured.push(resolved);
+          return neverAsked;
+        },
+      },
+    );
+
+    expect(configured).toEqual([
+      {
+        provider: "openai",
+        model: "gpt-5.6-terra",
+        reasoningEffort: "none",
+        key: A_KEY,
+      },
+    ]);
   });
 
   it("shows the judge the one criterion and the declared set, and nothing else", async () => {

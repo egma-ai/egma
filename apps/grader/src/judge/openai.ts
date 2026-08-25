@@ -63,6 +63,9 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
   return async (question: JudgeQuestion): Promise<JudgeAnswer> => {
     const body = JSON.stringify({
       model: judge.model,
+      ...(judge.reasoningEffort === undefined
+        ? {}
+        : { reasoning_effort: judge.reasoningEffort }),
       // The lowest the API allows, because the same conversation and the same
       // criterion should get the same answer twice. It is not a guarantee —
       // no model offers one — and it is the difference between a judgment that
