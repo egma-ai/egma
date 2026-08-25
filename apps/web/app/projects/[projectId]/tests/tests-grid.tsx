@@ -280,12 +280,15 @@ function Arriving({
  */
 function PersonaPicker({
   projectId,
+  owner,
   chosen,
   known,
   onChange,
   onDone,
 }: {
   readonly projectId: string;
+  /** Whose picking this is: the owning test's id, or `"entry"` for the row. */
+  readonly owner: string;
   readonly chosen: readonly string[];
   readonly known: ReadonlyMap<string, Named>;
   readonly onChange: (ids: readonly string[], named: ReadonlyMap<string, Named>) => void;
@@ -310,24 +313,30 @@ function PersonaPicker({
    * find, which is the defect the founder named on 2026-08-25.
    *
    * `mousedown` rather than `click`, so the close happens before focus moves —
-   * the same instant Done would have. The lane marked `data-persona-picker` is
-   * this surface *and* the "+ Add a persona" trigger, so pressing the trigger
-   * to shut the picker is not read as an outside click and then re-opened.
+   * the same instant Done would have.
+   *
+   * **"Elsewhere" is measured against this picker's owner, not against the
+   * marker alone.** `data-persona-picker` sits on this surface *and* on every
+   * "+ Add a persona" trigger, so a marker with no owner in it made the *other*
+   * row's trigger count as inside: the picking moved to that row, Done never
+   * ran, and the personas ticked here went with no save and no word said. Only
+   * this owner's own marks are inside. Every other target — the other trigger
+   * included — runs Done first, and the trigger's own click then opens its own
+   * picker, because a mousedown lands before the click it belongs to.
    */
   useEffect(() => {
     function elsewhere(event: MouseEvent): void {
       const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("[data-persona-picker]") !== null
-      ) {
-        return;
-      }
+      const marked =
+        target instanceof Element
+          ? target.closest("[data-persona-picker]")
+          : null;
+      if (marked?.getAttribute("data-persona-picker") === owner) return;
       done.current();
     }
     document.addEventListener("mousedown", elsewhere);
     return () => document.removeEventListener("mousedown", elsewhere);
-  }, []);
+  }, [owner]);
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -400,7 +409,7 @@ function PersonaPicker({
       className="absolute top-full left-0 z-20 mt-1 w-[300px] origin-top border border-border bg-surface shadow-popover"
       role="dialog"
       aria-label="Choose personas"
-      data-persona-picker=""
+      data-persona-picker={owner}
     >
       <div className="border-b border-border">
         <input
@@ -602,6 +611,7 @@ function CellBody({
   draft,
   known,
   projectId,
+  owner,
   picking,
   onPick,
   onChange,
@@ -614,6 +624,8 @@ function CellBody({
   readonly draft: Draft;
   readonly known: ReadonlyMap<string, Named>;
   readonly projectId: string;
+  /** This row's test id, which is what its picking is held under. */
+  readonly owner: string;
   readonly picking: boolean;
   readonly onPick: (open: boolean) => void;
   readonly onChange: (next: Draft) => void;
@@ -716,7 +728,7 @@ function CellBody({
         <button
           className={ADD_LINE}
           type="button"
-          data-persona-picker=""
+          data-persona-picker={owner}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => onPick(!picking)}
         >
@@ -726,6 +738,7 @@ function CellBody({
       {woken && picking ? (
         <PersonaPicker
           projectId={projectId}
+          owner={owner}
           chosen={draft.personas}
           known={known}
           onChange={(ids, named) => {
@@ -972,10 +985,18 @@ export function TestsGrid(props: GridProps) {
    */
   function rest(mine?: Session): void {
     if (mine !== undefined && wokenNow.current?.at !== mine.at) return;
+    /*
+     * Whose picking this may put away: its own, and nothing else. A commit is
+     * awaited, and by the time it answers the picking can belong to another
+     * row or to the entry row — the same rule that gives `picking` an owner
+     * rather than a boolean. Closing it here shut a picker somebody had just
+     * opened, over a save they had already stopped watching.
+     */
+    const owner = mine?.testId ?? wokenNow.current?.testId ?? null;
     woken(null);
     holdDraft(null);
     setCellRefused(null);
-    setPicking(null);
+    setPicking((held) => (owner !== null && held === owner ? null : held));
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
@@ -1204,6 +1225,7 @@ export function TestsGrid(props: GridProps) {
             draft={draft}
             known={known}
             projectId={projectId}
+            owner={test.id}
             picking={woken && picking === test.id}
             onPick={(open) => setPicking(open ? test.id : null)}
             onChange={holdDraft}
@@ -1303,7 +1325,7 @@ export function TestsGrid(props: GridProps) {
               <button
                 className={ADD_LINE}
                 type="button"
-                data-persona-picker=""
+                data-persona-picker="entry"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() =>
                   setPicking(picking === "entry" ? null : "entry")
@@ -1314,6 +1336,7 @@ export function TestsGrid(props: GridProps) {
               {picking === "entry" ? (
                 <PersonaPicker
                   projectId={projectId}
+                  owner="entry"
                   chosen={entry.personas}
                   known={known}
                   onChange={(ids, named) => {
