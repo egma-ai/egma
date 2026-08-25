@@ -59,6 +59,22 @@ async function addHistoricalMigration(
 }
 
 describe("the migration files", () => {
+  /**
+   * 0042 reached the hosted test database before the agent-platform cutover.
+   * Its bytes are now part of that database's migration history. A later
+   * schema change must use a new migration instead of changing this hash.
+   */
+  it("keeps the deployed 0042 migration immutable", async () => {
+    const deployed = (await readMigrations()).find(
+      (migration) =>
+        migration.name === "0042_agents_own_platform_monitoring.sql",
+    );
+
+    expect(deployed?.hash).toBe(
+      "e811c2066c1ee01af8d7e358a16dc9caded5f37a517cec9526b860acf4ab0160",
+    );
+  });
+
   it("are numbered plain SQL, applied in that order", async () => {
     const migrations = await readMigrations();
     expect(migrations.length).toBeGreaterThan(0);
@@ -4989,7 +5005,7 @@ describe("agents own platform monitoring (0042)", () => {
   const frontDesk = newId("agt");
   const backOffice = newId("agt");
   const chatConnection = newId("con");
-  const liveKitConnection = newId("con");
+  const phoneConnection = newId("con");
 
   beforeAll(async () => {
     database = await createEmptyDatabase("agents_own_platform_monitoring");
@@ -5027,9 +5043,8 @@ describe("agents own platform monitoring (0042)", () => {
       );
     }
 
-    // Two connection kinds and both old platform values, so the rename has
-    // more than one value to carry and the LiveKit vocabulary cutover is
-    // proved against data written by the immutable 0038 migration.
+    // Two connection kinds, so the rename has more than one value to carry
+    // and a column of one repeated value cannot pass for a carried one.
     await client.query(
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
@@ -5043,10 +5058,10 @@ describe("agents own platform monitoring (0042)", () => {
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
           connection_kind, modality, topology, access_variant, config, revision)
-       values ($1, $2, $3, $4, 'Room', 'livekit_agents', 'livekit_room', 'voice',
-          'hosted-broker', 'livekit_room.project_credentials',
-          '{"url":"wss://support.livekit.cloud"}'::jsonb, $5)`,
-      [liveKitConnection, organizationId, projectId, backOffice, newId("rev")],
+       values ($1, $2, $3, $4, 'Line', 'retell', 'phone_number', 'voice',
+          'egma-dials-in', 'phone_number.public_e164',
+          '{"e164":"+15550000000"}'::jsonb, $5)`,
+      [phoneConnection, organizationId, projectId, backOffice, newId("rev")],
     );
 
     // The whole of what the old build owned: a setup object, one selected
@@ -5117,7 +5132,7 @@ describe("agents own platform monitoring (0042)", () => {
     );
     expect(rows).toEqual([
       { name: "Chat", connection_type: "retell_chat_api" },
-      { name: "Room", connection_type: "livekit_room" },
+      { name: "Line", connection_type: "phone_number" },
     ]);
     // The rename is in place, and the two columns the connection no longer
     // owns went with it: the platform now sits on the agent, and concurrent
@@ -5153,7 +5168,7 @@ describe("agents own platform monitoring (0042)", () => {
     expect(rows).toEqual([
       {
         name: "Back office",
-        agent_platform: "livekit",
+        agent_platform: null,
         platform_agent_id: null,
         monitoring_api_key: null,
         monitoring_api_key_hint: null,
@@ -5161,15 +5176,15 @@ describe("agents own platform monitoring (0042)", () => {
       },
       {
         name: "Front desk",
-        agent_platform: "retell",
+        agent_platform: null,
         platform_agent_id: null,
         monitoring_api_key: null,
         monitoring_api_key_hint: null,
         pull_production_calls: false,
       },
     ]);
-    // The platform comes from each agent's one existing connection. Nothing
-    // else is carried from the retired monitoring rows.
+    // Nothing is carried from the selected-agent rows: an installed agent is
+    // unbound and not pulling until a person pastes a key onto it.
     const gone = await client.query<{ column_name: string }>(
       `select column_name from information_schema.columns
         where table_schema = 'public' and table_name = 'agent'
@@ -5197,14 +5212,14 @@ describe("agents own platform monitoring (0042)", () => {
   it("refuses a switch on that is not a whole binding", async () => {
     const halfBound = newId("agt");
     await client.query(
-      `insert into agent (id, organization_id, project_id, name, agent_platform)
-       values ($1, $2, $3, 'Half bound', 'retell')`,
+      `insert into agent (id, organization_id, project_id, name)
+       values ($1, $2, $3, 'Half bound')`,
       [halfBound, organizationId, projectId],
     );
     await expect(
       client.query(
-        `update agent set platform_agent_id = 'agent_half',
-            pull_production_calls = true
+        `update agent set agent_platform = 'retell',
+            platform_agent_id = 'agent_half', pull_production_calls = true
           where id = $1`,
         [halfBound],
       ),
@@ -5212,7 +5227,7 @@ describe("agents own platform monitoring (0042)", () => {
     // The key and its hint travel together, whichever way round they are set.
     await expect(
       client.query(
-        `update agent set monitoring_api_key = 'sealed'
+        `update agent set agent_platform = 'retell', monitoring_api_key = 'sealed'
           where id = $1`,
         [halfBound],
       ),
@@ -5246,5 +5261,97 @@ describe("agents own platform monitoring (0042)", () => {
         [second],
       ),
     ).rejects.toMatchObject({ constraint: "agent_pulled_platform_agent_unique" });
+  });
+});
+
+describe("the required agent platform cutover (0044)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const bareAgent = newId("agt");
+  const retellAgent = newId("agt");
+  const liveKitAgent = newId("agt");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("required_agent_platform");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0044-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0044") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      `insert into organization (id, name, slug)
+       values ($1, 'Platform cutover', 'platform-cutover')`,
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Platform cutover', 'platform-cutover', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("stops on an old agent whose platform cannot be recovered", async () => {
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name)
+       values ($1, $2, $3, 'Needs reset')`,
+      [bareAgent, organizationId, projectId],
+    );
+
+    await expect(runMigrations(database.url)).rejects.toThrow(
+      /migration 0044_require_agent_platform\.sql failed/,
+    );
+
+    const recorded = await client.query<{ count: string }>(
+      `select count(*)::text as count from egma_meta.migration
+        where name = '0044_require_agent_platform.sql'`,
+    );
+    expect(recorded.rows).toEqual([{ count: "0" }]);
+  });
+
+  it("applies after the reset and normalizes the shipped LiveKit value", async () => {
+    await client.query("delete from agent where id = $1", [bareAgent]);
+    await client.query(
+      `insert into agent
+         (id, organization_id, project_id, name, agent_platform)
+       values
+         ($1, $3, $4, 'Retell', 'retell'),
+         ($2, $3, $4, 'LiveKit', 'livekit_agents')`,
+      [retellAgent, liveKitAgent, organizationId, projectId],
+    );
+
+    const result = await runMigrations(database.url);
+    expect(result.applied).toEqual(["0044_require_agent_platform.sql"]);
+
+    const agents = await client.query<{
+      name: string;
+      agent_platform: string;
+    }>("select name, agent_platform from agent order by name");
+    expect(agents.rows).toEqual([
+      { name: "LiveKit", agent_platform: "livekit" },
+      { name: "Retell", agent_platform: "retell" },
+    ]);
+
+    const columns = await client.query<{ is_nullable: string }>(
+      `select is_nullable from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'agent'
+          and column_name = 'agent_platform'`,
+    );
+    expect(columns.rows).toEqual([{ is_nullable: "NO" }]);
   });
 });
