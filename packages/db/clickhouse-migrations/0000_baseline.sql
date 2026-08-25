@@ -1,8 +1,7 @@
--- PRE-PRODUCTION BASELINE RESET, confirmed by the founder on 2026-08-25.
--- This file replaces the prior ClickHouse migration chain. Self-hosted
--- databases that ran it must be recreated. Every statement is guarded because
--- ClickHouse has no transaction around a migration file and a boot must be able
--- to resume after a partial failure.
+-- CURRENT PRE-PRODUCTION BASELINE.
+-- Creates only the current ClickHouse schema. Every statement is guarded
+-- because ClickHouse has no transaction around a migration file and a boot
+-- must be able to resume after a partial failure.
 
 -- One row is one span. The sorting key is the immutable span identity, while
 -- the shorter primary key keeps organization, project, and trace reads cheap.
