@@ -1,8 +1,6 @@
--- PRE-PRODUCTION BASELINE RESET, confirmed by the founder on 2026-08-25.
--- This file replaces PostgreSQL migrations 0000 through 0046. Self-hosted
--- databases that ran them must be recreated. The baseline creates only the
--- current schema and current catalog rows; it carries no rename, backfill, or
--- compatibility path.
+-- CURRENT PRE-PRODUCTION BASELINE.
+-- Creates only the current PostgreSQL schema and current catalog rows. It has
+-- no rename, backfill, or compatibility steps.
 CREATE EXTENSION IF NOT EXISTS citext;
 --> statement-breakpoint
 CREATE TABLE "account" (

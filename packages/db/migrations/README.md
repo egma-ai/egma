@@ -2,16 +2,12 @@
 
 ## Current baseline
 
-The founder confirmed a full pre-production reset on 2026-08-25. PostgreSQL
-and ClickHouse each start from one `0000_baseline.sql` file. The prior
-migration chains are not a normal upgrade path; recreate a self-hosted database
-or volume that applied them before running this build. New migrations start at
-`0001`.
+PostgreSQL and ClickHouse each start from one `0000_baseline.sql` file. New
+migrations start at `0001`.
 
 Every migration ledger starts at this exact baseline. A build refuses unknown
 rows without that marker. With it, an older build may ignore rows appended by a
-newer build so a normal additive rollback can still boot. No prior migration
-name, hash, or row is part of this epoch.
+newer build so a normal additive rollback can still boot.
 
 One rule keeps every deploy and every rollback safe, and it binds both
 stores — the Postgres files here and the ClickHouse files in
@@ -35,25 +31,13 @@ In practice:
   product tests run on those images.
 - **Add freely.** New tables, new nullable columns, new indexes — code that
   does not know them never sees them.
-- **Prelaunch cleanup is the explicit exception.** A one-step removal is allowed
-  only when the founder confirms that no older API or rollback contract is
-  supported. Record that decision in the migration and accept that the prior
-  build cannot run after the change. The same exception covers a ClickHouse
-  rebuild that no `ALTER` can reach: a sorting key is fixed at creation, so a
-  table whose filing order has to change is dropped and recreated, and the file
-  that does it carries the justification and amends whatever earlier file said
-  the shape was final.
 - **Remove in two releases, not one.** Stop reading the thing first and ship
   that; drop it in a later release than the one that stopped using it. A
   rename is an add and a remove, in that order, never one statement.
 - **Freeze shipped history, not local state.** Before merge, a migration may be
   rewritten or squashed even if a local development database applied it;
   repair that local ledger. After merge or use outside local development, add
-  a new file instead; the runner refuses a changed recorded file. The
-  founder-approved 2026-08-25 baseline reset is the one exception: Egma was
-  still pre-production, so every store starts at this baseline and the prior
-  ledgers have no supported rollback path. Future migration history is
-  immutable again from this baseline forward.
+  a new file instead; the runner refuses a changed recorded file.
 - **ClickHouse migrations must resume safely.** There is no transaction around
   a file, so every schema statement uses `IF EXISTS`, `IF NOT EXISTS` or
   `CREATE OR REPLACE`, and survives a second run after a partial failure. An

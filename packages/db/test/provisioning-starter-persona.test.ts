@@ -92,7 +92,7 @@ async function waitUntilBlockedBy(blockerPid: number): Promise<void> {
 
 let acme: Provisioned;
 let globex: Provisioned;
-let legacy: { readonly auth: AuthContext; readonly personaId: string };
+let existingProject: { readonly auth: AuthContext; readonly personaId: string };
 
 beforeAll(async () => {
   database = await createConnectedDatabase("egma_provided_personas", {
@@ -124,7 +124,7 @@ beforeAll(async () => {
     "update project set default_persona_id = $1 where id = $2",
     [local.id, projectId],
   );
-  legacy = { auth, personaId: local.id };
+  existingProject = { auth, personaId: local.id };
 
   await seedPersonaLibrary();
   acme = await signUp("acme-persona-library");
@@ -164,10 +164,12 @@ describe("the shared default persona", () => {
     });
   });
 
-  it("is seeded idempotently without a boot-time legacy adoption path", async () => {
+  it("is seeded idempotently and keeps an existing project's default", async () => {
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await seedPersonaLibrary()).toEqual([]);
-    expect(await defaultOf(legacy.auth.projectId ?? "")).toBe(legacy.personaId);
+    expect(await defaultOf(existingProject.auth.projectId ?? "")).toBe(
+      existingProject.personaId,
+    );
   });
 
   it("appears once in each project's library", async () => {
