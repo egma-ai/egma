@@ -1,0 +1,5 @@
+How can we change the default model of our default persona to GPT 5.6 Terra with reasoning off?
+
+I have, I think, for two or three times asked coding agents like you to change the persona LLM to this one but I don't know why it keeps on going back to GPT 4o mini. Can you check why that is happening? also look at egma cloud repo And like our real production AWS, are we setting this through an environment variable somehow because this should not be at all a part of an environment variable.
+
+Where are we storing all of these personas, like the default persona"? We want to understand: is it being stored in Postgres or is it stored as part of the code, like the default persona, their prompt, and all of these things? Where are they stored? I want to understand that as well&#x20;
