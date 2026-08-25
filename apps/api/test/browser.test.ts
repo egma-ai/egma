@@ -71,6 +71,14 @@ let browser: Browser;
 let page: Page;
 let origin: string;
 
+async function openPeopleSettings(which: Page): Promise<void> {
+  await which.goto(`${origin}/`);
+  await which.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+  const projectId = /\/projects\/(prj_[^/]+)\//u.exec(which.url())?.[1];
+  if (projectId === undefined) throw new Error("the signed-in landing page named no project");
+  await which.goto(`${origin}/projects/${projectId}/settings/people`);
+}
+
 const BROWSER_RETELL_KEY = "retell-browser-fixture-key-WXYZ";
 const BROWSER_RETELL_AGENT = "agent_in_retell_journey";
 const BROWSER_RETELL_NUMBER = "+14155550100";
@@ -301,13 +309,7 @@ describe("adding a colleague, with no mail configured", () => {
   it(
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
-      // The address organization settings has always been at. Settings moved
-      // into the product shell so the project selector stays on screen through
-      // it, and this one resolves the project and goes there — which is the
-      // half worth walking in a real browser, because a redirect that never
-      // arrives looks exactly like a page that failed to load.
-      await page.goto(`${origin}/members`);
-      await page.waitForURL(/\/projects\/prj_[^/]+\/settings\/people$/);
+      await openPeopleSettings(page);
       expect(await page.getByText("Invite somebody").count()).toBe(0);
       // People and invitations are two views of this settings page. The tab
       // keeps that navigation clear without making either view look like a
@@ -399,8 +401,7 @@ describe("adding a colleague, with no mail configured", () => {
   it(
     "does nothing until an admin confirms a destructive member action",
     async () => {
-      await page.goto(`${origin}/members`);
-      await page.waitForURL(/\/settings\/people$/);
+      await openPeopleSettings(page);
       // The wide layout's row. The list beside it is the same three controls
       // over the same person, drawn for a narrow screen from one column
       // definition, so driving either would prove the same thing.
@@ -2194,7 +2195,7 @@ describe("recovering when a page cannot load", () => {
     "shows a retry for People and for an invitation lookup",
     async () => {
       await page.route("**/v1/members", (route) => route.abort());
-      await page.goto(`${origin}/members`);
+      await openPeopleSettings(page);
       await page.waitForSelector("text=Egma could not be reached");
       await page.unroute("**/v1/members");
       await page.getByRole("button", { name: "Try again" }).click();

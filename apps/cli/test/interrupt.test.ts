@@ -378,7 +378,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
         .split("\n")
         .map((line) => line.trimEnd())
         .filter((line) => line !== "");
-      const address = `${platform.url}/runs/${started?.id ?? ""}`;
+      const address = `${platform.url}/projects/${platform.projectId}/runs/${started?.id ?? ""}`;
 
       expect(lines).toEqual([
         "✓ Your first run is live — no simulation result is ready yet (3 total).",

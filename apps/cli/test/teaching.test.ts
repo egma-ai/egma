@@ -291,8 +291,10 @@ describe("the pane, while the files land", () => {
         );
 
         // Line for line the same ending, and the same tests on egma either way.
-        const here = `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`;
-        expect(endingShape(scrollbackLines(terminal.scrollback()), here)).toEqual(
+        const firstRun = platform.running.runs[0];
+        const terminalLines = scrollbackLines(terminal.scrollback());
+        const here = `${platform.url}/projects/${platform.projectId}/runs/${firstRun?.id ?? ""}`;
+        expect(endingShape(terminalLines, here)).toEqual(
           endingShape(written, address),
         );
         expect(elsewhere.tests.tests.map((test) => test.name).sort()).toEqual(

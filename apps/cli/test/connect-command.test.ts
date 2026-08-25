@@ -621,7 +621,7 @@ describe("the whole walk, headless", () => {
     // left behind says where to watch it.
     expect(result.stdout).toContain("✓ Your first run is live");
     expect(result.stdout).toContain(
-      `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`,
+      `${platform.url}/projects/${platform.projectId}/runs/${platform.running.runs[0]?.id ?? ""}`,
     );
     expect(result.stdout).toContain(
       "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",

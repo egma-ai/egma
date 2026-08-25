@@ -41,9 +41,6 @@ const SESSION_META: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
   claude: {
     claudeCode: { options: { settings: { permissions: { deny: CLAUDE_DENY_RULES } } } },
   },
-  "claude-acp": {
-    claudeCode: { options: { settings: { permissions: { deny: CLAUDE_DENY_RULES } } } },
-  },
 };
 
 /** What to attach to `session/new` for this agent, or `null` for none. */

@@ -80,9 +80,7 @@ async function everything(): Promise<{ repository: string[]; home: string[] }> {
 describe("who the offer is aimed at", () => {
   it.each([
     ["claude", "claude-code", "Claude Code"],
-    ["claude-acp", "claude-code", "Claude Code"],
     ["codex", "codex", "Codex"],
-    ["codex-acp", "codex", "Codex"],
     ["cursor", "cursor", "Cursor"],
     ["opencode", "opencode", "OpenCode"],
   ])("names %s to the installer as %s", (id, skillsAgentId, name) => {
@@ -92,6 +90,11 @@ describe("who the offer is aimed at", () => {
     expect(places?.name).toBe(name);
     expect(places?.repository).toBe(repository.dir);
     expect(places?.home).toBe(home.dir);
+  });
+
+  it("does not recognize retired adapter ids as skill destinations", () => {
+    expect(placesFor("claude-acp")).toBeNull();
+    expect(placesFor("codex-acp")).toBeNull();
   });
 
   /**

@@ -192,7 +192,7 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
       "--cwd",
       workspace.dir,
       "--coding-agent",
-      "claude-acp",
+      "claude",
       "--",
       process.execPath,
       FAKE_AGENT,
@@ -434,7 +434,7 @@ describe("the skill offer and what is left behind", () => {
       .filter((line) => line !== "");
 
     const runId = platform.running.runs[0]?.id ?? "";
-    const address = `${platform.url}/runs/${runId}`;
+    const address = `${platform.url}/projects/${platform.projectId}/runs/${runId}`;
 
     // The address is a line, and the whole of that line — a triple-click takes
     // it and gets exactly the address.

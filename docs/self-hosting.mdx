@@ -265,11 +265,11 @@ By default, Egma runs in single-organization mode:
 EGMA_SINGLE_ORGANIZATION=true
 ```
 
-The first person to sign up claims the organization and becomes its admin. After that, signup is closed and new users arrive by invitation only — admins send invitations from the `/members` page. If you are building a multi-tenant deployment, set this to `false`.
+The first person to sign up claims the organization and becomes its admin. After that, signup is closed and new users arrive by invitation only — admins send invitations from **Settings → People**. If you are building a multi-tenant deployment, set this to `false`.
 
 ## Adding a second user
 
-Open `/members` in the web application, enter an email address, select a role, and send. If no SMTP server is configured, the invitation link comes back to you directly in the response — paste it to your colleague however you like (Slack, email, a text message).
+Open a project in the web application, choose **Settings → People**, enter an email address, select a role, and send. If no SMTP server is configured, the invitation link comes back to you directly in the response — paste it to your colleague however you like (Slack, email, a text message).
 
 To enable email delivery:
 

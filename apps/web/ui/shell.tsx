@@ -175,7 +175,7 @@ export function useShellSession(): Session {
  *
  * Access, invitation and device pages use their own composition and must not
  * fetch a signed-in session. Every route that already draws AppShell is listed
- * here, including the projectless forwarding and creation pages. Keeping this
+ * here, including the projectless creation page. Keeping this
  * boundary in the root layout means moving between those route families does
  * not remount the shell or flash empty organization, project and account text.
  */
@@ -183,14 +183,8 @@ export function ProductShellBoundary({ children }: { readonly children: ReactNod
   const pathname = usePathname() ?? "/";
   const usesProductShell =
     pathname === "/" ||
-    pathname === "/members" ||
     pathname === "/new-project" ||
-    pathname === "/projects" ||
-    pathname.startsWith("/projects/") ||
-    pathname === "/runs" ||
-    pathname.startsWith("/runs/") ||
-    pathname === "/traces" ||
-    pathname.startsWith("/traces/");
+    pathname.startsWith("/projects/");
 
   return usesProductShell ? <AppShell>{children}</AppShell> : <>{children}</>;
 }
@@ -442,7 +436,7 @@ function AccountMenu({
   role,
   placement,
   compact = false,
-  projectId,
+  settingsHref,
 }: {
   readonly me: Me | null;
   readonly settled: boolean;
@@ -461,15 +455,14 @@ function AccountMenu({
    */
   readonly compact?: boolean;
   /**
-   * The project Settings is drawn under, or nothing while the session read is
-   * still in flight or the organization holds none.
+   * The Settings destination, or nothing until the session has loaded
+   * successfully.
    *
    * Settings lives inside the product shell so the project selector stays on
    * screen throughout it, which means every Settings address names a project —
-   * including the pages whose subject is the whole organization. With none to
-   * name, the menu falls back to `/members`, which resolves one for itself.
+   * including the pages whose subject is the whole organization.
    */
-  readonly projectId?: string | null;
+  readonly settingsHref: string | null;
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
@@ -536,9 +529,7 @@ function AccountMenu({
         <>
           <MenuLabel>{standing}</MenuLabel>
           <MenuItem
-            href={
-              projectId == null ? "/members" : settingsPath(projectId, "project")
-            }
+            {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
             onClick={close}
           >
             Settings
@@ -659,16 +650,20 @@ function ShellFrame({
    * grader screens were the last pages it was standing in for, and they are
    * under `/projects/:projectId/graders` now.
    *
-   * Some addresses still name no project on purpose: `/new-project`, the two
-   * transcript addresses, the terminal's `/runs/{runId}` address and the kept
-   * `/members` address. They do not draw project navigation or a mobile
-   * navigation button, because an address that names no project cannot honestly
-   * say which project's links it is opening. The selector stays visible, so
-   * choosing one remains the way into the project product. Each page still
-   * decides its own data scope; the browser transcript read, for example, uses
-   * the project carried by the session even though its URL has no project.
+   * `/new-project` names no project on purpose. It does not draw project
+   * navigation or a mobile navigation button, because an address that names no
+   * project cannot honestly say which project's links it is opening. The
+   * selector stays visible, so choosing one remains the way into the product.
    */
   const shown = projectIdIn(pathname);
+  const settingsHref =
+    me === null
+      ? null
+      : shown !== null
+        ? settingsPath(shown, "project")
+        : projects[0] === undefined
+          ? "/new-project"
+          : settingsPath(projects[0].id, "people");
   /**
    * **Null until the session read answers, and never `viewer` in the meantime.**
    * A cautious default reads as a fact: every admin would be shown the
@@ -738,7 +733,7 @@ function ShellFrame({
             settled={session.settled}
             role={role}
             placement="right-end"
-            projectId={shown}
+            settingsHref={settingsHref}
           />
         </SidebarFooter>
       </aside>
@@ -786,7 +781,7 @@ function ShellFrame({
             role={role}
             placement="below-end"
             compact
-            projectId={shown}
+            settingsHref={settingsHref}
           />
         </header>
 

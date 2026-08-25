@@ -194,10 +194,16 @@ describe("the pages", () => {
    * whether adding a second person is something a person can do or something an
    * API can do. Without it, inviting a colleague would be a curl command.
    */
-  it("include the two an invitation needs: somewhere to send one, and somewhere to land", async () => {
+  it("include the two an invitation needs: project Settings to send one, and somewhere to land", async () => {
     const files = (await pageSources()).map(([file]) => file);
-    expect(files).toContain("app/members/page.tsx");
+    expect(files).toContain("app/projects/[projectId]/settings/people/page.tsx");
     expect(files).toContain("app/invite/page.tsx");
+  });
+
+  it("does not keep projectless compatibility pages", async () => {
+    const files = (await pageSources()).map(([file]) => file);
+    expect(files).not.toContain("app/members/page.tsx");
+    expect(files).not.toContain("app/runs/[runId]/page.tsx");
   });
 
   /**
@@ -456,36 +462,6 @@ describe("the pages", () => {
   });
 
   /**
-   * **One run has one page.** The address a terminal prints carries no project,
-   * and the product's own pages are all project-scoped — so for a while there
-   * were two pages drawing one run, free to disagree about whether a skipped
-   * conversation is a failure and only one of them kept in step as the product
-   * moved. The terminal's address now reads the run for the project it belongs
-   * to and forwards.
-   *
-   * The guard is on the forwarder rather than on the run page, because the
-   * mistake it catches is a second run page growing back here.
-   */
-  it("send the address a terminal prints to the run inside its project", async () => {
-    const forwarder = await readFile(
-      path.join(WEB, "app/runs/[runId]/page.tsx"),
-      "utf8",
-    );
-
-    // The project comes off the run read. A browser holding only a run id
-    // cannot know it, and an organization with two projects makes any default
-    // wrong.
-    expect(forwarder).toContain("getRun({ runId }");
-    expect(forwarder).toContain("answer.value.projectId");
-    expect(forwarder).toContain("projectPath(");
-    expect(forwarder).toContain("router.replace(");
-    // And it draws no run: no conversations, no verdicts, no grading counts.
-    expect(forwarder).not.toContain("simulations");
-    expect(forwarder).not.toContain("verdict");
-    expect(forwarder).not.toContain("gradedCount");
-  });
-
-  /**
    * **Simulation runs is a label, and only a label.**
    *
    * Monitoring gave production traffic a surface of its own, so the surface
@@ -501,7 +477,6 @@ describe("the pages", () => {
       "app/projects/[projectId]/runs/new/page.tsx",
       "app/projects/[projectId]/runs/[runId]/page.tsx",
       "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
-      "app/runs/[runId]/page.tsx",
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain('"Simulation runs"');

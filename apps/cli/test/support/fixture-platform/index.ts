@@ -43,6 +43,8 @@ export type { SeedBehavior, SeedTest, SeededTest, TestControls } from "./tests.t
 export type { SeededSuite, SuiteControls } from "./suites.ts";
 
 export type Platform = FixturePlatform & {
+  /** The one project every authenticated fixture request belongs to. */
+  readonly projectId: string;
   /** What a person in a browser would do, done directly. */
   readonly device: DeviceControls;
   /** What was registered, and what the platform was handed to seal. */
@@ -79,6 +81,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
   let suites!: SuiteControls;
   let mocking!: MockToolControls;
   let running!: RunControls;
+  let projectId!: string;
 
   const platform = await startFixturePlatform((origin) => {
     const deviceGroup = deviceRoutes(origin);
@@ -89,7 +92,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     // acts in the one project that key was minted for, so a body or a filter
     // naming a project meets one answer rather than one per route group.
     const holdsKey = (key: string): boolean => device.keys.includes(key);
-    const projectId = newId("prj");
+    projectId = newId("prj");
     const organizationId = newId("org");
 
     const suiteGroup = suiteRoutes({
@@ -175,6 +178,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
 
   return {
     ...platform,
+    projectId,
     device,
     registered,
     monitoring,

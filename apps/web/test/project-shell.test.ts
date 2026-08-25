@@ -293,11 +293,6 @@ describe("the product navigation", () => {
     expect(activeSectionIn("/projects/prj_1/personas/prs_3")).toBe("personas");
     expect(activeSectionIn("/projects/prj_1/global")).toBeNull();
     expect(activeSectionIn("/projects/prj_1/simulations")).toBeNull();
-    // The two addresses the transcript pages used to answer at. They are inside
-    // the project now, and nothing here is under them.
-    expect(activeSectionIn("/traces")).toBeNull();
-    expect(activeSectionIn("/traces/5c1e4b0f")).toBeNull();
-    expect(activeSectionIn("/members")).toBeNull();
   });
 });
 

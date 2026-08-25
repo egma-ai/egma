@@ -342,7 +342,7 @@ which is the only record of a report that never got through. Both survive the
 container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
-Every production simulation carries one contract-v2 work order. Its pinned
+Every simulation carries one simulation work order. Its pinned
 persona version supplies the required LLM, STT and TTS selections, and the API
 adds only the provider keys those selections need. Chat carries only the LLM
 key; voice carries all three. There is no container model or key fallback.
@@ -1057,10 +1057,11 @@ directly.
 
 ## Adding a second person
 
-Open `/members`, type an address, pick a role, and send. **If no mail transport
-is configured, the link comes straight back to you** and you pass it on however
-you like — Slack, a text message, reading it out. The colleague follows it,
-chooses a password, and lands in your organization at the role you picked.
+Open a project, choose **Settings → People**, type an address, pick a role, and
+send. **If no mail transport is configured, the link comes straight back to
+you** and you pass it on however you like — Slack, a text message, reading it
+out. The colleague follows it, chooses a password, and lands in your
+organization at the role you picked.
 
 Nothing about this needs SMTP. That is deliberate: the pleasant part of a local
 install is solo, and requiring a mail server before a second person can join is

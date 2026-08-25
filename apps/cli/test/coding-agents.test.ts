@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   discoverCodingAgents,
   installedCodingAgent,
+  supportedCodingAgentId,
 } from "../src/acp/coding-agents.ts";
+import { sessionMetaFor } from "../src/acp/hardening.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 let scratch: Workspace | null = null;
@@ -168,7 +170,7 @@ describe("installed coding agents", () => {
     });
   });
 
-  it("accepts the two old adapter ids only as aliases for existing installs", async () => {
+  it("accepts only canonical public ids", async () => {
     scratch = await makeWorkspace({});
     const bin = path.join(scratch.dir, "bin");
     await mkdir(bin);
@@ -181,8 +183,13 @@ describe("installed coding agents", () => {
       platform: "linux",
     });
 
-    expect(installedCodingAgent(found, "claude-acp")?.id).toBe("claude");
+    expect(installedCodingAgent(found, "claude")?.id).toBe("claude");
+    expect(supportedCodingAgentId("claude-acp")).toBeNull();
+    expect(supportedCodingAgentId("codex-acp")).toBeNull();
+    expect(installedCodingAgent(found, "claude-acp")).toBeNull();
     expect(installedCodingAgent(found, "codex-acp")).toBeNull();
     expect(installedCodingAgent(found, "augie")).toBeNull();
+    expect(sessionMetaFor("claude")).not.toBeNull();
+    expect(sessionMetaFor("claude-acp")).toBeNull();
   });
 });

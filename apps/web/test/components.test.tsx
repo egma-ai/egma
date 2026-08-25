@@ -8,13 +8,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { Suspense, useState } from "react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsLoading from "../app/projects/[projectId]/agents/loading.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import TestLoading from "../app/projects/[projectId]/tests/[testId]/loading.tsx";
@@ -1707,8 +1706,40 @@ describe("the role the shell shows", () => {
     expect(within(product).queryByRole("link", { name: "Settings" })).toBeNull();
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
+    const settings = screen.getByRole("menuitem", { name: "Settings" });
+    expect(settings.getAttribute("href")).toBe("/projects/prj_1/settings");
+    fireEvent.click(settings);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("sends projectless Settings to People in the first available project", () => {
+    routed.pathname = "/new-project";
+    routed.projectId = undefined;
+    render(
+      <AppShell initialMe={meWith("admin")}>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
+    expect(screen.getByRole("menuitem", { name: "Settings" }).getAttribute("href")).toBe(
+      "/projects/prj_1/settings/people",
+    );
+  });
+
+  it("sends projectless Settings to project creation when none exists", () => {
+    routed.pathname = "/new-project";
+    routed.projectId = undefined;
+    render(
+      <AppShell initialMe={{ ...meWith("admin"), projects: [] }}>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
+    expect(screen.getByRole("menuitem", { name: "Settings" }).getAttribute("href")).toBe(
+      "/new-project",
+    );
   });
 
   it("claims nothing at all while the session read is in flight", async () => {
@@ -1722,6 +1753,12 @@ describe("the role the shell shows", () => {
     expect(await screen.findByText("page")).toBeDefined();
     expect(screen.queryByText(/view only/i)).toBeNull();
     expect(screen.getAllByText(/Checking your session/).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
+    const settings = screen.getByRole("menuitem", { name: "Settings" });
+    expect(settings.tagName).toBe("BUTTON");
+    expect(settings.hasAttribute("disabled")).toBe(true);
+    expect(settings.getAttribute("href")).toBeNull();
   });
 
   it("never shows an admin a View only badge, before or after the answer", async () => {
@@ -1860,78 +1897,12 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findAllByText("Session unavailable")).not.toHaveLength(0);
     expect(screen.queryByText(/view only/i)).toBeNull();
-  });
-});
 
-/* ------------------------------------------------------------------------ */
-
-/**
- * **The address a terminal prints, when it does not forward.**
- *
- * `inProject` once said in a comment that `/runs/{runId}` and `/members` "never
- * arrive here, because they forward before a selector is ever drawn". Both draw
- * `ProductStatePage`, which is this same shell around a page, and `AppShell`
- * draws the selector unconditionally — so the selector is on screen for as long
- * as the read takes, and indefinitely when the read does not end in a forward.
- *
- * This is that case: a `resultsUrl` for a run the session cannot reach settles
- * into `missing` and stays there. It is not an exotic state — it is what a
- * copied `resultsUrl` for a run in another project does today — and one click
- * on the selector goes straight into `inProject` from an address carrying no
- * project. So of the five addresses that reach that function, these two are the
- * likeliest, not the impossible ones.
- */
-describe("the run address a terminal prints, stuck", () => {
-  it("still draws the selector, and one click on it reaches inProject", async () => {
-    routed.pathname = "/runs/run_9";
-    routed.projectId = undefined;
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/runs/run_9": {
-        status: 404,
-        body: {
-          error: "not_found",
-          message: "no run of yours has that id.",
-        },
-      },
-    });
-
-    // `act` around the render because this page reads its own route parameters
-    // through React's `use`, so its first paint is a suspension rather than a
-    // page. Nothing else in this file needs it; nothing else in this file
-    // suspends.
-    // Rendered inside an awaited `act`, because this page reads its own route
-    // parameters through React's `use`: its first paint is a suspension rather
-    // than a page, and `render`'s own synchronous act cannot wait for one.
-    // Nothing else in this file suspends, so nothing else needs it.
-    await act(async () => {
-      render(
-        <Suspense fallback={<p>waiting</p>}>
-          <RunResultsAddress params={Promise.resolve({ runId: "run_9" })} />
-        </Suspense>,
-      );
-    });
-
-    // The page has given up forwarding and is showing egma's absence.
-    expect(await screen.findByText(/no run of yours has that id/)).toBeDefined();
-
-    // And the shell around it is a whole shell: the selector, saying honestly
-    // that this address is inside no project.
-    // The shell draws the selector twice — the sidebar's and the narrow
-    // screen's — so both are read, and either one is a way in.
-    const triggers = screen.getAllByRole("button", {
-      name: /^Organization Acme/,
-    });
-    expect(triggers).not.toHaveLength(0);
-    for (const one of triggers) expect(one.textContent).toContain("No project");
-
-    fireEvent.click(triggers[0] as HTMLElement);
-    const panel = within(screen.getByRole("menu"));
-    fireEvent.click(panel.getByText("Outbound"));
-
-    // `inProject`, reached from an address with no project in it: there is no
-    // area to carry across, so the answer is the picked project's landing page.
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/agents");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
+    const settings = screen.getByRole("menuitem", { name: "Settings" });
+    expect(settings.tagName).toBe("BUTTON");
+    expect(settings.hasAttribute("disabled")).toBe(true);
+    expect(settings.getAttribute("href")).toBeNull();
   });
 });
 
