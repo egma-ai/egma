@@ -39,7 +39,16 @@ const WEB = path.join(import.meta.dirname, "..");
 
 /** Where the two pages live, now that both are inside a project. */
 const SECTION = "app/projects/[projectId]/monitoring";
-const LIST_PAGE = `${SECTION}/transcripts/page.tsx`;
+/**
+ * The list's own module, which now sits beside its route rather than inside it.
+ *
+ * `transcripts/page.tsx` is still the address and composes this. The screen
+ * moved out of it when a second address — the retired `monitoring/start` — had
+ * to render the same thing: Next refuses a route module that exports anything
+ * but its own reserved fields. This guard follows the file that renders the
+ * copy, which is what it has always been about.
+ */
+const LIST_PAGE = `${SECTION}/transcripts/screen.tsx`;
 const DETAIL_PAGE = `${SECTION}/transcripts/[transcriptId]/page.tsx`;
 
 const FACTS: Facts = {

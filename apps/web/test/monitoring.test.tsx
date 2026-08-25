@@ -36,6 +36,13 @@ vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   useParams: () => ({ projectId: routed.projectId }),
+  /*
+   * Read off the address the test put this page on, which is how the real hook
+   * behaves — and it is what makes the picker's query state assertable here:
+   * the sheet is open because `?sheet=monitor` is in the address, and for no
+   * other reason.
+   */
+  useSearchParams: () => new URLSearchParams(globalThis.location.search),
 }));
 
 vi.mock("next/link", () => ({
@@ -53,14 +60,30 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
 
-const ME: Me = {
-  user: { id: "usr_1", email: "ada@acme.example" },
-  organizations: [{ id: "org_1", name: "Acme", slug: "acme", role: "admin" }],
-  projects: [
-    { id: "prj_1", name: "Default", slug: "default" },
-    { id: "prj_2", name: "Outbound", slug: "outbound" },
-  ],
-};
+/**
+ * Which role the session read answers with.
+ *
+ * Admin for every case that is not about roles, because that is the reader who
+ * sees the whole page. The one case that is about roles says so out loud.
+ */
+let seenRole: "admin" | "member" | "viewer" = "admin";
+
+function seenAs(role: typeof seenRole): void {
+  seenRole = role;
+}
+
+function meIs(): Me {
+  return {
+    user: { id: "usr_1", email: "ada@acme.example" },
+    organizations: [
+      { id: "org_1", name: "Acme", slug: "acme", role: seenRole },
+    ],
+    projects: [
+      { id: "prj_1", name: "Default", slug: "default" },
+      { id: "prj_2", name: "Outbound", slug: "outbound" },
+    ],
+  };
+}
 
 const FACTS: Facts = {
   traceId: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
@@ -194,7 +217,7 @@ function stub(options: {
   const ever = options.everRecorded ?? rows;
 
   return apiAnswers({
-    "/api/me": { status: 200, body: ME },
+    "/api/me": { status: 200, body: meIs() },
     // One path, two questions. The probe is the one asking for a single row.
     "/v1/traces": (at) =>
       at.searchParams.get("pageSize") === "1"
@@ -251,6 +274,7 @@ function listedAt(asked: readonly string[]): URLSearchParams {
 
 beforeEach(() => {
   routed.projectId = "prj_2";
+  seenRole = "admin";
   routed.pathname = "/projects/prj_2/monitoring/transcripts";
   atNoWindow();
 });
@@ -294,12 +318,18 @@ describe("what the Monitoring list asks egma for", () => {
     expect(query.get("to")).not.toBeNull();
   });
 
-  it("heads the page Monitoring", async () => {
+  /**
+   * **Transcripts, not Monitoring.** Monitoring is the sidebar group; this is
+   * the one page under it, and since the separate monitoring screen retired it
+   * is where the one monitoring verb lives too (board `JGS-0`). A title bar
+   * repeating the group's word said the section's name twice over.
+   */
+  it("heads the page Transcripts", async () => {
     stub({ rows: [ONE_ROW] });
     render(<MonitoringTranscriptsPage />);
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Monitoring" }),
+      await screen.findByRole("heading", { level: 1, name: "Transcripts" }),
     ).toBeDefined();
   });
 });
@@ -379,7 +409,7 @@ describe("what the Monitoring list shows", () => {
       preview: "The older conversation",
     };
     const { asked } = apiAnswers({
-      "/api/me": { status: 200, body: ME },
+      "/api/me": { status: 200, body: meIs() },
       "/v1/traces": (at) =>
         at.searchParams.get("pageToken") === "older"
           ? {
@@ -512,13 +542,23 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
-    // The one action this page offers leads to the start-monitoring flow.
-    // There is no monitoring setup object to open any more (ADR-0015).
-    expect(
-      screen
-        .getByRole("link", { name: LIST.startMonitoring })
-        .getAttribute("href"),
-    ).toBe("/projects/prj_2/monitoring/start");
+    /*
+     * **The empty state carries the one monitoring verb, and it opens a sheet
+     * over this page rather than leading to one.** The address it points at is
+     * this page's own with the picker asked for in the query, which is what
+     * makes Back close it and a copied link reopen it (board `JGS-0`).
+     */
+    const offered = screen.getAllByRole("link", { name: LIST.monitorAgent });
+    // Two of them, and deliberately: the header carries the action wherever
+    // this page is, and the empty card carries the same one where somebody is
+    // actually reading about it. Both are the same address, and both carry the
+    // window this page is on rather than dropping it.
+    expect(offered).toHaveLength(2);
+    for (const one of offered) {
+      expect(one.getAttribute("href")).toBe(
+        "/projects/prj_2/monitoring/transcripts?window=24h&sheet=monitor",
+      );
+    }
   });
 
   /**
@@ -629,5 +669,92 @@ describe("what a quiet Monitoring page says", () => {
 
     await screen.findByRole("table", { name: LIST.tableLabel });
     expect(guidance()).toEqual([]);
+  });
+});
+
+/**
+ * **Monitoring is one verb on this screen, and v0 shows nothing else about
+ * it.**
+ *
+ * The separate monitoring screen is retired, so the action that used to lead
+ * away from here now opens a sheet over it. And the management half — stop
+ * pulling, turn it on again, when something last arrived — has no interface at
+ * launch: the API keeps `stopMonitoring`, and surfacing it is its own effort.
+ * A screen that grew a stop button would be that decision made by drift.
+ */
+describe("the one monitoring action this screen carries", () => {
+  it("heads the page with it, and asks for the picker in the address", async () => {
+    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    const action = screen.getByRole("link", { name: LIST.monitorAgent });
+    // The page it points at is the page it is on. Nothing navigates away, so
+    // nothing reloads, and the query is the whole of what changes.
+    expect(action.getAttribute("href")).toBe(
+      "/projects/prj_2/monitoring/transcripts?window=24h&sheet=monitor",
+    );
+    // And the old address is not what it points at any more.
+    expect(action.getAttribute("href")).not.toContain("/monitoring/start");
+  });
+
+  /**
+   * **The sheet opens on the URL the person is already on, whole.**
+   *
+   * The window is a filter they chose, and it lives in the address. An action
+   * that built a fresh query would throw it away on the way open: the list
+   * behind the sheet would jump from thirty days back to one, and closing the
+   * sheet would leave them there wondering what they pressed.
+   */
+  it("keeps the window the person chose in the address it opens on", async () => {
+    atWindow(WIDEST);
+    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    expect(
+      screen.getByRole("link", { name: LIST.monitorAgent }).getAttribute("href"),
+    ).toBe(`/projects/prj_2/monitoring/transcripts?window=${WIDEST}&sheet=monitor`);
+  });
+
+  /**
+   * **A viewer is told, rather than allowed to type a Retell key and find out
+   * from the server.**
+   *
+   * Starting monitoring is `configure_monitoring`, which members and admins
+   * have and viewers do not. The server refuses them either way — that is where
+   * the boundary is — but the control says so first, which is the house
+   * pattern: disabled, with the sentence on it, never removed.
+   */
+  it("disables the action for a viewer and says whose it is not", async () => {
+    seenAs("viewer");
+    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    const action = await screen.findByRole("button", {
+      name: LIST.monitorAgent,
+    });
+    expect(action.hasAttribute("disabled")).toBe(true);
+    // Not a link, so there is nothing to open — and the reason is on the page
+    // rather than only in a title attribute nobody hears.
+    expect(screen.queryByRole("link", { name: LIST.monitorAgent })).toBeNull();
+    expect(
+      screen.getByText(/Your viewer role cannot start monitoring/u),
+    ).toBeDefined();
+  });
+
+  it("offers no stop, no turn-on, and no last-received", async () => {
+    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    for (const absent of [
+      /stop pulling/iu,
+      /turn on/iu,
+      /last received/iu,
+    ]) {
+      expect(screen.queryByText(absent), String(absent)).toBeNull();
+    }
   });
 });

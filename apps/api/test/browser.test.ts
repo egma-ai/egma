@@ -1134,19 +1134,26 @@ describe("what a project recorded in production", () => {
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
-      // The heading is the product's word for this area.
+      // The heading is this page's own word. **Monitoring is the sidebar
+      // group** — and since the separate monitoring screen retired, this page
+      // is the whole of the area, so the title bar names the page rather than
+      // saying the group's word a second time (board `JGS-0`).
       //
-      // **And it is the whole of what stands above the list now.** The boards
-      // draw a list screen as a title bar, one strip of controls and the table
-      // (`71V-0`, `71N-0`) — no label over the title and no purpose sentence
-      // under it. The sidebar already says which section this is and which
-      // project it belongs to, and the table says what it holds; the sentence
-      // that used to sit here is kept for the screens that ask somebody to
-      // fill something in. Updated with the ui-refresh restyle of this screen.
-      expect(shown).toContain("Monitoring");
+      // **And it is the whole of what stands above the list**, beside the
+      // window control and the one action. The boards draw a list screen as a
+      // title bar, one strip of controls and the table (`71V-0`, `71N-0`) — no
+      // label over the title and no purpose sentence under it. The sidebar
+      // already says which section this is and which project it belongs to,
+      // and the table says what it holds.
+      expect(shown).toContain("Transcripts");
       expect(shown).not.toContain(
         "What your agents did in production, newest first.",
       );
+
+      // The one monitoring verb, on the screen its results land on. It opens a
+      // picker over this page; the full Start-monitoring page is retired.
+      expect(shown).toContain("Monitor an agent");
+      expect(shown).not.toContain("Start monitoring");
 
       // The window control is on the default nobody chose, and the capture is
       // inside it — the browser's clock is pinned to the evening of the day the
@@ -3269,18 +3276,23 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Reschedules a booked appointment",
       },
       {
-        what: "Start monitoring",
+        what: "Monitor an agent",
         address: at("monitoring", "start"),
         /*
-         * The start-monitoring flow, which replaced the monitoring-setup page
-         * when the setup object was dropped (ADR-0015). The header's lead is
-         * drawn while the roster read is still in flight, so the phrase is the
-         * picker's own section heading, which only the settled page draws.
+         * **The retired Start-monitoring address, now a deep link.** The full
+         * page is gone: monitoring is one verb on the Transcripts screen, and
+         * this address renders that screen with the picker already open —
+         * rendered rather than redirected, so a saved link costs one load.
          *
-         * The Monitoring list itself is not here: this walk opens it many
+         * The phrase is the picker's own, and only the open sheet draws it, so
+         * the walk cannot pass on the screen behind it. The sheet is portaled
+         * inside `<main>` (see `components/ui/sheet.tsx`), which is what makes
+         * a whole-screen text read find it at all.
+         *
+         * The Transcripts list itself is not here: this walk opens it many
          * times already, under `monitoringAt`, and against its own states.
          */
-        says: "What Egma should watch",
+        says: "Only agents not yet monitored are listed.",
       },
       {
         what: "Settings",
