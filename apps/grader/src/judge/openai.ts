@@ -24,6 +24,25 @@ import { asJudgeReads } from "./input.ts";
 
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
+/** Make the provider enforce the fixed judge answer contract before parsing. */
+const JUDGE_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "egma_judge_answer",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        decision: { type: "string", enum: DECISIONS },
+        rationale: { type: "string" },
+        cited_turns: { type: "array", items: { type: "integer" } },
+      },
+      required: ["decision", "rationale", "cited_turns"],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 /**
  * How many times a call is made before the assertion is `errored`.
  *
@@ -49,7 +68,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       // no model offers one — and it is the difference between a judgment that
       // usually reproduces and one that never does.
       temperature: 0,
-      response_format: { type: "json_object" },
+      response_format: JUDGE_RESPONSE_FORMAT,
       messages: [
         // The library entry's own words, handed down with the question. This
         // file holds no prompt of its own: what a judge is told it is is

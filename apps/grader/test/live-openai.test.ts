@@ -19,14 +19,11 @@ import type { JudgeInput } from "../src/judge/index.ts";
  *
  *     TEST_OPENAI_API_KEY=sk-... npx vitest run apps/grader/test/live-openai
  *
- * `TEST_OPENAI_MODEL` picks the model; the default is the cheapest one that can
- * hold a judgment. Nothing here touches a database, a store, or the service:
+ * `TEST_OPENAI_MODEL` picks the model; the default is the model in the shipped
+ * Expected behaviors definition. Nothing here touches a database or service:
  * one function, one request, one answer, so the pass-with-key path is as small
  * as it can be and a failure names the provider rather than the harness.
  */
-
-const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
-const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
 
 /**
  * The words a real judge is told it is working under: the ones on the
@@ -34,10 +31,22 @@ const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
  * ships lives. Asking a real model with anything else would be smoke-testing a
  * prompt no deployment sends.
  */
-const THE_PROMPT =
+const EXPECTED_BEHAVIORS =
   GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
-  )?.prompt ?? "";
+  );
+if (
+  EXPECTED_BEHAVIORS?.prompt === null ||
+  EXPECTED_BEHAVIORS?.prompt === undefined ||
+  EXPECTED_BEHAVIORS.judgeModel === null
+) {
+  throw new Error("Expected behaviors has no executable judge definition");
+}
+
+const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
+const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ??
+  EXPECTED_BEHAVIORS.judgeModel.model;
+const THE_PROMPT = EXPECTED_BEHAVIORS.prompt;
 
 /** One short conversation, plainly settling one thing and plainly not another. */
 const EVIDENCE: JudgeInput = {

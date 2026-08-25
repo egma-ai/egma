@@ -108,7 +108,29 @@ describe("one judge call", () => {
     // The same conversation and the same criterion should get the same decision
     // twice, as far as a model can promise that at all.
     expect(body["temperature"]).toBe(0);
-    expect(body["response_format"]).toEqual({ type: "json_object" });
+    expect(body["response_format"]).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "egma_judge_answer",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            decision: {
+              type: "string",
+              enum: ["met", "not_met", "cannot_determine"],
+            },
+            rationale: { type: "string" },
+            cited_turns: {
+              type: "array",
+              items: { type: "integer" },
+            },
+          },
+          required: ["decision", "rationale", "cited_turns"],
+          additionalProperties: false,
+        },
+      },
+    });
   });
 
   it("shows the judge the one criterion and the declared set, and nothing else", async () => {
@@ -121,8 +143,10 @@ describe("one judge call", () => {
     const body = JSON.parse(String(calls[0]?.init.body)) as {
       messages: { role: string; content: string }[];
     };
+    const declared = body.messages.at(0)?.content ?? "";
     const asked = body.messages.at(-1)?.content ?? "";
 
+    expect(declared).toContain("met, not_met, or cannot_determine");
     expect(asked).toContain("## Criterion");
     expect(asked).toContain("the agent confirms the new time");
     expect(asked).toContain("## Transcript");

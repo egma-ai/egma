@@ -5,7 +5,10 @@ import { assertionResultOf } from "./judged.ts";
 const PROMPT = [
   "You grade one recorded conversation against one instruction.",
   "Decide only the instruction you are given.",
-  "Use cannot_determine when the evidence does not settle it.",
+  "Set decision to exactly one of met, not_met, or cannot_determine.",
+  "Use met when the evidence shows the instruction was met.",
+  "Use not_met when the evidence shows the instruction was not met.",
+  "Use cannot_determine when the evidence does not settle the instruction.",
   "Answer with JSON containing decision, rationale, and cited_turns.",
 ].join("\n");
 
