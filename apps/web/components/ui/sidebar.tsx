@@ -211,8 +211,9 @@ function SidebarGroup({
  *
  * Weight 400 and the compact label treatment, which is what the bar already
  * used for the one group label it had. It is quiet on purpose: the label says
- * where a row belongs, and the row is the thing being read. `px-3` is the row's
- * own padding, so the label starts exactly where the row's content starts.
+ * where a row belongs, and the row is the thing being read. `px-2` is the row's
+ * own padding, so the label starts exactly where the row's icon starts — on the
+ * bar's 16px gutter, in line with the project block above it.
  */
 function SidebarGroupLabel({ className, ...props }: ComponentProps<"h2">) {
   const labelId = useContext(SidebarGroupLabelId);
@@ -227,7 +228,7 @@ function SidebarGroupLabel({ className, ...props }: ComponentProps<"h2">) {
          * margin of the label's as well made it 8. The boards put the label
          * one gap above its first row like every other pair in the column.
          */
-        "my-0 px-3 text-sm text-faint tracking-(--tracking-label) uppercase",
+        "my-0 px-2 text-sm text-faint tracking-(--tracking-label) uppercase",
         className,
       )}
       {...props}
@@ -291,6 +292,15 @@ function SidebarMenuItem({ className, ...props }: ComponentProps<"li">) {
  * already gives a compact control. The 44px tap target is not traded away for
  * that: `pointer-coarse` puts it straight back on every touch screen, which is
  * the same rule the segmented choice control already uses.
+ *
+ * **The row's 8px padding is what puts its icon on the bar's 16px gutter.** The
+ * column around it is inset 8, so 8 and 8 land the icon exactly where the Egma
+ * mark, the word `Project`, the project name and the group labels already
+ * start: one left edge down the whole sidebar. It was 12 against a column inset
+ * of 16, which put every icon and every group label 12px right of the project
+ * block above them. The Ember mark is unaffected either way — it is absolutely
+ * placed on the row's own leading edge and pushes nothing, so a lit row's icon
+ * stands on the same line as a quiet one's.
  */
 function SidebarMenuButton({
   className,
@@ -312,7 +322,7 @@ function SidebarMenuButton({
       aria-current={isActive ? "page" : undefined}
       className={cn(
         "relative flex w-full min-w-0 items-center gap-3",
-        "min-h-(--control-md) rounded-button px-3",
+        "min-h-(--control-md) rounded-button px-2",
         "pointer-coarse:min-h-(--tap-target)",
         "text-sm text-muted-foreground no-underline",
         "transition-[color,background-color] duration-(--duration-hover) ease-out",

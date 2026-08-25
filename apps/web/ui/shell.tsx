@@ -258,12 +258,19 @@ function Navigation({
     <SidebarProvider onNavigate={onNavigate}>
       {/*
        * The 16px gutter is the bar's, and it is on every block in the column
-       * rather than on the column itself. The organization bar's hairline has to
-       * run the full 224px, so the `<aside>` can carry no side padding — and
-       * the rows are 192px wide with their Ember mark exactly on the gutter,
-       * which is what the boards draw (`725-0`, `72Z-0`).
+       * rather than on the column itself. The organization bar's hairline has
+       * to run the full 224px, so the `<aside>` can carry no side padding.
+       *
+       * **8px here, because the gutter belongs to the row's icon and not to the
+       * row's plate.** The Egma mark, the word `Project`, the project name and
+       * every group label all start at 16px; a row whose own padding is 8 puts
+       * its icon on that same line, so the bar reads as one lane top to bottom
+       * instead of a project block and a navigation block 12px apart. The plate
+       * is 8px in from both edges as a result, 208px wide, and the Ember mark
+       * rides its leading edge — absolutely placed, so the icon lane is the same
+       * on the lit row and on every quiet one.
        */}
-      <SidebarContent className="px-4" asChild>
+      <SidebarContent className="px-2" asChild>
         <nav aria-label="Product navigation">
           {groups.map((group) => (
             <SidebarGroup key={group.id} labelled={group.label !== null}>
