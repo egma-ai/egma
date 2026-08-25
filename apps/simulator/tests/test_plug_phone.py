@@ -381,6 +381,9 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
         livekit_api_key="key",
         livekit_api_secret="secret",
         trunk_address="test.pstn.twilio.com",
+        trunk_number="+15550100100",
+        trunk_username="test-trunk-user",
+        trunk_password="SENTINEL-test-trunk-password",
     )
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
