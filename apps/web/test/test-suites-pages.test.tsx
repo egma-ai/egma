@@ -741,6 +741,83 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("commits an open picker before the other row's trigger takes the picking", async () => {
+    const CALM = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA, CALM],
+          version: 2,
+          versionId: "tstv_2",
+        }),
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA, CALM], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+
+    // Wake the stored row's Personas cell, open its picker, tick a second
+    // caller there. Nothing is saved yet — Done is what saves.
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(await screen.findByLabelText("Calm Ben"));
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    // Now press the *entry row's* trigger. It wears the same picker marker, so
+    // an unowned marker read this as a click inside the open picker: the
+    // picking moved and the tick above went with no save and no word said.
+    const entryRow = screen.getByLabelText("Name").closest("tr");
+    if (entryRow === null) throw new Error("the entry row is not on screen");
+    const entryTrigger = within(entryRow).getByRole("button", {
+      name: "+ Add a persona",
+    });
+    fireEvent.mouseDown(entryTrigger);
+    fireEvent.click(entryTrigger);
+
+    // The click that followed the mousedown opened the entry row's own picker,
+    // and it is the only one standing.
+    expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+    expect(
+      within(entryRow).getByRole("dialog", { name: "Choose personas" }),
+    ).toBeTruthy();
+
+    // The mousedown ran the open picker's Done first: exactly what the Done
+    // button sends, carrying the version the cell read.
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { personas: ["prs_1", "prs_2"], expectedVersionId: "tstv_1" },
+        },
+      ]);
+    });
+
+    // …and that answer, landing on a cell whose picking is long gone, leaves
+    // the entry row's picker exactly where somebody put it.
+    expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+    expect(
+      within(entryRow).getByRole("dialog", { name: "Choose personas" }),
+    ).toBeTruthy();
+  });
+
   it("saves a name against the revision it read, not the version", async () => {
     gridAnswers({
       saved: {
