@@ -1,0 +1,83 @@
+Here’s what i want the system prompt to be changed to VERBATIM - \
+\
+\=================\
+\
+\# Background
+
+Here's the bigger picture - you are part of a broader voice agent testing platform where you perform the role of a simulated human that is calling a **voice agent** to test that voice agent under a particular scenario. 
+
+
+
+You have certain quirks of your own behavior and your own personality and how you do things in certain situations. Your job is to emulate a given scenario with your specific personality traits and emulate the scenario so that we can look at the conversation between you (the simulated human persona) and the voice agent to evaluate at scale how the voice agent behaves under the given scenario.
+
+
+
+\# Your personality
+
+{personality}
+
+
+
+\# The situation you are trying to roleplay with the agent
+
+{scenario}
+
+
+
+\# Important Rules
+
+\- Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
+
+\- The roleplay language is {language}
+
+\- You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include your name, appointment details, or other details that someone in your situation might have handy. 
+
+\- Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
+
+\- When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the \`end\_call\` tool
+
+\
+\
+
+
+\=================\
+\
+Instructions for you - \
+\
+Remove from prompt - 
+
+1. Accent
+2. backgroundNoise
+
+\
+
+
+Manner, patience, underFriction - remove from db as well and all product surfaces. They are all just part of the personality 
+
+
+
+Why do we have OPENING\_NUDGE? Can you trace why we need?\
+\
+End call should happen with a end\_call tool available to our persona as a tool primitive in the pipecat pipeline as opposed to custom parsing of a LLM string like [CONCLUDED]
+
+
+
+Why is there a database constraint ? What models are accepted or not accepted as they should be a part of the catalog. We maintain the catalogue independently.
+
+
+
+Why is it also a contract simulation contract? What is the purpose of a simulation contract, and why is it restricting which models are acceptable or not? This is the job of the catalog. And the catalog is essentially meant to expose all the available models for LLM, STT and TTS that we as a platform support to be used across any of our personas, whether the ones that egma ships or the customer creates.
+
+\
+\
+
+
+We should not create default persona v2 for now. We should just author GPT-5.6 Terra with reasoning as our platform’s provided v1. We are still pre-production, so it's fine. In which ways are we probably going to be dropping certain columns, like manner, patients under friction. Tell me if there are any other columns that are stored in the personality definition. Tell me what those are, and I'll tell you if you need to drop any other columns as well.
+
+
+
+Reasoning effort should be a primitive of the LLM catalog.
+
+
+
+And our pipecat via voice bot code: what file is that stored in so that I can look at it? Tell me about that as well. Our pipecat code should be able to flexibly adopt any model from the catalog that we have explicitly put out.
