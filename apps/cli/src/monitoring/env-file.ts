@@ -289,20 +289,36 @@ export async function writeEnvFile(
    */
   const stagedName = `${ENV_FILE_NAME}.egma-${randomBytes(6).toString("hex")}`;
   const gitDirectory = await gitDirectoryOf(repository);
-  const staged =
-    gitDirectory === null
-      ? path.join(repository, `.${stagedName}`)
-      : path.join(gitDirectory, stagedName);
-  try {
-    await writeFile(staged, `${kept.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(staged, file);
-  } catch (cause) {
-    await rm(staged, { force: true }).catch(() => undefined);
+  const inGitDirectory =
+    gitDirectory === null ? null : path.join(gitDirectory, stagedName);
+  const besideTheFile = path.join(repository, `.${stagedName}`);
+  const content = `${kept.join("\n")}\n`;
+
+  const swap = async (staged: string): Promise<null | NodeJS.ErrnoException> => {
+    try {
+      await writeFile(staged, content, { encoding: "utf8", mode: 0o600 });
+      await rename(staged, file);
+      return null;
+    } catch (cause) {
+      await rm(staged, { force: true }).catch(() => undefined);
+      return cause as NodeJS.ErrnoException;
+    }
+  };
+
+  // A git directory on another filesystem (a linked worktree can be) makes the
+  // rename EXDEV — then, and only then, stage beside the file instead: same
+  // filesystem by definition, still one motion, and the stranded-file window
+  // returns only in that already-unusual layout.
+  let failed = inGitDirectory === null ? null : await swap(inGitDirectory);
+  if (inGitDirectory === null || failed?.code === "EXDEV") {
+    failed = await swap(besideTheFile);
+  }
+  if (failed !== null) {
     return {
       kind: "refused",
       reason:
         `Egma could not write ${ENV_FILE_NAME}: ` +
-        `${cause instanceof Error ? cause.message : String(cause)}. ` +
+        `${failed.message}. ` +
         "Put the two lines below wherever this worker gets its environment.",
     };
   }
