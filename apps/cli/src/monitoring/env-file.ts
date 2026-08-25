@@ -122,6 +122,30 @@ export async function gitIgnores(
   });
 }
 
+/**
+ * Where this repository's git directory really is, asked of Git.
+ *
+ * Asked rather than assumed to be `.git`, because in a linked worktree `.git`
+ * is a file pointing elsewhere. `null` when Git will not say.
+ */
+async function gitDirectoryOf(repository: string): Promise<string | null> {
+  return new Promise<string | null>((resolve) => {
+    execFile(
+      "git",
+      ["--no-optional-locks", "rev-parse", "--absolute-git-dir"],
+      { cwd: repository },
+      (error, stdout) => {
+        if (error !== null) {
+          resolve(null);
+          return;
+        }
+        const answered = stdout.trim();
+        resolve(answered === "" ? null : answered);
+      },
+    );
+  });
+}
+
 /** What a developer is told when Egma will not write the file. */
 function refusalFor(answer: Exclude<IgnoreAnswer, "ignored">): string {
   if (answer === "not-ignored") {
@@ -247,16 +271,28 @@ export async function writeEnvFile(
   }
 
   /*
-   * Written beside the file and renamed over it, never truncated in place: an
+   * Staged and renamed over the file, never truncated in place: an
    * interruption leaves the developer's own `.env` exactly as it was, and the
-   * swap is one motion. The temporary file is born private, and the rename
+   * swap is one motion. The staging file is born private, and the rename
    * carries that with it — a live key was just written into this file, so it
    * lands readable by the developer alone whatever mode the old one had.
+   *
+   * Staged **inside `.git/`**, not beside the file: a process killed between
+   * the write and the rename strands the staging file with the key in it, and
+   * a stranded file in the working tree is one `git add .` from the history —
+   * most repositories ignore `.env` by that exact name and nothing else.
+   * Nothing under the git directory can be committed, and it is the same
+   * filesystem, so the rename stays one motion. A repository whose git
+   * directory cannot be found falls back to staging beside the file — the
+   * ignore check above already proved Git answers here, so that is theory
+   * more than practice.
    */
-  const staged = path.join(
-    repository,
-    `.${ENV_FILE_NAME}.egma-${randomBytes(6).toString("hex")}`,
-  );
+  const stagedName = `${ENV_FILE_NAME}.egma-${randomBytes(6).toString("hex")}`;
+  const gitDirectory = await gitDirectoryOf(repository);
+  const staged =
+    gitDirectory === null
+      ? path.join(repository, `.${stagedName}`)
+      : path.join(gitDirectory, stagedName);
   try {
     await writeFile(staged, `${kept.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
     await rename(staged, file);
