@@ -176,7 +176,10 @@ describe("one executable model catalog", () => {
       speed: RECOMMENDED_ENTRY.tts.recommendedSpeed,
     });
     const graderEntry = PROVIDER_CATALOG.find(
-      (entry) => entry.job === "llm" && entry.graderEligible === true,
+      (entry) =>
+        entry.job === "llm" &&
+        "graderEligible" in entry &&
+        entry.graderEligible === true,
     );
     expect(RECOMMENDED_GRADER_MODEL).toEqual({
       provider: graderEntry?.provider,
