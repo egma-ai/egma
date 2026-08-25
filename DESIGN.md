@@ -267,6 +267,7 @@ The measurements, all of them theme values:
 - Group related fields on Pure Paper surfaces.
 - Keep labels visible. Placeholder text is not a label.
 - **One label grammar, everywhere.** A mandatory field's label ends in `*`. An optional field's label ends in `[optional]`, in square brackets. A field carries at most one faint help line, and that line says what to write or where the value comes from — never how Egma stores it. (Developer decision, 2026-08-24. The lines that explained storage — “One paste, ever…”, “From your Retell…”, “Off by default…” — were deleted with it.)
+- **The star is never only a picture.** A field whose label ends in `*` also carries `aria-required="true"`, so the promise the label makes to a reader is the same one it makes to a screen reader. A starred label with no required semantics is a bug, not a style choice. (Developer decision, 2026-08-24.)
 - Save state is truthful: unchanged, saving, saved, or failed.
 - Editing after save clears the saved state.
 - Protect drafts during link, project, tab, reload, and write-in-flight navigation.

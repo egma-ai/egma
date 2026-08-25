@@ -99,6 +99,19 @@ const NEW_AGENT = "";
 const SHORTEST_KEY = 8;
 
 /**
+ * The platforms an agent can be connected on: Retell and LiveKit, and no
+ * third one (founder ruling, 2026-08-24).
+ *
+ * **The catalog carries one more.** A phone number belongs to no platform in
+ * particular, so the registry lists it under a platform-less option labelled
+ * "Any or unknown" — which is a true thing about a connection type and a
+ * meaningless answer to "what runs your agent". Offering it let somebody
+ * register an agent bound to nothing, which nothing downstream can monitor.
+ * The catalog is not changed; this sheet chooses what it offers from it.
+ */
+const OFFERED_PLATFORMS: readonly string[] = ["retell", "livekit"];
+
+/**
  * The connection half of the write, typed from the operation that carries it.
  *
  * Both writes take the same object — `registerAgent` nests it under
@@ -165,6 +178,8 @@ export function ConnectAgentSheet({
   const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
   /** Whether this save also starts pulling the agent's production calls. */
   const [pullCalls, setPullCalls] = useState(false);
+  /** Whether the person chose the Retell agent themselves. */
+  const [pickedByHand, setPickedByHand] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -220,9 +235,13 @@ export function ConnectAgentSheet({
           window.location.replace("/sign-in");
         } else if (read.status === "ready") {
           setCatalog(read.value);
-          const first = read.value.items[0];
+          // The first option on a platform this sheet offers — never the
+          // catalog's own first item, which may be the platform-less one.
+          const first = read.value.items.find((one) =>
+            OFFERED_PLATFORMS.includes(one.agentPlatform ?? ""),
+          );
           if (first !== undefined) {
-            setPlatformValue(first.agentPlatform ?? "unknown");
+            setPlatformValue(first.agentPlatform ?? "");
             setModality(first.modality);
             setAccessVariant(first.accessVariant);
           }
@@ -246,11 +265,9 @@ export function ConnectAgentSheet({
   const platformFixed = !creating && boundPlatform !== null;
   const selectedPlatform = platformFixed
     ? boundPlatform
-    : platformValue === "unknown"
+    : platformValue === ""
       ? null
-      : platformValue === ""
-        ? null
-        : platformValue;
+      : platformValue;
 
   const platformOptions = optionsForPlatform(catalog, selectedPlatform);
   const modalities = [...new Set(platformOptions.map((one) => one.modality))];
@@ -313,13 +330,13 @@ export function ConnectAgentSheet({
     setLivekitDispatch(newLiveKitDispatch());
     setDiscoveredAgents(null);
     setDiscoveredAgentId("");
+    setPickedByHand(false);
     setDiscoverRefused(null);
     setRefused(null);
   }
 
   function choosePlatform(next: string): void {
-    const platform = next === "unknown" ? null : next;
-    const forPlatform = optionsForPlatform(catalog, platform);
+    const forPlatform = optionsForPlatform(catalog, next);
     const first = forPlatform[0];
     setPlatformValue(next);
     setModality(first?.modality ?? "");
@@ -442,15 +459,40 @@ export function ConnectAgentSheet({
       if (discoveredAgentId !== "") setDiscoveredAgentId("");
       return;
     }
-    if (!matchingAgents.some((one) => one.platformAgentId === discoveredAgentId)) {
-      const bound = matchingAgents.find(
-        (one) => one.platformAgentId === boundPlatformAgentId,
-      );
-      setDiscoveredAgentId(
-        bound?.platformAgentId ?? matchingAgents[0]?.platformAgentId ?? "",
-      );
+    /*
+     * **Nothing is pre-selected until Egma knows what this agent is bound
+     * to.** The account listing and the agent read race, and picking the
+     * list's first entry while the read is still in flight would show one
+     * agent and then swap it for another under the person's eyes.
+     */
+    if (chosenAgent !== NEW_AGENT && known === null) return;
+    const bound = matchingAgents.find(
+      (one) => one.platformAgentId === boundPlatformAgentId,
+    );
+    /*
+     * **The binding wins until somebody chooses.** The account listing and the
+     * agent read land in either order, so a list that arrived first would
+     * otherwise settle on its own first entry and keep it — the pre-selection
+     * would be right or wrong depending on which request was quicker. Once a
+     * person has picked, nothing moves under them.
+     */
+    if (!pickedByHand && bound !== undefined) {
+      if (discoveredAgentId !== bound.platformAgentId) {
+        setDiscoveredAgentId(bound.platformAgentId);
+      }
+      return;
     }
-  }, [matchingAgents, discoveredAgentId, boundPlatformAgentId]);
+    if (!matchingAgents.some((one) => one.platformAgentId === discoveredAgentId)) {
+      setDiscoveredAgentId(matchingAgents[0]?.platformAgentId ?? "");
+    }
+  }, [
+    matchingAgents,
+    discoveredAgentId,
+    boundPlatformAgentId,
+    pickedByHand,
+    chosenAgent,
+    known,
+  ]);
 
   /** Everything the connection half of this panel is about to send. */
   function connectionBody(chosen: ConnectionOption): ConnectionBody {
@@ -533,14 +575,6 @@ export function ConnectAgentSheet({
       return;
     }
 
-    if (creating && newAgentPlatform === null) {
-      setRefused({
-        error: "unprocessable",
-        message: "Choose Retell or LiveKit for the new agent.",
-      });
-      return;
-    }
-
     if (usesAgentDiscovery && !retellReady) {
       setRefused({ error: "unprocessable", message: whyNotYet ?? "" });
       return;
@@ -552,8 +586,13 @@ export function ConnectAgentSheet({
     setSaving(true);
 
     if (creating) {
-      // Kept beside the typed request as well as the early user-facing guard
-      // because `creating` is not a TypeScript discriminant for the platform.
+      /*
+       * The platform-less option is never offered, so this cannot be reached
+       * by anything a person can press. It stays because `agentPlatform` is
+       * nullable on a connection option and `creating` is not a TypeScript
+       * discriminant for it — the narrowing has to happen somewhere, and
+       * silently is better than a sentence nobody can produce.
+       */
       if (newAgentPlatform === null) {
         setSaving(false);
         return;
@@ -645,7 +684,16 @@ export function ConnectAgentSheet({
   ];
 
   function body(): ReactNode {
-    if (role !== null && !mayAuthor) {
+    /*
+     * **While the role is unknown there is no form.** A deep link opens this
+     * panel before the session read has answered, and a form drawn then is an
+     * enabled credential field in front of somebody Egma has not identified —
+     * who may turn out to be a viewer, and be told so only after they had
+     * pasted a key into it. The list gates its own Connect control the same
+     * way, for the same reason.
+     */
+    if (role === null) return <Loading what="what you can do here" />;
+    if (!mayAuthor) {
       return (
         <NotFound
           message={`Your ${role} role cannot connect agents. Ask an organization admin to change your role, then try again.`}
@@ -678,6 +726,7 @@ export function ConnectAgentSheet({
           */}
         <Field label="Agent*" htmlFor="agent-choice">
           <Select
+            aria-required="true"
             id="agent-choice"
             value={chosenAgent}
             disabled={saving}
@@ -696,6 +745,7 @@ export function ConnectAgentSheet({
           <SheetGroup eyebrow="New agent">
             <Field label="Name*" htmlFor="agent-name">
               <Input
+                aria-required="true"
                 id="agent-name"
                 value={agentName}
                 placeholder="Front desk"
@@ -786,7 +836,10 @@ export function ConnectAgentSheet({
                 setDiscoveredAgentId("");
                 setDiscoverRefused(null);
               }}
-              onAgentChange={setDiscoveredAgentId}
+              onAgentChange={(next) => {
+                setPickedByHand(true);
+                setDiscoveredAgentId(next);
+              }}
               onPhoneNumberChange={(phoneNumber) =>
                 setDraft((current) => ({
                   ...current,
@@ -843,17 +896,20 @@ export function ConnectAgentSheet({
           disabled={saving}
           onChange={(event) => choosePlatform(event.target.value)}
         >
-          {agentPlatformChoices(catalog).map((one) => (
-            <option key={one.value} value={one.value}>
-              {one.label}
-            </option>
-          ))}
+          {agentPlatformChoices(catalog)
+            .filter((one) => OFFERED_PLATFORMS.includes(one.value))
+            .map((one) => (
+              <option key={one.value} value={one.value}>
+                {one.label}
+              </option>
+            ))}
         </Select>
       </Field>
     );
   }
 
-  const usable = role === null || mayAuthor;
+  /** The submit exists once Egma knows whose it would be, and not before. */
+  const usable = role !== null && mayAuthor;
 
   return (
     <Sheet
@@ -918,17 +974,16 @@ function labelFor(name: string, platforms: string | null): string {
 /**
  * A named group of fields inside the sheet, under a letter-spaced eyebrow.
  *
- * `contained` is the NEW AGENT block, which the board draws on the canvas
- * colour inside a hairline (`7E0-0`) — the one block in the panel that is about
- * a different record from the rest of it.
+ * **The grey box is gone.** The NEW AGENT block used to be drawn on the canvas
+ * colour inside a hairline; the 2026-08-24 boards put its fields flush with
+ * the rest of the panel (`I79-0`), so a group is now an eyebrow and the fields
+ * under it, and nothing else.
  */
 function SheetGroup({
   eyebrow,
-  contained = false,
   children,
 }: {
   readonly eyebrow: string;
-  readonly contained?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -936,14 +991,7 @@ function SheetGroup({
       <p className="m-0 text-2xs tracking-(--tracking-label) text-faint uppercase">
         {eyebrow}
       </p>
-      <div
-        className={cn(
-          "flex flex-col gap-3",
-          contained && "border border-border bg-background p-4",
-        )}
-      >
-        {children}
-      </div>
+      <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
 }
@@ -1005,7 +1053,13 @@ function ModalityChoice({
                * of mounting and unmounting a bar.
                */
               "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:content-['']",
-              "before:origin-left before:bg-accent before:transition-[opacity,transform]",
+              /*
+               * `bg-brand`, which is Ember. `accent` is the neutral quiet
+               * surface in this theme, so `bg-accent` drew the founder's
+               * two-pixel Ember line in grey — the state was there and the
+               * brand signal was not.
+               */
+              "before:origin-left before:bg-brand before:transition-[opacity,transform]",
               "before:duration-(--duration-hover) before:ease-out",
               "motion-reduce:before:transition-none",
               one === value
@@ -1125,6 +1179,7 @@ function RetellSetup({
       {asksForKey ? (
         <Field label="Retell API key*" htmlFor="retell-api-key">
           <Input
+            aria-required="true"
             id="retell-api-key"
             value={apiKey}
             type="password"
@@ -1167,6 +1222,7 @@ function RetellSetup({
             }
           >
             <Select
+              aria-required="true"
               id="retell-agent"
               value={selectedAgent}
               disabled={disabled}
@@ -1187,6 +1243,7 @@ function RetellSetup({
               hint="The number Egma calls in a simulation, like +15551234567."
             >
               <Input
+                aria-required="true"
                 className="font-mono"
                 id="retell-phone-number"
                 inputMode="tel"

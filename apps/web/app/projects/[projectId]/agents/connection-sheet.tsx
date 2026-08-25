@@ -55,13 +55,15 @@ import {
  * opens exactly this, so every link in the docs and the CLI still lands
  * somewhere honest.
  *
- * **Read first, edit on purpose.** The board draws Save and Edit side by side,
- * which would put a save on a panel with nothing to save; what is drawn here is
- * the honest half of it — Edit while reading, Save and Cancel while editing,
- * and Archive at the far end of the footer in both.
+ * **Read first, edit on purpose, and manage from the ⋮.** Reading is plain
+ * labelled rows with no controls in front of them; Edit connection and Delete
+ * connection live in a menu in the head, and the footer exists only while
+ * something is being edited.
  *
- * **The destructive action says "Archive", because that is the write.** There
- * is no delete for a connection anywhere in the contract. See `archive.tsx`.
+ * **The destructive action says "Delete", and the write underneath archives**
+ * (founder ruling, 2026-08-24). The word matches what a person meant; the
+ * sentence in the confirmation is what says what actually happens to stored
+ * transcripts. See `archive.tsx`.
  *
  * **The credential is never in this panel, on either side.** A read answers
  * whether one is present and a hint of which it is; it never answers with the
@@ -282,6 +284,7 @@ export function ConnectionSheet({
         <>
           <Field label="Name*" htmlFor="edit-connection-name">
             <Input
+              aria-required="true"
               id="edit-connection-name"
               value={editing.name}
               aria-invalid={nameProblem !== null ? true : undefined}

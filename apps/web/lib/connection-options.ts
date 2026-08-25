@@ -75,27 +75,30 @@ export type DiscoveredAgents = DiscoverAgentsResponse;
 export type DiscoveredAgent = DiscoveredAgents["agents"][number];
 export type ConnectionCandidate = DiscoveredAgent["connectionCandidates"][number];
 
-/** Candidates that represent the explicit connection option on the form. */
-export function candidatesForOption(
-  agent: DiscoveredAgent,
-  option: ConnectionOption | undefined,
-): readonly ConnectionCandidate[] {
-  if (option === undefined) return [];
-  return agent.connectionCandidates.filter(
-    (candidate) =>
-      candidate.agentPlatform === option.agentPlatform &&
-      candidate.connectionType === option.connectionType &&
-      candidate.accessVariant === option.accessVariant &&
-      candidate.modality === option.modality,
-  );
-}
-
-/** Agents that offer at least one candidate for the selected access variant. */
+/**
+ * Agents on the account that can be reached the way the form is set to.
+ *
+ * **The candidates decide, and they are not otherwise shown.** Discovery
+ * answers each account agent with the connections it actually offers, so an
+ * account holding chat agents and voice agents narrows to the half the chosen
+ * modality can reach — and the person picks a name rather than choosing a
+ * route. A candidate list of its own was drawn here until 2026-08-24; the
+ * boards replaced it with the name and a typed phone number.
+ */
 export function agentsForOption(
   agents: readonly DiscoveredAgent[] | null,
   option: ConnectionOption | undefined,
 ): readonly DiscoveredAgent[] {
+  if (option === undefined) return [];
   return (
-    agents?.filter((agent) => candidatesForOption(agent, option).length > 0) ?? []
+    agents?.filter((agent) =>
+      agent.connectionCandidates.some(
+        (candidate) =>
+          candidate.agentPlatform === option.agentPlatform &&
+          candidate.connectionType === option.connectionType &&
+          candidate.accessVariant === option.accessVariant &&
+          candidate.modality === option.modality,
+      ),
+    ) ?? []
   );
 }

@@ -281,9 +281,13 @@ function boundPlatformAgentId(value: string): string {
  * Turn pull on for one agent: bind it to its platform, seal its monitoring
  * key, and open its notebook.
  *
- * The key is asked for even when a connection already holds one for the same
- * account. Simulation custody and monitoring custody are two jobs with two
- * secrets on purpose.
+ * **The key reaches this from wherever the person last gave it.** Connecting
+ * an agent seals it here first (`sealAgentMonitoringKey`), so a switch-on that
+ * follows a connect spends the copy the agent already holds rather than asking
+ * again — one paste per agent, ever (founder ruling, 2026-08-24). A Retell
+ * chat connection still keeps its own copy on the connection, because
+ * simulation custody and monitoring custody are two jobs; what changed is that
+ * a person is no longer asked twice to supply them.
  */
 export async function enablePullProductionCalls(
   auth: AuthContext,
@@ -524,6 +528,11 @@ export async function agentMonitoringKey(
       and(
         within(auth, agent, eq(agent.projectId, projectId)),
         eq(agent.id, agentId),
+        // An agent somebody deleted keeps its sealed key, because Restore has
+        // to bring back a working agent — but nothing may *spend* it. Without
+        // this, naming a deleted agent in a discovery would still read its
+        // account with the secret it holds.
+        isNull(agent.archivedAt),
       ),
     )
     .limit(1);

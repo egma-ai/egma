@@ -99,6 +99,7 @@ export function RenameAgentSheet({
             {refused === null ? null : <Refused message={refused.message} />}
             <Field label="Name*" htmlFor="agent-rename">
               <Input
+                aria-required="true"
                 autoComplete="off"
                 disabled={saving || !mayAuthor}
                 id="agent-rename"

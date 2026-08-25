@@ -257,7 +257,13 @@ export type RegisterAgentData = {
             credentials?: {
                 [key: string]: unknown;
             };
+            /**
+             * The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name.
+             */
             platformAgentId?: string;
+            /**
+             * Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history.
+             */
             pullProductionCalls?: boolean;
             /**
              * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
@@ -578,7 +584,13 @@ export type AddConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
+        /**
+         * The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name.
+         */
         platformAgentId?: string;
+        /**
+         * Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history.
+         */
         pullProductionCalls?: boolean;
         /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.

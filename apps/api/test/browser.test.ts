@@ -2618,7 +2618,6 @@ describe("the complete product, walked in order in a second project", () => {
        * taking somebody away from what they just made.
        */
       await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
-      agentAddress = walk.url();
       await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Retell staging");
 
@@ -2655,9 +2654,14 @@ describe("the complete product, walked in order in a second project", () => {
           `select id from agent where name = 'The Support line'`,
         )
       ).rows[0]?.id ?? "";
-      connectionAddress =
-        `${origin}/projects/${second}/agents/${storedAgentId}` +
-        `/connections/${storedConnectionId}`;
+      /*
+       * **The agent's own address, which is now a retired one.** It is kept
+       * because the two connection addresses hang off it and because a link to
+       * it has to keep working; what it does when it is opened is asserted
+       * below, on its own.
+       */
+      agentAddress = `${origin}/projects/${second}/agents/${storedAgentId}`;
+      connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
@@ -2673,6 +2677,22 @@ describe("the complete product, walked in order in a second project", () => {
       expect(agentsScreen).not.toContain("Production calls");
       expect(agentsScreen).not.toContain("Recent runs");
       expect(agentsScreen).not.toContain("Attached tests");
+
+      /*
+       * **The retired agent address lands on the list.** The agent page is
+       * gone (founder ruling, 2026-08-24) and its address is one every CLI
+       * message, every piece of documentation and somebody's notes still
+       * hold — so it has to arrive somewhere honest rather than at a 404. The
+       * address is asserted as well as the words, because "it says the agent's
+       * name" would also be true of the page that used to be here.
+       */
+      await walk.goto(agentAddress);
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      await saysWithin(walk, "The Support line");
+      expect(
+        await walk.getByRole("table", { name: "Agents in this project" }).count(),
+        "the retired agent address lands on the agents list",
+      ).toBe(1);
 
       /*
        * And the list says egma can reach it, without anybody opening it. This
@@ -3199,8 +3219,13 @@ describe("the complete product, walked in order in a second project", () => {
         // sentence is the form itself rather than the address of it.
         says: "Its name in Egma",
       },
-      // The agent's own address is retired and lands on the list, which is the
-      // one agent screen. It still says the agent's name, on its row.
+      /*
+       * **A retired address, kept in the table on purpose.** It redirects to
+       * the agents list, so what settles is the list — and the phrase is the
+       * agent's name, which the list says on its row. It stays listed because
+       * a copied link to it must keep arriving somewhere, and this table is
+       * where that promise is checked.
+       */
       { what: "one agent", address: agentAddress, says: "The Support line" },
       {
         what: "Add a connection",

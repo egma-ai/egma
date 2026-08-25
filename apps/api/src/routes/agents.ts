@@ -743,8 +743,88 @@ async function takeCustody(
     if (error instanceof UnprocessableInputError) {
       return { refused: true, error: "unprocessable", message: error.message };
     }
+    if (lostToPullUniqueness(error)) {
+      return {
+        refused: true,
+        error: "unprocessable",
+        message:
+          `${custody.platformAgentId} is already watched by another agent in ` +
+          "this project. One Egma agent watches one Retell agent, so turn " +
+          "that agent's switch off first, or connect without ticking Pull " +
+          "production calls.",
+      };
+    }
     throw error;
   }
+}
+
+/**
+ * The agent a registration would land on, when it would land on one that
+ * already exists — asked before anything is written.
+ *
+ * **A registration can reuse.** `registerAgent` matches a living connection
+ * naming the same vendor agent and answers with the agent that already holds
+ * it, so a request that names no agent id can still settle on one that is
+ * already bound. That is the path where the binding rule used to be met only
+ * *after* the agent and its connection were written, which left a live
+ * connection on an agent the save was refused for — and a second press wrote
+ * a second one.
+ *
+ * **It reads the reuse key rather than re-deciding reuse.** The factory owns
+ * the rule and keeps owning it; this asks the same question of the page of
+ * agents the project can already answer with, and it asks it only for the one
+ * connection shape that has a reuse key. Everything else creates a fresh,
+ * unbound agent, which no binding rule can refuse.
+ *
+ * A miss here is not a hole: `takeCustody` still meets the access layer's own
+ * refusal, and the register route undoes its connection when it does.
+ */
+async function reusedAgentFor(
+  acting: AuthContext,
+  wanted: NewConnection,
+): Promise<Agent | undefined> {
+  const vendorAgent = wanted.config["retellAgentId"];
+  if (
+    wanted.connectionType !== "retell_chat_api" ||
+    typeof vendorAgent !== "string" ||
+    vendorAgent === ""
+  ) {
+    return undefined;
+  }
+  const page = await listAgents(acting, {});
+  return page.items.find((one) =>
+    one.connections.some(
+      (connection) =>
+        connection.connectionType === "retell_chat_api" &&
+        connection.config["retellAgentId"] === vendorAgent,
+    ),
+  );
+}
+
+/**
+ * Whether a write lost to the one-switched-on-agent rule.
+ *
+ * The same reading `monitoring.ts` does, and for the same reason: the index is
+ * what decides, because a read that checked first and wrote second would be a
+ * race with the very next request. What it buys here is the sentence — without
+ * it a person who ticked "Pull production calls" for a platform agent another
+ * egma agent already watches got a fault, after their connection was written.
+ *
+ * It walks the `cause` chain because the query layer hands the driver's error
+ * back wrapped.
+ */
+function lostToPullUniqueness(error: unknown): boolean {
+  for (
+    let at: unknown = error, depth = 0;
+    at !== undefined && at !== null && depth < 4;
+    depth += 1
+  ) {
+    if (typeof at !== "object") break;
+    const carrier = at as { constraint?: unknown; cause?: unknown };
+    if (carrier.constraint === "agent_pulled_platform_agent_unique") return true;
+    at = carrier.cause;
+  }
+  return false;
 }
 
 /**
@@ -1240,6 +1320,17 @@ export async function agentRoutes(
           );
     if (isRefusal(confirmedInline)) return refused(reply, confirmedInline);
 
+    /*
+     * The agent this registration would reuse, and whether it is already bound
+     * somewhere else. Asked here so the ordinary refusal writes nothing at all.
+     */
+    if (confirmedInline !== undefined) {
+      const reusing = await reusedAgentFor(acting, confirmedInline.connection);
+      const bound =
+        reusing === undefined ? undefined : boundElsewhere(reusing, inlineChoice);
+      if (bound !== undefined) return refused(reply, bound);
+    }
+
     const registered = await registerAgent(acting, {
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
@@ -1267,7 +1358,29 @@ export async function agentRoutes(
         confirmedInline.custody,
         pull,
       );
-      if (stopped !== undefined) return refused(reply, stopped);
+      if (stopped !== undefined) {
+        /*
+         * **A refused save leaves nothing live behind.** The pre-check above
+         * catches the ordinary case before a row exists; this is what happens
+         * when two requests raced it, or when the rule was met by a fact only
+         * the transaction could see. The connection this request wrote is put
+         * back, so pressing again is a fresh attempt rather than a second live
+         * way into an agent nobody was allowed to bind. The agent row stays
+         * when this registration reused one — it was not this request's to
+         * remove.
+         */
+        if (registered.connection !== undefined) {
+          await archiveConnection(
+            acting,
+            registered.agent.id,
+            registered.connection.id,
+          );
+        }
+        if (registered.result === "created") {
+          await archiveAgent(acting, registered.agent.id);
+        }
+        return refused(reply, stopped);
+      }
     }
 
     // Created and extended each wrote a row; reused wrote none, and saying 201

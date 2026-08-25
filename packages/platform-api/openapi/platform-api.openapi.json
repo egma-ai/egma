@@ -570,10 +570,12 @@
                         "additionalProperties": true
                       },
                       "platformAgentId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name."
                       },
                       "pullProductionCalls": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                       },
                       "agentPlatformSelection": {
                         "type": "object",
@@ -2323,10 +2325,12 @@
                     "additionalProperties": true
                   },
                   "platformAgentId": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name."
                   },
                   "pullProductionCalls": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                   },
                   "agentPlatformSelection": {
                     "type": "object",

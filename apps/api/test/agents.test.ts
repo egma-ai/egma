@@ -586,6 +586,122 @@ describe("discovering simulation agents", () => {
     expect(agentOf(after).monitoringApiKeyHint).toBe("WXYZ");
   });
 
+  /**
+   * **The checkbox starts the pull on the same save.** Monitoring begins where
+   * the connection is made rather than on a screen of its own, and the switch
+   * is the only stored monitoring choice in the product (ADR-0015).
+   */
+  it("starts pulling production calls on the save that ticked the box", async () => {
+    api = await createApi("retell_connect_starts_pulling");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    expect(agentOf(created).pullProductionCalls).toBe(false);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    const connected = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(connected.status, JSON.stringify(connected.body)).toBe(201);
+
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(agentOf(after).pullProductionCalls).toBe(true);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    // The key is sealed on the agent, and only its last characters come back.
+    expect(agentOf(after).monitoringKeyPresent).toBe(true);
+    expect(agentOf(after).monitoringApiKeyHint).toBe("WXYZ");
+    expect(JSON.stringify(after.body)).not.toContain("retell-secret-confirm-WXYZ");
+  });
+
+  /**
+   * The save re-reads the picked agent before it stores anything, in the
+   * spelling the connect sheet now uses.
+   *
+   * Discovery is a snapshot: a number that has stopped answering for the
+   * picked agent between listing and saving is refused rather than stored.
+   */
+  it("refuses a phone number that no longer reaches the picked agent", async () => {
+    api = await createApi("retell_platform_agent_id_verified");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Front desk",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (path.startsWith("/get-phone-number/")) {
+          return new Response(
+            JSON.stringify({
+              phone_number: "+14155550100",
+              nickname: "Main",
+              inbound_agents: [{ agent_id: "agent_somebody_else" }],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "That phone number is no longer routed to the selected agent. Load the account again.",
+    });
+    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(read.body.connections).toEqual([]);
+    // Nothing was bound and no key was sealed by a save that did not land.
+    expect(agentOf(read).platformAgentId).toBeNull();
+    expect(agentOf(read).monitoringKeyPresent).toBe(false);
+  });
+
   /** The ordinary second connection: the same Retell agent, another way in. */
   it("adds a second way into the Retell agent it is already bound to", async () => {
     api = await createApi("retell_same_binding_reconnect");

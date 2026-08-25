@@ -41,10 +41,16 @@ import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
  *
  * **One screen, and every panel is a state of it.** Connecting an agent,
  * reading a connection and changing one all happen in a side sheet over this
- * list (`DESIGN.md`, Side sheets). The four addresses that used to be pages of
- * their own — `agents/new`, `connections/new`, `connections/:id` — still work
- * and each opens the panel it names, so a link in the CLI, the docs or
- * somebody's notes lands exactly where it always did.
+ * list (`DESIGN.md`, Side sheets). The three addresses that used to be pages
+ * of their own — `agents/new`, `connections/new`, `connections/:id` — still
+ * work and each opens the panel it names, and the agent's own address, whose
+ * page is retired, lands on this list. So a link in the CLI, the docs or
+ * somebody's notes still arrives somewhere honest.
+ *
+ * **Opening a panel never navigates.** Every control here changes query state
+ * on the address the person is already at (the founder's blanket ruling of
+ * 2026-08-24); the old addresses survive as deep-link aliases and nothing
+ * else.
  *
  * **Which panel is open is in the address, and nowhere else.** Back closes a
  * sheet, a copied link opens one, and a reload keeps it. State held in this
@@ -213,10 +219,10 @@ export function AgentsScreen({
          * connections in the next column are links, and now the underline
          * means one thing on this row — press this and a connection opens.
          *
-         * **The agent page is still reached**, from the row's actions menu
-         * (Open agent) and from the connect flow, which lands on it. Both are
-         * deliberate steps rather than a whole-name target a pointer finds by
-         * accident.
+         * **There is nothing behind the name any more.** The agent page is
+         * retired and its address lands here (founder ruling, 2026-08-24), so
+         * the name is a name: what a person came to read is the row, and what
+         * a person can do to the agent is in its ⋮.
          */
         cell: (agent) => agent.name,
       },

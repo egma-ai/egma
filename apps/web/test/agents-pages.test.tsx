@@ -636,6 +636,50 @@ describe("reading an agent's reach from the list", () => {
   });
 
   /**
+   * Renaming sends the name and nothing else.
+   *
+   * **There is no revision to send.** An agent is deliberately unversioned —
+   * its real content lives at the provider, where Egma cannot freeze it — so
+   * two people editing one agent is last-writer-wins (ADR-0015), and a
+   * revision in this body would be a promise the contract does not keep.
+   */
+  it("renames an agent with the name alone", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/agents": [
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+      "/v1/agents/agt_1": { status: 200, body: { agent: AGENT } },
+    });
+    render(<AgentsPage />);
+    await screen.findAllByText("Front desk");
+
+    const trigger = screen.getByRole("button", { name: "Actions for Front desk" });
+    trigger.focus();
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(trigger);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Rename agent" }),
+    );
+
+    const name = (await screen.findByLabelText("Name*")) as HTMLInputElement;
+    expect(name.value).toBe("Front desk");
+    // Nothing to save until it moved, so the sheet cannot write a no-op.
+    expect(
+      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.change(name, { target: { value: "Night line" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.method).toBe("PATCH");
+    expect(sent[0]?.url).toBe("/v1/agents/agt_1?projectId=prj_1");
+    expect(sent[0]?.body).toEqual({ name: "Night line" });
+  });
+
+  /**
    * **The row is the agent**, so the menu holds what a person does to an
    * agent and nothing that used to lead somewhere else (`I2Z-0`).
    */
@@ -754,16 +798,16 @@ describe("registering an agent", () => {
         target: { value: "livekit" },
       });
     }
-    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL"), {
+    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL*"), {
       target: { value: "wss://rooms.example.test" },
     });
     fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
       target: { value: "front-desk" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API key*"), {
       target: { value: "livekit-key" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API secret*"), {
       target: { value: "livekit-secret" },
     });
   }
@@ -961,8 +1005,38 @@ describe("registering an agent", () => {
       "Front desk",
     );
     expect(
-      (screen.getByLabelText("LiveKit WebSocket URL") as HTMLInputElement).value,
+      (screen.getByLabelText("LiveKit WebSocket URL*") as HTMLInputElement).value,
     ).toBe("wss://rooms.example.test");
+  });
+
+  /**
+   * **No credential form in front of somebody Egma has not identified yet.**
+   * A deep link opens this panel before the session read answers; a form drawn
+   * then would take a pasted Retell key from a person who may turn out to be a
+   * viewer, and be told so only afterwards. The list gates its own Connect
+   * control the same way.
+   */
+  it("draws no form until it knows what the person may do", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+    });
+    render(<RegisterAgentPage />);
+
+    /*
+     * Nothing is awaited here on purpose: this is the first paint, before the
+     * session read has answered, which is exactly the window a deep link opens
+     * in. The panel says what it is; it asks for nothing.
+     */
+    expect(screen.getByRole("heading", { name: "Connect an agent" })).toBeTruthy();
+    expect(screen.queryByLabelText("Name*")).toBeNull();
+    expect(screen.queryByLabelText("Retell API key*")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect agent" })).toBeNull();
+
+    // And it opens once Egma knows whose panel it is.
+    expect(await screen.findByLabelText("Name*")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect agent" })).toBeTruthy();
   });
 
   it("tells a viewer the panel is not theirs instead of pretending it worked", async () => {
@@ -1017,16 +1091,16 @@ describe("onboarding an agent", () => {
       screen.getByRole("button", { name: "Finish without a connection" }),
     ).toBeDefined();
 
-    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL"), {
+    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL*"), {
       target: { value: "wss://rooms.example.test" },
     });
     fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
       target: { value: "front-desk" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API key*"), {
       target: { value: "livekit-key" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API secret*"), {
       target: { value: "livekit-secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
@@ -1351,7 +1425,13 @@ describe("adding a connection", () => {
     const picked = (await screen.findByLabelText(
       "Retell voice agent*",
     )) as HTMLSelectElement;
-    expect(picked.value).toBe("agent_voice_2");
+    /*
+     * The account listing and the agent read are two requests, so the settled
+     * selection is what is asserted — the sheet shows nothing pre-selected
+     * until both have landed rather than picking the list's first entry and
+     * swapping it afterwards.
+     */
+    await waitFor(() => expect(picked.value).toBe("agent_voice_2"));
     expect(picked.selectedOptions[0]?.textContent).toBe("Out of hours");
 
     // Both are still offered: the rule is the server's, not the control's.
@@ -1383,13 +1463,13 @@ describe("adding a connection", () => {
     });
     expect(screen.queryByText(/shape/i)).toBeNull();
     expect(screen.queryByText(/credential/i)).toBeNull();
-    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL*"), {
       target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(screen.getByLabelText("Token endpoint"), {
+    fireEvent.change(screen.getByLabelText("Token endpoint*"), {
       target: { value: "https://tokens.example.test/livekit" },
     });
-    fireEvent.change(screen.getByLabelText("Auth headers"), {
+    fireEvent.change(screen.getByLabelText("Auth headers*"), {
       target: { value: '{"Authorization":"Bearer endpoint-secret"}' },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
@@ -1431,7 +1511,7 @@ describe("adding a connection", () => {
       (screen.getByRole("button", { name: "Connect agent" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL*"), {
       target: { value: "wss://rooms.example.test" },
     });
     fireEvent.change(await screen.findByLabelText("LiveKit agent name"), {
@@ -1442,15 +1522,15 @@ describe("adding a connection", () => {
         "Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room.",
       ),
     ).toBeTruthy();
-    expect(screen.queryByLabelText("LiveKit agent name (optional)")).toBeNull();
-    const metadata = screen.getByLabelText("Room metadata (optional)");
+    expect(screen.queryByLabelText("LiveKit agent name [optional]")).toBeNull();
+    const metadata = screen.getByLabelText("Room metadata [optional]");
     fireEvent.change(metadata, {
       target: { value: '{"tenant":"acme"}' },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API key*"), {
       target: { value: "livekit-key" },
     });
-    const apiSecret = screen.getByLabelText("LiveKit API secret");
+    const apiSecret = screen.getByLabelText("LiveKit API secret*");
     fireEvent.change(apiSecret, {
       target: { value: "livekit-secret" },
     });
@@ -1505,13 +1585,13 @@ describe("adding a connection", () => {
         "LiveKit sends the room to any available agent that accepts automatic dispatch. Egma stores no agent name.",
       ),
     ).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
+    fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL*"), {
       target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API key*"), {
       target: { value: "livekit-key" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+    fireEvent.change(screen.getByLabelText("LiveKit API secret*"), {
       target: { value: "livekit-secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
@@ -1723,7 +1803,7 @@ describe("one connection's page", () => {
     fireEvent.change(screen.getByLabelText("Name*"), {
       target: { value: "Primary Retell connection" },
     });
-    fireEvent.change(screen.getByLabelText("Retell agent ID"), {
+    fireEvent.change(screen.getByLabelText("Retell agent ID*"), {
       target: { value: "agent_moved" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
