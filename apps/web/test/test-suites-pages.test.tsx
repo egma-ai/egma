@@ -595,7 +595,7 @@ describe("the suite-first Tests route", () => {
     const asked = await screen.findByRole("dialog", { name: "Discard this test?" });
     expect(
       within(asked).getByText(
-        "What you typed is not saved. Egma keeps nothing from this row.",
+        "What you typed is not saved.",
       ),
     ).toBeTruthy();
     fireEvent.click(within(asked).getByRole("button", { name: "Discard" }));
@@ -641,6 +641,119 @@ describe("the suite-first Tests route", () => {
     });
     await waitFor(() => {
       expect(screen.queryByText("Books service")).toBeNull();
+    });
+  });
+
+  it("focuses the entry row from the toolbar and from the retired write address", async () => {
+    gridAnswers({ tests: [] });
+
+    render(<TestSuitePage />);
+
+    // The toolbar's own button: the entry row opens with the caret in Name,
+    // and the address does not move.
+    fireEvent.click(await screen.findByRole("button", { name: "Write a test" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+    });
+    expect(routed.push).not.toHaveBeenCalled();
+
+    cleanup();
+    sent = [];
+
+    // The retired write address lands on the same row, in the same place.
+    routed.pathname = "/projects/prj_1/tests/new";
+    routed.params = { projectId: "prj_1" };
+    routed.search = "suite=ste_1";
+    gridAnswers({ tests: [] });
+    routed.pathname = "/projects/prj_1/tests/new";
+    routed.params = { projectId: "prj_1" };
+
+    render(<NewTestPage />);
+
+    expect(await screen.findByRole("button", { name: "Save test" })).toBeTruthy();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+    });
+  });
+
+  it("keeps a cell's Escape inside that cell while an entry row is open", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "A row in progress" },
+    });
+
+    // Wake an existing test's cell, type into it, and press Escape there.
+    // Scoped to that row: the open entry row has cells of the same names.
+    const row = screen.getByText("The caller books service.").closest("tr");
+    if (row === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(row).getByText("The caller books service."));
+    const scenario = within(row).getByLabelText("Scenario");
+    fireEvent.change(scenario, { target: { value: "Something else entirely." } });
+    fireEvent.keyDown(scenario, { key: "Escape" });
+
+    // The cell reverted and nothing was sent; the entry row is untouched and
+    // no discard dialog was raised over a row nobody asked to throw away.
+    expect(screen.getByText("The caller books service.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save test" })).toBeTruthy();
+    expect(
+      (screen.getAllByLabelText("Name")[0] as HTMLInputElement).value,
+    ).toBe("A row in progress");
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("opens one persona picker at a time", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    expect(await screen.findAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+
+    // Waking the row's own Personas cell opens its picker and leaves exactly
+    // one standing — the entry row's does not survive beside it.
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+    });
+  });
+
+  it("saves a name against the revision it read, not the version", async () => {
+    gridAnswers({
+      saved: {
+        status: 200,
+        body: testBody({ personas: [PERSONA], name: "Books a service", revision: "rev_2" }),
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    // A blur commits exactly as Enter does, and a name is identity: it carries
+    // the revision it was read at and mints no version.
+    fireEvent.click(await screen.findByText("Books service"));
+    const name = screen.getByLabelText("Name");
+    fireEvent.change(name, { target: { value: "Books a service" } });
+    fireEvent.blur(name);
+
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { name: "Books a service", expectedRevision: "rev_1" },
+        },
+      ]);
     });
   });
 

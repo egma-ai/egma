@@ -3219,10 +3219,12 @@ describe("the complete product, walked in order in a second project", () => {
       },
       {
         // The retired write-a-test address, kept as a deep link: it lands on
-        // the suite's grid with the entry row already open.
+        // the suite's grid with the entry row already OPEN. The suite's name
+        // would be there either way, so the proof reads the commit bar, which
+        // only an open entry row draws.
         what: "Write a test",
         address: testWriterAddress(),
-        says: "Support reception",
+        says: "Save test",
       },
       {
         // The retired test address, kept as a deep link: it resolves the

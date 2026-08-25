@@ -1144,10 +1144,13 @@ export async function listPersonas(
  * The answers come back in the order the entries were given, because that order
  * is content: a version names its personas in the order they were authored.
  *
- * **Naming nobody comes back as nobody.** What an empty list means — the
- * project's default persona — is a rule about the write, and the test factory
- * holds it. Answering the default here as well would put one rule in two places,
- * where it can come to disagree with itself.
+ * **Naming nobody comes back as nobody.** What an empty list means — that the
+ * write is refused, because a test says who calls — is a rule about the write,
+ * and the test factory holds it. Answering it here as well would put one rule
+ * in two places, where it can come to disagree with itself. Until 2026-08-24
+ * the rule read the other way round and an empty list meant the project's
+ * default persona; that substitution is gone, and this translation is
+ * untouched by the change because it never held the rule.
  *
  * **This is a translation, not a promise.** The read is outside whatever
  * transaction the write will open, so a persona can be archived between this

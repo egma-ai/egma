@@ -16,6 +16,7 @@ import {
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
   platformAnswer,
@@ -82,7 +83,7 @@ const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
  */
 const ACTION = "w-(--table-action-width) border-b border-border p-0 text-center align-top";
 const PAD = "px-2.5 py-2";
-const TEXT = "text-sm leading-caption text-foreground";
+const TEXT = "text-sm leading-(--line-caption) text-foreground";
 /*
  * A woken cell wears its 2px ink edge as an inset shadow rather than a border,
  * so waking one moves nothing: a border would take two pixels out of the cell
@@ -92,11 +93,11 @@ const TEXT = "text-sm leading-caption text-foreground";
 const WOKEN =
   "shadow-[inset_0_0_0_2px_var(--border-strong)] transition-shadow duration-(--duration-hover) ease-out motion-reduce:transition-none";
 const QUIET_INPUT =
-  "w-full resize-none border-0 bg-transparent p-0 text-sm leading-caption text-foreground outline-none placeholder:text-faint";
+  "w-full resize-none border-0 bg-transparent p-0 text-sm leading-(--line-caption) text-foreground outline-none placeholder:text-faint";
 
 /** The ember affordance a woken cell grows, and nothing else on the screen. */
 const ADD_LINE =
-  "cursor-pointer bg-transparent p-0 text-left text-sm leading-caption text-primary underline-offset-4 pointer-hover:underline";
+  "cursor-pointer bg-transparent p-0 text-left text-sm leading-(--line-caption) text-primary underline-offset-4 pointer-hover:underline";
 
 type Draft = {
   readonly name: string;
@@ -298,12 +299,10 @@ function PersonaPicker({
         ) : (
           listed.map((one) => (
             <label
-              className="flex h-9 cursor-pointer items-center gap-2.5 px-2.5 text-sm text-foreground pointer-hover:bg-surface-soft"
+              className="flex min-h-9 cursor-pointer items-center gap-2.5 px-2.5 text-sm text-foreground pointer-hover:bg-surface-soft"
               key={one.id}
             >
-              <input
-                className="size-4 flex-none accent-[var(--action)]"
-                type="checkbox"
+              <Checkbox
                 checked={chosen.includes(one.id)}
                 onChange={() => toggle(one)}
               />
@@ -371,6 +370,7 @@ function BehaviorLines({
               }
               if (event.key === "Escape") {
                 event.preventDefault();
+                event.stopPropagation();
                 onCancel();
               }
             }}
@@ -453,6 +453,10 @@ function CellBody({
           }
           if (event.key === "Escape") {
             event.preventDefault();
+            // Escape in a cell reverts that cell and stops there. Without this
+            // it also reached the wrapper, where an open entry row reads it as
+            // "discard everything I typed".
+            event.stopPropagation();
             onCancel();
           }
         }}
@@ -478,6 +482,7 @@ function CellBody({
           }
           if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             onCancel();
           }
         }}
@@ -507,7 +512,15 @@ function CellBody({
   }
 
   return (
-    <div className="relative flex flex-col gap-0.5">
+    <div
+      className="relative flex flex-col gap-0.5"
+      onKeyDown={(event) => {
+        if (!woken || event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onCancel();
+      }}
+    >
       <span className={TEXT}>{personaNames(draft.personas, known)}</span>
       {woken ? (
         <button
@@ -574,7 +587,15 @@ export function TestsGrid(props: GridProps) {
   const [cellDraft, setCellDraft] = useState<Draft | null>(null);
   const [cellRefused, setCellRefused] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [picking, setPicking] = useState(false);
+  /**
+   * Which cell's persona picker is open, and there can only be one.
+   *
+   * **Openness belongs to the cell that owns it**, not to a shared flag: a
+   * boolean served every woken Personas cell and the entry row at once, so two
+   * pickers could stand open together and waking any cell slammed the entry
+   * row's shut. `"entry"` is the entry row's own; a woken cell's is its test id.
+   */
+  const [picking, setPicking] = useState<string | null>(null);
   const [known, setKnown] = useState<ReadonlyMap<string, Named>>(new Map());
   const [entry, setEntry] = useState<Draft | null>(null);
   const [entryRefused, setEntryRefused] = useState<string | null>(null);
@@ -603,27 +624,57 @@ export function TestsGrid(props: GridProps) {
     window.requestAnimationFrame(() => entryName.current?.focus());
   }, [onWriting]);
 
+  /*
+   * The address that means "write a test" opens the entry row the same way the
+   * ghost row does, caret and all — `/tests/new?suite=` is the old write
+   * address, and landing on it must put somebody in the same place pressing
+   * the button does.
+   */
+  const arrivedWriting = useRef(false);
   useEffect(() => {
-    if (writing && entry === null) setEntry(EMPTY_DRAFT);
-  }, [writing, entry]);
+    if (!writing || arrivedWriting.current) return;
+    arrivedWriting.current = true;
+    openEntry();
+  }, [writing, openEntry]);
 
   function wake(test: ListedTest, field: Field): void {
     if (!mayAuthor) return;
     setActive({ testId: test.id, field });
     setCellDraft(draftOf(test));
     setCellRefused(null);
-    setPicking(false);
+    // Waking a cell closes a picker of its own from a previous wake, and
+    // leaves the entry row's alone.
+    setPicking((held) => (held === "entry" ? held : null));
   }
 
-  function rest(): void {
+  /**
+   * Put the grid back to rest, but only if the cell that asked is still the
+   * woken one.
+   *
+   * **A save that lands late must not reach into a cell somebody has since
+   * clicked into.** A commit is awaited, and in that time the caret can be two
+   * cells away with a sentence half typed into it; un-waking that cell would
+   * throw away what was typed with no refusal and no record — the one thing
+   * this grid promises never to do.
+   */
+  function rest(mine?: { readonly testId: string; readonly field: Field }): void {
+    if (
+      mine !== undefined &&
+      (active?.testId !== mine.testId || active.field !== mine.field)
+    ) {
+      return;
+    }
     setActive(null);
     setCellDraft(null);
     setCellRefused(null);
-    setPicking(false);
+    setPicking(null);
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
     if (cellDraft === null || saving) return;
+    // Which cell this commit is of, held across the await so the answer can
+    // only ever land back on the cell that asked.
+    const mine = { testId: test.id, field };
     const stored = draftOf(test);
     const problem = whyFieldRefuses(field, cellDraft);
     if (problem !== null) {
@@ -647,7 +698,7 @@ export function TestsGrid(props: GridProps) {
               ? stored.expectedBehaviors
               : stored.personas);
     if (unchanged) {
-      rest();
+      rest(mine);
       return;
     }
     setSaving(true);
@@ -675,12 +726,17 @@ export function TestsGrid(props: GridProps) {
       window.location.replace("/sign-in");
       return;
     }
+    const stillMine =
+      active?.testId === mine.testId && active.field === mine.field;
     if (answer.status !== "ready") {
-      setCellRefused(answer.refusal.message);
+      // A refusal belongs beside the cell it is about. If the caret has moved
+      // on, the sentence has nowhere truthful to sit, and the save simply did
+      // not happen — the stored value stands either way.
+      if (stillMine) setCellRefused(answer.refusal.message);
       return;
     }
     onSaved(answer.value);
-    rest();
+    rest(mine);
   }
 
   async function write(): Promise<void> {
@@ -778,8 +834,8 @@ export function TestsGrid(props: GridProps) {
             draft={draft}
             known={known}
             projectId={projectId}
-            picking={woken && picking}
-            onPick={setPicking}
+            picking={woken && picking === test.id}
+            onPick={(open) => setPicking(open ? test.id : null)}
             onChange={setCellDraft}
             onKnown={setKnown}
             onCommit={() => void commit(test, field)}
@@ -868,11 +924,13 @@ export function TestsGrid(props: GridProps) {
                 className={ADD_LINE}
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setPicking(!picking)}
+                onClick={() =>
+                  setPicking(picking === "entry" ? null : "entry")
+                }
               >
                 + Add a persona
               </button>
-              {picking ? (
+              {picking === "entry" ? (
                 <PersonaPicker
                   projectId={projectId}
                   chosen={entry.personas}
@@ -881,7 +939,7 @@ export function TestsGrid(props: GridProps) {
                     setEntry({ ...entry, personas: ids });
                     setKnown(named);
                   }}
-                  onDone={() => setPicking(false)}
+                  onDone={() => setPicking(null)}
                 />
               ) : null}
             </div>
@@ -897,6 +955,16 @@ export function TestsGrid(props: GridProps) {
     <div
       onKeyDown={(event) => {
         if (event.key !== "Escape" || entry === null) return;
+        /*
+         * Only the entry row's own Escape discards it. A woken cell handles
+         * and stops its own; this guard is the second half of the same rule,
+         * so Escape pressed anywhere else on the grid never throws away a row
+         * somebody is still writing.
+         */
+        const inEntry =
+          event.target instanceof Element &&
+          event.target.closest("[data-entry-row]") !== null;
+        if (!inEntry) return;
         event.preventDefault();
         askToDiscard();
       }}
@@ -954,7 +1022,7 @@ export function TestsGrid(props: GridProps) {
             </tr>
           ))}
           {entry === null ? null : (
-            <tr>
+            <tr data-entry-row="">
               {COLUMNS.map((column) => entryCell(column.field))}
               {/* Nothing to delete yet: the entry row holds the lane and no ⋮. */}
               <td className={cn(ACTION, WOKEN)} />
@@ -982,12 +1050,18 @@ export function TestsGrid(props: GridProps) {
       {more}
 
       {entry === null ? null : (
-        <Arriving className="mt-3 flex flex-wrap items-center gap-3">
+        <Arriving
+          className="mt-3 flex flex-wrap items-center gap-3"
+          data-entry-row=""
+        >
           <Button
             type="button"
             size="lg"
             disabled={!mayAuthor || missing !== null || entrySaving}
             busy={entrySaving}
+            // The sentence beside it is the reason it cannot fire, so the
+            // button names it rather than leaving a screen reader to find it.
+            aria-describedby="entry-row-state"
             {...(why === undefined ? {} : { why })}
             onClick={() => void write()}
           >
@@ -1002,7 +1076,11 @@ export function TestsGrid(props: GridProps) {
           >
             Cancel
           </Button>
-          <p className="m-0 text-sm text-muted-foreground" role="status">
+          <p
+            className="m-0 text-sm text-muted-foreground"
+            id="entry-row-state"
+            role="status"
+          >
             {missing ?? "Not saved yet."}
           </p>
         </Arriving>
@@ -1034,7 +1112,7 @@ export function TestsGrid(props: GridProps) {
           {(dismiss) => (
             <div className="flex flex-col gap-5">
               <p className="m-0 text-sm text-muted-foreground">
-                What you typed is not saved. Egma keeps nothing from this row.
+                What you typed is not saved.
               </p>
               <div className="flex flex-wrap items-center gap-3 pt-1">
                 <Button
@@ -1044,7 +1122,7 @@ export function TestsGrid(props: GridProps) {
                   onClick={() => {
                     setDiscarding(false);
                     setEntry(null);
-                    setPicking(false);
+                    setPicking(null);
                     onWriting(false);
                   }}
                 >

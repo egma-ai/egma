@@ -131,6 +131,9 @@ describe("suite identity and membership", () => {
         suiteId: suite.id,
         name: "Cross-tenant test",
         ...authored,
+        // Globex's own caller, so the refusal this asserts is the suite's and
+        // not the persona rule standing in front of it.
+        personaIds: [world.grace],
       }),
     ).rejects.toThrow(/no active test suite/u);
 
