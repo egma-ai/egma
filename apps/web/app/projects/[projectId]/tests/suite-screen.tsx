@@ -77,6 +77,8 @@ export function SuiteScreen({
   const [after, setAfter] = useState<TestPage | null>(null);
   const [written, setWritten] = useState<readonly ListedTest[]>([]);
   const [edited, setEdited] = useState<ReadonlyMap<string, ListedTest>>(new Map());
+  /** Rows that left, so a delete does not wait on a re-read of the page. */
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [shownSuite, setShownSuite] = useState<TestSuite | null>(null);
   const [search, setSearch] = useState("");
   const [entryOpen, setEntryOpen] = useState(writing);
@@ -89,6 +91,7 @@ export function SuiteScreen({
     setAfter(null);
     setWritten([]);
     setEdited(new Map());
+    setRemoved(new Set());
     setMoreRefused(null);
     setShownSuite(null);
     setSearch("");
@@ -162,7 +165,9 @@ export function SuiteScreen({
       ...tests.value.tests,
       ...(after?.tests ?? []),
       ...written,
-    ].map((test) => edited.get(test.id) ?? test);
+    ]
+      .filter((test) => !removed.has(test.id))
+      .map((test) => edited.get(test.id) ?? test);
     const cursor = after?.nextPageToken ?? tests.value.nextPageToken;
     const items = loaded.filter((test) => matchesSearch(test.name, search));
 
@@ -213,6 +218,9 @@ export function SuiteScreen({
           onCreated={(test) => setWritten((held) => [...held, test])}
           onSaved={(test) =>
             setEdited((held) => new Map(held).set(test.id, test))
+          }
+          onDeleted={(test) =>
+            setRemoved((held) => new Set(held).add(test.id))
           }
           more={
             cursor === null ? undefined : (

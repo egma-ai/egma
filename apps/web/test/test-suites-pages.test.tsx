@@ -128,6 +128,7 @@ function gridAnswers(options: {
   readonly tests?: readonly Record<string, unknown>[];
   readonly saved?: Stub;
   readonly created?: Stub;
+  readonly removed?: Stub;
 } = {}): void {
   routed.pathname = "/projects/prj_1/tests/suites/ste_1";
   routed.params = { projectId: "prj_1", suiteId: "ste_1" };
@@ -143,6 +144,7 @@ function gridAnswers(options: {
             options.created,
           ],
     ...(options.saved === undefined ? {} : { "/v1/tests/tst_1": options.saved }),
+    ...(options.removed === undefined ? {} : { "/v1/tests/tst_1": options.removed }),
     "/v1/personas": {
       status: 200,
       body: { personas: [PERSONA], nextPageToken: null },
@@ -602,6 +604,44 @@ describe("the suite-first Tests route", () => {
       expect(screen.queryByRole("button", { name: "Save test" })).toBeNull();
     });
     expect(sent.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("deletes one test from its row menu, after naming what would go", async () => {
+    gridAnswers({ removed: { status: 204, body: null } });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open the menu for Books service" }));
+    // The row offers one thing, and the four columns stay the test's content.
+    expect(
+      (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+    ).toEqual(["Delete test"]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete test" }));
+    const asked = await screen.findByRole("dialog", { name: "Delete this test?" });
+    expect(
+      within(asked).getByText(
+        "“Books service” leaves this suite. Nobody can author or run it after this.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(asked).getByText(
+        "Runs that already ran it keep their results and transcripts.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(asked).getByRole("button", { name: "Delete test" }));
+
+    await waitFor(() => {
+      expect(sent.find((request) => request.method === "DELETE")).toEqual({
+        path: "/v1/tests/tst_1",
+        method: "DELETE",
+        body: undefined,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Books service")).toBeNull();
+    });
   });
 
   it("lands the retired test address on that test's suite grid", async () => {

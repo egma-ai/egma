@@ -8,7 +8,12 @@ import {
   type ComponentProps,
   type ReactNode,
 } from "react";
-import { createTest, listPersonas, updateTest } from "@egma/platform-api/client";
+import {
+  createTest,
+  deleteTest,
+  listPersonas,
+  updateTest,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,6 +23,8 @@ import {
 } from "../../../../lib/platform-client.ts";
 import type { ListedTest } from "../../../../lib/tests.ts";
 import { Dialog } from "../../../../ui/dialog.tsx";
+import { DestructiveItem, MenuReason, RowMenu } from "../../../../ui/row-menu.tsx";
+import { ConfirmDialog } from "./parts.tsx";
 
 /**
  * The suite's tests, as a spreadsheet.
@@ -66,6 +73,14 @@ const COLUMNS: readonly {
 ];
 
 const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
+/*
+ * **The row's own ⋮ lane, and it is not a fifth column.** The four columns are
+ * the test's content; this is the house table's fixed `--table-action-width`
+ * slot, which every row of every list in the product carries so the triggers
+ * line up in one lane. The boards are silent on it, so the current screen's
+ * verb stays: a test is deleted from its row.
+ */
+const ACTION = "w-(--table-action-width) border-b border-border p-0 text-center align-top";
 const PAD = "px-2.5 py-2";
 const TEXT = "text-sm leading-caption text-foreground";
 /*
@@ -536,6 +551,7 @@ export type GridProps = {
   readonly onWriting: (open: boolean) => void;
   readonly onSaved: (test: ListedTest) => void;
   readonly onCreated: (test: ListedTest) => void;
+  readonly onDeleted: (test: ListedTest) => void;
   readonly more?: ReactNode;
 };
 
@@ -550,6 +566,7 @@ export function TestsGrid(props: GridProps) {
     onWriting,
     onSaved,
     onCreated,
+    onDeleted,
     more,
   } = props;
 
@@ -563,6 +580,9 @@ export function TestsGrid(props: GridProps) {
   const [entryRefused, setEntryRefused] = useState<string | null>(null);
   const [entrySaving, setEntrySaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [deleting, setDeleting] = useState<ListedTest | null>(null);
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
+  const [deleteRefused, setDeleteRefused] = useState<string | null>(null);
   const entryName = useRef<HTMLInputElement>(null);
 
   /* Every persona a row already names has a name, so a cell can show it. */
@@ -695,6 +715,26 @@ export function TestsGrid(props: GridProps) {
     onWriting(false);
   }
 
+  async function remove(test: ListedTest): Promise<void> {
+    setDeleteInFlight(true);
+    setDeleteRefused(null);
+    const answer = await platformAnswer(
+      deleteTest({ testId: test.id, projectId }, { client: platformClient }),
+    );
+    setDeleteInFlight(false);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setDeleteRefused(answer.refusal.message);
+      return;
+    }
+    setDeleting(null);
+    if (active?.testId === test.id) rest();
+    onDeleted(test);
+  }
+
   function askToDiscard(): void {
     if (entry === null) return;
     const typed =
@@ -751,6 +791,38 @@ export function TestsGrid(props: GridProps) {
             </p>
           ) : null}
         </div>
+      </td>
+    );
+  }
+
+  /**
+   * The row's own ⋮, holding the one thing a row can do to itself.
+   *
+   * It is here rather than in a column because it is the house table's
+   * trailing slot: `ui/row-menu.tsx` draws the control, and the lane is 48px
+   * wide on every row so the triggers line up. Only a written test has one —
+   * the entry row has nothing to delete yet, and the ghost row is not a test.
+   */
+  function rowMenu(test: ListedTest): ReactNode {
+    return (
+      <td className={ACTION} key="menu">
+        <RowMenu label={`Open the menu for ${test.name}`}>
+          {(close) => (
+            <>
+              <DestructiveItem
+                disabled={!mayAuthor}
+                onClick={() => {
+                  close();
+                  setDeleteRefused(null);
+                  setDeleting(test);
+                }}
+              >
+                Delete test
+              </DestructiveItem>
+              {why === undefined ? null : <MenuReason>{why}</MenuReason>}
+            </>
+          )}
+        </RowMenu>
       </td>
     );
   }
@@ -835,6 +907,7 @@ export function TestsGrid(props: GridProps) {
           {COLUMNS.map((column) => (
             <col key={column.field} style={{ width: column.width }} />
           ))}
+          <col style={{ width: "var(--table-action-width)" }} />
         </colgroup>
         <thead>
           <tr className="bg-surface-soft">
@@ -847,6 +920,17 @@ export function TestsGrid(props: GridProps) {
                 {column.header}
               </th>
             ))}
+            {/*
+              The trailing slot is empty in the header and still present: it is
+              what holds the lane open above the first ⋮, exactly as the house
+              table draws it.
+            */}
+            <th
+              className="w-(--table-action-width) border-b border-border p-0"
+              scope="col"
+            >
+              <span className="sr-only">Test actions</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -860,19 +944,28 @@ export function TestsGrid(props: GridProps) {
               </td>
               <td className={cn(CELL, PAD, TEXT, "text-faint")}>…and who calls.</td>
               <td className={cn(CELL, PAD)} />
+              <td className={ACTION} />
             </tr>
           ) : null}
           {tests.map((test) => (
             <tr key={test.id}>
               {COLUMNS.map((column) => cell(test, column.field))}
+              {rowMenu(test)}
             </tr>
           ))}
           {entry === null ? null : (
-            <tr>{COLUMNS.map((column) => entryCell(column.field))}</tr>
+            <tr>
+              {COLUMNS.map((column) => entryCell(column.field))}
+              {/* Nothing to delete yet: the entry row holds the lane and no ⋮. */}
+              <td className={cn(ACTION, WOKEN)} />
+            </tr>
           )}
           {mayAuthor && entry === null ? (
             <tr>
-              <td className={cn(CELL, "border-b-0")} colSpan={COLUMNS.length}>
+              <td
+                className={cn(CELL, "border-b-0")}
+                colSpan={COLUMNS.length + 1}
+              >
                 <button
                   className={cn(ADD_LINE, PAD, "w-full")}
                   type="button"
@@ -919,6 +1012,21 @@ export function TestsGrid(props: GridProps) {
         <p className="mt-2 text-sm text-failure" role="alert">
           {entryRefused}
         </p>
+      )}
+
+      {deleting === null ? null : (
+        <ConfirmDialog
+          title="Delete this test?"
+          lines={[
+            `“${deleting.name}” leaves this suite. Nobody can author or run it after this.`,
+            "Runs that already ran it keep their results and transcripts.",
+          ]}
+          confirmLabel="Delete test"
+          busy={deleteInFlight}
+          refusal={deleteRefused}
+          onConfirm={() => void remove(deleting)}
+          onClose={() => setDeleting(null)}
+        />
       )}
 
       {discarding ? (
