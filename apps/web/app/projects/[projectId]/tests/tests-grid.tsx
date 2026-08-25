@@ -655,6 +655,34 @@ export function TestsGrid(props: GridProps) {
    * refuses is the same cell twice — an Enter followed by the blur it causes.
    */
   const inFlight = useRef<Set<string>>(new Set());
+  /**
+   * The tail of each test's queue, so one test's saves happen in order.
+   *
+   * **Two cells of the same test cannot go at once, and the reason is the
+   * version guard.** A content edit carries the version it was read at, so two
+   * content cells committed together would carry the *same* one: the first
+   * mints a new version and the second is refused for holding the version it
+   * has just replaced. That refusal would be about nothing a person did, and if
+   * the caret had already moved it would have nowhere to be shown — an edit
+   * gone with no request left standing and no sentence, which is the one thing
+   * this grid promises never to do.
+   *
+   * Different tests keep no queue between them: their guards are separate rows,
+   * so they are independent by construction and run side by side.
+   */
+  const queued = useRef<Map<string, Promise<void>>>(new Map());
+  /**
+   * The newest version and revision egma has answered with, per test.
+   *
+   * A queued save reads its guard from here at the moment it is sent rather
+   * than from the render that started it, so the save in front of it hands the
+   * one behind it the version it just minted. `onSaved` writes the same answer
+   * into the screen's state; this is the copy that is true immediately, because
+   * a queued continuation cannot wait for a render.
+   */
+  const latest = useRef<Map<string, { versionId: string; revision: string }>>(
+    new Map(),
+  );
   const [cellDraft, setCellDraft] = useState<Draft | null>(null);
   const [cellRefused, setCellRefused] = useState<string | null>(null);
   /**
@@ -675,6 +703,16 @@ export function TestsGrid(props: GridProps) {
   const [deleteInFlight, setDeleteInFlight] = useState(false);
   const [deleteRefused, setDeleteRefused] = useState<string | null>(null);
   const entryName = useRef<HTMLInputElement>(null);
+
+  /*
+   * A different suite is a different set of rows, so nothing a previous one
+   * learned about versions or had in flight may follow it here.
+   */
+  useEffect(() => {
+    queued.current = new Map();
+    latest.current = new Map();
+    inFlight.current = new Set();
+  }, [projectId, suiteId]);
 
   /* Every persona a row already names has a name, so a cell can show it. */
   useEffect(() => {
@@ -782,40 +820,67 @@ export function TestsGrid(props: GridProps) {
     }
     inFlight.current.add(key);
     setCellRefused(null);
+
     /*
-     * One field, and the guard the platform asks that field for. A content
-     * edit carries the version it was read at, so a save cannot land on top of
+     * One field, and the guard the platform asks that field for. A content edit
+     * carries the version it was read at, so a save cannot land on top of
      * somebody else's; a name is identity and carries the revision instead.
+     *
+     * Both are read here rather than closed over, because this runs when the
+     * queue reaches it: the save in front may have minted a version since, and
+     * carrying the older one would be refused for no reason a person could act
+     * on. A genuine refusal now means what it says — somebody else moved this
+     * test — which is exactly what the sentence in the cell is for.
      */
-    const answer = await platformAnswer(
-      updateTest(
-        {
-          testId: test.id,
-          projectId,
-          [field]: value,
-          ...(isContent(field)
-            ? { expectedVersionId: test.versionId }
-            : { expectedRevision: test.revision }),
-        } as Parameters<typeof updateTest>[0],
-        { client: platformClient },
-      ),
+    const send = async (): Promise<void> => {
+      const guard = latest.current.get(test.id) ?? {
+        versionId: test.versionId,
+        revision: test.revision,
+      };
+      const answer = await platformAnswer(
+        updateTest(
+          {
+            testId: test.id,
+            projectId,
+            [field]: value,
+            ...(isContent(field)
+              ? { expectedVersionId: guard.versionId }
+              : { expectedRevision: guard.revision }),
+          } as Parameters<typeof updateTest>[0],
+          { client: platformClient },
+        ),
+      );
+      inFlight.current.delete(key);
+      if (answer.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      const now = wokenNow.current;
+      const stillMine = now?.testId === mine.testId && now.field === mine.field;
+      if (answer.status !== "ready") {
+        // A refusal belongs beside the cell it is about. If the caret has moved
+        // on, the sentence has nowhere truthful to sit, and the save simply did
+        // not happen — the stored value stands either way.
+        if (stillMine) setCellRefused(answer.refusal.message);
+        return;
+      }
+      // What the next save on this test must carry, true from this instant.
+      latest.current.set(test.id, {
+        versionId: answer.value.versionId,
+        revision: answer.value.revision,
+      });
+      onSaved(answer.value);
+      rest(mine);
+    };
+
+    // Behind whatever this test is already saving, and nothing else.
+    const ahead = queued.current.get(test.id) ?? Promise.resolve();
+    const run = ahead.then(send, send);
+    queued.current.set(
+      test.id,
+      run.catch(() => undefined),
     );
-    inFlight.current.delete(key);
-    if (answer.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    const now = wokenNow.current;
-    const stillMine = now?.testId === mine.testId && now.field === mine.field;
-    if (answer.status !== "ready") {
-      // A refusal belongs beside the cell it is about. If the caret has moved
-      // on, the sentence has nowhere truthful to sit, and the save simply did
-      // not happen — the stored value stands either way.
-      if (stillMine) setCellRefused(answer.refusal.message);
-      return;
-    }
-    onSaved(answer.value);
-    rest(mine);
+    await run;
   }
 
   async function write(): Promise<void> {
