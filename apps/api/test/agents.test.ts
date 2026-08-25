@@ -590,6 +590,45 @@ describe("registering an agent", () => {
     expect(rows[0]).toEqual({ agents: "1", connections: "1" });
   });
 
+  it.each([
+    {
+      platform: "retell",
+      connection: registration().connection,
+    },
+    {
+      platform: "livekit",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+        modality: "voice",
+        config: { url: "wss://acme.livekit.cloud" },
+        credentials: {
+          apiKey: "livekit-api-key-WXYZ",
+          apiSecret: "livekit-api-secret-WXYZ",
+        },
+      },
+    },
+  ])(
+    "requires the agent platform for $platform even when its first connection names one",
+    async ({ platform, connection }) => {
+      api = await createApi(`agents_register_requires_${platform}`);
+      const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+      const refused = await post("/v1/agents", withKey(ada.secret), {
+        name: "Agent without a declared platform",
+        connection,
+      });
+
+      expect(refused.status).toBe(400);
+      expect(refused.body).toEqual({
+        error: "invalid_request",
+        message: "an agent platform is required and must be retell or livekit",
+      });
+      expect(await agentRowCount()).toBe(0);
+    },
+  );
+
   it("leaves no agent behind when the connection payload is refused", async () => {
     api = await createApi("agents_all_or_nothing");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
