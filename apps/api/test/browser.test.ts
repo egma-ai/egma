@@ -2555,14 +2555,22 @@ describe("the complete product, walked in order in a second project", () => {
       await saysWithin(walk, "No agents in this project yet");
 
       /*
-       * **One panel does both halves.** The agent and its first way in used to
-       * be two pages with a forward between them, and an agent that never
-       * reached the second one sat in the list unreachable. `/agents/new` is
-       * still the address — the CLI and the documentation print it — and what
-       * it opens is the side sheet over this list.
+       * **One panel does both halves, and opening it is not a navigation.**
+       * The agent and its first way in used to be two pages with a forward
+       * between them, and an agent that never reached the second one sat in
+       * the list unreachable. Now the control changes query state on the
+       * address the person is already at (founder ruling, 2026-08-24) — it no
+       * longer sends the browser to `/agents/new`, which is why this used to
+       * wait for that address and time out.
+       *
+       * `/agents/new` is still an address and still opens this panel; the
+       * copied-link table below is where that promise is checked, because that
+       * is what a link in the CLI or the documentation actually does.
        */
       await walk.getByRole("link", { name: "Connect an agent" }).first().click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents\\?sheet=connect$`),
+      );
       await reactHasTakenOver(walk, "form");
 
       // One field for the agent, and the shortness is the product's decision:
@@ -2623,8 +2631,19 @@ describe("the complete product, walked in order in a second project", () => {
        * agent page is retired (founder ruling, 2026-08-24): everything it held
        * is on the row behind the panel, so a save that navigated would be
        * taking somebody away from what they just made.
+       *
+       * **What is waited for is the outcome, not a navigation.** Closing is a
+       * query-state change on the address the panel was opened over, so there
+       * is no load to wait for: the panel goes, the row arrives, and the
+       * address settles back to the bare list. Waiting on any one of the three
+       * alone would pass while the other two had not happened.
        */
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      await expect
+        .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
+        .toBe(0);
+      await expect
+        .poll(() => walk.url(), { timeout: 30_000 })
+        .toMatch(new RegExp(`/projects/${second}/agents$`));
       await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Retell staging");
 
@@ -2693,8 +2712,16 @@ describe("the complete product, walked in order in a second project", () => {
        * address is asserted as well as the words, because "it says the agent's
        * name" would also be true of the page that used to be here.
        */
-      await walk.goto(agentAddress);
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      /*
+       * `commit` rather than `load`: this address answers with a redirect, so
+       * what is being waited for is where it lands, not the paint of a page
+       * that was never going to be drawn. The two assertions under it are the
+       * arrival, and they are the ones worth failing on.
+       */
+      await walk.goto(agentAddress, { waitUntil: "commit", timeout: 60_000 });
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`), {
+        timeout: 60_000,
+      });
       await saysWithin(walk, "The Support line");
       expect(
         await walk.getByRole("table", { name: "Agents in this project" }).count(),
@@ -2713,8 +2740,7 @@ describe("the complete product, walked in order in a second project", () => {
        * **The row names the agent as plain text, and its ⋮ is the way in.**
        * This list is the one agent screen (`6ZJ-0`), so the name is a name
        * rather than a link, and the underline on this row belongs to the
-       * connections alone. Open agent still carries the address the panel
-       * landed on.
+       * connections alone — there is no page behind the name to promise.
        */
       const named = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
