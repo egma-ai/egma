@@ -1632,11 +1632,19 @@ describe("the role the shell shows", () => {
     const organization = within(sidebar).getByRole("button", {
       name: "Open organization menu for Acme",
     });
-    expect(organization.querySelector("img")?.getAttribute("src")).toBe(
+    const organizationBar = organization.closest('[data-slot="sidebar-brand"]');
+    const mark = organizationBar?.querySelector("img");
+    expect(mark?.getAttribute("src")).toBe(
       "/brand/egma-mark-light.svg",
     );
+    expect(mark?.getAttribute("width")).toBe("32");
+    expect(mark?.getAttribute("height")).toBe("32");
+    expect(organization.querySelector("img")).toBeNull();
     expect(organization.textContent).toContain("Acme");
     expect(organization.textContent).toContain("Free");
+    expect(
+      organization.querySelector('[data-slot="organization-name"]')?.className,
+    ).toContain("text-sm");
     expect(organization.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
       "true",
     );
