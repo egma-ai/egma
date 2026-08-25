@@ -307,10 +307,23 @@ export async function writeEnvFile(
 
   // A git directory on another filesystem (a linked worktree can be) makes the
   // rename EXDEV — then, and only then, stage beside the file instead: same
-  // filesystem by definition, still one motion, and the stranded-file window
-  // returns only in that already-unusual layout.
+  // filesystem by definition, still one motion. Out here the stranded-file
+  // window is back, so Git is asked about the staging name first: unless an
+  // interruption would strand an *ignored* file, Egma refuses to write at all,
+  // and the printed lines are the working answer.
   let failed = inGitDirectory === null ? null : await swap(inGitDirectory);
   if (inGitDirectory === null || failed?.code === "EXDEV") {
+    if ((await gitIgnores(repository, `.${stagedName}`)) !== "ignored") {
+      return {
+        kind: "refused",
+        reason:
+          `Egma had no safe place to stage ${ENV_FILE_NAME} here: its git ` +
+          `directory could not take the staging file, and Git does not ignore ` +
+          `the fallback staging name, so an interruption could have left the ` +
+          `key in a committable file. Put the two lines below wherever this ` +
+          `worker gets its environment.`,
+      };
+    }
     failed = await swap(besideTheFile);
   }
   if (failed !== null) {
