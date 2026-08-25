@@ -325,14 +325,36 @@ export function ConnectAgentSheet({
     Object.values(draft.credentials).some((value) => value !== "");
   useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
 
+  /**
+   * Forget what was typed for one connection shape, and keep the account.
+   *
+   * **The account is not part of the draft.** `discoverAgents` answers the
+   * whole Retell account and this sheet filters it by the chosen option, so
+   * switching Chat↔Voice is a different view of the same answer rather than a
+   * reason to ask again. Clearing it here left the person stranded: the
+   * listing's own effect watches the key and the agent, neither of which a
+   * modality switch touches, so nothing re-ran and the picker stayed empty
+   * with Connect disabled until they retyped the key.
+   *
+   * The pick is kept too. It survives a switch that has it on both sides, and
+   * the effect below corrects it when the new modality cannot reach it — so
+   * Voice → Chat → Voice comes back to the agent it started on.
+   *
+   * The account is dropped where the account genuinely changes: a new key, or
+   * a different agent whose sealed key opens a different one.
+   */
   function forgetConnectionDraft(): void {
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
+    setDiscoverRefused(null);
+    setRefused(null);
+  }
+
+  /** Drop the account listing itself, and everything read out of it. */
+  function forgetDiscoveredAccount(): void {
     setDiscoveredAgents(null);
     setDiscoveredAgentId("");
     setPickedByHand(false);
-    setDiscoverRefused(null);
-    setRefused(null);
   }
 
   function choosePlatform(next: string): void {
@@ -367,6 +389,7 @@ export function ConnectAgentSheet({
      */
     setDiscoveryKey("");
     setPullCalls(false);
+    forgetDiscoveredAccount();
     forgetConnectionDraft();
   }
 
@@ -832,8 +855,7 @@ export function ConnectAgentSheet({
               disabled={saving}
               onKeyChange={(value) => {
                 setDiscoveryKey(value);
-                setDiscoveredAgents(null);
-                setDiscoveredAgentId("");
+                forgetDiscoveredAccount();
                 setDiscoverRefused(null);
               }}
               onAgentChange={(next) => {

@@ -439,6 +439,11 @@ const THE_MODELS = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  // One egma agent binds to one platform agent. A second, different one is
+  // refused by name — its own class, and a subclass of the unprocessable-input
+  // refusal, because the sentence is the whole of the answer and the two ids
+  // beside it are what lets a caller say something else instead.
+  "AgentAlreadyBoundError",
   // The agent factory's own refusal, carrying which of its three rules turned
   // a write away: an HTTP layer answers the three differently and must not
   // have to read the sentence to tell them apart.

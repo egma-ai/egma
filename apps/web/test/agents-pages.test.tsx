@@ -1358,6 +1358,98 @@ describe("adding a connection", () => {
   });
 
   /**
+   * **Switching Chat↔Voice is a different view of the same account.**
+   *
+   * `agents:discover` answers the whole Retell account and this sheet filters
+   * it by the chosen option, so a modality switch must not throw the answer
+   * away. It used to: the account was cleared as part of forgetting the
+   * connection draft, and the listing's own effect watches the key and the
+   * agent — neither of which a modality switch touches — so nothing re-ran.
+   * The person was left with an empty picker and a disabled Connect until
+   * they retyped the key they had just pasted.
+   */
+  it("keeps the loaded Retell account when the modality changes", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents:discover": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              platformAgentId: "agent_voice_1",
+              name: "Appointment line",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550100" },
+                },
+              ],
+            },
+            {
+              platformAgentId: "agent_chat_9",
+              name: "Web chat",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "retell_chat_api",
+                  accessVariant: "retell_chat_api.api_key",
+                  modality: "chat",
+                  productLabel: "Retell chat",
+                  config: { retellAgentId: "agent_chat_9" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    // One paste, and the account answers once.
+    fireEvent.click(await screen.findByRole("radio", { name: "Voice" }));
+    fireEvent.change(await screen.findByLabelText("Retell API key*"), {
+      target: { value: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    expect(
+      (await screen.findByLabelText("Retell voice agent*") as HTMLSelectElement)
+        .value,
+    ).toBe("agent_voice_1");
+    await waitFor(() => expect(sent).toHaveLength(1));
+
+    // Chat: the same answer, filtered the other way. No second listing.
+    fireEvent.click(screen.getByRole("radio", { name: "Chat" }));
+    const chat = (await screen.findByLabelText(
+      "Retell chat agent*",
+    )) as HTMLSelectElement;
+    expect(chat.value).toBe("agent_chat_9");
+    expect(chat.selectedOptions[0]?.textContent).toBe("Web chat");
+    expect(sent).toHaveLength(1);
+    // Chat asks for no phone number, so the save is ready to fire.
+    expect(
+      (screen.getByRole("button", { name: "Connect agent" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    // And back, onto the agent it started on.
+    fireEvent.click(screen.getByRole("radio", { name: "Voice" }));
+    expect(
+      (await screen.findByLabelText("Retell voice agent*") as HTMLSelectElement)
+        .value,
+    ).toBe("agent_voice_1");
+    expect(sent).toHaveLength(1);
+  });
+
+  /**
    * **One egma agent binds to one platform agent**, so the picker opens on the
    * one this agent is already bound to rather than on whichever the account
    * listed first. Picking another is still allowed to be attempted — the
