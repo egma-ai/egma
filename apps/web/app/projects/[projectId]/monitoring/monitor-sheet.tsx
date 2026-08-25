@@ -15,7 +15,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-import type { Refusal } from "../../../../lib/api.ts";
+import type { Answer, Refusal } from "../../../../lib/api.ts";
 import type { AgentPage, ListedAgentWithConnections } from "../../../../lib/agents.ts";
 import {
   notYetMonitored,
@@ -28,7 +28,7 @@ import {
   platformClient,
 } from "../../../../lib/platform-client.ts";
 import { Field, Problem, Refused } from "../../../../ui/form.tsx";
-import { Empty, Failure, Loading } from "../../../../ui/page-state.tsx";
+import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 
 /**
@@ -58,21 +58,39 @@ import { useProjectRead } from "../../../../ui/resource.ts";
  * agents that verb can still be used on.
  */
 
+/**
+ * Every word this sheet says out loud, in one place so that one test can hold
+ * it against the banned list — the discipline `lib/transcript-copy.ts` keeps
+ * for the two transcript pages, applied to the panel that opens over one of
+ * them.
+ *
+ * **The labels carry the fields, and there is no help line under either.** The
+ * founder deleted the "One paste, ever…" and "From your Retell…" lines outright
+ * on 2026-08-24; a starred label and the one lead under the chooser are the
+ * whole of what this sheet explains.
+ *
+ * `STEPS` is held apart from the prose above it because it is not prose: the
+ * two names in it are the SDK's own, and the words `call` and `session` inside
+ * `monitor_livekit(ctx)` and `AgentSession.start` are identifiers a person
+ * types into their editor rather than product vocabulary.
+ */
+const STEPS = [
+  "Install the Egma SDK.",
+  "Call monitor_livekit(ctx) before AgentSession.start.",
+  "Set EGMA_URL and EGMA_API_KEY in the agent's environment.",
+] as const;
+
 const COPY = {
   title: "Monitor an agent",
   agent: "Agent",
   /** Why the list is short, said once, under the control it is about. */
   agentHint: "Only agents not yet monitored are listed.",
   key: "Retell API key*",
-  keyHint:
-    "The key Egma pulls with. One paste per agent: Egma seals it on the " +
-    "agent and never asks again.",
   keyHeld: (hint: string | null) =>
     hint === null || hint === ""
       ? "Egma already holds this agent's Retell key."
       : `Egma already holds this agent's Retell key (…${hint}).`,
   platformAgentId: "Retell agent ID*",
-  platformAgentIdHint: "Retell's own id for this agent, from your Retell dashboard.",
   start: "Start pulling",
   starting: "Starting…",
   cancel: "Cancel",
@@ -85,35 +103,95 @@ const COPY = {
   noAgentsLead: "Connect the agent you want Egma to watch, then monitor it here.",
   missingKey: "Enter this agent's Retell API key.",
   missingPlatformAgentId: "Enter Retell's own id for this agent.",
-  livekit: [
-    "Install the Egma SDK.",
-    "Call monitor_livekit(ctx) before AgentSession.start.",
-    "Set EGMA_URL and EGMA_API_KEY in the agent's environment.",
-  ],
+  notYours: (role: string) =>
+    `Your ${role} role cannot start monitoring. Ask an organization admin to ` +
+    "change your role, then try again.",
   livekitLead:
-    "From then on, calls appear in Transcripts as they happen. Nothing is " +
-    "stored on the agent, and there is no switch.",
+    "From then on, this agent's production transcripts appear in Transcripts " +
+    "as they finish. Nothing is stored on the agent, and there is no switch.",
 } as const;
+
+/** How many agents one roster read asks for. The contract's own ceiling. */
+const ROSTER_PAGE = 200;
+
+/**
+ * A bound on the paging loop, so a server that answered the same cursor forever
+ * could not spin this sheet. Forty thousand agents is far past any project, and
+ * a runaway read is worse than a truncated one.
+ */
+const ROSTER_PAGES = 200;
+
+/**
+ * **The whole roster, not the first page of it.**
+ *
+ * The list read is keyset-paged, and one page is at most `ROSTER_PAGE` agents.
+ * Reading only the first page made two silent lies possible in a project bigger
+ * than that: an agent that exists would be missing from the picker with nothing
+ * on screen saying so, and — worse — a project whose first page happened to be
+ * all monitored would be told *every agent here is already monitored* while
+ * unmonitored ones sat on page two. So the loop runs to exhaustion before
+ * anything decides anything.
+ *
+ * A refusal on any page is the whole answer: half a roster is exactly the
+ * input that produces the second lie, so it is never treated as the roster.
+ */
+async function everyAgent(projectId: string): Promise<Answer<AgentPage>> {
+  const gathered: ListedAgentWithConnections[] = [];
+  let after: string | null = null;
+
+  for (let page = 0; page < ROSTER_PAGES; page += 1) {
+    const answer: Answer<AgentPage> = await platformAnswer(
+      listAgents(
+        {
+          projectId,
+          pageSize: ROSTER_PAGE,
+          ...(after === null ? {} : { pageToken: after }),
+        },
+        { client: platformClient },
+      ),
+    );
+    if (answer.status !== "ready") return answer;
+
+    gathered.push(...answer.value.agents);
+    after = answer.value.nextPageToken;
+    if (after === null) break;
+  }
+
+  return {
+    status: "ready",
+    value: { agents: gathered, nextPageToken: null },
+  };
+}
 
 export function MonitorAgentSheet({
   projectId,
   askedFor,
+  role,
+  mayAuthor,
+  whyNot,
   onClose,
   onStarted,
 }: {
   readonly projectId: string;
   /** The agent a link named, carried through from the old start address. */
   readonly askedFor: string | null;
+  /** Null until the session read answers, and then this reader's own role. */
+  readonly role: string | null;
+  readonly mayAuthor: boolean;
+  readonly whyNot: string;
   readonly onClose: () => void;
   /** Something started pulling, so the list behind this sheet is now stale. */
   readonly onStarted: () => void;
 }) {
+  /*
+   * **Not read at all for somebody who could not act on it.** A viewer's copied
+   * link opens this panel, and the panel's answer is a sentence rather than a
+   * form — so asking for the roster would be a request made only to fill in a
+   * control nobody here can use.
+   */
   const { answer, reload } = useProjectRead<AgentPage>(
-    (projectId) =>
-      platformAnswer(
-        listAgents({ projectId, pageSize: 200 }, { client: platformClient }),
-      ),
-    projectId,
+    everyAgent,
+    mayAuthor ? projectId : null,
   );
 
   return (
@@ -127,14 +205,36 @@ export function MonitorAgentSheet({
         <SheetHeader closeLabel={COPY.close}>
           <SheetTitle>{COPY.title}</SheetTitle>
         </SheetHeader>
-        <Picker
-          projectId={projectId}
-          answer={answer}
-          reload={reload}
-          askedFor={askedFor}
-          onClose={onClose}
-          onStarted={onStarted}
-        />
+        {role === null ? (
+          <SheetBody>
+            <Loading what={COPY.loading} />
+          </SheetBody>
+        ) : mayAuthor ? (
+          <Picker
+            projectId={projectId}
+            answer={answer}
+            reload={reload}
+            askedFor={askedFor}
+            onClose={onClose}
+            onStarted={onStarted}
+          />
+        ) : (
+          <>
+            <SheetBody>
+              <NotFound message={whyNot} />
+            </SheetBody>
+            <SheetFooter>
+              <Button
+                type="button"
+                size="lg"
+                variant="secondary"
+                onClick={onClose}
+              >
+                {COPY.close}
+              </Button>
+            </SheetFooter>
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -415,16 +515,21 @@ function RetellStart({
         <div className={`flex flex-col gap-4 ${ARRIVES}`}>
           {refusal === null ? null : <Refused message={refusal.message} />}
 
+          {/*
+            No help line under either field, and no `required` attribute on
+            them either: the browser's own validation would fire before this
+            form's, and its bubble says none of the sentences below. The star
+            in the label is presentation, so the semantics are said out loud
+            with `aria-required` — a field announced as optional and then
+            refused is the one thing a starred label must not become.
+          */}
           {askKey ? (
-            <Field
-              label={COPY.key}
-              htmlFor="monitor-retell-key"
-              hint={COPY.keyHint}
-            >
+            <Field label={COPY.key} htmlFor="monitor-retell-key">
               <Input
                 id="monitor-retell-key"
                 type="password"
                 value={apiKey}
+                aria-required="true"
                 autoComplete="off"
                 spellCheck={false}
                 placeholder="key_…"
@@ -440,14 +545,11 @@ function RetellStart({
             </p>
           )}
 
-          <Field
-            label={COPY.platformAgentId}
-            htmlFor="monitor-retell-agent-id"
-            hint={COPY.platformAgentIdHint}
-          >
+          <Field label={COPY.platformAgentId} htmlFor="monitor-retell-agent-id">
             <Input
               id="monitor-retell-agent-id"
               value={platformAgentId}
+              aria-required="true"
               autoComplete="off"
               spellCheck={false}
               placeholder="agent_…"
@@ -507,7 +609,7 @@ function LiveKitSteps({
 
         <div className={`flex flex-col gap-4 ${ARRIVES}`}>
           <ol className="m-0 flex list-none flex-col gap-4 p-0">
-            {COPY.livekit.map((step, at) => (
+            {STEPS.map((step, at) => (
               <li key={step} className="flex gap-3">
                 {/*
                   A fixed-width slot, so the three sentences start on one lane

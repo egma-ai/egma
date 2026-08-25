@@ -3,7 +3,8 @@
 import { useParams, useSearchParams } from "next/navigation";
 
 import { AGENT_PARAMETER } from "../../../../../lib/monitoring.ts";
-import { TranscriptsWithMonitorSheet } from "../transcripts/page.tsx";
+import { AppShell } from "../../../../../ui/shell.tsx";
+import { TranscriptsScreen } from "../transcripts/screen.tsx";
 
 /**
  * The old Start-monitoring address, kept as a deep link and nothing else.
@@ -28,6 +29,8 @@ export default function StartMonitoringPage() {
   const agentId = useSearchParams().get(AGENT_PARAMETER);
 
   return (
-    <TranscriptsWithMonitorSheet projectId={projectId} agentId={agentId} />
+    <AppShell>
+      <TranscriptsScreen projectId={projectId} forced={{ agentId }} />
+    </AppShell>
   );
 }

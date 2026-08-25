@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -60,11 +61,20 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
 
-const ME = {
-  user: { id: "usr_1", email: "ada@acme.example" },
-  organizations: [{ id: "org_1", name: "Acme", slug: "acme", role: "admin" }],
-  projects: [{ id: "prj_2", name: "Outbound", slug: "outbound" }],
-};
+/** Which role the session read answers with. Admin unless a case says else. */
+let seenRole: "admin" | "member" | "viewer" = "admin";
+
+function seenAs(role: typeof seenRole): void {
+  seenRole = role;
+}
+
+function meIs() {
+  return {
+    user: { id: "usr_1", email: "ada@acme.example" },
+    organizations: [{ id: "org_1", name: "Acme", slug: "acme", role: seenRole }],
+    projects: [{ id: "prj_2", name: "Outbound", slug: "outbound" }],
+  };
+}
 
 const RETELL_KEY = "key_live_monitoring_only_ABCD";
 
@@ -131,16 +141,33 @@ function apiAnswers(answers: Record<string, Stubbed | (() => Stubbed)>): {
  */
 function stub(options: {
   readonly agents?: readonly ReturnType<typeof agent>[];
+  /**
+   * The roster as several pages, answered in order — one per read, the way a
+   * keyset-paged list answers a cursor it handed out.
+   */
+  readonly roster?: readonly (readonly ReturnType<typeof agent>[])[];
   readonly start?: Stubbed;
 }) {
+  const pages = options.roster ?? [options.agents ?? [agent()]];
+  let read = 0;
+
   return apiAnswers({
-    "/api/me": { status: 200, body: ME },
+    "/api/me": { status: 200, body: meIs() },
     "/v1/traces": { status: 200, body: { traces: [], nextPageToken: null } },
     "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
     "/v1/keys": { status: 200, body: { keys: [] } },
-    "/v1/agents": {
-      status: 200,
-      body: { agents: options.agents ?? [agent()], nextPageToken: null },
+    "/v1/agents": () => {
+      const at = Math.min(read, pages.length - 1);
+      read += 1;
+      return {
+        status: 200,
+        body: {
+          agents: pages[at] ?? [],
+          // The last page stops the loop; every page before it hands out the
+          // cursor the next read has to send back.
+          nextPageToken: at < pages.length - 1 ? `after-${String(at)}` : null,
+        },
+      };
     },
     "/v1/monitoring/start":
       options.start ?? {
@@ -186,6 +213,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   routed.replace.mockClear();
+  seenRole = "admin";
   at(TRANSCRIPTS);
 });
 
@@ -213,6 +241,24 @@ describe("how the picker opens", () => {
     expect(
       await screen.findByRole("dialog", { name: "Monitor an agent" }),
     ).toBeDefined();
+  });
+
+  /**
+   * **Closing leaves the address the way it found it, minus the sheet.**
+   *
+   * The window is a filter the person chose. Opening the picker merges into
+   * that query rather than replacing it, and closing takes only the two params
+   * the sheet added — so the list they come back to is the list they left.
+   */
+  it("gives the window back untouched when it closes", async () => {
+    at(`${TRANSCRIPTS}?window=30d&sheet=monitor&agent=agt_1`);
+    stub({});
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(routed.replace).toHaveBeenCalledWith(`${TRANSCRIPTS}?window=30d`);
   });
 
   /**
@@ -325,6 +371,82 @@ describe("which agents the picker lists", () => {
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Start pulling" })).toBeNull();
   });
+
+  /**
+   * **The whole roster decides, never the first page of it.**
+   *
+   * The list read is keyset-paged. Reading one page made two silent lies
+   * possible in a project with more agents than a page holds: an agent that
+   * exists missing from the picker with nothing saying so, and — worse — a
+   * first page that happens to be all monitored answering *every agent here is
+   * already monitored* while unmonitored ones sit on page two.
+   */
+  it("reads every page of the roster before it decides what is left", async () => {
+    withThePicker();
+    const { seen } = stub({
+      roster: [
+        // A first page that is entirely monitored: the exact input that used
+        // to produce the confident wrong sentence.
+        [agent({ pullProductionCalls: true })],
+        [agent({ id: "agt_2", name: "Billing" })],
+      ],
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const picked = await screen.findByLabelText("Agent");
+    expect(
+      [...picked.querySelectorAll("option")].map((one) => one.textContent),
+    ).toEqual(["Billing · Retell"]);
+    expect(
+      screen.queryByRole("heading", {
+        name: "Every agent here is already monitored",
+      }),
+    ).toBeNull();
+
+    // Two reads, and the second hands back the cursor the first gave out.
+    const reads = seen.filter((one) => one.path === "/v1/agents");
+    expect(reads).toHaveLength(2);
+  });
+});
+
+/**
+ * **A viewer is told, rather than allowed to type a Retell key and find out
+ * from the server.**
+ *
+ * Starting monitoring is `configure_monitoring`, which members and admins have
+ * and viewers do not. The server refuses them either way — that is where the
+ * boundary actually is — but a person who has already pasted a production
+ * credential into a form has been told too late.
+ *
+ * **The gate is on the panel, not only on the button that usually opens it.**
+ * A copied link, a bookmark, or a hand-typed address reaches this sheet
+ * directly, so the sheet is what has to refuse.
+ */
+describe("a viewer who reaches the picker anyway", () => {
+  it("gets the sentence instead of the form, and asks for no roster", async () => {
+    seenAs("viewer");
+    withThePicker();
+    const { seen } = stub({});
+    render(<MonitoringTranscriptsPage />);
+
+    /*
+     * Said inside the panel, which is the half that matters here — the
+     * disabled header action behind it says the same sentence, and that is the
+     * point: one reason, wherever a viewer meets it.
+     */
+    const panel = await screen.findByRole("dialog", { name: "Monitor an agent" });
+    expect(
+      within(panel).getByText(/Your viewer role cannot start monitoring/u),
+    ).toBeDefined();
+    // No chooser, no credential field, nothing to press.
+    expect(screen.queryByLabelText("Agent")).toBeNull();
+    expect(screen.queryByLabelText("Retell API key*")).toBeNull();
+    expect(screen.queryByLabelText("Retell agent ID*")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start pulling" })).toBeNull();
+    // And the roster is not even asked for: the read would only fill a control
+    // nobody here can use.
+    expect(seen.filter((one) => one.path === "/v1/agents")).toEqual([]);
+  });
 });
 
 describe("the Retell half", () => {
@@ -433,6 +555,40 @@ describe("the Retell half", () => {
     ).toBe("agent_voice_1");
   });
 
+  /**
+   * **A whole-request refusal is shown, and nothing is claimed to have
+   * started.**
+   *
+   * This is the guard on the keyless start: an agent that already holds a
+   * sealed key is not asked for one, and the operation still takes one — so
+   * that commit can come back refused. The sheet stays open on the server's own
+   * sentence, and reveals the field it did not ask for, rather than closing as
+   * though something had started.
+   */
+  it("relays a whole-request refusal without claiming anything started", async () => {
+    withThePicker();
+    const refusal = "Enter a Retell API key.";
+    stub({
+      agents: [agent({ monitoringKeyPresent: true, monitoringApiKeyHint: "ABCD" })],
+      start: { status: 422, body: { error: "unprocessable", message: refusal } },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    type("Retell agent ID*", "agent_voice_1");
+    fireEvent.click(screen.getByRole("button", { name: "Start pulling" }));
+
+    expect(await screen.findByText(refusal)).toBeDefined();
+    // Still open, still on what was typed, and the sheet did not leave.
+    expect(routed.replace).not.toHaveBeenCalled();
+    expect(
+      (screen.getByLabelText("Retell agent ID*") as HTMLInputElement).value,
+    ).toBe("agent_voice_1");
+    // And the field it had not asked for is now on screen, under that
+    // sentence, so the refusal has somewhere to be answered.
+    expect(await screen.findByLabelText("Retell API key*")).toBeDefined();
+  });
+
   /** Nothing is sent until the sheet has what the operation needs. */
   it("refuses in place rather than sending an empty binding", async () => {
     withThePicker();
@@ -480,5 +636,110 @@ describe("the LiveKit half", () => {
 
     // And it stores nothing: the roster read is the only ask it made.
     expect(seen.filter((one) => one.method === "POST")).toEqual([]);
+  });
+});
+
+/**
+ * The words this panel says out loud, held against the same list the two
+ * transcript pages are held against.
+ *
+ * **The panel opens over one of those pages, so it is under their discipline.**
+ * The store files a trace made of spans and a platform reports a call; what a
+ * person reads on this surface is a **transcript**. Without a check the panel
+ * was the one place that vocabulary could leak back in, because its copy lives
+ * beside it rather than in `lib/transcript-copy.ts`.
+ *
+ * **The two SDK names are the carve-out, and they are not prose.**
+ * `monitor_livekit(ctx)` and `AgentSession.start` are identifiers somebody
+ * types into their own editor — renaming them to suit egma's vocabulary would
+ * make the instructions wrong.
+ */
+const NEVER_SAID = [
+  "trace",
+  "span",
+  "call",
+  "caller",
+  "conversation",
+  "eval",
+  "evaluation",
+  "scenario",
+] as const;
+
+/** The step lines, which carry the SDK's own names and are exempt. */
+const SDK_NAMES = /monitor_livekit\(ctx\)|AgentSession\.start/gu;
+
+describe("the words the picker says", () => {
+  it("uses no storage word and no banned one", async () => {
+    withThePicker();
+    stub({});
+    const { container } = render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    const said = (
+      within(container).getByRole("dialog").textContent ?? ""
+    ).replaceAll(SDK_NAMES, "");
+
+    for (const banned of NEVER_SAID) {
+      expect(
+        new RegExp(`\\b${banned}`, "iu").test(said),
+        `the picker says "${banned}"`,
+      ).toBe(false);
+    }
+  });
+
+  it("says it in the LiveKit half too, where the steps live", async () => {
+    withThePicker();
+    stub({
+      agents: [
+        agent({ id: "agt_lk", name: "Livekit agent", agentPlatform: "livekit" }),
+      ],
+    });
+    const { container } = render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    const said = (
+      within(container).getByRole("dialog").textContent ?? ""
+    ).replaceAll(SDK_NAMES, "");
+
+    for (const banned of NEVER_SAID) {
+      expect(
+        new RegExp(`\\b${banned}`, "iu").test(said),
+        `the LiveKit half says "${banned}"`,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * **The two help lines the founder deleted outright stay deleted.** A starred
+   * label and the one lead under the chooser carry this sheet; the "One paste,
+   * ever…" and "From your Retell…" sentences were ruled out on 2026-08-24 and
+   * came back once already.
+   */
+  it("carries no help line under either credential field", async () => {
+    withThePicker();
+    stub({});
+    const { container } = render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    const said = within(container).getByRole("dialog").textContent ?? "";
+    expect(said).not.toMatch(/One paste/iu);
+    expect(said).not.toMatch(/from your Retell dashboard/iu);
+    // The one lead that does belong is still there.
+    expect(said).toContain("Only agents not yet monitored are listed.");
+  });
+
+  /**
+   * The star in a label is presentation. A field announced as optional and
+   * then refused is the thing a starred label must never become.
+   */
+  it("says the two starred fields are required, not just draws a star", async () => {
+    withThePicker();
+    stub({});
+    render(<MonitoringTranscriptsPage />);
+
+    for (const label of ["Retell API key*", "Retell agent ID*"]) {
+      const field = await screen.findByLabelText(label);
+      expect(field.getAttribute("aria-required"), label).toBe("true");
+    }
   });
 });
