@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 /**
  * The deployment story, checked against the code that reads it.
  *
- * Three files tell a self-hoster how to run this — `docker-compose.yml`, the
- * overlays beside it, and `.env.example` — and a fourth, this app's README, is
- * the table they are summarised in. Every one of them names environment
+ * The full environment reference tells an operator about every advanced
+ * variable, while `.env.example` stays limited to normal operator inputs.
+ * Compose and this app's README must agree with that reference. Each names
  * variables, and every one of them can fall behind the module that reads them,
  * silently, because nothing fails when a variable is documented and unread or
  * read and undocumented. The second is the expensive kind: a self-hoster cannot
@@ -72,8 +72,8 @@ function serviceBlock(compose: string, service: string): string | undefined {
 }
 
 describe("every variable the grader reads", () => {
-  it("is in .env.example, because nobody can set what nobody told them about", async () => {
-    const documented = await read(".env.example");
+  it("is in the full environment reference", async () => {
+    const documented = await read("docs/configuration/environment-variables.mdx");
     for (const name of await variablesTheCodeReads()) {
       expect(documented).toContain(name);
     }
@@ -104,7 +104,7 @@ describe("every variable the grader reads", () => {
   it("is the only one anything documents", async () => {
     const read_ = await variablesTheCodeReads();
     for (const named of [
-      ".env.example",
+      "docs/configuration/environment-variables.mdx",
       "apps/grader/README.md",
       ...(await composeFiles()),
     ]) {

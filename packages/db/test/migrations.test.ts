@@ -61,6 +61,12 @@ const GRADER_MODELS_AT_0037 = [
   { provider: "openai", model: "gpt-4o-mini" },
 ] as const;
 
+/** Mint the retired table's historical shape without keeping `pfs` in the
+ * current identifier catalog. Only migrations that predate 0046 use it. */
+function historicalPlatformSettingId(): string {
+  return `pfs_${newId("rev").slice("rev_".length)}`;
+}
+
 function idBits(id: string): bigint {
   const body = id.slice(id.indexOf("_") + 1);
   let value = 0n;
@@ -3346,7 +3352,7 @@ describe("persona availability over installed references (0037)", () => {
         await prepared.client.query(
           `insert into platform_setting (id, name, value, hint)
            values ($1, $2, 'sealed', 'hint')`,
-          [newId("pfs"), name],
+          [historicalPlatformSettingId(), name],
         );
       }
       await writeFile(
@@ -3400,7 +3406,7 @@ describe("persona availability over installed references (0037)", () => {
         prepared.client.query(
           `insert into platform_setting (id, name, value, hint)
            values ($1, 'speech_to_text_model', 'sealed', 'hint')`,
-          [newId("pfs")],
+          [historicalPlatformSettingId()],
         ),
       ).rejects.toMatchObject({
         code: "23514",
@@ -3587,7 +3593,7 @@ describe("persona availability over installed references (0037)", () => {
         await prepared.client.query(
           `insert into platform_setting (id, name, value, hint)
            values ($1, $2, 'sealed', 'hint')`,
-          [newId("pfs"), name],
+          [historicalPlatformSettingId(), name],
         );
       }
       await writeFile(
@@ -5574,5 +5580,60 @@ describe("the persona catalog ownership cutover (0045)", () => {
         [customVersionId],
       ),
     ).rejects.toThrow(/persona version.*authored content cannot change/u);
+  });
+});
+
+describe("the platform-settings removal (0046)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("drop_platform_settings");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0046-"));
+    const migrations = await readMigrations();
+    for (const migration of migrations) {
+      if (migration.name < "0046") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    for (const name of [
+      "carrier_trunk_address",
+      "carrier_trunk_number",
+      "carrier_trunk_username",
+      "carrier_trunk_password",
+    ]) {
+      await client.query(
+        `insert into platform_setting (id, name, value, hint)
+         values ($1, $2, 'sealed', 'hint')`,
+        [historicalPlatformSettingId(), name],
+      );
+    }
+
+    const cutover = migrations.find(
+      (migration) => migration.name === "0046_drop_platform_settings.sql",
+    );
+    if (cutover === undefined) throw new Error("missing migration 0046");
+    await writeFile(path.join(before, cutover.name), cutover.sql);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("drops the stored copy without carrying its values forward", async () => {
+    const result = await runMigrations(database.url, before);
+    expect(result.applied).toEqual(["0046_drop_platform_settings.sql"]);
+
+    const { rows } = await client.query<{ table_name: string | null }>(
+      "select to_regclass('public.platform_setting')::text as table_name",
+    );
+    expect(rows).toEqual([{ table_name: null }]);
   });
 });

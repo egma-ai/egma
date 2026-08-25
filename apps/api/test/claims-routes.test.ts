@@ -1163,11 +1163,11 @@ describe("one source of execution truth", () => {
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_carrier_only",
       {
-        platformSettings: {
-          carrier_trunk_address: "acme.pstn.twilio.com",
-          carrier_trunk_number: "+15550100",
-          carrier_trunk_username: "acme-trunk",
-          carrier_trunk_password: "the-carrier-issued-this-one",
+        carrierRoute: {
+          trunkAddress: "acme.pstn.twilio.com",
+          sourceNumber: "+15550100",
+          trunkUsername: "acme-trunk",
+          trunkPassword: "the-carrier-issued-this-one",
         },
       },
     );
@@ -1189,11 +1189,11 @@ describe("one source of execution truth", () => {
       await aRealtimeVoiceCustomerReadyToRun(
         "claims_phone_carrier_only",
         {
-          platformSettings: {
-            carrier_trunk_address: "acme.pstn.twilio.com",
-            carrier_trunk_number: "+15550100",
-            carrier_trunk_username: "acme-trunk",
-            carrier_trunk_password: "the-carrier-issued-this-one",
+          carrierRoute: {
+            trunkAddress: "acme.pstn.twilio.com",
+            sourceNumber: "+15550100",
+            trunkUsername: "acme-trunk",
+            trunkPassword: "the-carrier-issued-this-one",
           },
         },
         PHONE,

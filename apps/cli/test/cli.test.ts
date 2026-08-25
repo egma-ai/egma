@@ -107,9 +107,8 @@ describe("the egma command", () => {
     expect(help.stdout).not.toContain("--suite");
     expect(help.stdout).toContain("--no-follow");
     expect(help.stdout).toContain("What egma run answers with:");
-    expect(help.stdout).toContain("egma self-host setup");
-    expect(help.stdout).toContain("--replace-carrier --yes");
-    expect(help.stdout).toContain("a replacement beside the old credential");
+    expect(help.stdout).toContain("egma self-host up");
+    expect(help.stdout).not.toContain("--replace-carrier");
     expect(help.stdout).not.toContain("Twilio Auth Token");
 
     // The test seams are not product surface, so neither is offered: not the

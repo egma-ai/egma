@@ -45,8 +45,10 @@ const PHONE = {
 } as const;
 
 const PHONE_IS_READY = {
-  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
-  carrier_trunk_number: "+18885550123",
+  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
+  sourceNumber: "+18885550123",
+  trunkUsername: "egma-test-trunk",
+  trunkPassword: "the-carrier-issued-this-one",
 } as const;
 
 type ReadyRun = {
@@ -205,7 +207,7 @@ describe("run admission", () => {
 
     await api.close();
     const ready = await readyToRun("run_phone_ready", PHONE, {
-      platformSettings: PHONE_IS_READY,
+      carrierRoute: PHONE_IS_READY,
     });
     const started = await start(ready);
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);

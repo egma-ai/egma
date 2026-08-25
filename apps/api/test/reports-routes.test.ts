@@ -92,10 +92,12 @@ const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   );
 };
 
-/** The minimum platform settings required to conduct a phone simulation. */
+/** The deployment credential required to conduct a phone simulation. */
 const PHONE_IS_SET_UP = {
-  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
-  carrier_trunk_number: "+18885550123",
+  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
+  sourceNumber: "+18885550123",
+  trunkUsername: "egma-test-trunk",
+  trunkPassword: "the-carrier-issued-this-one",
 } as const;
 
 /** The claimant every claim in this file conducts under. */
@@ -522,7 +524,7 @@ describe("the lifecycle lands", () => {
   it("lands a voice conversation's recording reference", async () => {
     const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
       "reports_voice",
-      { platformSettings: PHONE_IS_SET_UP },
+      { carrierRoute: PHONE_IS_SET_UP },
     );
     const attached = await ask(api.app, "POST", `/v1/agents/${agentId}/connections`, key, {
       agentPlatform: null,

@@ -63,12 +63,10 @@ const CONTEXT_ESTABLISHING = [
 
 /**
  * What answers a question about the deployment rather than about a customer.
- * None takes an argument. One returns whether signup is claimed, and one
- * returns what this deployment has been configured with, with every secret in
- * it reduced to `null`. The build rule pins both exact return types and refuses
- * either if it grows an argument.
+ * It takes no argument and returns whether signup is claimed. The build rule
+ * pins its exact return type and refuses it if it grows an argument.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed", "platformFacts"];
+const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest
@@ -243,13 +241,6 @@ const CONTEXT_REQUIRING = [
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
-  // Safe carrier-setting metadata and secret hints. Model-provider credentials
-  // have their own runtime source and never enter this store.
-  "readPlatformSettings",
-  // Hosted egma has no organization owner who may configure its shared carrier
-  // route. Startup reconciles that deployment-owned route from a complete
-  // environment bundle and can name no organization or project.
-  "reconcileDeploymentCarrierSettings",
   "readAgentPullState",
   "isProjectOfOrganization",
   "projectOfOrganizationState",
@@ -312,12 +303,6 @@ const CONTEXT_REQUIRING = [
   // Archive asks, so a page and a refusal can never disagree about it.
   "testsUsingPersona",
   "traceEvidenceStartedAt",
-  // The dispatch path's door to the deployment's carrier route in the clear.
-  // A credential-auth route may contain its SIP pair; model-provider keys do
-  // not use this table or this door. It takes the context like everything else
-  // and refuses every one that did not come from a simulation claim, because
-  // conducting a phone simulation is the only thing egma does with this route.
-  "resolvePlatformSettings",
   "resolveProductionGraders",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
@@ -330,7 +315,6 @@ const CONTEXT_REQUIRING = [
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
   "seedPersonaLibrary",
-  "seedPlatformSettings",
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
@@ -361,7 +345,6 @@ const CONTEXT_REQUIRING = [
   // The run-start write that freezes the matching project graders and their
   // definition versions. Future policy edits cannot change that recorded plan.
   "writeGradingPlan",
-  "writePlatformSettings",
   "yieldMonitoringLease",
 ];
 
@@ -377,14 +360,6 @@ const PERMISSION = [
   "permits",
   "permitsApiKeyMintedBy",
 ];
-
-/**
- * Every setting this deployment can hold, and the words a person meets each one
- * by. Exported because a readiness answer and a setup interview both have to
- * name them, and a list written in two places is a list that will one day
- * disagree with itself.
- */
-const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
 
 /**
  * What egma ships on the shelf, and the vocabulary a library entry is written
@@ -625,7 +600,6 @@ describe("the data-access module's surface", () => {
         ...THE_RETELL_BUDGET,
         ...THE_FOLD,
         ...THE_MOCKED_WORLD,
-        ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,
         ...THE_PERSONA_LIBRARY,
         ...THE_MODELS,

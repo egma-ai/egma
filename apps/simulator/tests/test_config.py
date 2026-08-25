@@ -344,43 +344,25 @@ def test_a_container_without_a_bridge_cannot_be_enabled_by_a_work_order(env):
 
 
 @pytest.mark.parametrize(
-    ("carrier", "missing", "given"),
-    [
-        (
-            PlatformCarrier(trunk_address="trunk.example", trunk_username="user"),
-            "password",
-            "username",
-        ),
-        (
-            PlatformCarrier(trunk_address="trunk.example", trunk_password="secret"),
-            "username",
-            "password",
-        ),
-    ],
+    "missing",
+    ["trunk_address", "trunk_number", "trunk_username", "trunk_password"],
 )
-def test_half_a_work_order_credential_is_refused(
-    env, carrier: PlatformCarrier, missing: str, given: str
-):
+def test_every_work_order_carrier_value_is_required(env, missing: str):
     a_deployment_that_dials(env)
+    values = {
+        "trunk_address": "trunk.example",
+        "trunk_number": "+15551110000",
+        "trunk_username": "user",
+        "trunk_password": "secret",
+    }
+    values[missing] = None
+    carrier = PlatformCarrier(**values)
     media = MediaSettings.for_simulation(SimulatorConfig.from_env().media, carrier)
     assert media is not None
     with pytest.raises(ValueError) as refusal:
         media.checked()
     told = str(refusal.value)
-    assert f"trunk_{missing}" in told
-    assert f"trunk_{given}" in told
-
-
-def test_an_address_authenticated_work_order_trunk_needs_no_credential(env):
-    a_deployment_that_dials(env)
-    media = MediaSettings.for_simulation(
-        SimulatorConfig.from_env().media,
-        PlatformCarrier(trunk_address="trunk.example.pstn.twilio.com"),
-    )
-    assert media is not None
-    assert media.checked() is media
-    assert media.trunk_username is None
-    assert media.trunk_password is None
+    assert f"platform.carrier.{missing}" in told
 
 
 def test_telephony_secrets_never_print(env):
@@ -390,6 +372,7 @@ def test_telephony_secrets_never_print(env):
         config.media,
         PlatformCarrier(
             trunk_address="trunk.example",
+            trunk_number="+15551110000",
             trunk_username="user",
             trunk_password="SENTINEL-platform-trunk-password",
         ),

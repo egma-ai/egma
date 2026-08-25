@@ -21,10 +21,9 @@ line::
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     uv run pytest tests/test_live_phone.py -v
 
-The test writes ``TEST_SIP_TRUNK_ADDRESS``, ``TEST_SIP_TRUNK_NUMBER``, and
-the optional username/password pair into the work order's platform carrier.
-They never enter deployment configuration. The number is the caller ID the
-call appears to come from.
+The test writes all four ``TEST_SIP_TRUNK_*`` values into the work order's
+platform carrier. They never enter simulator deployment configuration. The
+number is the caller ID the call appears to come from.
 
 What is asserted is *structure*, not content: a live agent says different
 words every time and a carrier's latency is nobody's to pin. So this
@@ -81,11 +80,11 @@ REQUIRED = {
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_SIP_TRUNK_ADDRESS": TRUNK_ADDRESS,
     "TEST_SIP_TRUNK_NUMBER": TRUNK_NUMBER,
+    "TEST_SIP_TRUNK_USERNAME": TRUNK_USERNAME,
+    "TEST_SIP_TRUNK_PASSWORD": TRUNK_PASSWORD,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
-if bool(TRUNK_USERNAME) != bool(TRUNK_PASSWORD):
-    MISSING.append("both TEST_SIP_TRUNK_USERNAME and TEST_SIP_TRUNK_PASSWORD")
 
 
 def _corpus_root() -> str:
@@ -162,17 +161,14 @@ def deployment() -> dict[str, str]:
 
 def platform() -> dict:
     """The only carrier source: the platform block on the work order."""
-    carrier = {
-        "trunk_address": TRUNK_ADDRESS,
-        "trunk_number": TRUNK_NUMBER,
+    return {
+        "carrier": {
+            "trunk_address": TRUNK_ADDRESS,
+            "trunk_number": TRUNK_NUMBER,
+            "trunk_username": TRUNK_USERNAME,
+            "trunk_password": TRUNK_PASSWORD,
+        }
     }
-    for name, value in (
-        ("trunk_username", TRUNK_USERNAME),
-        ("trunk_password", TRUNK_PASSWORD),
-    ):
-        if value:
-            carrier[name] = value
-    return {"carrier": carrier}
 
 
 async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(

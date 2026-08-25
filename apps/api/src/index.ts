@@ -3,12 +3,10 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
-  reconcileDeploymentCarrierSettings,
   reconcileGraderCatalog,
   runClickHouseMigrations,
   runMigrations,
   seedPersonaLibrary,
-  seedPlatformSettings,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -67,21 +65,6 @@ let traceSchema: TraceStoreSchema =
   config.ingestion.role === "ingest"
     ? { state: "skipped" }
     : { state: "migrating" };
-
-// The carrier route this environment offers, written when the platform does
-// not already hold one. This is how an automated deployment configures phone
-// routing with no interview. In the default `platform` mode, a restart never
-// replaces a complete route somebody changed.
-const seeded = await seedPlatformSettings(config.platformSettings);
-
-// An operator can instead say that the deployment environment owns the carrier
-// route. Reconcile it on every start in that mode, after seeding. A changed
-// route replaces the stored route, and an absent route removes it. This choice
-// is explicit and independent of how many organizations the platform serves.
-const reconciled =
-  config.carrierSettingsSource === "environment"
-    ? await reconcileDeploymentCarrierSettings(config.platformSettings)
-    : [];
 
 // Egma-provided personas, written from the fixed-id catalog before any
 // project can be created or read. A new project points its default directly at
@@ -150,22 +133,6 @@ if (traceSchema.state === "migrating") {
   })();
 }
 
-if (seeded.length > 0) {
-  // The names, never the values and never their hints: what is worth saying is
-  // that this platform just gained settings it did not have, and which ones.
-  app.log.info(
-    { settings: seeded },
-    "the environment supplied platform settings this deployment was missing",
-  );
-}
-if (reconciled.length > 0) {
-  // Names only. A value or hint here would put a production credential in the
-  // deployment log, which is another credential store by accident.
-  app.log.info(
-    { settings: reconciled },
-    "the deployment reconciled its carrier settings from the environment",
-  );
-}
 if (personaShelf.length > 0) {
   // Names, ids and immutable version ids are product catalog facts. Persona
   // content and provider credentials are not logged.

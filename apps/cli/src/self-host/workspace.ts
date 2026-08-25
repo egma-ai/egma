@@ -41,8 +41,8 @@ export const PLATFORM_DIRECTORY = ".egma-platform";
  * be editing somebody's notes. This one is egma's to write and is read back on
  * every `self-host` command.
  *
- * It holds only `BOOTSTRAP_VARIABLES`. The carrier route lives in the platform
- * store. Provider keys live in the deployment environment.
+ * It holds only `BOOTSTRAP_VARIABLES`. Provider keys and the optional carrier
+ * route live in the operator's deployment environment.
  */
 export const PLATFORM_CONFIG_FILE = "platform.env";
 
@@ -55,10 +55,23 @@ export const PLATFORM_CONFIG_FILE = "platform.env";
  * media server, its SIP gateway and its simulator; the address is what the
  * platform reports itself as, which every agent repository then binds to.
  */
-export const BOOTSTRAP_VARIABLES = [
-  "EGMA_BASE_URL",
+export const PLATFORM_CREDENTIAL_VARIABLES = [
+  "EGMA_ENCRYPTION_KEY",
+  "EGMA_AUTH_SECRET",
+  "EGMA_SIMULATOR_SERVICE_TOKEN",
+  "EGMA_S3_ACCESS_KEY_ID",
+  "EGMA_S3_SECRET_ACCESS_KEY",
+  "EGMA_S3_READ_ACCESS_KEY_ID",
+  "EGMA_S3_READ_SECRET_ACCESS_KEY",
+  "EGMA_S3_INGEST_ACCESS_KEY_ID",
+  "EGMA_S3_INGEST_SECRET_ACCESS_KEY",
   "EGMA_LIVEKIT_API_KEY",
   "EGMA_LIVEKIT_API_SECRET",
+] as const;
+
+export const BOOTSTRAP_VARIABLES = [
+  "EGMA_BASE_URL",
+  ...PLATFORM_CREDENTIAL_VARIABLES,
 ] as const;
 
 /**
@@ -76,14 +89,13 @@ export const PLATFORM_CONFIG_HEADER = [
   "else, it belongs wherever the rest of this deployment's secrets do, and",
   "it belongs in no repository.",
   "",
-  "The media server's key and secret are Egma's own. They are generated when",
-  "this workspace is prepared and never regenerated, because the three",
-  "containers that authenticate each other with them hold whatever they were",
-  "created with. Nobody chooses them and nobody types them.",
+  "The credentials below are Egma's own passwords between its containers.",
+  "They are generated when this workspace is prepared and never regenerated.",
+  "An existing deployment's values are adopted before any new value is made,",
+  "so stored credentials and running containers do not lose agreement.",
   "",
-  "The carrier route and provider keys are deliberately not here.",
-  "`egma self-host setup` writes the carrier route to the platform store.",
-  "Provider keys stay in the deployment environment.",
+  "The carrier route and model-provider keys are deliberately not here.",
+  "They stay in the operator's .env file and are loaded by `self-host up`.",
 ] as const;
 
 /** Owner read and write, and nothing for anybody else. */
@@ -133,6 +145,10 @@ export function platformConfigPath(workspace: string): string {
 export function readPlatformConfig(workspace: string): Record<string, string> {
   const file = platformConfigPath(workspace);
   if (!existsSync(file)) return {};
+  // A restored or manually copied file may have arrived with a broad mode.
+  // Repair both levels before the early no-op bootstrap path can return.
+  chmodSync(path.dirname(file), PRIVATE_DIRECTORY_MODE);
+  chmodSync(file, PRIVATE_FILE_MODE);
   const found: Record<string, string> = {};
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const text = line.trim();
@@ -142,6 +158,24 @@ export function readPlatformConfig(workspace: string): Record<string, string> {
     found[text.slice(0, split)] = text.slice(split + 1);
   }
   return found;
+}
+
+/**
+ * Make the operator environment private before Docker Compose reads it.
+ *
+ * The values themselves are resolved by Compose's own parser in
+ * `composeEnvironment`. This function owns only the filesystem guarantee.
+ */
+export function protectOperatorEnvironment(workspace: string): void {
+  const file = path.join(workspace, ".env");
+  if (!existsSync(file)) return;
+
+  // This file now holds model-provider keys and may hold a SIP password. A
+  // normal `cp .env.example .env` follows the user's umask and is commonly
+  // world-readable. Tighten it before reading, on every start, so the safe
+  // mode is a property of the command rather than a setup instruction a person
+  // must remember.
+  chmodSync(file, PRIVATE_FILE_MODE);
 }
 
 /**
@@ -168,8 +202,7 @@ export function bootstrapVariables(
  *
  * **The `chmod` is the point, not the `mkdir`.** `mkdirSync`'s `mode` applies
  * only when it creates the directory, so whichever write happened to be first
- * decided the mode for good. A plan can create the receipt directory before a
- * later setup writes private state; this one door sets the mode every time.
+ * decided the mode for good. This one door sets the mode every time.
  */
 export function platformDirectory(workspace: string): string {
   const directory = path.join(workspace, PLATFORM_DIRECTORY);
@@ -183,7 +216,7 @@ export function platformDirectory(workspace: string): string {
  *
  * Created private and kept private: it holds the media server's secret, and a
  * mode is set on every write rather than only at creation, so a file somebody
- * loosened is tightened again the next time setup runs. The directory it sits
+ * loosened is tightened again the next time `self-host up` runs. The directory it sits
  * in is held the same way.
  *
  * The writer applies the same closed bootstrap list as the reader. No carrier

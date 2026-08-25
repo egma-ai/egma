@@ -330,26 +330,20 @@ class MediaSettings:
                 f"this deployment dials through livekit and this container is "
                 f"missing {' and '.join(absent)}"
             )
-        if self.trunk_address is None:
-            raise ValueError(
-                "a phone call needs platform.carrier.trunk_address, but this "
-                "work order has none"
+        carrier_absent = [
+            f"platform.carrier.{name}"
+            for name, value in (
+                ("trunk_address", self.trunk_address),
+                ("trunk_number", self.trunk_number),
+                ("trunk_username", self.trunk_username),
+                ("trunk_password", self.trunk_password),
             )
-        # Credential auth is a pair. Neither half is a trunk the carrier
-        # authenticates some other way — by the address it came from — and
-        # that is a real deployment. One half is nobody's deployment: every
-        # call it places comes back 403, which reads as *wrong* credentials
-        # rather than as half of one, and it reads that way once per
-        # simulation until somebody looks here.
-        if (self.trunk_username is None) != (self.trunk_password is None):
-            missing, given = (
-                ("password", "username")
-                if self.trunk_password is None
-                else ("username", "password")
-            )
+            if value is None
+        ]
+        if carrier_absent:
             raise ValueError(
-                f"platform.carrier has a trunk_{given} and no trunk_{missing}: "
-                "a trunk authenticated by credentials needs both halves"
+                "a phone call needs a complete credential-authenticated carrier "
+                f"route; this work order is missing {' and '.join(carrier_absent)}"
             )
         return self
 

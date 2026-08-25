@@ -11,10 +11,8 @@ import {
   markSimulationCanceled,
   releaseSimulationClaim,
   resolveMockTools,
-  resolvePlatformSettings,
   resolveSimulationConnection,
   type PersonaModels,
-  type PlatformSettingValues,
   type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
@@ -28,6 +26,7 @@ import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
+import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
@@ -75,9 +74,9 @@ import {
  * place runtime credential material travels; reports have no field for it.
  *
  * Model choices have one source: the pinned persona version. Provider keys
- * have one source: this deployment's credential source. The platform settings
- * store contributes only the carrier route. These boundaries prevent a model
- * from one provider being combined with another adapter or credential.
+ * have one source: this deployment's credential source. The carrier route comes
+ * straight from this process's deployment environment. These boundaries prevent
+ * a model from one provider being combined with another adapter or credential.
  */
 
 export type ClaimRoutesOptions = {
@@ -85,6 +84,8 @@ export type ClaimRoutesOptions = {
   readonly serviceToken: string;
   /** Current provider keys, read once for each simulation work order. */
   readonly providerCredentials: ProviderCredentialSource;
+  /** Complete phone route, or absent when phone simulations are unavailable. */
+  readonly carrierRoute: CarrierRoute | undefined;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -140,21 +141,17 @@ type Body = Record<string, unknown>;
  * phone route. Model, speech, voice, VAD and media facts cannot enter here.
  */
 function platformBlock(
-  held: PlatformSettingValues,
+  carrier: CarrierRoute | undefined,
 ): Record<string, unknown> | undefined {
-  // Model and speech fields cannot enter this document from the platform
-  // store. The persona version owns those choices and the credential source
-  // below authorizes them. The platform owns only the shared phone route.
-  const carrier = onlyWhatIsHeld({
-    trunk_address: held.carrier_trunk_address,
-    trunk_number: held.carrier_trunk_number,
-    trunk_username: held.carrier_trunk_username,
-    trunk_password: held.carrier_trunk_password,
-  });
-
-  const platform = onlyWhatIsHeld({ carrier });
-  // No carrier means no platform block, not a carrier made of empty fields.
-  return platform === undefined ? undefined : platform;
+  if (carrier === undefined) return undefined;
+  return {
+    carrier: {
+      trunk_address: carrier.trunkAddress,
+      trunk_number: carrier.sourceNumber,
+      trunk_username: carrier.trunkUsername,
+      trunk_password: carrier.trunkPassword,
+    },
+  };
 }
 
 /**
@@ -222,18 +219,6 @@ async function modelsBlock(
       ...speechKey(models.tts.provider),
     },
   };
-}
-
-/** One block with its absent fields dropped, or nothing where none is held. */
-function onlyWhatIsHeld<T>(
-  fields: Record<string, T | undefined>,
-): Record<string, T> | undefined {
-  const present = Object.entries(fields).filter(
-    ([, value]) => value !== undefined,
-  );
-  return present.length === 0
-    ? undefined
-    : (Object.fromEntries(present) as Record<string, T>);
 }
 
 /** What a claim request said, once every field has been read and refused for itself. */
@@ -354,6 +339,7 @@ async function assembledSpec(
   runs: Map<string, Run | undefined>,
   retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
   providerCredentials: ProviderCredentialSource,
+  carrierRoute: CarrierRoute | undefined,
   retellFetch?: typeof fetch,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
@@ -404,11 +390,11 @@ async function assembledSpec(
     }
   }
 
-  // Read the live carrier route only for `phone_number`. A Retell chat or
+  // Add the deployment carrier route only for `phone_number`. A Retell chat or
   // LiveKit room claim must not carry a SIP password it cannot use.
   const platform =
     connectionTypeUsesPlatformCarrier(connection.connectionType)
-      ? platformBlock(await resolvePlatformSettings(claim.auth))
+      ? platformBlock(carrierRoute)
       : undefined;
 
   if (!runs.has(claim.runId)) {
@@ -572,6 +558,7 @@ export async function claimRoutes(
             runs,
             retellTargets,
             options.providerCredentials,
+            options.carrierRoute,
             options.retellFetch,
             responseDeadline,
           ).catch(

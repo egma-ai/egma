@@ -56,9 +56,11 @@ PLATFORM = {
     "carrier": {
         "trunk_address": "scripted-carrier.example.com",
         "trunk_number": "+15550100100",
+        "trunk_username": "scripted-trunk-user",
+        "trunk_password": "SENTINEL-scripted-trunk-password",
     }
 }
-"""A complete source-IP carrier route for contract-valid phone work."""
+"""A complete credential-authenticated route for contract-valid phone work."""
 
 
 def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
@@ -379,6 +381,9 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
         livekit_api_key="key",
         livekit_api_secret="secret",
         trunk_address="test.pstn.twilio.com",
+        trunk_number="+15550100100",
+        trunk_username="test-trunk-user",
+        trunk_password="SENTINEL-test-trunk-password",
     )
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
