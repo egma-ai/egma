@@ -1,0 +1,1 @@
+use [$codebase-design](/Users/nischalj10/.codex/worktrees/8669/egma/.agents/skills/codebase-design/SKILL.md)&#x20;
