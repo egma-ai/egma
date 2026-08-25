@@ -18,6 +18,17 @@ it("does not expose the retired platform identity route", async () => {
   expect(response.statusCode).toBe(404);
 });
 
+it("does not expose the retired platform settings route", async () => {
+  api = await createApi("platform_settings_retired");
+
+  const response = await api.app.inject({
+    method: "GET",
+    url: "/api/platform/settings",
+  });
+
+  expect(response.statusCode).toBe(404);
+});
+
 it("publishes the platform API contract without account or system routes", async () => {
   api = await createApi("platform_openapi");
 

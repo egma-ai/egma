@@ -1,8 +1,7 @@
 import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
-import { openaiJudge } from "../src/judge/openai.ts";
-import type { JudgeInput } from "../src/judge/index.ts";
+import { judgeFor, type JudgeInput } from "../src/judge/index.ts";
 
 /**
  * One real question put to a real OpenAI judge — opt-in.
@@ -19,14 +18,12 @@ import type { JudgeInput } from "../src/judge/index.ts";
  *
  *     TEST_OPENAI_API_KEY=sk-... npx vitest run apps/grader/test/live-openai
  *
- * `TEST_OPENAI_MODEL` picks the model; the default is the cheapest one that can
- * hold a judgment. Nothing here touches a database, a store, or the service:
- * one function, one request, one answer, so the pass-with-key path is as small
- * as it can be and a failure names the provider rather than the harness.
+ * The model is the model in the shipped Expected behaviors definition. The
+ * test does not accept a second model setting: it proves the exact release
+ * default and its provider settings rather than a test-only substitute.
+ * Nothing here touches a database or service: one function, one request, one
+ * answer, so a failure names the provider rather than the harness.
  */
-
-const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
-const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
 
 /**
  * The words a real judge is told it is working under: the ones on the
@@ -34,10 +31,22 @@ const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
  * ships lives. Asking a real model with anything else would be smoke-testing a
  * prompt no deployment sends.
  */
-const THE_PROMPT =
+const EXPECTED_BEHAVIORS =
   GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
-  )?.prompt ?? "";
+  );
+const JUDGE_MODEL = EXPECTED_BEHAVIORS?.judgeModel;
+if (
+  EXPECTED_BEHAVIORS?.prompt === null ||
+  EXPECTED_BEHAVIORS?.prompt === undefined ||
+  JUDGE_MODEL === null ||
+  JUDGE_MODEL === undefined
+) {
+  throw new Error("Expected behaviors has no executable judge definition");
+}
+
+const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
+const THE_PROMPT = EXPECTED_BEHAVIORS.prompt;
 
 /** One short conversation, plainly settling one thing and plainly not another. */
 const EVIDENCE: JudgeInput = {
@@ -56,7 +65,10 @@ const EVIDENCE: JudgeInput = {
 describe.skipIf(API_KEY === "")(
   "a real OpenAI judge, asked one criterion",
   () => {
-    const judge = openaiJudge({ provider: "openai", model: MODEL, key: API_KEY });
+    const judge = judgeFor(
+      JUDGE_MODEL,
+      { openai: API_KEY },
+    ).ask;
 
     it("answers met, with a reason and a turn it rests on", async () => {
       const answer = await judge({

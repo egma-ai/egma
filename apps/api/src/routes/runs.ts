@@ -10,7 +10,6 @@ import {
   listRuns,
   listSimulations,
   NotPermittedError,
-  platformFacts,
   productLabelOf,
   ProjectOutsideOrganizationError,
   readRunGradingProgress,
@@ -36,6 +35,7 @@ import { runOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import type { CarrierRoute } from "../config.ts";
 import { actingIn, cannotActIn, reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
@@ -58,6 +58,7 @@ export type RunRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
   readonly baseUrl: string;
+  readonly carrierRoute: CarrierRoute | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -408,7 +409,7 @@ export async function runRoutes(
         return reply.code(201).send(described);
       }
 
-      const carrier = phoneReadiness(await platformFacts());
+      const carrier = phoneReadiness(options.carrierRoute);
       if (carrier.state !== "ready") {
         const kind = await connectionTypeOf(acting.auth, connectionId);
         if (kind !== undefined && connectionTypeUsesPlatformCarrier(kind)) {

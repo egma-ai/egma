@@ -755,6 +755,8 @@ Clone the repository, then, from your checkout of it:
 
 ```
 pnpm install
+cp .env.example .env
+chmod 600 .env
 npx @egma/cli self-host up
 ```
 
@@ -763,43 +765,42 @@ simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
 call needs — and prints the address to point an agent repository at. Open it and
 sign up: you become the admin of your own instance.
 
-Put the deployment's current provider keys in `.env` as
-`EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
-`EGMA_CARTESIA_API_KEY`. Persona and grader versions choose the models; these
-variables supply credentials only.
-
-Configure the optional carrier route in the same directory:
+The normal `.env` contains only external values. Add the current key for each
+provider selected by a persona or grader version:
 
 ```
-npx @egma/cli login --url http://localhost:3101
-npx @egma/cli self-host setup
+EGMA_OPENAI_API_KEY=...
+EGMA_CARTESIA_API_KEY=...
+EGMA_DEEPGRAM_API_KEY=... # only when selected
 ```
 
-It asks only how a call reaches the telephone network. The carrier route is
-written through the platform's own API, which is why you log in first. The SIP
-password is sealed in Postgres and is handed to a simulator only on a claimed
-phone work order.
+For optional phone simulations, add a complete carrier route to the same file:
 
-For the phone half, a Twilio administrator creates one SIP credential per
-developer and one for production in the credential list already attached to the
-shared trunk. All of them use the same trunk address and source number. Each
-developer keeps their own pair outside the database.
+```
+EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
+EGMA_PHONE_SOURCE_NUMBER=+15551234567
+EGMA_PHONE_TRUNK_USERNAME=egma-local
+EGMA_PHONE_TRUNK_PASSWORD=...
+```
 
-Setup asks for the trunk address and source number, plus the SIP username and
-password when the carrier uses credential authentication. It writes the
-complete bundle into the platform store. Keep that bundle in the ignored
-`.env` file or a password manager if a fresh database must restore it later;
-the CLI does not write an environment file. Setup never asks for the Twilio
-Account SID or Auth Token, never contacts Twilio, and never creates or changes
-a SIP credential.
+Wrap a credential containing `$` in single quotes. To disable phone
+simulations, remove all four values. A phone route is either absent or complete.
 
-Normal setup does not replace a held carrier bundle. To replace one developer
-credential safely, an administrator first adds the new credential beside the
-old one. Export the trunk address, source number, new SIP username and new SIP
-password, then run `egma self-host setup --replace-carrier --yes`. Run one phone
-simulation with the new bundle, then revoke the old credential. The command
-still does not contact Twilio. Hosted production uses its deployment secret
-instead of this self-hosted command.
+For Twilio, the username and password come from the SIP credential list
+attached to the trunk. They are never the Twilio Account SID and Auth Token.
+Use one shared trunk and source number, with one SIP pair per developer and one
+for production.
+
+Run `egma self-host up` after changing `.env`. The command generates and
+preserves internal auth, encryption, simulator, bundled-MinIO, and LiveKit
+credentials in `.egma-platform/platform.env`. Compose supplies safe local
+defaults.
+
+The four phone values are ordinary deployment credentials. They are not stored
+in Postgres. The API receives them when `self-host up` starts the containers and
+adds them only to phone work orders. To rotate a SIP credential, replace all
+four values, run `self-host up`, test one phone simulation, and then revoke the
+old credential in Twilio.
 
 To run the command from this same checkout rather than from npm, build it:
 

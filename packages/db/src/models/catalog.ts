@@ -46,6 +46,8 @@ export type ReasoningEffort = "none";
 type LlmPolicy = {
   /** This release may use the entry for an LLM-as-judge grader. */
   readonly graderEligible?: true;
+  /** New LLM grader versions copy this model. Exactly one entry owns it. */
+  readonly graderDefault?: true;
   /** Fixed execution value. Absent when the model has no reasoning mode. */
   readonly reasoningEffort?: ReasoningEffort;
 };
@@ -97,6 +99,8 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.6-terra",
     adapter: "openai_chat_completions",
     label: "OpenAI",
+    graderEligible: true,
+    graderDefault: true,
     reasoningEffort: "none",
   },
   {

@@ -47,16 +47,6 @@ const config: NextConfig = {
       // Ahead of this app's own files, so the API owns these paths outright.
       // `/api/health` is this process's own and is deliberately not among them.
       beforeFiles: [
-        // What this deployment has been configured with, as its owner reads and
-        // changes it. Forwarded because the point of holding these on the
-        // platform is that nobody needs shell access to change one: the person
-        // who does it is signed in to this origin, and this is the only origin
-        // their session is valid for. This route is deployment configuration,
-        // not a platform resource, so it stays outside the versioned API.
-        {
-          source: "/api/platform/settings",
-          destination: `${api}/api/platform/settings`,
-        },
         { source: "/api/auth/:path*", destination: `${api}/api/auth/:path*` },
         { source: "/api/signup", destination: `${api}/api/signup` },
         {

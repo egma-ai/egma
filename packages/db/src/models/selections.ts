@@ -198,11 +198,17 @@ export const RECOMMENDED_PERSONA_MODELS: PersonaModels = {
 };
 
 function recommendedGraderModel(): GraderModel {
-  const entry = PROVIDERS_BY_JOB.llm.find(
-    (candidate) => candidate.graderEligible === true,
+  const defaults = PROVIDERS_BY_JOB.llm.filter(
+    (candidate) => candidate.graderDefault === true,
   );
-  if (entry === undefined) {
-    throw new Error("the provider catalog ships no grader-eligible LLM");
+  if (defaults.length !== 1) {
+    throw new Error(
+      `the provider catalog must ship exactly one default grader LLM; found ${defaults.length}`,
+    );
+  }
+  const entry = defaults[0];
+  if (entry === undefined || entry.graderEligible !== true) {
+    throw new Error("the default grader LLM must also be grader-eligible");
   }
   return { provider: entry.provider, model: entry.model };
 }

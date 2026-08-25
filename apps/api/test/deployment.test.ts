@@ -2,10 +2,10 @@
  * The API's deployment story, checked against the code that reads it.
  *
  * **This file exists because the gap it closes really happened.** Phone
- * readiness was written, documented in `.env.example`, and covered by tests —
+ * readiness was written, documented, and covered by tests —
  * and then a real carrier setup against a real Twilio account
  * finished every carrier step correctly and reported phone setup required anyway,
- * because the compose entry for the API never passed the three variables
+ * because the compose entry for the API never passed the carrier variables
  * through. A variable absent from a service's `environment:` is not merely
  * undocumented: it does not reach the container at all, whatever the operator
  * sets in their shell or their `.env`. Nothing fails, nothing warns, and the
@@ -89,26 +89,45 @@ function serviceBlock(service: string): string {
 }
 
 describe("the API's deployment story", () => {
-  it("always seeds settings and reconciles only when the environment owns the carrier route", () => {
+  it("keeps .env.example to the seven normal operator inputs", () => {
+    const example = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+    const assignments = example
+      .split("\n")
+      .map((line) => /^([A-Z][A-Z0-9_]*)=/u.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined);
+
+    expect(assignments).toEqual([
+      "EGMA_OPENAI_API_KEY",
+      "EGMA_CARTESIA_API_KEY",
+      "EGMA_DEEPGRAM_API_KEY",
+      "EGMA_PHONE_TRUNK_ADDRESS",
+      "EGMA_PHONE_SOURCE_NUMBER",
+      "EGMA_PHONE_TRUNK_USERNAME",
+      "EGMA_PHONE_TRUNK_PASSWORD",
+    ]);
+  });
+
+  it("keeps both operator and generated secrets out of every Docker build context", () => {
+    const ignored = readFileSync(path.join(ROOT, ".dockerignore"), "utf8")
+      .split("\n")
+      .map((line) => line.trim());
+
+    expect(ignored).toContain(".env");
+    expect(ignored).toContain(".env.*");
+    expect(ignored).toContain(".egma-platform");
+  });
+
+  it("keeps the deployment carrier route out of Postgres", () => {
     const entry = readFileSync(path.join(API, "src/index.ts"), "utf8");
-    const seed = entry.indexOf(
-      "await seedPlatformSettings(config.platformSettings)",
-    );
-    const reconcile = entry.indexOf(
-      "await reconcileDeploymentCarrierSettings(config.platformSettings)",
+    const claims = readFileSync(
+      path.join(API, "src/routes/claims.ts"),
+      "utf8",
     );
 
-    expect(seed, "API startup no longer seeds the platform settings").toBeGreaterThan(
-      -1,
-    );
-    expect(
-      reconcile,
-      "API startup no longer reconciles an environment-owned carrier route",
-    ).toBeGreaterThan(seed);
-    expect(entry.slice(seed, reconcile)).toContain(
-      'config.carrierSettingsSource === "environment"',
-    );
-    expect(entry.slice(seed, reconcile)).not.toContain("singleOrganization");
+    expect(entry).not.toContain("seedPlatformSettings");
+    expect(entry).not.toContain("reconcileDeploymentCarrierSettings");
+    expect(claims).not.toContain("resolvePlatformSettings");
+    expect(claims).toContain("options.carrierRoute");
   });
 
   it("passes every variable the API reads to the api container", () => {
@@ -126,16 +145,19 @@ describe("the API's deployment story", () => {
     ).toEqual([]);
   });
 
-  it("documents every variable the API reads in .env.example", () => {
-    const documented = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+  it("documents every variable the API reads in the full environment reference", () => {
+    const documented = readFileSync(
+      path.join(ROOT, "docs/configuration/environment-variables.mdx"),
+      "utf8",
+    );
     const missing = [...variablesReadByTheCode()]
       .filter((name) => !documented.includes(name))
       .sort();
 
     expect(
       missing,
-      `.env.example does not name ${missing.join(", ")}, which the API reads — ` +
-        "a self-hoster cannot set a variable nobody told them about",
+      `the full environment reference does not name ${missing.join(", ")}, ` +
+        "which the API reads",
     ).toEqual([]);
   });
 
@@ -184,8 +206,8 @@ describe("the API's deployment story", () => {
       expect(grader).toContain(variable);
     }
 
-    // The API seeds and seals the deployment carrier route. Neither worker gets
-    // that route as a deployment credential.
+    // The API keeps the deployment carrier route. Neither worker gets that
+    // route as a process-wide deployment credential.
     expect(api).not.toContain("TWILIO_AUTH_TOKEN");
     expect(api).toContain("EGMA_PHONE_TRUNK_PASSWORD");
     const simulator = serviceBlock("simulator");

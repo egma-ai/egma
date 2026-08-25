@@ -7,7 +7,7 @@ Understand the repo with Deepwiki - [![Ask DeepWiki](https://deepwiki.com/badge.
 
 ## Running it
 
-You need Docker with Compose. Nothing else.
+You need Node 22 or newer and Docker with Compose.
 
 This is the **platform workspace** — the directory your deployment lives in. It
 is deliberately not your agent repository: the platform's carrier and provider
@@ -17,7 +17,8 @@ laptop that is often the same person, and the two directories are still
 separate, because one platform serves many repositories.
 
 ```bash
-cp .env.example .env      # then fill in the seven this command cannot make for you
+cp .env.example .env      # fill only the external values you use
+chmod 600 .env            # provider keys and a SIP password may live here
 npx @egma/cli self-host up
 ```
 
@@ -25,61 +26,25 @@ That starts the whole platform and prints the address an agent repository
 points at. Nobody runs a migration step, because there isn't one — the API
 applies its migrations while it boots.
 
-**The first step is not optional, and the deployment says so rather than
-guessing.** Ten values have no default anywhere, and `.env.example` marks every
-one REQUIRED. Three of them you never type — `egma self-host up` generates the
-media server's key and secret, and sets `EGMA_BASE_URL` to the address it
-prints. The other seven are yours: the key that seals every credential and
-setting you store, the secret that signs your sessions, the token a simulator
-claims work with, and the object store's two credential pairs. `openssl` makes
-each in a line, and `.env.example` gives the line.
+The normal `.env` file contains only values the operator gets from an external
+service: model-provider keys and, when phone simulations are needed, a carrier
+route. The shipped default persona uses OpenAI and Cartesia. Add Deepgram only
+when a persona version selects it.
 
-They lost their defaults because a default was the wrong answer. Each used to
-fall back to a value written in this repository, which every reader of it
-holds — so a deployment could seal its provider keys with a published key, sign
-its sessions with a published secret, and answer a claim for anybody who had
-read the source, and nothing anywhere said so. A start missing one now stops
-with that variable's name and how to make one, before a single container is
-created.
+`egma self-host up` generates and preserves every credential used only between
+Egma containers. That includes the encryption key, session secret, simulator
+service token, bundled-MinIO users, and LiveKit pair. It writes them to
+`.egma-platform/platform.env`. Keep that file private and back it up with
+Postgres.
 
-The first `up` in a workspace also **generates the credential Egma's media
-server, its simulator and its SIP gateway authenticate each other with**, and
-writes it to `.egma-platform/platform.env`. You never choose it and never type
-it: it is a password between Egma's own parts, in the same class as the
-Postgres password. A pair that is already there is left exactly as it is, so
-starting the platform again never locks a running deployment out of itself.
-There is deliberately no default for it anywhere in this repository — a
-deployment must not run on a credential every reader of this repository holds.
+Docker Compose supplies safe defaults for local ports, databases, bundled
+MinIO, and service tuning. Advanced and Cloud-only controls stay in the full
+[environment variable reference](docs/configuration/environment-variables.mdx),
+not in `.env.example`.
 
-`docker compose up` starts the same containers, and is not the same thing.
-
-**Your carrier route survives either way.** It lives in the platform database,
-so a restart brings it back. Persona versions own model and speech choices;
-grader definition versions own grading models. Provider credentials come from
-`EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
-`EGMA_CARTESIA_API_KEY` in the deployment environment.
-
-**What a bare `docker compose up` does still lose is the media server's key and
-secret, and the address this platform answers as.** The first two are in
-`.egma-platform/platform.env`, nothing points compose at that file, and a
-container reads that pair when it is *created* — so it cannot come from the
-platform's database. The pair has no default anywhere, deliberately, so a
-deployment never runs on a credential published in this repository. `Egma
-self-host up` reads the file, hands the pair over, and sets `EGMA_BASE_URL` to
-the address it prints, which is why it is the way to start this platform.
-
-Drive compose yourself and you supply those three, in `.env` like the rest.
-**Compose refuses and names the one it is missing** — it does not start a media
-server with no password and leave you with a simulator that waits for ever on a
-health check nothing will pass, which is what an empty value used to do.
-
-There is a second, smaller difference. `egma self-host up` waits for the
-platform to answer for itself, tells you what to type next, and tries once more
-if the first attempt fails — which on a workspace that has never been started
-it can, because ClickHouse's first boot creates its database and restarts
-itself, and its health check answers during the server that is on its way down.
-Nothing restarts the API when that happens, so the bare compose path needs the
-second `up` typed by hand.
+Use `egma self-host up` for normal starts. A direct `docker compose up` does not
+load `.egma-platform/platform.env` for you and does not run the complete
+preparation and health workflow.
 
 | Service | URL |
 | --- | --- |
@@ -87,7 +52,7 @@ second `up` typed by hand.
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
-| Object store | none — reached on the deployment's own network |
+| Object store | http://localhost:9000, bound to this machine by default |
 | Simulator | none — it only dials out |
 | Grader | none — it only dials out |
 | LiveKit server | 127.0.0.1:7880, for this machine only |
@@ -101,63 +66,34 @@ after that arrives by invitation.
 
 ### Configuring it
 
-A started platform may not have a phone carrier route. `self-host up` reports
-that separately. First put the provider keys your persona and grader definition versions
-use in `.env`. Then configure the optional carrier route:
+Put each selected model provider's key in `.env`. For phone simulations, add a
+complete carrier route in the same file:
 
 ```bash
-npx @egma/cli login --url http://localhost:3101   # once, as the owner
-npx @egma/cli self-host setup
+EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
+EGMA_PHONE_SOURCE_NUMBER=+15551234567
+EGMA_PHONE_TRUNK_USERNAME=egma-local
+EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-Setup asks only how a phone call reaches the telephone network. A complete
-route is never asked for again. `--plan` prints the carrier input it would ask
-for and stops.
+All four values are required. For Twilio, the username and password come from
+the SIP credential list attached to the trunk. They are **not** the Account SID
+and Auth Token. Wrap a credential containing `$` in single quotes.
 
-For the phone half, keep one Twilio account, trunk, source number, and attached
-credential list. Create one SIP username/password in that list per developer,
-plus one for production. Each developer uses the shared trunk address and
-source number with their own credential.
-
-Setup asks for the trunk address and source number, plus the SIP username and
-password when the carrier uses credential authentication. It writes that
-complete route into the platform store. Keep the same values in the ignored
-`.env` file or a password manager if a fresh database must restore them later;
-the CLI does not write an environment file. Setup never asks for the Twilio
-Account SID or Auth Token and never contacts or changes Twilio. Press Enter at
-the trunk address question to leave the phone for later. `--json` is the same
-work with nobody watching.
-
-**Every carrier answer is written through the platform's own API, and the
-platform is the only thing that seals.** The route lives in Postgres, with its
-SIP password sealed by `EGMA_ENCRYPTION_KEY`, so it survives a restart, an
-upgrade and a move to another machine. Every simulator receives the route on
-the phone work order it claims, so a second simulator on another host needs no
-carrier credential copied to it. The CLI keeps none of it.
-
-**Normal setup never receives the Twilio Auth Token.** A running Egma receives
-only one developer or production SIP credential. That credential can
-authenticate SIP requests on the shared trunk; it cannot manage the Twilio
-account.
+These are ordinary deployment credentials, like the provider keys above. Egma
+does not store them in Postgres. Run `egma self-host up` after changing `.env`
+so the API receives the new values. Remove all four values to disable phone
+simulations.
 
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
 
-Ports, the two stores' credentials and the settings below come from the
-environment; see `.env.example` for the names and their defaults.
+Compose supplies the local ports, store addresses, and service defaults. The
+CLI supplies the internal credentials. The normal `.env.example` therefore
+contains neither. See the full environment reference for advanced overrides.
 
-**The division there is worth knowing.** What the deployment creates for itself
-— the two stores' own users and databases, every port, every bind — has a
-working default, so a self-hoster who sets none of them gets exactly the
-deployment this page documents. What the deployment *cannot* invent has no
-default at all: its own secrets, and its own address. Those are the ten marked
-REQUIRED in `.env.example`, and a start missing one of them is refused by name.
-Per-container tuning keeps its defaults too, because how many simulations one
-simulator takes at once is a property of your machine rather than of Egma.
-
-**`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
-one.** It has no default: one written into this repository is one every reader
-of it can mint a session with. `openssl rand -base64 32` makes one.
+**`EGMA_AUTH_SECRET` signs session cookies.** `egma self-host up` generates it
+once and preserves it in `.egma-platform/platform.env`.
 
 **`EGMA_BASE_URL` is the whole address people reach this instance at, and
 nothing more than that** — scheme, host and port. It is what the pages, the
@@ -212,17 +148,15 @@ recordings: it is the store's admin surface and its root credential, which can
 list, replace and delete every recording you hold — so on `0.0.0.0` a
 `docker compose up` on shared wifi hands every recording to the room, to read
 and to overwrite. A recording is evidence, and evidence somebody else can
-replace is not evidence. This repository used to ship a development default for
-that credential, which made the same sentence true on the machine's own network
-too; it has none now, and a deployment that states no credential of its own is
-refused at start.
+replace is not evidence. The CLI generates a private root credential for this
+workspace instead of using a value published in the repository.
 Loopback costs the default deployment nothing, because the default assumes the
 browser is on this machine. When it is not — a server, a colleague — set
 `EGMA_S3_BIND=0.0.0.0` and point `EGMA_BLOB_PUBLIC_URL` at the address those
-browsers use, and **change `EGMA_S3_SECRET_ACCESS_KEY` first**.
+browsers use. Keep `.egma-platform/platform.env` private.
 
-**The API's store credential is read-only**, created by the deployment on first
-start and separate from the one the simulator writes with. A leaked read
+**The API's store credential is read-only**, generated for the workspace and
+separate from the one the simulator writes with. A leaked read
 credential must not be usable to overwrite a recording, so it can fetch one
 object at a time and cannot write, delete or list.
 
@@ -238,9 +172,8 @@ an `amazonaws.com` address without one rather than signing everything for
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
 your live provider credentials, and port 3100 is published on the host, so the
-check is always on and there is no default. Both containers read the same
-variable, so one line in `.env` covers both and the two halves always match:
-`echo "egma_st_$(openssl rand -hex 32)"` makes one.
+check is always on. `egma self-host up` generates one token and supplies the
+same value to both containers.
 
 Email is optional, and this is load-bearing rather than a convenience. See
 [Adding a second person](#adding-a-second-person).
@@ -442,10 +375,10 @@ LiveKit, and it is already running: the LiveKit server, its SIP gateway and the
 Redis they find each other through are part of the default deployment. There is
 no overlay to ask for by name.
 
-An administrator creates the carrier trunk and its credential list. `egma
-self-host setup` connects this deployment to it with a limited SIP credential.
-The rest of this section explains that path and what to do when the machine you
-are on cannot host the gateway.
+An administrator creates the carrier trunk and its credential list. The
+operator puts one limited SIP credential in the platform workspace's `.env`
+file, then runs `egma self-host up`. The rest of this section explains that
+path and what to do when the machine cannot host the gateway.
 
 **LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it with
 its key and secret and stop reading — there is nothing to host and nothing to
@@ -500,15 +433,9 @@ amount.
 ### Connecting Egma to a shared trunk
 
 An administrator creates the trunk, attaches the source number and credential
-list, and adds a credential when a developer joins. After that, each developer
-runs:
-
-```bash
-npx @egma/cli self-host setup
-```
-
-The normal path does not read or write the Twilio account. Keep one trunk,
-source number, and credential list. In the Twilio console, create one SIP
+list, and adds a credential when a developer joins. The normal path does not
+read or write the Twilio account. Keep one trunk, source number, and credential
+list. In the Twilio console, create one SIP
 credential in that list for each developer and one for production. For example:
 `egma-nischal`, `egma-alice`, and `egma-production`.
 
@@ -517,53 +444,47 @@ is set. Save each password when the credential is created. A developer puts
 their own four values in the local environment:
 
 ```bash
-export EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
-export EGMA_PHONE_SOURCE_NUMBER=+15551234567
-export EGMA_PHONE_TRUNK_USERNAME=egma-nischal
-export EGMA_PHONE_TRUNK_PASSWORD="$(cat my-sip-password.txt)"
+EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
+EGMA_PHONE_SOURCE_NUMBER=+15551234567
+EGMA_PHONE_TRUNK_USERNAME=egma-nischal
+EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-A fresh database copies the complete bundle into the platform's own store,
-sealed. All four values move together. A partial bundle is refused before any
-write. Keep a recovery copy in the developer's ignored local `.env` or password
-manager as well as the sealed database copy. A database reset reads that local
-copy; it needs no synchronization with another database.
+Run `egma self-host up`. The API reads the complete bundle from its environment
+and refuses to start with a partial bundle. It adds the route only to claimed
+phone work orders. The values are not stored in Postgres.
 
 Production uses the same trunk address and source number with its own SIP pair
-in the deployment secret. Hosted Egma treats that complete carrier bundle as
-deployment-owned configuration. Each API start reconciles it into the platform
-store, because no customer organization owns the shared production route.
-Normal setup never asks for the Twilio Account SID or Auth Token. It does not
-create, inspect, or change Twilio resources.
+in deployment configuration. Hosted Egma supplies the same four environment
+values through its deployment configuration and secret manager. Egma never asks
+for the Twilio Account SID or Auth Token. It does not create, inspect, or change
+Twilio resources.
 
-Normal self-hosted setup also never replaces a bundle the platform already
-holds. To replace one developer credential safely, a Twilio administrator first
-adds the new credential beside the old one. Export the trunk address, source
-number, new SIP username and new SIP password, then run:
+To replace one developer credential safely, a Twilio administrator first adds
+the new credential beside the old one. Replace all four phone values in `.env`,
+then run:
 
 ```bash
-npx @egma/cli self-host setup --replace-carrier --yes
+npx @egma/cli self-host up
 ```
 
-That recovery command replaces all four stored values together. It still does
-not contact Twilio. Run one phone simulation with the new bundle, then ask the
-administrator to revoke the old credential.
+The restarted API reads the new bundle. Run one phone simulation with it, then
+ask the administrator to revoke the old credential.
 
-For hosted production, update the deployment secret with the new production SIP
-pair and deploy. The API replaces the four stored carrier values together on
-startup. Run one production phone simulation before the administrator revokes
-the old credential.
+For hosted production, update `EGMA_PHONE_TRUNK_USERNAME` in the private
+deployment configuration and `sip_password` in the `egma/phone` AWS secret.
+Publish both changes before you deploy. Run one production phone simulation
+before the administrator revokes the old credential.
 
-**The number must already be on your account.** Normal setup never searches the
+**The number must already be on your account.** Egma never searches the
 Twilio catalogue and never buys, ports or registers a number. It also cannot
 verify ownership without account access, so the administrator must copy the
 source number from the shared trunk.
 
-**The account token is not a setup input.** What a running deployment keeps is
-one limited SIP credential. It can authenticate SIP requests over the shared
-trunk; it cannot manage the Twilio account. It is sealed in the platform's own
-store with the same key a connection's credentials are sealed with, and it
-reaches a simulator only on the work order that simulator claims.
+**The account token is not a carrier-route input.** The deployment uses one
+limited SIP credential. It can authenticate SIP requests over the shared trunk;
+it cannot manage the Twilio account. The API keeps it in memory and sends it
+only on a phone work order that a simulator claims.
 
 ### Real end-to-end proof
 
@@ -582,11 +503,9 @@ report a processing rate. The WAV header is the only sample-rate fact Egma
 writes. It tells a player how to play the recording; it does not describe the
 connection's codec or acoustic quality.
 
-Every variable this section mentions is in `.env.example` with its default and
-whether it is required. Anything set to something unusable stops the simulator
-on its first line naming the variable — including a trunk given only half a
-credential, which a carrier would otherwise refuse once per call in a way that
-reads exactly like a wrong one.
+The operator-owned provider and phone variables are in `.env.example`. LiveKit,
+network, and capacity overrides are in the full environment reference. A trunk
+given only half a credential is refused before a call is placed.
 
 ## Testing a LiveKit agent in its own room
 
@@ -683,12 +602,12 @@ does not — so both of those scripts hand Compose a placeholder for each, and
 neither container ever reads one. See `packages/db/test/support/compose.ts`,
 which explains why the wrapper exists at all.
 
-**Plain `docker compose` in a checkout is a different story, and it should be.**
-Compose reads the whole file before it does anything — `ps` and `down` included
-— so every subcommand refuses until this deployment's ten REQUIRED values are
-set, which is right for a deployment and merely inconvenient in a checkout
-nobody runs the platform from. Use the two scripts above, or fill in `.env` and
-drive Compose directly the way a self-hoster does.
+**Plain `docker compose` in a checkout is a different story.** Compose reads
+the whole file before it does anything — `ps` and `down` included — but the
+platform's internal credentials now live in `.egma-platform/platform.env`,
+which Compose does not load automatically. Use the two test-store scripts
+above for contributor databases. Use `egma self-host up` for a real local
+platform; it prepares the private file and hands those values to Compose.
 
 The object store is real for the same reason and asks you for nothing. The
 handful of tests that need one start their own MinIO container, on a port of

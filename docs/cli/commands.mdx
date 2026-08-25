@@ -490,7 +490,18 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
   <Accordion title="egma self-host up — start a local Egma instance">
     Starts a full local Egma instance using Docker Compose: Postgres, ClickHouse, the API, the web UI, the simulator, the grader, and (for phone simulations) a LiveKit server, SIP gateway, and Redis. Run this from your Egma platform checkout, not from your agent repository.
 
-    After the stack is up, the command prints the address to point your agent repository at, and lists any platform configuration still missing.
+    The command reads external model-provider keys and the optional
+    `EGMA_PHONE_*` carrier route from `.env`. It generates internal auth,
+    encryption, simulator, bundled-MinIO, and LiveKit credentials once in
+    `.egma-platform/platform.env`, then preserves them. Compose supplies safe
+    local defaults.
+
+    The four phone values are ordinary deployment credentials and are not
+    stored in Postgres. Supply all four or none. For Twilio, use the SIP
+    credential-list username and password, never the Account SID and Auth Token.
+
+    After the stack is up, the command prints the address to point your agent
+    repository at. Phone readiness is checked when a phone run is created.
 
     **Usage**
 
@@ -505,31 +516,5 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     |---|---|
     | `0` | Instance started successfully |
     | `4` | Docker or a required service did not start |
-  </Accordion>
-
-  <Accordion title="egma self-host setup — configure a running instance">
-    Configures a running Egma instance's shared carrier route. Run this after `egma self-host up` and after signing in with `egma login --url <address>`.
-
-    The command asks only for a trunk address and source number. If the carrier uses SIP credentials, it also asks for a SIP username and password. A complete route is never asked for again.
-
-    A Twilio administrator creates the limited SIP credential in the list already attached to the shared trunk. Setup copies the complete two-value or four-value route into the platform. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio.
-
-    Normal setup never replaces a held bundle. To replace one developer credential safely, an administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then use `--replace-carrier --yes` to replace them together in the platform store. Run one phone simulation with the new bundle, then revoke the old credential. Hosted production uses its deployment secret instead of this command.
-
-    **Usage**
-
-    ```bash
-    # Sign in first, then configure
-    egma login --url http://localhost:3101
-    egma self-host setup
-    ```
-
-    **Exit codes**
-
-    | Code | Meaning |
-    |---|---|
-    | `0` | Configuration complete (or already complete) |
-    | `2` | Not signed in as an organization owner |
-    | `4` | The platform API did not answer, or refused |
   </Accordion>
 </AccordionGroup>

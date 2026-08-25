@@ -150,14 +150,15 @@
   },
   "$defs": {
     "platform_carrier": {
-      "description": "The complete carrier route used for a phone simulation. Address and number are always present. SIP username and password are either both absent for source-IP authentication or both present for credential authentication.",
+      "description": "The complete credential-authenticated carrier route used for a phone simulation.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["trunk_address", "trunk_number"],
-      "dependentRequired": {
-        "trunk_username": ["trunk_password"],
-        "trunk_password": ["trunk_username"]
-      },
+      "required": [
+        "trunk_address",
+        "trunk_number",
+        "trunk_username",
+        "trunk_password"
+      ],
       "properties": {
         "trunk_address": {
           "type": "string",

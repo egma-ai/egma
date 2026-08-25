@@ -1,3 +1,5 @@
+import type { ReasoningEffort } from "@egma/db";
+
 import type { JudgeInput } from "./input.ts";
 
 /**
@@ -86,6 +88,8 @@ export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
 export type ResolvedJudge = {
   readonly provider: "openai";
   readonly model: string;
+  /** Release-owned provider setting for this stored model pair. */
+  readonly reasoningEffort?: ReasoningEffort | undefined;
   readonly key: string;
 };
 

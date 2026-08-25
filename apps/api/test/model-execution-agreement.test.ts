@@ -175,12 +175,18 @@ describe("one executable model catalog", () => {
       voiceId: RECOMMENDED_ENTRY.tts.recommendedVoiceId,
       speed: RECOMMENDED_ENTRY.tts.recommendedSpeed,
     });
-    const graderEntry = PROVIDER_CATALOG.find(
+    const graderDefaults = PROVIDER_CATALOG.filter(
       (entry) =>
         entry.job === "llm" &&
-        "graderEligible" in entry &&
-        entry.graderEligible === true,
+        "graderDefault" in entry &&
+        entry.graderDefault === true,
     );
+    expect(graderDefaults).toHaveLength(1);
+    const graderEntry = graderDefaults[0];
+    expect(graderEntry).toMatchObject({
+      graderEligible: true,
+      reasoningEffort: "none",
+    });
     expect(RECOMMENDED_GRADER_MODEL).toEqual({
       provider: graderEntry?.provider,
       model: graderEntry?.model,

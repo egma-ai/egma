@@ -9,7 +9,6 @@ import {
   disconnectClickHouse,
   reconcileGraderCatalog,
   seedPersonaLibrary,
-  seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import type { Fetch as RetellFetch } from "@egma/retell";
@@ -72,22 +71,14 @@ export type TestApi = {
 export type TestApiOptions = {
   readonly singleOrganization?: boolean;
   /**
-   * Settings this instance starts holding, seeded exactly as a deployment's own
-   * environment seeds them — through `seedPlatformSettings`, sealed, into the
-   * real table.
+   * The deployment-owned phone route this instance starts with.
    *
    * Absent by default, and absent is the honest default: a deployment nobody
    * has configured is what every egma is on its first morning, and a suite that
    * quietly started every instance phone-ready would never have noticed the run
    * door letting a phone run through.
-   *
-   * This replaced a `phone` block handed straight to the configuration. The
-   * carrier is one of the platform's own settings now, so a test that wants a
-   * platform able to dial has to put the settings where the platform keeps
-   * them — which is the same path the product takes and no longer a shortcut
-   * around it.
    */
-  readonly platformSettings?: Config["platformSettings"];
+  readonly carrierRoute?: Config["carrierRoute"];
   /**
    * The object store recordings are resolved against. Absent by default, and
    * absent is the honest default: an egma nobody has pointed at a store is
@@ -252,6 +243,9 @@ export async function createApi(
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
+    ...(options.carrierRoute === undefined
+      ? {}
+      : { carrierRoute: options.carrierRoute }),
     ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.baseUrl === undefined ? {} : { baseUrl: options.baseUrl }),
     ...(options.providerCredentials === undefined
@@ -283,14 +277,6 @@ export async function createApi(
             ...(options.role === undefined ? {} : { role: options.role }),
           },
         };
-
-  // Through the deployment's own seeding door rather than written straight
-  // into the table: what a test then reads back has been sealed and hinted the
-  // way the product seals and hints it, and a suite that inserted rows itself
-  // would be proving something about rows nothing produces.
-  if (options.platformSettings !== undefined) {
-    await seedPlatformSettings(options.platformSettings);
-  }
 
   // The two fixed-id catalogs the real entry point writes before a project can
   // be created. A new project points directly at the Egma-provided persona, and

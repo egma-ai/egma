@@ -25,7 +25,7 @@
  */
 
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -128,6 +128,8 @@ describe("the media server's credential", () => {
     try {
       await runUp(workspace, platform);
       const first = await workspace.storedConfig();
+      await chmod(path.dirname(workspace.configFile), 0o755);
+      await chmod(workspace.configFile, 0o644);
 
       const second = await runUp(workspace, platform);
       const after = await workspace.storedConfig();
@@ -135,6 +137,10 @@ describe("the media server's credential", () => {
       expect(second.code).toBe(0);
       expect(after[KEY_VARIABLE]).toBe(first[KEY_VARIABLE]);
       expect(after[SECRET_VARIABLE]).toBe(first[SECRET_VARIABLE]);
+      expect((await stat(workspace.configFile)).mode & 0o777).toBe(0o600);
+      expect(
+        (await stat(path.dirname(workspace.configFile))).mode & 0o777,
+      ).toBe(0o700);
       // And it says which of the two happened, because "generated" on a running
       // deployment is the line that explains why its containers were replaced.
       expect(second.stdout).toContain("media_credential: existing");
@@ -145,12 +151,10 @@ describe("the media server's credential", () => {
   });
 
   it("keeps a pair the operator brought, and writes it down rather than replacing it", async () => {
-    // `.env.example` names these two variables, so somebody exporting them
-    // meant it — and a CLI that quietly minted its own over the top would be
-    // ignoring a setting it told them to make. Recording it matters as much as
-    // honouring it: a pair that lives only in one shell is one the next start
-    // cannot find, and that start would mint a third and lock the deployment
-    // out of itself.
+    // An older deployment can still export this pair. A CLI that quietly
+    // minted its own over the top would break its running media containers.
+    // Recording it matters as much as honouring it: a pair that lives only in
+    // one shell is one the next start cannot find.
     const platform = await startPlatform();
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     try {
@@ -170,9 +174,9 @@ describe("the media server's credential", () => {
 
   it("mints one pair when two commands prepare the same workspace at once", async () => {
     // Two preparations racing on a workspace with no pair is reachable without
-    // anybody doing anything strange: `up` and `setup` both mint, so the
-    // racers need not even be the same command. Unguarded, each generates its
-    // own pair, each writes the file, and each hands *its* pair to Compose — so
+    // anybody doing anything strange: two `up` commands can start together.
+    // Unguarded, each generates its own pair, each writes the file, and each
+    // hands *its* pair to Compose — so
     // the recorded pair and the running containers' pair differ. That passes
     // every health check and surfaces minutes later as an authentication
     // refusal naming nothing about configuration, which is the exact failure
@@ -197,11 +201,16 @@ describe("the media server's credential", () => {
       // One pair on disk, and every pair either command handed to Compose is
       // that pair. Read from what the docker stand-in wrote down, so this is
       // what the build and the containers would really have received. Each
-      // command builds once and starts once, for four Docker invocations.
+      // Each command asks Compose to resolve `.env`, builds once, and starts
+      // once, for six Docker invocations. Only build and up receive the
+      // generated bootstrap pair.
       const stored = await workspace.storedConfig();
       const calls = await workspace.dockerCalls();
       const invocations = calls.split("\n").filter((line) => line.startsWith("ARGS compose "));
-      expect(invocations).toHaveLength(4);
+      expect(invocations).toHaveLength(6);
+      expect(
+        invocations.filter((line) => line.endsWith("config --environment")),
+      ).toHaveLength(2);
       expect(invocations.filter((line) => line === "ARGS compose build")).toHaveLength(2);
       expect(
         invocations.filter(

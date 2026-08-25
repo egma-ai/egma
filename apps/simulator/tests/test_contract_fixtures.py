@@ -64,9 +64,9 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     ),
     "spec/modality-unknown.json": ("/modality", "enum", None),
     "spec/unknown-field.json": ("", "additionalProperties", "agent_id"),
-    # Platform settings may carry the carrier only. Model and speech choices
+    # The work-order platform block may carry the carrier only. Model and speech choices
     # belong to the pinned persona version and are refused here.
-    "spec/platform-setting-unknown.json": (
+    "spec/platform-block-unknown.json": (
         "/platform",
         "additionalProperties",
         "model",
