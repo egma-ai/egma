@@ -19587,7 +19587,8 @@
                   "suiteId",
                   "name",
                   "scenario",
-                  "expectedBehaviors"
+                  "expectedBehaviors",
+                  "personas"
                 ],
                 "additionalProperties": false
               }

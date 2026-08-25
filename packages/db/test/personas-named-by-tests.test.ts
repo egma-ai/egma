@@ -391,13 +391,8 @@ describe("the persona a project points at by default", () => {
     );
     expect(refusal).toBeInstanceOf(DefaultPersonaReplacementError);
 
-    // Nothing moved, so a test naming nobody still gets Pia.
-    const taking = await createTest(inOutbound, {
-      ...rescheduling,
-      suiteId: acme.outboundSuite,
-    });
-    expect(taking.personas.map((one) => one.id)).toEqual([pia]);
-    await deleteTest(inOutbound, taking.id);
+    // Nothing moved: the project still points at Pia, and she is still active.
+    expect((await getPersona(inOutbound, pia))?.archivedAt).toBeNull();
   });
 
   it("takes the replacement in the same write, so the project is never pointing at nobody", async () => {
@@ -411,14 +406,9 @@ describe("the persona a project points at by default", () => {
     expect(archived?.archivedAt).toBeInstanceOf(Date);
     expect(archived?.isDefault).toBe(false);
 
-    // The pointer moved with the Archive, so a test naming nobody is written
-    // rather than refused — and it is written naming the replacement.
-    const written = await createTest(inOutbound, {
-      ...rescheduling,
-      suiteId: acme.outboundSuite,
-    });
-    expect(written.personas.map((one) => one.id)).toEqual([taking]);
-    await deleteTest(inOutbound, written.id);
+    // The pointer moved with the Archive, so the project is pointing at the
+    // replacement rather than at nobody.
+    expect((await getPersona(inOutbound, taking))?.isDefault).toBe(true);
   });
 
   it("refuses a replacement that is not an active persona of this project", async () => {

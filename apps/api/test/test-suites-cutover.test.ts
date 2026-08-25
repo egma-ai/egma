@@ -29,7 +29,9 @@ const TEST_BODY = {
   description: "A caller moves a booking.",
   scenario: "Move Thursday's booking to next week.",
   expectedBehaviors: ["confirms the new time before finishing"],
-  personas: [],
+  // Every test names at least one persona from birth; the project's
+  // Egma-provided caller is the one every project already has.
+  personas: ["Default Persona"],
   mockTools: [],
 } as const;
 
