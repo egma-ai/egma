@@ -168,7 +168,7 @@ describe("egma monitoring enable, on Retell", () => {
         authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ name: "order-line" }),
+      body: JSON.stringify({ name: "order-line", agentPlatform: "retell" }),
     });
     const body = (await created.json()) as { agent: { id: string; name: string } };
     await onboarded(body.agent);
@@ -276,7 +276,7 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.agents[0]).toMatchObject({
       name: "front-desk",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       pullProductionCalls: false,
     });
     expect(platform.registered.connections).toHaveLength(0);
@@ -377,8 +377,10 @@ describe("egma monitoring enable, on LiveKit", () => {
 
 describe("which platform runs this agent", () => {
   /**
-   * Inference is from the repository's own binding: the agent's, or — for an
-   * agent that has only ever been tested — the connections that reach it.
+   * Inference is from the repository's own binding. Every registration writes
+   * one now, so the verb's "Egma cannot tell" refusal stands as armor against
+   * a platform speaking words this build does not know, not as a path any
+   * registered agent can reach.
    */
   it("is read from the agent's own binding when it has one", async () => {
     await egma(["monitoring", "enable", "--platform", "livekit", "--name", "front-desk"]);
@@ -391,25 +393,6 @@ describe("which platform runs this agent", () => {
     expect(facts(result.stdout).platform).toBe("livekit");
   });
 
-  it("is refused in plain words when Egma cannot tell", async () => {
-    const created = await fetch(`${platform.url}/v1/agents`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ name: "unbound" }),
-    });
-    const body = (await created.json()) as { agent: { id: string; name: string } };
-    await onboarded(body.agent);
-
-    const result = await egma(["monitoring", "enable"], { stdin: `${KEY}\n` });
-
-    expect(result.code).toBe(MONITORING_EXIT.unchosen);
-    expect(facts(result.stdout).status).toBe("unchosen");
-    expect(result.stderr).toContain("--platform retell or --platform livekit");
-    expect(platform.monitoring.monitoringKeys).toHaveLength(0);
-  });
 
   it("names the two it knows when the command said something else", async () => {
     const result = await egma(["monitoring", "enable", "--platform", "vapi"]);

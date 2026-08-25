@@ -98,10 +98,10 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
-    agentPlatform?: 'retell' | 'livekit_agents' | null;
+    agentPlatform: 'retell' | 'livekit';
     connection?: {
         name?: string;
-        agentPlatform: 'retell' | 'livekit_agents' | null;
+        agentPlatform: 'retell' | 'livekit' | null;
         connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
         accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
@@ -208,7 +208,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     agentId: string;
     projectId?: string;
     name?: string;
-    agentPlatform: 'retell' | 'livekit_agents' | null;
+    agentPlatform: 'retell' | 'livekit' | null;
     connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
     accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
     modality: 'voice' | 'chat';

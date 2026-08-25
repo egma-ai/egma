@@ -76,7 +76,7 @@ const FACTS: Facts = {
   environment: "default",
   connectionType: "",
   providerCallId: "egma-fixture-capture-1",
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   platformAgentId: "",
   platformAgentName: "kelly",
   platformAgentVersion: "",

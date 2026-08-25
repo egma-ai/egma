@@ -65,7 +65,7 @@ const RETELL = {
 } as const;
 
 const LIVEKIT = {
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
@@ -140,6 +140,7 @@ async function aCustomerReadyToRun(
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: RETELL,
   });
@@ -192,6 +193,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
+    agentPlatform: connection.agentPlatform ?? "retell",
     name: "Live voice desk",
     connection,
   });
@@ -417,6 +419,7 @@ describe("claiming work", () => {
     const key = await projectKeyFor(api.app, ada);
 
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: RETELL,
     });
@@ -494,6 +497,7 @@ describe("claiming work", () => {
     const key = await projectKeyFor(api.app, ada);
 
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: RETELL,
     });
@@ -878,6 +882,7 @@ describe("a simulation the platform cannot hand over", () => {
         retellFetch,
       });
     const second = await ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Second desk",
       connection: {
         ...RETELL,
@@ -929,6 +934,7 @@ describe("a simulation the platform cannot hand over", () => {
     // claim, so one spec can be assembled and one cannot.
     const doomed = await aQueuedRun(key, connectionId, versionId);
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
@@ -988,6 +994,7 @@ describe("a simulation the platform cannot hand over", () => {
 
     const doomed = await aQueuedRun(key, connectionId, versionId);
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });

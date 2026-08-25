@@ -267,7 +267,7 @@ export function monitoringRoutes(options: {
                 });
                 continue;
               }
-              held = blankAgent(options.projectId, name);
+              held = blankAgent(options.projectId, name, "retell");
               agents.push(held);
               created = true;
             }

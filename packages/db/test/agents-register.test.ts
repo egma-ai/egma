@@ -54,6 +54,7 @@ function registration(overrides: {
 }): NewAgent {
   return {
     name: overrides.name ?? "Front desk",
+    agentPlatform: "retell",
     connection: {
       agentPlatform: "retell",
       connectionType: "retell_chat_api",
@@ -139,6 +140,7 @@ describe("a vendor agent already registered in another project", () => {
 describe("a registration naming no connection", () => {
   it("creates, because there is nothing to match a registration on", async () => {
     const claimed = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "retell",
       name: "Identity only",
     });
 
@@ -159,6 +161,7 @@ describe("a connection type with no reuse key", () => {
    */
   it("creates every time, and the name is what stops a mistake", async () => {
     const dialled = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "retell",
       name: "Reception line",
       connection: {
         agentPlatform: null,
@@ -171,6 +174,7 @@ describe("a connection type with no reuse key", () => {
     expect(dialled.result).toBe("created");
 
     const again = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "retell",
       name: "Reception line, second team",
       connection: {
         agentPlatform: null,

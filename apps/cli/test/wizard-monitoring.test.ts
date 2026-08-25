@@ -214,7 +214,7 @@ function connectionFetch(): typeof fetch {
         JSON.stringify({
           items: [
             {
-              agentPlatform: "livekit_agents",
+              agentPlatform: "livekit",
               agentPlatformLabel: "LiveKit Agents",
               connectionType: "livekit_room",
               accessVariant: "livekit_room.project_credentials",
@@ -464,7 +464,7 @@ describe("choosing monitoring on LiveKit", () => {
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.agents[0]).toMatchObject({
       name: "front-desk",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       platformAgentId: null,
       pullProductionCalls: false,
       monitoringApiKeyHint: null,
@@ -717,7 +717,7 @@ describe("choosing both", () => {
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.agents[0]).toMatchObject({
       name: "front-desk",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
     });
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.agentId).toBe(

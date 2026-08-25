@@ -96,7 +96,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "room-1",
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
@@ -260,7 +260,7 @@ describe("platform agent reference carried only by a late root", () => {
         traceId: ROOT_ONLY,
         spanId: root,
         providerCallId: "room-root-only",
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         platformAgentId: "cloud-agent-7",
         platformAgentName: "Front desk",
         platformAgentVersion: "2026-08-20",
@@ -271,7 +271,7 @@ describe("platform agent reference carried only by a late root", () => {
   it("returns the same platform agent reference in the list and detail", async () => {
     const expected = {
       providerCallId: "room-root-only",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       platformAgentId: "cloud-agent-7",
       platformAgentName: "Front desk",
       platformAgentVersion: "2026-08-20",

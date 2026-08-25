@@ -171,6 +171,7 @@ beforeAll(async () => {
   // adding grading work to these lifecycle cases.
 
   const created = await createAgent(actingAsAcme(), {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: {
       agentPlatform: "retell",

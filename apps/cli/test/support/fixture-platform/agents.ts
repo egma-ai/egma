@@ -416,21 +416,21 @@ const CONNECTION_OPTIONS = [
     productLabel: "Retell phone",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     productLabel: "LiveKit project credentials",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -503,7 +503,7 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_TYPES.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "projectId", "agentPlatform", "connection"] as const;
+const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -762,15 +762,15 @@ type StoredConnection = {
  * An agent, and the monitoring half it owns on its own row (ADR-0015).
  *
  * The binding, the sealed monitoring key and the pull switch live here rather
- * than on a connection, and each may exist without the others: a LiveKit agent
- * that only pushes is bound and never pulls, and an agent Egma reaches for
- * simulations may hold no binding at all.
+ * than on a connection. Every agent is bound to its platform at registration;
+ * the monitoring half may still be absent: a LiveKit agent that only pushes is
+ * bound and never pulls.
  */
 export type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
-  agentPlatform: string | null;
+  readonly agentPlatform: BoundPlatform;
   platformAgentId: string | null;
   /** Sealed. Only its hint ever leaves this file through a route. */
   monitoringApiKey: string | null;
@@ -783,31 +783,35 @@ export type StoredAgent = {
 };
 
 /** The platforms an agent may be bound to, refused by name like every enum. */
-const AGENT_PLATFORMS = ["retell", "livekit_agents"] as const;
+const AGENT_PLATFORMS = ["retell", "livekit"] as const;
 
-/** The binding a registration asked for, or `null` when it asked for none. */
-function agentPlatformIn(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
+type BoundPlatform = (typeof AGENT_PLATFORMS)[number];
+
+/** The binding a registration asked for — required, in the real thing's words. */
+function agentPlatformIn(value: unknown): BoundPlatform {
   if (
     typeof value !== "string" ||
     !(AGENT_PLATFORMS as readonly string[]).includes(value)
   ) {
     throw new Refusal(
-      `an agent platform is one of ${AGENT_PLATFORMS.join(", ")}, and this ` +
-        `registration said ${JSON.stringify(value)}`,
+      "an agent platform is required and must be retell or livekit",
     );
   }
-  return value;
+  return value as BoundPlatform;
 }
 
-/** A brand-new roster row: named, in a project, and bound to nothing. */
-export function blankAgent(projectId: string, name: string): StoredAgent {
+/** A brand-new roster row: named, in a project, and bound to its platform. */
+export function blankAgent(
+  projectId: string,
+  name: string,
+  agentPlatform: BoundPlatform,
+): StoredAgent {
   const now = new Date().toISOString();
   return {
     id: newId("agt"),
     projectId,
     name,
-    agentPlatform: null,
+    agentPlatform,
     platformAgentId: null,
     monitoringApiKey: null,
     monitoringApiKeyHint: null,
@@ -1124,7 +1128,7 @@ export function agentRoutes(options: {
       agentId: agent.id,
       projectId: agent.projectId,
       name,
-      agentPlatform: input.agentPlatform,
+      agentPlatform: input.agentPlatform ?? agent.agentPlatform,
       connectionType,
       accessVariant: input.accessVariant,
       modality,
@@ -1211,9 +1215,10 @@ export function agentRoutes(options: {
             const projectId = projectNamed(given(named), "writes into");
 
             const name = validName(body["name"], "an agent");
-            // The agent's own platform binding, settable without a connection:
-            // an agent that only pushes its production evidence belongs in the
-            // roster and has nothing for Egma's simulator to dial.
+            // The agent's own platform binding: required on every
+            // registration, and settable without a connection — an agent that
+            // only pushes its production evidence belongs in the roster and
+            // has nothing for Egma's simulator to dial.
             const boundTo = agentPlatformIn(body["agentPlatform"]);
             const inline = envelope === undefined ? undefined : admitConnection(envelope);
 
@@ -1268,10 +1273,7 @@ export function agentRoutes(options: {
 
             // Both rows or neither: a connection payload the registry turns
             // away leaves no agent behind, so nothing is kept until both are.
-            const agent: StoredAgent = {
-              ...blankAgent(projectId, name),
-              agentPlatform: boundTo,
-            };
+            const agent: StoredAgent = blankAgent(projectId, name, boundTo);
 
             if (inline === undefined) {
               agents.push(agent);

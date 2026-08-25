@@ -386,9 +386,10 @@ describe("what lands on the platform", () => {
     expect(platform.registered.connections[0]?.modality).toBe("voice");
 
     // None of it went to egma. The agent it just registered holds its identity
-    // and the monitoring half it owns (ADR-0015) — a binding, a sealed key and
-    // a switch, all empty here — and nothing at all about what the provider is
-    // running: no prompt, no voice, no tools.
+    // — with the platform binding every registration now writes — and the
+    // monitoring half it owns (ADR-0015), a sealed key and a switch both empty
+    // here; and nothing at all about what the provider is running: no prompt,
+    // no voice, no tools.
     const [agent] = platform.registered.agents;
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
@@ -405,7 +406,7 @@ describe("what lands on the platform", () => {
       "updatedAt",
     ]);
     expect(agent).toMatchObject({
-      agentPlatform: null,
+      agentPlatform: "retell",
       platformAgentId: null,
       monitoringApiKey: null,
       pullProductionCalls: false,
@@ -427,6 +428,7 @@ describe("what lands on the platform", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "order-line",
+        agentPlatform: "retell",
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
           agentPlatform: "retell",
@@ -445,9 +447,9 @@ describe("what lands on the platform", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "projectId, agentPlatform, connection; the agent's content stays at " +
-        "the provider, where Egma reads it fresh rather than out of a copy " +
-        "that would go stale.",
+        "agentPlatform, projectId, connection; the agent's content stays at the " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
+        "would go stale.",
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -668,6 +670,7 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
+        agentPlatform: "retell",
         connection: {
           agentPlatform: null,
           connectionType: "phone_number",
@@ -692,6 +695,7 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
+        agentPlatform: "retell",
         connection: {
           agentPlatform: "retell",
           connectionType: "retell_chat_api",
@@ -716,6 +720,7 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
+        agentPlatform: "retell",
         connection: {
           agentPlatform: null,
           connectionType: "phone_number",

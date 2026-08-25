@@ -824,7 +824,7 @@ connections the simulator uses.
   agent, turns on its **pull production calls** switch, imports the previous 30
   days, and then polls for completed conversations about every 30 seconds. The
   switch is on the agent, so each agent is started and stopped on its own.
-- For LiveKit Agents, install the Egma Python SDK and call
+- For LiveKit, install the Egma Python SDK and call
   `monitor_livekit(ctx)` before `AgentSession.start`. The same helper works in a
   customer-hosted worker and a LiveKit Cloud-hosted Python agent.
 
@@ -843,7 +843,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 
 These variables configure an existing exporter. They do not create a tracer
 provider or register one in an agent process. The LiveKit helper owns that
-setup for LiveKit Agents.
+setup for LiveKit.
 
 The `%20` is not a typo: the OpenTelemetry specification says this variable is a
 list of `key=value` pairs whose values are percent-encoded, and a literal space

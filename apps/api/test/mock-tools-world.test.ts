@@ -103,6 +103,7 @@ async function registerAgent(
   name: string,
 ): Promise<{ agentId: string; connectionId: string }> {
   const registered = await request("POST", "/v1/agents", key, {
+    agentPlatform: "retell",
     name,
     connection: { ...retellFor(name), name },
   });

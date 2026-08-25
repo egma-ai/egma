@@ -1091,7 +1091,7 @@ function turnSpan(
     name: "human turn",
     kind: "turn:human",
     text,
-    agent_platform: source === "simulation" ? "" : "livekit_agents",
+    agent_platform: source === "simulation" ? "" : "livekit",
     payload: "{}",
   };
 }
@@ -1529,7 +1529,7 @@ describe("a span arriving twice", () => {
     kind: "turn:human",
     text: "I need to move my Tuesday appointment",
     provider_call_id: "call-abc",
-    agent_platform: "livekit_agents",
+    agent_platform: "livekit",
     payload: '{"kept":"verbatim"}',
   };
 

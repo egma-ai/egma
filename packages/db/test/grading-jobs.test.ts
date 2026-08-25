@@ -73,7 +73,7 @@ function productionSpan(overrides: Partial<NewSpan> = {}): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "production-call",
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     platformAgentId: "agent-under-test",
     platformAgentName: "Support",
     platformAgentVersion: "",

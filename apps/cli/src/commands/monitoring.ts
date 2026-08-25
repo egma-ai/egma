@@ -144,7 +144,7 @@ function platformIn(
  */
 function inferredPlatform(agent: AgentMonitoring): PlatformWord | null {
   const platformOf = (named: string): PlatformWord | null =>
-    named === "retell" ? "retell" : named === "livekit_agents" ? "livekit" : null;
+    named === "retell" ? "retell" : named === "livekit" ? "livekit" : null;
 
   if (agent.agentPlatform !== null) return platformOf(agent.agentPlatform);
 

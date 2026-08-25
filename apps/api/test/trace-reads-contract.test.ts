@@ -889,6 +889,7 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
     // the pins off them, and that is what stamps the spans `simulation`.
     const auth: AuthContext = contextFor(acme, "member");
     const agent = await createAgent(auth, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",

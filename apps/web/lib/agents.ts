@@ -73,36 +73,26 @@ export const NO_ENVIRONMENT = "Unlabelled";
  * Which platforms an agent is on, in the words a person reads, as this
  * application can honestly answer it.
  *
- * **The agent's own `agentPlatform` is null until Start monitoring binds it.**
- * `registerAgent` cannot set it — the contract has no field for it — so an
- * agent registered today and given a Retell connection this afternoon still
- * reads `null` on itself. Its connections do know: every connection carries the
- * platform it was written against.
- *
- * So the answer is read from the connections first and from the agent second,
- * and it is `null` when neither has one. That order is the truthful one: a
- * connection is a fact about a live way in, and the agent's own column is the
- * monitoring binding, which is a different question that happens to share a
- * word.
+ * Every agent declares its platform when it is registered. Connections can
+ * still name another platform when their connection type pins one, so the
+ * list says every platform represented by a live connection and falls back to
+ * the agent's declared platform when it has no live connection.
  *
  * **An agent can be reached on two platforms at once**, so every platform its
  * live connections name is said, and not the first of them. One Retell
  * connection and one LiveKit connection on one agent is an ordinary state, and
  * naming only the first made the answer depend on which connection was made
- * first: the same agent read `Retell` today and `LiveKit Agents` the day that
+ * first: the same agent read `Retell` today and `LiveKit` the day that
  * connection was archived, with nothing about the agent having changed.
  */
 export function agentPlatformText(
   agent: ListedAgentWithConnections,
-): string | null {
+): string {
   const named = new Set<string>();
   for (const connection of agent.connections) {
-    if (connection.agentPlatform !== null) named.add(connection.agentPlatform);
+    named.add(connection.agentPlatform);
   }
-  if (named.size === 0 && agent.agentPlatform !== null) {
-    named.add(agent.agentPlatform);
-  }
-  if (named.size === 0) return null;
+  if (named.size === 0) named.add(agent.agentPlatform);
   return [...named]
     .sort((one, other) => platformRank(one) - platformRank(other))
     .map(agentPlatformLabel)
@@ -114,11 +104,11 @@ export function agentPlatformText(
  * connections'.
  *
  * Connections come back in the order they were made, so ordering by them would
- * let one agent read `Retell · LiveKit Agents` and the next agent read the
+ * let one agent read `Retell · LiveKit` and the next agent read the
  * reverse for the same two platforms. A platform this list does not hold is
  * named after the ones it does, in the order the connections named it.
  */
-const PLATFORM_ORDER: readonly string[] = ["retell", "livekit_agents"];
+const PLATFORM_ORDER: readonly string[] = ["retell", "livekit"];
 
 function platformRank(platform: string): number {
   const at = PLATFORM_ORDER.indexOf(platform);
@@ -127,15 +117,6 @@ function platformRank(platform: string): number {
 
 /** What stands between two platforms in one cell. */
 const PLATFORM_JOIN = " · ";
-
-/**
- * What a cell says when nothing has named a platform.
- *
- * An em dash rather than a sentence: the column is one word wide, and "not
- * bound" would be a claim about monitoring rather than about this agent's
- * connections.
- */
-export const NO_PLATFORM = "—";
 
 /**
  * How many connections a row draws before it counts the rest.

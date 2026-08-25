@@ -127,7 +127,7 @@ const AGENT = {
   id: "agt_1",
   projectId: "prj_1",
   name: "Front desk",
-  agentPlatform: null,
+  agentPlatform: "retell",
   platformAgentId: null,
   monitoringKeyPresent: false,
   monitoringApiKeyHint: null,
@@ -161,8 +161,8 @@ const CONNECTION = {
 };
 
 /**
- * A second way into the same agent: another platform and another channel. One
- * connection of each kind makes "the facts on a row" a claim a test can falsify.
+ * A second way into the same agent: another channel. One connection of each
+ * kind makes "the facts on a row" a claim a test can falsify.
  */
 const MEASURED_CONNECTION = {
   ...CONNECTION,
@@ -170,7 +170,7 @@ const MEASURED_CONNECTION = {
   // Named apart from its environment on purpose: a fixture where the two read
   // the same would let a cell showing the wrong one pass.
   name: "phone line",
-  agentPlatform: null,
+  agentPlatform: "retell",
   connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   productLabel: "Phone number",
@@ -190,7 +190,7 @@ const LIVEKIT_CONNECTION = {
   ...CONNECTION,
   id: "con_3",
   name: "livekit room",
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   productLabel: "LiveKit project credentials",
@@ -274,8 +274,8 @@ const TYPES = {
       credentialFields: [],
     },
     {
-      agentPlatform: "livekit_agents",
-      agentPlatformLabel: "LiveKit Agents",
+      agentPlatform: "livekit",
+      agentPlatformLabel: "LiveKit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       accessVariantLabel: "API key and secret",
@@ -329,8 +329,8 @@ const TYPES = {
       ],
     },
     {
-      agentPlatform: "livekit_agents",
-      agentPlatformLabel: "LiveKit Agents",
+      agentPlatform: "livekit",
+      agentPlatformLabel: "LiveKit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       accessVariantLabel: "Token endpoint",
@@ -565,7 +565,7 @@ describe("reading an agent's reach from the list", () => {
     listOf({
       ...LISTED_AGENT,
       // The LiveKit way in comes back first, so a cell reading the first
-      // connection would say "LiveKit Agents" and stop there.
+      // connection would say "LiveKit" and stop there.
       connections: [LIVEKIT_CONNECTION, CONNECTION, MEASURED_CONNECTION],
     });
     render(<AgentsPage />);
@@ -573,11 +573,11 @@ describe("reading an agent's reach from the list", () => {
 
     // One cell, both platforms, in the vocabulary's order rather than the
     // order the connections were made in.
-    expect(screen.getByText("Retell · LiveKit Agents")).toBeDefined();
+    expect(screen.getByText("Retell · LiveKit")).toBeDefined();
     // And one platform on its own is nowhere on the row, which would read as
     // an agent on one of them.
     expect(screen.queryByText("Retell")).toBeNull();
-    expect(screen.queryByText("LiveKit Agents")).toBeNull();
+    expect(screen.queryByText("LiveKit")).toBeNull();
   });
 
   it("says plainly when egma has no way into an agent", async () => {
@@ -588,8 +588,8 @@ describe("reading an agent's reach from the list", () => {
     // In words, on the row. An agent egma cannot reach is found out here
     // rather than when a run refuses to start.
     expect(screen.getByText("No connections yet")).toBeDefined();
-    // And nothing claims a platform for an agent nothing has named one for.
-    expect(screen.getByText("—")).toBeDefined();
+    // The agent's required declaration answers when it has no connection.
+    expect(screen.getByText("Retell")).toBeDefined();
   });
 
   /**
@@ -682,13 +682,24 @@ describe("registering an agent", () => {
     });
   }
 
-  /** The one platform that needs no account discovery, so a test can finish. */
-  async function chooseAPhoneNumber(number: string): Promise<void> {
-    fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "unknown" },
+  /** LiveKit needs no account discovery, so the test can complete one write. */
+  async function fillLiveKitRoom(choosePlatform = true): Promise<void> {
+    if (choosePlatform) {
+      fireEvent.change(await screen.findByLabelText("Platform"), {
+        target: { value: "livekit" },
+      });
+    }
+    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(await screen.findByLabelText("Phone number"), {
-      target: { value: number },
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "front-desk" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+      target: { value: "livekit-secret" },
     });
   }
 
@@ -705,7 +716,7 @@ describe("registering an agent", () => {
     // No description field: the column was dropped pre-launch (ADR-0015), and
     // a form that still collected one would be collecting what egma refuses.
     expect(screen.queryByLabelText("Description")).toBeNull();
-    await chooseAPhoneNumber("+14155550100");
+    await fillLiveKitRoom();
 
     const connect = screen.getByRole("button", { name: "Connect agent" });
     expectSheetLayout(connect);
@@ -731,19 +742,25 @@ describe("registering an agent", () => {
      */
     expect(sent[0]?.url).toBe("/v1/agents?projectId=prj_1");
     /*
-     * **The platform rides on the connection, and that is the contract's
-     * doing.** `registerAgent` has no `agentPlatform` and refuses unknown keys,
-     * so an agent's platform is not something this form can write; the
-     * connection's is.
+     * The selected platform is stored on the agent and also checks the first
+     * connection's supported combination.
      */
     expect(sent[0]?.body).toEqual({
       name: "Front desk",
+      agentPlatform: "livekit",
       connection: {
-        agentPlatform: null,
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "voice",
-        config: { phoneNumber: "+14155550100" },
+        config: {
+          url: "wss://rooms.example.test",
+          agentName: "front-desk",
+        },
+        credentials: {
+          apiKey: "livekit-key",
+          apiSecret: "livekit-secret",
+        },
       },
     });
     // No prompt, no model, no tools: this form does not have them, so it cannot
@@ -763,7 +780,7 @@ describe("registering an agent", () => {
     sheetAnswers({ status: 201, body: { result: "created", agent: AGENT } });
     render(<RegisterAgentPage />);
 
-    await chooseAPhoneNumber("+14155550100");
+    await fillLiveKitRoom();
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
 
     expect(
@@ -788,7 +805,7 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    await chooseAPhoneNumber("+14155550100");
+    await fillLiveKitRoom();
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
 
     // Egma's own sentence, unchanged — and the typing still on screen, so the
@@ -801,9 +818,9 @@ describe("registering an agent", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Front desk",
     );
-    expect((screen.getByLabelText("Phone number") as HTMLInputElement).value).toBe(
-      "+14155550100",
-    );
+    expect(
+      (screen.getByLabelText("LiveKit WebSocket URL") as HTMLInputElement).value,
+    ).toBe("wss://rooms.example.test");
   });
 
   it("tells a viewer the panel is not theirs instead of pretending it worked", async () => {
@@ -839,7 +856,7 @@ describe("onboarding an agent", () => {
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
       "/v1/agents/agt_1": {
         status: 200,
-        body: { agent: AGENT, connections: [] },
+        body: { agent: { ...AGENT, agentPlatform: "livekit" }, connections: [] },
       },
       "/v1/connection-options": { status: 200, body: TYPES },
       "/v1/agents/agt_1/connections": {
@@ -858,9 +875,17 @@ describe("onboarding an agent", () => {
       screen.getByRole("button", { name: "Finish without a connection" }),
     ).toBeDefined();
 
-    fireEvent.change(screen.getByLabelText("Platform"), { target: { value: "unknown" } });
-    fireEvent.change(await screen.findByLabelText("Phone number"), {
-      target: { value: "+14155550100" },
+    fireEvent.change(await screen.findByLabelText("LiveKit WebSocket URL"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+      target: { value: "front-desk" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API key"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("LiveKit API secret"), {
+      target: { value: "livekit-secret" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
 
@@ -1039,7 +1064,7 @@ describe("an agent's production calls", () => {
     await screen.findByRole("heading", { name: "Production calls" });
     expect(screen.getByText("Off")).toBeDefined();
     // Nothing binds it yet, and the page says so rather than showing a blank.
-    expect(screen.getAllByText("Not bound")).toHaveLength(2);
+    expect(screen.getAllByText("Not bound")).toHaveLength(1);
     // The link carries the agent it came from, so the flow opens about this
     // agent instead of the account roster — which is what stops an unbound
     // agent being started a second time under a new roster entry.
@@ -1060,7 +1085,7 @@ describe("an agent's production calls", () => {
       "/v1/agents/agt_1": {
         status: 200,
         body: {
-          agent: { ...AGENT, agentPlatform: "livekit_agents" },
+          agent: { ...AGENT, agentPlatform: "livekit" },
           connections: [],
         },
       },
@@ -1068,7 +1093,7 @@ describe("an agent's production calls", () => {
     render(<AgentDetailPage />);
 
     await screen.findByRole("heading", { name: "Production calls" });
-    expect(screen.getByText("LiveKit Agents")).toBeDefined();
+    expect(screen.getByText("LiveKit")).toBeDefined();
     expect(screen.queryByText("Off")).toBeNull();
     expect(screen.queryByText("Pull production calls")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
@@ -1209,7 +1234,7 @@ describe("adding a connection", () => {
     ).toBeTruthy();
     const picker = (await screen.findByLabelText("Agent")) as HTMLSelectElement;
     expect(picker.value).toBe("agt_1");
-    expect(picker.selectedOptions[0]?.textContent).toBe("Front desk");
+    expect(picker.selectedOptions[0]?.textContent).toBe("Front desk · Retell");
     // Making a new agent is still one of its options, on every way in.
     expect(within(picker).getByText("Create a new agent")).toBeTruthy();
     expect(
@@ -1340,7 +1365,7 @@ describe("adding a connection", () => {
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
       "/v1/agents/agt_1": {
         status: 200,
-        body: { agent: AGENT, connections: [] },
+        body: { agent: { ...AGENT, agentPlatform: "livekit" }, connections: [] },
       },
       "/v1/connection-options": { status: 200, body: TYPES },
       "/v1/agents/agt_1/connections": {
@@ -1350,10 +1375,7 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit_agents" },
-    });
-    fireEvent.change(screen.getByLabelText("Access"), {
+    fireEvent.change(await screen.findByLabelText("Access"), {
       target: { value: "livekit_room.customer_token_endpoint" },
     });
     expect(screen.queryByText(/shape/i)).toBeNull();
@@ -1371,7 +1393,7 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -1390,7 +1412,7 @@ describe("adding a connection", () => {
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
       "/v1/agents/agt_1": {
         status: 200,
-        body: { agent: AGENT, connections: [] },
+        body: { agent: { ...AGENT, agentPlatform: "livekit" }, connections: [] },
       },
       "/v1/connection-options": { status: 200, body: TYPES },
       "/v1/agents/agt_1/connections": {
@@ -1400,10 +1422,7 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit_agents" },
-    });
-    expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
+    expect((await screen.findByLabelText("Dispatch method") as HTMLSelectElement).value)
       .toBe("named");
     expect(
       (screen.getByRole("button", { name: "Connect agent" }) as HTMLButtonElement)
@@ -1412,7 +1431,7 @@ describe("adding a connection", () => {
     fireEvent.change(screen.getByLabelText("LiveKit WebSocket URL"), {
       target: { value: "wss://rooms.example.test" },
     });
-    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+    fireEvent.change(await screen.findByLabelText("LiveKit agent name"), {
       target: { value: "front-desk" },
     });
     expect(
@@ -1439,7 +1458,7 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -1461,7 +1480,7 @@ describe("adding a connection", () => {
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
       "/v1/agents/agt_1": {
         status: 200,
-        body: { agent: AGENT, connections: [] },
+        body: { agent: { ...AGENT, agentPlatform: "livekit" }, connections: [] },
       },
       "/v1/connection-options": { status: 200, body: TYPES },
       "/v1/agents/agt_1/connections": {
@@ -1471,10 +1490,7 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
-    fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit_agents" },
-    });
-    fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
+    fireEvent.change(await screen.findByLabelText("LiveKit agent name"), {
       target: { value: "must-not-be-sent" },
     });
     fireEvent.change(screen.getByLabelText("Dispatch method"), {
@@ -1499,7 +1515,7 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -1610,7 +1626,7 @@ describe("one connection's page", () => {
     for (const connection of [
       {
         ...CONNECTION,
-        agentPlatform: null,
+        agentPlatform: "retell",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         productLabel: "Phone number",
@@ -1619,7 +1635,7 @@ describe("one connection's page", () => {
       },
       {
         ...CONNECTION,
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         productLabel: "LiveKit token endpoint",
@@ -1688,7 +1704,7 @@ describe("one connection's page", () => {
   it("edits named and automatic LiveKit dispatch as two explicit modes", async () => {
     const named = {
       ...CONNECTION,
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",

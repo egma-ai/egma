@@ -53,7 +53,7 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 
 /** A voice connection that needs no live worker in these route-only tests. */
 const A_VOICE_AGENT = {
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
@@ -360,6 +360,7 @@ export async function aConductedRun(
   const runs = (conducted += 1);
 
   const registered = await ask(app, "POST", "/v1/agents", who.key, {
+    agentPlatform: "retell",
     name: `Front desk ${modality} ${String(runs)}`,
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });

@@ -77,7 +77,10 @@ afterAll(async () => {
 
 describe("creating an agent", () => {
   it("returns an agt_ id and fetch round-trips the name", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Front Desk" });
+    const created = await createAgent(actingAsAcme(), {
+      name: "Front Desk",
+      agentPlatform: "retell",
+    });
 
     expect(isId("agt", created.id)).toBe(true);
 
@@ -85,14 +88,18 @@ describe("creating an agent", () => {
     expect(fetched).toBeDefined();
     expect(fetched?.name).toBe("Front Desk");
     expect(fetched?.projectId).toBe(acme.project);
+    expect(fetched?.agentPlatform).toBe("retell");
   });
 
-  it("starts unbound: no platform, no key, and the pull switch off", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Terse" });
+  it("starts with its platform, no platform id or key, and the pull switch off", async () => {
+    const created = await createAgent(actingAsAcme(), {
+      name: "Terse",
+      agentPlatform: "livekit",
+    });
 
     const fetched = await getAgent(actingAsAcme(), created.id);
     expect(fetched).toMatchObject({
-      agentPlatform: null,
+      agentPlatform: "livekit",
       platformAgentId: null,
       monitoringApiKeyHint: null,
       pullProductionCalls: false,
@@ -100,26 +107,27 @@ describe("creating an agent", () => {
   });
 
   it("needs a name that is more than whitespace", async () => {
-    await expect(createAgent(actingAsAcme(), { name: "   " })).rejects.toThrow(
+    await expect(createAgent(actingAsAcme(), { agentPlatform: "retell", name: "   " })).rejects.toThrow(
       /name/,
     );
   });
 
   it("stores the name trimmed, so padding cannot slip past the uniqueness rule", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "  Padded  " });
+    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "  Padded  " });
     expect(created.name).toBe("Padded");
 
     await expect(
-      createAgent(actingAsAcme(), { name: "Padded" }),
+      createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Padded" }),
     ).rejects.toThrow(/already/);
   });
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
-      createAgent(actingAsAcme("viewer"), { name: "Viewer's Try" }),
+      createAgent(actingAsAcme("viewer"), { agentPlatform: "retell", name: "Viewer's Try" }),
     ).rejects.toThrow(NotPermittedError);
 
     const fetchedByViewer = await createAgent(actingAsAcme("member"), {
+      agentPlatform: "retell",
       name: "Member's Agent",
     }).then((created) => getAgent(actingAsAcme("viewer"), created.id));
     expect(fetchedByViewer?.name).toBe("Member's Agent");
@@ -131,7 +139,7 @@ describe("creating an agent", () => {
     await expect(
       createAgent(
         { ...actingAsAcme(), projectId: undefined, via: "api_key" },
-        { name: "Nowhere" },
+        { agentPlatform: "retell", name: "Nowhere" },
       ),
     ).rejects.toThrow(/project/);
   });
@@ -140,7 +148,7 @@ describe("creating an agent", () => {
     await expect(
       createAgent(
         { ...actingAsAcme(), projectId: globex.project },
-        { name: "Stray" },
+        { agentPlatform: "retell", name: "Stray" },
       ),
     ).rejects.toThrow(ProjectOutsideOrganizationError);
   });
@@ -148,38 +156,39 @@ describe("creating an agent", () => {
 
 describe("an agent's name", () => {
   it("is refused while another live agent in the project holds it", async () => {
-    await createAgent(actingAsAcme(), { name: "Reception" });
+    await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Reception" });
 
     await expect(
-      createAgent(actingAsAcme(), { name: "Reception" }),
+      createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Reception" }),
     ).rejects.toThrow(/already/);
   });
 
   it("is welcome in another project of the same customer", async () => {
-    await createAgent(actingAsAcme(), { name: "Concierge" });
+    await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Concierge" });
 
     const inOtherProject = await createAgent(
       { ...actingAsAcme(), projectId: acme.secondProject },
-      { name: "Concierge" },
+      { agentPlatform: "retell", name: "Concierge" },
     );
     expect(inOtherProject.projectId).toBe(acme.secondProject);
   });
 
   it("is welcome in another customer's project", async () => {
-    await createAgent(actingAsAcme(), { name: "Switchboard" });
+    await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Switchboard" });
 
     const elsewhere = await createAgent(actingAsGlobex(), {
+      agentPlatform: "retell",
       name: "Switchboard",
     });
     expect(elsewhere.projectId).toBe(globex.project);
   });
 
   it("is released by an archived agent, which still reads on its own", async () => {
-    const retiring = await createAgent(actingAsAcme(), { name: "Retiring" });
+    const retiring = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Retiring" });
 
     await archiveAgent(actingAsAcme(), retiring.id);
 
-    const successor = await createAgent(actingAsAcme(), { name: "Retiring" });
+    const successor = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Retiring" });
     expect(successor.id).not.toBe(retiring.id);
 
     // Archive frees the name and keeps the row: two agents can carry the same
@@ -192,13 +201,13 @@ describe("an agent's name", () => {
 
 describe("fetching an agent", () => {
   it("returns nothing under another organization's auth context", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Acme Only" });
+    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Acme Only" });
 
     expect(await getAgent(actingAsGlobex(), created.id)).toBeUndefined();
   });
 
   it("reaches the whole customer for a credential acting in no project", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Org Wide" });
+    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Org Wide" });
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const fetched = await getAgent(wholeCustomer, created.id);
@@ -207,7 +216,7 @@ describe("fetching an agent", () => {
   });
 
   it("returns nothing from a project the caller is not acting in", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Project Bound" });
+    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Project Bound" });
 
     const actingElsewhere = { ...actingAsAcme(), projectId: acme.secondProject };
     expect(await getAgent(actingElsewhere, created.id)).toBeUndefined();
@@ -215,11 +224,23 @@ describe("fetching an agent", () => {
 });
 
 describe("the database itself", () => {
-  it("rejects an agent row pairing one customer with another customer's project", async () => {
+  it("rejects an agent row with no platform", async () => {
     await expect(
       database.sql(
         `insert into agent (id, organization_id, project_id, name)
-         values ($1, $2, $3, 'Mismatched')`,
+         values ($1, $2, $3, 'No platform')`,
+        [newId("agt"), acme.organization, acme.project],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.notNullViolation,
+    );
+  });
+
+  it("rejects an agent row pairing one customer with another customer's project", async () => {
+    await expect(
+      database.sql(
+        `insert into agent (id, organization_id, project_id, name, agent_platform)
+         values ($1, $2, $3, 'Mismatched', 'retell')`,
         [newId("agt"), acme.organization, globex.project],
       ),
     ).rejects.toSatisfy(
@@ -228,7 +249,7 @@ describe("the database itself", () => {
   });
 
   it("rejects a connection row pairing one customer with another customer's project", async () => {
-    const anchor = await createAgent(actingAsAcme(), { name: "Anchor" });
+    const anchor = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Anchor" });
 
     await expect(
       database.sql(
@@ -246,7 +267,7 @@ describe("the database itself", () => {
     // The sharp case: the organization, the project pair, and the agent all
     // exist — every single-column reference is satisfied, and only the
     // agent/project pairing is wrong.
-    const homed = await createAgent(actingAsAcme(), { name: "Homed" });
+    const homed = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Homed" });
 
     await expect(
       database.sql(
@@ -261,7 +282,7 @@ describe("the database itself", () => {
   });
 
   it("rejects a connection row whose credentials and hint disagree", async () => {
-    const sealed = await createAgent(actingAsAcme(), { name: "Sealed" });
+    const sealed = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Sealed" });
 
     const halfSealed = (credentials: string | null, hint: string | null) =>
       database.sql(
@@ -288,7 +309,7 @@ describe("the database itself", () => {
   });
 
   it("refuses a second active connection holding a name, and an archived one releases it", async () => {
-    const wired = await createAgent(actingAsAcme(), { name: "Wired" });
+    const wired = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Wired" });
 
     const staging = (id: string) =>
       database.sql(

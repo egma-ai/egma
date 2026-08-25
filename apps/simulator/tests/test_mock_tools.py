@@ -73,7 +73,7 @@ def mocked_spec(
         modality=modality,
         connection={
             "agent_platform": (
-                "livekit_agents" if connection_type == "livekit_room" else None
+                "livekit" if connection_type == "livekit_room" else None
             ),
             "connection_type": connection_type,
             "access_variant": (

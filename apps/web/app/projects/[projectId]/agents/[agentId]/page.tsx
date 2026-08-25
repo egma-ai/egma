@@ -525,13 +525,13 @@ function ProductionCalls({
   const on = agent.pullProductionCalls;
 
   /*
-   * **A LiveKit Agents agent has no switch, here or anywhere.** Push is
+   * **A LiveKit agent has no switch, here or anywhere.** Push is
    * observed rather than declared: the agent's own process sends its spans to
    * the OTLP door with the project key, and there is no server-side off for
    * it. Drawing "Pull production calls: Off" would offer a control that can
    * never be turned on for this agent and would read as a fault.
    */
-  if (agent.agentPlatform === "livekit_agents") {
+  if (agent.agentPlatform === "livekit") {
     return (
       <Section
         title="Production calls"
@@ -546,7 +546,7 @@ function ProductionCalls({
       >
         <Facts
           facts={[
-            { label: "Platform", value: "LiveKit Agents" },
+            { label: "Platform", value: "LiveKit" },
             {
               label: "How evidence arrives",
               value: "Reported by the agent, using this project's API key.",
@@ -633,9 +633,7 @@ function ProductionCalls({
           },
           {
             label: "Platform",
-            value: agent.agentPlatform === null
-              ? NOT_BOUND
-              : agentPlatformLabel(agent.agentPlatform),
+            value: agentPlatformLabel(agent.agentPlatform),
           },
           {
             label: "Platform agent ID",

@@ -26,7 +26,7 @@ import { readAgentMonitoring } from "../platform/monitoring.ts";
 import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
 
 /** The platform binding a LiveKit worker's agent row carries. */
-const LIVEKIT = "livekit_agents";
+const LIVEKIT = "livekit";
 
 /** How many names are tried when a living agent already holds the first one. */
 const NAME_ATTEMPTS = 20;

@@ -116,10 +116,10 @@ const pullState = {
   properties: {
     agentId: stringIdSchema,
     pullProductionCalls: { type: "boolean" },
-    agentPlatform: nullable({
+    agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit_agents"],
-    }),
+      enum: ["retell", "livekit"],
+    },
     platformAgentId: nullable({ type: "string" }),
     monitoringApiKeyHint: nullable({ type: "string" }),
     lastReceivedAt: optionalInstant,

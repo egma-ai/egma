@@ -56,6 +56,7 @@ function registration(
 ): Record<string, unknown> {
   return {
     name: overrides.name ?? "Front desk",
+    agentPlatform: "retell",
     connection: {
       ...(overrides.connectionName === undefined
         ? {}
@@ -355,6 +356,7 @@ describe("discovering simulation agents", () => {
     api = await createApi("retell_discovery_selection_required");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
     });
     const agentId = String(agentOf(created).id);
@@ -387,6 +389,7 @@ describe("discovering simulation agents", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
@@ -410,6 +413,7 @@ describe("discovering simulation agents", () => {
     api = await createApi("retell_discovery_confirmed_connection");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
     });
     vi.stubGlobal(
@@ -470,19 +474,14 @@ describe("discovering simulation agents", () => {
       credentialPresent: false,
     });
 
-    // The number was confirmed against Retell, and the connection still
-    // belongs to no platform: `phone_number` spans platforms, so a connection
-    // of that type is Retell's only when its **agent** is bound to Retell
-    // (ADR-0015). Confirming a number is not binding an agent — the simulation
-    // credential used for the check and the monitoring key an agent holds are
-    // two custodies on purpose — so this reads null until somebody binds it.
-    expect(connectionOf(connected).agentPlatform).toBeNull();
+    expect(connectionOf(connected).agentPlatform).toBe("retell");
   });
 
   it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
     api = await createApi("retell_discovery_rerouted_connection");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
     });
     const agentId = String(agentOf(created).id);
@@ -562,9 +561,7 @@ describe("registering an agent", () => {
     expect(agentOf(registered)).toMatchObject({
       name: "Front desk",
       projectId: ada.projectId,
-      // A registration binds no platform and turns no switch on. Monitoring is
-      // its own decision, taken later on the agent (ADR-0015).
-      agentPlatform: null,
+      agentPlatform: "retell",
       platformAgentId: null,
       pullProductionCalls: false,
     });
@@ -598,6 +595,7 @@ describe("registering an agent", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
@@ -624,6 +622,7 @@ describe("registering an agent", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const claimed = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Not wired yet",
     });
 
@@ -633,61 +632,12 @@ describe("registering an agent", () => {
     expect(agentOf(claimed).name).toBe("Not wired yet");
   });
 
-  /**
-   * A LiveKit worker that only ever pushes its production evidence is a real
-   * agent in the roster, and there is nothing for Egma's simulator to dial —
-   * so the binding has to be settable without a connection under it. It is the
-   * agent's own fact (ADR-0015), and the row it writes is what the terminal's
-   * monitoring lane creates for a repository it never connects.
-   */
-  it("binds an agent to a platform with no connection under it", async () => {
-    api = await createApi("agents_bound_without_connection");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const bound = await post("/v1/agents", withKey(ada.secret), {
-      name: "Front desk worker",
-      agentPlatform: "livekit_agents",
-    });
-
-    expect(bound.status).toBe(201);
-    expect(bound.body).not.toHaveProperty("connection");
-    expect(agentOf(bound)).toMatchObject({
-      name: "Front desk worker",
-      agentPlatform: "livekit_agents",
-      // The binding and nothing else: push is observed, never declared, so
-      // there is no platform id to hold and no switch to turn on.
-      platformAgentId: null,
-      pullProductionCalls: false,
-      monitoringKeyPresent: false,
-    });
-
-    const read = await get(
-      `/v1/agents/${String(agentOf(bound).id)}`,
-      withKey(ada.secret),
-    );
-    expect(read.body.agent).toMatchObject({ agentPlatform: "livekit_agents" });
-    expect(read.body.connections).toEqual([]);
-  });
-
-  it("names the platforms it knows when a registration says another", async () => {
-    api = await createApi("agents_unknown_platform");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const refused = await post("/v1/agents", withKey(ada.secret), {
-      name: "Front desk worker",
-      agentPlatform: "pipecat",
-    });
-
-    expect(refused.status).toBe(400);
-    expect(refused.body.message).toContain("retell, livekit_agents");
-    expect(await agentRowCount()).toBe(0);
-  });
-
   it("refuses a registration with no name, in the factory's own words", async () => {
     api = await createApi("agents_needs_a_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "   ",
     });
 
@@ -711,6 +661,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: connectionPayload({ connectionType: "vapi" }),
     });
@@ -729,6 +680,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Reception line",
       connection: {
         agentPlatform: "vapi",
@@ -753,6 +705,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Reception line",
       connection: {
         agentPlatform: null,
@@ -776,6 +729,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
@@ -798,6 +752,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: connectionPayload({ credentials: { apiKey: "short" } }),
     });
@@ -815,6 +770,7 @@ describe("a connection payload its kind will not take", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: connectionPayload({ name: "   " }),
     });
@@ -846,7 +802,7 @@ describe("a livekit connection", () => {
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -861,6 +817,7 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
       name: "Quickstart agent",
       connection: livekitPayload(),
     });
@@ -868,7 +825,7 @@ describe("a livekit connection", () => {
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
       name: "livekit_room-1",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
@@ -887,6 +844,7 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
       name: "Dispatched agent",
       connection: livekitPayload({
         config: {
@@ -930,9 +888,10 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
       name: "Production agent",
       connection: {
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
@@ -946,7 +905,7 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       productLabel: "LiveKit token endpoint",
@@ -966,9 +925,10 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
       name: "Private-network agent",
       connection: {
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
@@ -1213,6 +1173,7 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
       name: "Quickstart agent",
       connection: livekitPayload(refusal.payload),
     });
@@ -1253,6 +1214,7 @@ describe("a livekit connection", () => {
     const answers = [
       // The one that works, so the sealing path is walked too.
       await post("/v1/agents", withKey(ada.secret), {
+        agentPlatform: "livekit",
         name: "Quickstart agent",
         connection: livekitPayload(),
       }),
@@ -1260,6 +1222,7 @@ describe("a livekit connection", () => {
       ...(await Promise.all(
         REFUSED.map((refusal) =>
           post("/v1/agents", withKey(ada.secret), {
+            agentPlatform: "livekit",
             name: `Refused ${refusal.named}`,
             connection: livekitPayload(refusal.payload),
           }),
@@ -1311,7 +1274,7 @@ describe("a livekit connection", () => {
     const endpointPayload = (
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> => ({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -1335,22 +1298,26 @@ describe("a livekit connection", () => {
 
     const answers = [
       await post("/v1/agents", withKey(ada.secret), {
+        agentPlatform: "livekit",
         name: "Production agent",
         connection: endpointPayload(),
       }),
       // And the refusals, each with the header sitting in the body: a refusal
       // is where a value gets quoted back to explain what was wrong with it.
       await post("/v1/agents", withKey(ada.secret), {
+        agentPlatform: "livekit",
         name: "Refused for a stray credential key",
         connection: endpointPayload({
           credentials: { headers, apiKey: "APIsomethingelse" },
         }),
       }),
       await post("/v1/agents", withKey(ada.secret), {
+        agentPlatform: "livekit",
         name: "Refused for a modality it does not speak",
         connection: endpointPayload({ modality: "chat" }),
       }),
       await post("/v1/agents", withKey(ada.secret), {
+        agentPlatform: "livekit",
         name: "Refused for headers with no endpoint",
         connection: endpointPayload({
           config: { url: "wss://acme.livekit.cloud" },
@@ -1522,6 +1489,7 @@ describe("the vendor payload egma no longer keeps", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       ...registration(),
       pulled: {
         vendor: "retell",
@@ -1538,9 +1506,9 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "projectId, agentPlatform, connection; the agent's content stays at " +
-        "the provider, where Egma reads it fresh rather than out of a copy " +
-        "that would go stale.",
+        "agentPlatform, projectId, connection; the agent's content stays at the " +
+        "provider, where Egma reads it fresh rather than out of a copy that " +
+        "would go stale.",
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1579,6 +1547,7 @@ describe("the vendor payload egma no longer keeps", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       organization: "org_somebody_elses",
     });
@@ -1587,7 +1556,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, projectId, agentPlatform, connection',
+        'a registration has no key "organization"; it holds name, agentPlatform, projectId, connection',
     });
   });
 
@@ -1596,6 +1565,7 @@ describe("the vendor payload egma no longer keeps", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: connectionPayload({ topology: "egma-dials-in" }),
     });
@@ -1765,7 +1735,7 @@ describe("reading agents", () => {
     const acting = contextFor(ada, "admin");
 
     for (let n = 0; n < 51; n += 1) {
-      await createAgent(acting, { name: `Agent ${String(n).padStart(2, "0")}` });
+      await createAgent(acting, { agentPlatform: "retell", name: `Agent ${String(n).padStart(2, "0")}` });
     }
 
     const page = await get("/v1/agents", withKey(ada.secret));
@@ -1874,7 +1844,7 @@ describe("reading agents", () => {
 
     // An agent nobody has given egma a way into. Its row is the one that has
     // to say so, which it cannot do if the field is simply missing.
-    await post("/v1/agents", withKey(ada.secret), { name: "Unwired" });
+    await post("/v1/agents", withKey(ada.secret), { agentPlatform: "retell", name: "Unwired" });
 
     const page = await get("/v1/agents", withKey(ada.secret));
     expect(page.status).toBe(200);
@@ -1914,12 +1884,12 @@ describe("reading agents", () => {
       (one) => one.name === "production",
     );
     expect(wired).toMatchObject({
-      agentPlatform: null,
+      agentPlatform: "retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       // The registry's customer-facing label travels with the technical facts
       // so list and detail surfaces cannot spell the same setup differently.
-      productLabel: "Phone number",
+      productLabel: "Retell phone",
       modality: "voice",
       environment: "production",
     });
@@ -2142,6 +2112,7 @@ describe("the project a request names", () => {
     });
 
     const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       ...registration(),
       projectId: outbound.id,
     });
@@ -2176,10 +2147,12 @@ describe("the project a request names", () => {
     });
 
     await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       ...registration(),
       projectId: ada.projectId,
     });
     await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       ...registration({ name: "Outbound desk", retellAgentId: "agent_two" }),
       projectId: outbound.id,
     });
@@ -2217,6 +2190,7 @@ describe("the project a request names", () => {
     };
 
     const writing = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
       ...registration(),
       projectId: grace.projectId,
     });
@@ -2247,6 +2221,7 @@ describe("the project a request names", () => {
     );
 
     const writing = await post("/v1/agents", withKey(forDefault), {
+      agentPlatform: "retell",
       ...registration(),
       projectId: outbound.id,
     });
@@ -2292,7 +2267,7 @@ describe("a request egma cannot place", () => {
     const nobody = await post(
       "/v1/agents",
       withKey("egma_sk_this-was-never-a-key-anybody-was-given"),
-      { ...registration(), pulled: { vendor: "retell" } },
+      { agentPlatform: "retell", ...registration(), pulled: { vendor: "retell" } },
     );
     expect(nobody.status).toBe(401);
     expect(nobody.body).toEqual(refusal);

@@ -160,6 +160,7 @@ async function seedSimulationNamed(
 }> {
   const auth = contextFor(person, "member");
   const created = await createAgent(auth, {
+    agentPlatform: "retell",
     name: `Front desk ${label}`,
     connection: {
       agentPlatform: "retell",

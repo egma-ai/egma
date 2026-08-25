@@ -95,7 +95,7 @@ export function liveKitConnection(input: LiveKitRegistration): NewConnection {
     ...(input.connectionName === undefined
       ? {}
       : { name: input.connectionName.trim() }),
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: input.variant,
     modality: "voice",
@@ -121,6 +121,7 @@ export function connectLiveKit(
 ): Promise<RegisterResult> {
   const registration: Registration = {
     name: input.name.trim(),
+    agentPlatform: "livekit",
     ...(input.project === undefined ? {} : { project: input.project }),
     connection: liveKitConnection(input),
   };

@@ -343,7 +343,7 @@ const CONNECTION_EDIT_KEYS = [
 ] as const;
 const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
-const AGENT_KEYS = ["name", "projectId", "agentPlatform", "connection"] as const;
+const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -355,6 +355,17 @@ const CONNECTION_KEYS = [
   "credentials",
   "agentPlatformSelection",
 ] as const;
+
+function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
+  const named = textWhenGiven(value, "an agent platform");
+  if (isRefusal(named)) return named;
+  if (named !== "retell" && named !== "livekit") {
+    return invalid(
+      "an agent platform is required and must be retell or livekit",
+    );
+  }
+  return named;
+}
 
 type AgentPlatformSelection = {
   readonly platformAgentId: string;
@@ -948,6 +959,8 @@ export async function agentRoutes(
 
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
+    const agentPlatform = agentPlatformIn(body.agentPlatform);
+    if (isRefusal(agentPlatform)) return refused(reply, agentPlatform);
     /*
      * **The query and the body**, with the query winning when both name a
      * project. A door that reads only one of the two ignores the other rather
@@ -962,21 +975,6 @@ export async function agentRoutes(
     if (isRefusal(said)) return refused(reply, said);
 
     const project = given(text(query.projectId)) ?? given(text(body.projectId));
-
-    /*
-     * The agent's own platform binding, which a registration may set and
-     * mostly does not. It is the agent's fact rather than a connection's
-     * (ADR-0015), and it is settable without one: a LiveKit worker that only
-     * pushes its production evidence belongs in the roster and has nothing
-     * for Egma's simulator to dial. `null` is written the same as absent —
-     * an unbound row — so a client that always sends the field needs no
-     * special case for the agent it cannot place.
-     */
-    const boundTo =
-      body.agentPlatform === null
-        ? null
-        : textWhenGiven(body.agentPlatform, "an agent platform");
-    if (isRefusal(boundTo)) return refused(reply, boundTo);
 
     const inline =
       body.connection === undefined
@@ -1012,11 +1010,7 @@ export async function agentRoutes(
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
-      // Handed on as it arrived: the factory names a platform it does not know,
-      // in the same sentence a direct caller would hear.
-      ...(boundTo === undefined
-        ? {}
-        : { agentPlatform: boundTo as AgentPlatform | null }),
+      agentPlatform,
       ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
     });
 

@@ -93,6 +93,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: RETELL,
   });

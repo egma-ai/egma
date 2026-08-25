@@ -373,7 +373,7 @@ describe.skipIf(!storage.available)("the captured trace, posted at the door", ()
     expect(row?.payload).toContain("telemetry.sdk.version");
   });
 
-  it("records LiveKit Agents as the platform without inventing a connection type", async () => {
+  it("records LiveKit as the platform without inventing a connection type", async () => {
     const rows = await store().rows<{
       agent_platform: string;
       connection_type: string;
@@ -381,7 +381,7 @@ describe.skipIf(!storage.available)("the captured trace, posted at the door", ()
       "select distinct agent_platform, connection_type from spans final",
     );
     expect(rows).toEqual([
-      { agent_platform: "livekit_agents", connection_type: "" },
+      { agent_platform: "livekit", connection_type: "" },
     ]);
   });
 

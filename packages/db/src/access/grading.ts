@@ -652,7 +652,7 @@ function supportedProductionEndModality(
     return undefined;
   }
   if (
-    span.agentPlatform === "livekit_agents" &&
+    span.agentPlatform === "livekit" &&
     (span.connectionType === "" || span.connectionType === "livekit_room")
   ) {
     return "voice";

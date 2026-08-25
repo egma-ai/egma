@@ -58,6 +58,7 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
       },
       body: JSON.stringify({
         name: "Front desk",
+        agentPlatform: "retell",
         connection: {
           name: "Fixture chat",
           agentPlatform: "retell",

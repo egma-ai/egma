@@ -85,7 +85,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "room-1",
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",

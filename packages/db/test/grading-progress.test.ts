@@ -172,6 +172,7 @@ afterAll(async () => {
 describe("run grading progress", () => {
   it("counts gradable completed traces and only terminal grading states", async () => {
     const created = await createAgent(auth, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
@@ -269,6 +270,7 @@ describe("run grading progress", () => {
 
   it("freezes the provider span time when it precedes the simulation clock", async () => {
     const created = await createAgent(auth, {
+      agentPlatform: "retell",
       name: "Skewed provider clock",
       connection: {
         agentPlatform: "retell",

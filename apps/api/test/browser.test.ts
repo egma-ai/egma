@@ -985,13 +985,13 @@ describe("what a project recorded in production", () => {
       // returning to the current project must keep the same settled context.
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .getByText("New project", { exact: true })
         .click();
       await page.waitForURL(new RegExp(`/new-project$`));
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .locator("button[data-menu-item]")
         .first()
         .click();
@@ -1176,7 +1176,7 @@ describe("what a project recorded in production", () => {
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
       );
       expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("LiveKit Agents");
+      expect(shown).toContain("LiveKit");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -2500,8 +2500,9 @@ describe("the complete product, walked in order in a second project", () => {
       await expect.poll(() => selectorOf(walk).innerText()).toContain("Default");
 
       await selectorOf(walk).click();
-      await walk.fill("#project-search", "Supp");
-      await walk.keyboard.press("Enter");
+      await walk
+        .getByRole("menuitem", { name: "Support", exact: true })
+        .click();
 
       await walk.waitForURL(`${origin}/projects/${second}/agents`);
       await expect.poll(() => selectorOf(walk).innerText()).toContain("Support");
@@ -2727,13 +2728,12 @@ describe("the complete product, walked in order in a second project", () => {
         .toContain("Retell staging");
       const said = await row.innerText();
       /*
-       * **An em dash under Platform, and that is a fact rather than a gap.**
+       * **Retell under Platform, and that is a fact rather than a gap.**
        * A `phone_number` connection spans platforms, so it answers the platform
-       * question through its agent — and this agent is unbound, because binding
-       * an agent to its platform is Start monitoring's job and never Register
-       * agent's. The two custodies are separate on purpose (ADR-0015).
+       * question through its agent. Register agent now records that required
+       * platform declaration separately from Start monitoring's credentials.
        */
-      expect(said).toContain("—");
+      expect(said).toContain("Retell");
       expect(said.toLowerCase()).not.toContain("not checked");
       expect(said.toLowerCase()).not.toContain("no connections yet");
     },
@@ -3570,8 +3570,9 @@ describe("the complete product, walked in order in a second project", () => {
          * screen — so Back has to undo it.
          */
         await selectorOf(walk).click();
-        await walk.fill("#project-search", "Default");
-        await walk.keyboard.press("Enter");
+        await walk
+          .getByRole("menuitem", { name: "Default", exact: true })
+          .click();
         await walk.waitForURL(`${origin}/projects/${first}/tests`);
 
         await walk.goBack();

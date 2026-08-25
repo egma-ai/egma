@@ -1,12 +1,12 @@
 ---
-title: "Production monitoring: Retell and LiveKit Agents"
+title: "Production monitoring: Retell and LiveKit"
 sidebarTitle: "Telemetry"
 description: "Set up platform-specific production monitoring, then read real conversations as transcripts, metrics, and grades."
 ---
 
 Egma receives real production conversations two ways, and which one depends on
 the agent platform. Retell is **pulled**: Egma polls Retell for an agent whose
-switch is on, after each voice conversation finishes. LiveKit Agents is
+switch is on, after each voice conversation finishes. LiveKit is
 **pushed**: the running Python agent process sends OpenTelemetry to Egma.
 
 Both paths produce the same Egma conversation record. Egma shows a structured
@@ -28,7 +28,7 @@ the agent platform.
   the previous 30 days, and then polls about every 30 seconds. The switch lives
   on the agent, so each agent is started and stopped on its own. See
   [Retell](/integrations/retell).
-- **LiveKit Agents is pushed.** Install the Egma Python SDK and call
+- **LiveKit is pushed.** Install the Egma Python SDK and call
   `monitor_livekit(ctx)` before `AgentSession.start`. The worker sends OTLP to
   `POST /v1/traces`. There is nothing to switch on: the conversations appear as
   soon as the worker sends them.
@@ -66,7 +66,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
 **Leave `/v1/traces` off the end.** The exporter appends the signal's own path. Give it the base origin.
 </Warning>
 
-### LiveKit Agents
+### LiveKit
 
 Install the Egma Python SDK:
 
@@ -159,7 +159,7 @@ Egma stores traces from two sources, and the dashboard distinguishes them:
 | **LiveKit production** | The LiveKit agent through the Egma SDK | `null` | No production recording is supplied |
 
 Simulation and production evidence use the same trace shape at rest. They do
-not all arrive through the same path. The simulator and LiveKit Agents send
+not all arrive through the same path. The simulator and LiveKit send
 OTLP. Retell Monitoring reads provider call history and writes the normalized
 conversation through the production writer. The shared store and read path are
 the point where these paths meet.

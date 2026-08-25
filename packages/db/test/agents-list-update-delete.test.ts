@@ -107,14 +107,15 @@ describe("listing agents", () => {
 
   beforeAll(async () => {
     for (const name of ["One", "Two", "Three", "Four", "Five"]) {
-      created.push(await createAgent(actingIn(acme.listing), { name }));
+      created.push(await createAgent(actingIn(acme.listing), { agentPlatform: "retell", name }));
     }
     // One in a sibling project and one at another customer, so "only the
     // acting project's" is a claim the assertions can actually falsify.
     neighbour = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Neighbour",
     });
-    stranger = await createAgent(actingAsGlobex(), { name: "Stranger" });
+    stranger = await createAgent(actingAsGlobex(), { agentPlatform: "retell", name: "Stranger" });
   });
 
   it("returns only the acting project's agents, newest first", async () => {
@@ -208,6 +209,7 @@ describe("listing agents", () => {
 describe("updating an agent", () => {
   it("changes the name in place, and fetch round-trips it", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Draft",
     });
 
@@ -225,6 +227,7 @@ describe("updating an agent", () => {
 
   it("treats an empty change as no edit: nothing written, not even updated_at", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Unmoved",
     });
     const before = await getAgent(actingIn(acme.updating), created.id);
@@ -239,6 +242,7 @@ describe("updating an agent", () => {
 
   it("stores the new name trimmed, and refuses one that is only whitespace", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Untrimmed",
     });
 
@@ -253,8 +257,9 @@ describe("updating an agent", () => {
   });
 
   it("refuses a name a living agent in the project holds, and leaves both untouched", async () => {
-    await createAgent(actingIn(acme.updating), { name: "Reception" });
+    await createAgent(actingIn(acme.updating), { agentPlatform: "retell", name: "Reception" });
     const rival = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Rival",
     });
 
@@ -268,9 +273,10 @@ describe("updating an agent", () => {
 
   it("takes a name an archived agent released", async () => {
     const vacating = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Vacated",
     });
-    const heir = await createAgent(actingIn(acme.updating), { name: "Heir" });
+    const heir = await createAgent(actingIn(acme.updating), { agentPlatform: "retell", name: "Heir" });
 
     await archiveAgent(actingIn(acme.updating), vacating.id);
 
@@ -282,6 +288,7 @@ describe("updating an agent", () => {
 
   it("lands for a credential acting in no project: the row names its own", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Org Editable",
     });
 
@@ -294,6 +301,7 @@ describe("updating an agent", () => {
 
   it("returns nothing for another customer's agent, and leaves it untouched", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Acme Held",
     });
 
@@ -306,7 +314,7 @@ describe("updating an agent", () => {
   });
 
   it("returns nothing for an archived agent, which is out of new work", async () => {
-    const gone = await createAgent(actingIn(acme.updating), { name: "Gone" });
+    const gone = await createAgent(actingIn(acme.updating), { agentPlatform: "retell", name: "Gone" });
     await archiveAgent(actingIn(acme.updating), gone.id);
 
     expect(
@@ -322,6 +330,7 @@ describe("updating an agent", () => {
 
   it("is refused to a viewer", async () => {
     const created = await createAgent(actingIn(acme.updating), {
+      agentPlatform: "retell",
       name: "Read Only",
     });
 
@@ -336,6 +345,7 @@ describe("updating an agent", () => {
 describe("archiving an agent", () => {
   it("is refused to a credential acting in no project, like create", async () => {
     const standing = await createAgent(actingIn(acme.deleting), {
+      agentPlatform: "retell",
       name: "Standing",
     });
 
@@ -349,6 +359,7 @@ describe("archiving an agent", () => {
 
   it("takes it out of the list while it still reads on its own", async () => {
     const retired = await createAgent(actingIn(acme.deleting), {
+      agentPlatform: "retell",
       name: "Retired",
     });
 
@@ -365,7 +376,7 @@ describe("archiving an agent", () => {
   });
 
   it("shows up under the archived filter, and only there", async () => {
-    const filed = await createAgent(actingIn(acme.deleting), { name: "Filed" });
+    const filed = await createAgent(actingIn(acme.deleting), { agentPlatform: "retell", name: "Filed" });
     await archiveAgent(actingIn(acme.deleting), filed.id);
 
     const archived = await listAgents(actingIn(acme.deleting), {
@@ -379,6 +390,7 @@ describe("archiving an agent", () => {
 
   it("archives its active connections with it, in the same operation", async () => {
     const wired = await createAgent(actingIn(acme.deleting), {
+      agentPlatform: "retell",
       name: "Wired Til The End",
     });
     const attached = await addConnection(
@@ -403,7 +415,7 @@ describe("archiving an agent", () => {
   });
 
   it("leaves its connections archived when the agent is restored", async () => {
-    const back = await createAgent(actingIn(acme.deleting), { name: "Back" });
+    const back = await createAgent(actingIn(acme.deleting), { agentPlatform: "retell", name: "Back" });
     const attached = await addConnection(
       actingIn(acme.deleting),
       back.id,
@@ -419,7 +431,7 @@ describe("archiving an agent", () => {
   });
 
   it("archives only once: a second archive changes nothing", async () => {
-    const once = await createAgent(actingIn(acme.deleting), { name: "Once" });
+    const once = await createAgent(actingIn(acme.deleting), { agentPlatform: "retell", name: "Once" });
 
     const first = await archiveAgent(actingIn(acme.deleting), once.id);
     const again = await archiveAgent(actingIn(acme.deleting), once.id);
@@ -429,6 +441,7 @@ describe("archiving an agent", () => {
 
   it("returns nothing for another customer's agent, and leaves it active", async () => {
     const bystander = await createAgent(actingIn(acme.deleting), {
+      agentPlatform: "retell",
       name: "Bystander",
     });
 
@@ -440,6 +453,7 @@ describe("archiving an agent", () => {
 
   it("is refused to a viewer", async () => {
     const guarded = await createAgent(actingIn(acme.deleting), {
+      agentPlatform: "retell",
       name: "Guarded",
     });
 

@@ -3,7 +3,7 @@
   "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
   "modality": "voice",
   "connection": {
-    "agent_platform": "livekit_agents",
+    "agent_platform": "livekit",
     "connection_type": "livekit_room",
     "access_variant": "livekit_room.project_credentials",
     "config": {

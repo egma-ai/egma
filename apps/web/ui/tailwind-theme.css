@@ -316,6 +316,8 @@
    */
   --sheet-width: 440px;
   --sheet-width-wide: 640px;
+  /* The signed-in sidebar's Egma mark, larger now that it is not a trigger. */
+  --sidebar-mark-size: 32px;
   /*
    * The access panel, which is 440px for a different reason than a side sheet
    * is. A sheet is that wide because it is a modal panel over a list that

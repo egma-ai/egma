@@ -203,8 +203,8 @@ function catalog(): Record<string, unknown> {
   return {
     items: [
       {
-        agentPlatform: "livekit_agents",
-        agentPlatformLabel: "LiveKit Agents",
+        agentPlatform: "livekit",
+        agentPlatformLabel: "LiveKit",
         connectionType: "livekit_room",
         accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
         accessVariantLabel: "LiveKit project credentials — Recommended",
@@ -225,8 +225,8 @@ function catalog(): Record<string, unknown> {
         ],
       },
       {
-        agentPlatform: "livekit_agents",
-        agentPlatformLabel: "LiveKit Agents",
+        agentPlatform: "livekit",
+        agentPlatformLabel: "LiveKit",
         connectionType: "livekit_room",
         accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
         accessVariantLabel: "Customer token endpoint — Advanced",
@@ -403,7 +403,7 @@ describe("LiveKit in the wizard", () => {
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["front-desk"]);
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]).toMatchObject({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: shape.variant,
       modality: "voice",

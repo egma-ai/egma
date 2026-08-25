@@ -317,6 +317,11 @@ const ROLE_LABEL: Record<Role, string> = {
  * does not offer a false switcher. The paired arrows still open a useful
  * surface: organization name, current plan and the person's real membership
  * role. Organization settings stay out until that product level exists.
+ *
+ * **The mark is identity, not a control.** It sits beside the menu trigger
+ * rather than inside it, so the hover plate, focus indicator and press feedback
+ * cover only the organization control. The organization name stays on the
+ * 14px product-text step; making it smaller would leave the accepted scale.
  */
 function OrganizationMenu({
   organization,
@@ -330,91 +335,95 @@ function OrganizationMenu({
   const mark = (
     /* eslint-disable-next-line @next/next/no-img-element */
     <img
-      className="size-7 flex-none [[data-theme=dark]_&]:invert"
+      className="size-(--sidebar-mark-size) flex-none [[data-theme=dark]_&]:invert"
       src="/brand/egma-mark-light.svg"
       alt="Egma"
-      width={28}
-      height={28}
+      width={32}
+      height={32}
     />
   );
 
   if (organization === undefined) {
     return (
-      <div
-        className="flex min-h-(--control-lg) w-full min-w-0 items-center gap-2"
-        data-slot="organization-status"
-      >
+      <>
         {mark}
-        <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
-          {settled ? "No organization" : "Checking your session…"}
-        </span>
-      </div>
+        <div
+          className="flex min-h-(--control-lg) min-w-0 flex-1 items-center px-2"
+          data-slot="organization-status"
+        >
+          <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
+            {settled ? "No organization" : "Checking your session…"}
+          </span>
+        </div>
+      </>
     );
   }
 
   const initial = organization.name.trim().slice(0, 1).toUpperCase() || "E";
 
   return (
-    <Menu
-      label={`Open organization menu for ${organization.name}`}
-      triggerClassName={cn(
-        "flex min-h-(--control-lg) w-full min-w-0 items-center gap-2 p-0",
-        "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
-        "transition-transform duration-(--duration-press) ease-out",
-        "pointer-hover:border-border pointer-hover:bg-surface-soft",
-        "[&:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:transition-none",
-        "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-      )}
-      openClassName="border-border bg-surface-soft"
-      placement="below-start"
-      panelRole="dialog"
-      panelClassName="w-[280px] p-3"
-      trigger={
-        <>
-          {mark}
-          <span
-            className="min-w-0 flex-1 overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground"
-            data-slot="organization-name"
-          >
-            {organization.name}
-          </span>
-          <Badge className="text-xs" shape="count" data-slot="organization-plan">
-            {CURRENT_PLAN.badge}
-          </Badge>
-          <ChevronsUpDownIcon
-            className="size-3 flex-none text-faint"
-            aria-hidden="true"
-            strokeWidth={1.75}
-          />
-        </>
-      }
-    >
-      {() => (
-        <div className="flex min-w-0 items-center gap-3 p-2" data-slot="organization-summary">
-          <span
-            className="grid size-10 flex-none place-items-center rounded-none border border-border bg-surface-soft text-sm text-muted-foreground"
-            aria-hidden="true"
-          >
-            {initial}
-          </span>
-          <span className="min-w-0">
-            <span className="block overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
+    <>
+      {mark}
+      <Menu
+        label={`Open organization menu for ${organization.name}`}
+        triggerClassName={cn(
+          "flex min-h-(--control-lg) w-full min-w-0 items-center gap-1 px-2",
+          "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          "transition-transform duration-(--duration-press) ease-out",
+          "pointer-hover:border-border pointer-hover:bg-surface-soft",
+          "[&:active:not(:focus-visible)]:scale-97",
+          "motion-reduce:transition-none",
+          "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+        )}
+        openClassName="border-border bg-surface-soft"
+        placement="below-start"
+        panelRole="dialog"
+        panelClassName="w-[280px] p-3"
+        trigger={
+          <>
+            <span
+              className="min-w-0 flex-1 overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground"
+              data-slot="organization-name"
+            >
               {organization.name}
             </span>
-            <span className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-              <span>{CURRENT_PLAN.name}</span>
-              {role === null ? null : (
-                <>
-                  <span className="h-3 w-px bg-border" aria-hidden="true" />
-                  <span>{ROLE_LABEL[role]}</span>
-                </>
-              )}
+            <Badge className="px-1 text-xs" shape="count" data-slot="organization-plan">
+              {CURRENT_PLAN.badge}
+            </Badge>
+            <ChevronsUpDownIcon
+              className="size-3 flex-none text-faint"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
+          </>
+        }
+      >
+        {() => (
+          <div className="flex min-w-0 items-center gap-3 p-2" data-slot="organization-summary">
+            <span
+              className="grid size-10 flex-none place-items-center rounded-none border border-border bg-surface-soft text-sm text-muted-foreground"
+              aria-hidden="true"
+            >
+              {initial}
             </span>
-          </span>
-        </div>
-      )}
-    </Menu>
+            <span className="min-w-0">
+              <span className="block overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
+                {organization.name}
+              </span>
+              <span className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{CURRENT_PLAN.name}</span>
+                {role === null ? null : (
+                  <>
+                    <span className="h-3 w-px bg-border" aria-hidden="true" />
+                    <span>{ROLE_LABEL[role]}</span>
+                  </>
+                )}
+              </span>
+            </span>
+          </div>
+        )}
+      </Menu>
+    </>
   );
 }
 
@@ -711,7 +720,7 @@ function ShellFrame({
         )}
       >
         {/* Organization context owns the top bar; project context stays below. */}
-        <SidebarBrand className="[&>[data-slot=menu]]:min-w-0 [&>[data-slot=menu]]:flex-1">
+        <SidebarBrand className="gap-2 [&>[data-slot=menu]]:min-w-0 [&>[data-slot=menu]]:flex-1">
           <OrganizationMenu
             organization={organization}
             role={role}

@@ -74,7 +74,7 @@ export async function seedAgent(
   auth: AuthContext,
   name: string,
 ): Promise<string> {
-  const created = await createAgent(auth, { name });
+  const created = await createAgent(auth, { agentPlatform: "retell", name });
   return created.id;
 }
 

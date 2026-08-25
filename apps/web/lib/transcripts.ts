@@ -65,8 +65,8 @@ export function agentPlatformLabel(value: string): string {
   switch (value) {
     case "retell":
       return "Retell";
-    case "livekit_agents":
-      return "LiveKit Agents";
+    case "livekit":
+      return "LiveKit";
     default:
       return humanizeIdentifier(value);
   }
