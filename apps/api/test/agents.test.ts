@@ -892,6 +892,99 @@ describe("discovering simulation agents", () => {
     expect(agentOf(winner).monitoringApiKeyHint).toBe("ABCD");
   });
 
+  /**
+   * A registration that *reused* an agent leaves its way in alone.
+   *
+   * **`reused` means this request wrote no connection.** The registration
+   * rotated the credential on a connection that was already there and nothing
+   * more, so a custody refusal has nothing of its own to put back — and
+   * archiving that row would take away a working way into somebody's agent
+   * over a refusal that was only ever about the pull switch. An agent whose
+   * one connection is the reused one would have been left unreachable by a
+   * request that failed.
+   */
+  it("archives nothing when the registration reused the connection it refused on", async () => {
+    api = await createApi("retell_reused_connection_survives");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const acting = contextFor(ada, "admin");
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    // The agent and the chat connection that is its only way in.
+    const first = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-the-first-WXYZ" },
+      },
+    });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const agentId = String(agentOf(first).id);
+    const connectionId = String(
+      (first.body.connection as Record<string, unknown>).id,
+    );
+
+    // And another agent that already watches the same Retell agent, so the
+    // pull switch-on below is refused after the reuse has happened.
+    const watching = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Night line",
+    });
+    const watchingId = String(agentOf(watching).id);
+    await enablePullProductionCalls(acting, {
+      agentId: watchingId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_chat_9",
+      apiKey: "retell-secret-the-winner-ABCD",
+    });
+
+    // The same registration again, this time asking for production calls.
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-the-second-WXYZ" },
+      },
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "agent_chat_9 is already watched by another agent in this project. " +
+        "One Egma agent watches one Retell agent, so turn that agent's switch " +
+        "off first, or connect without ticking Pull production calls.",
+    });
+
+    /*
+     * The way in that was there before this request is still there. It was
+     * never this request's to remove: the registration reused it.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(1);
+    expect(
+      (after.body.connections as readonly Record<string, unknown>[])[0]?.id,
+      "the refused registration archived a connection it did not write",
+    ).toBe(connectionId);
+
+    // And the agent that was already watching is exactly as it was.
+    const winner = await get(`/v1/agents/${watchingId}`, withKey(ada.secret));
+    expect(agentOf(winner).pullProductionCalls).toBe(true);
+    expect(agentOf(winner).monitoringApiKeyHint).toBe("ABCD");
+  });
+
   /** The ordinary second connection: the same Retell agent, another way in. */
   it("adds a second way into the Retell agent it is already bound to", async () => {
     api = await createApi("retell_same_binding_reconnect");

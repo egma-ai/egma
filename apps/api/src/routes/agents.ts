@@ -1360,24 +1360,34 @@ export async function agentRoutes(
       );
       if (stopped !== undefined) {
         /*
-         * **A refused save puts back the connection it wrote, and never the
-         * agent.** The pre-check above catches the ordinary case before a row
-         * exists; this is what happens when two requests raced it, or when the
-         * rule was met by a fact only the transaction could see.
+         * **A refusal un-writes exactly what this request wrote, and nothing
+         * else.** That is the whole rule, and each of its three halves was
+         * learned by getting it wrong:
          *
-         * **Archiving the agent here was a way to destroy somebody else's
-         * work.** An agent this request created is unbound the instant it is
-         * written, so its custody step can only be refused if another writer
-         * bound it in the window between the insert and the seal — which means
-         * the agent is *theirs*, and `archiveAgent` cascades over every live
-         * connection on it, including the one they just attached. The branch
-         * fired in exactly the case where firing it was wrong.
+         * - **The connection, when this request created one.** `created` and
+         *   `connection_added` each wrote a row; `reused` wrote none. On
+         *   `reused` the connection predates this request — the registration
+         *   rotated its credential and nothing more — so archiving it would
+         *   take away a working way into an agent over a refusal that was only
+         *   ever about the pull switch, and could leave that agent with no way
+         *   in at all.
+         * - **Never the agent.** An agent this request created is unbound the
+         *   instant it is written, so its custody step can only be refused if
+         *   another writer bound it in the window between the insert and the
+         *   seal — which means the agent is theirs, and `archiveAgent`
+         *   cascades over every live connection on it, including the one they
+         *   had just attached.
+         * - **Never a row this request only read.** The pre-check above
+         *   catches the ordinary case before anything is written at all; this
+         *   is the raced one, and a racing request owns less than it thinks.
          *
-         * So the cleanup is the connection alone, on this path and on
-         * `addConnection`'s. A refused creator leaves at worst an empty live
-         * agent row, which is a row and not a loss.
+         * A refused creator therefore leaves at worst an empty live agent row,
+         * which is a row and not a loss.
          */
-        if (registered.connection !== undefined) {
+        if (
+          registered.connection !== undefined &&
+          registered.result !== "reused"
+        ) {
           await archiveConnection(
             acting,
             registered.agent.id,
