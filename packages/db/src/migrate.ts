@@ -31,13 +31,6 @@ const { namespace: LOCK_NAMESPACE, id: LOCK_ID } = MIGRATION_ADVISORY_LOCK;
 const BOOKKEEPING_SCHEMA = "egma_meta";
 const BOOKKEEPING_TABLE = `${BOOKKEEPING_SCHEMA}.migration`;
 
-/**
- * A managed pre-production store may adopt this exact baseline out of band
- * after an operator verifies its old ledger and logical schema. Its recorded
- * hash is the deliberate adoption marker; the filename alone is not proof.
- */
-const CURRENT_BASELINE_MIGRATION = "0000_baseline.sql";
-
 export type Migration = {
   readonly name: string;
   readonly sql: string;
@@ -105,17 +98,15 @@ export function pendingMigrations(
     }
   }
 
-  // A verified database may adopt a squashed baseline out of band while its
-  // old ledger rows remain for rollback. The exact baseline hash is the proof
-  // that this was deliberate. Without it, an old store must stop before fresh
-  // baseline DDL can run against tables that already exist.
-  const baseline = migrations.find(
-    (migration) => migration.name === CURRENT_BASELINE_MIGRATION,
-  );
-  const adoptedBaseline =
+  // An older additive build must still boot after a newer build has appended
+  // migrations. The exact first file proves that the ledger belongs to this
+  // migration epoch; without it, unknown rows are a different history rather
+  // than future rows that a rollback may safely ignore.
+  const baseline = migrations[0];
+  const hasExactBaseline =
     baseline !== undefined &&
     alreadyApplied.get(baseline.name) === baseline.hash;
-  if (unsupported.length > 0 && !adoptedBaseline) {
+  if (unsupported.length > 0 && !hasExactBaseline) {
     throw new Error(
       `database records migrations that this build does not contain: ${unsupported.join(", ")}; ` +
         "recreate the database before running this build",

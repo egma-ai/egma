@@ -8,13 +8,10 @@ migration chains are not a normal upgrade path; recreate a self-hosted database
 or volume that applied them before running this build. New migrations start at
 `0001`.
 
-A verified managed pre-production database may use one exceptional adoption
-path. Before this build starts, its operator must prove that every legacy
-migration name and hash is known and that the logical schema matches this
-baseline, then record this exact baseline name and hash. Legacy ledger rows may
-remain so the old image can still roll back. The runner accepts unknown legacy
-rows only when the exact current baseline hash is already recorded. This is an
-operator cutover procedure, not an in-place self-host upgrade.
+Every migration ledger starts at this exact baseline. A build refuses unknown
+rows without that marker. With it, an older build may ignore rows appended by a
+newer build so a normal additive rollback can still boot. No prior migration
+name, hash, or row is part of this epoch.
 
 One rule keeps every deploy and every rollback safe, and it binds both
 stores — the Postgres files here and the ClickHouse files in
@@ -54,9 +51,9 @@ In practice:
   repair that local ledger. After merge or use outside local development, add
   a new file instead; the runner refuses a changed recorded file. The
   founder-approved 2026-08-25 baseline reset is the one exception: Egma was
-  still pre-production, the managed stores adopt the exact baseline hash before
-  the new image deploys, and their legacy rows remain for an old-image rollback.
-  Future migration history is immutable again from this baseline forward.
+  still pre-production, so every store starts at this baseline and the prior
+  ledgers have no supported rollback path. Future migration history is
+  immutable again from this baseline forward.
 - **ClickHouse migrations must resume safely.** There is no transaction around
   a file, so every schema statement uses `IF EXISTS`, `IF NOT EXISTS` or
   `CREATE OR REPLACE`, and survives a second run after a partial failure. An

@@ -1,10 +1,8 @@
 -- PRE-PRODUCTION BASELINE RESET, confirmed by the founder on 2026-08-25.
 -- This file replaces the prior ClickHouse migration chain. Self-hosted
--- databases that ran it must be recreated. A managed store may instead adopt
--- this exact file hash only after an operator verifies every old ledger hash
--- and the logical schema; old ledger rows may remain for rollback. Every
--- statement is guarded because ClickHouse has no transaction around a migration
--- file and a boot must be able to resume after a partial failure.
+-- databases that ran it must be recreated. Every statement is guarded because
+-- ClickHouse has no transaction around a migration file and a boot must be able
+-- to resume after a partial failure.
 
 -- One row is one span. The sorting key is the immutable span identity, while
 -- the shorter primary key keeps organization, project, and trace reads cheap.
