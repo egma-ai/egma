@@ -361,7 +361,13 @@ export function ExecutionTimeline({
                 {howFarIn(step.startedAt, transcript.startedAt)}
               </span>
               <span
-                className="size-2 rounded-chip border-2 border-foreground bg-surface"
+                /*
+                 * A square, not a dot. Every status marker in the product is
+                 * a square (`DESIGN.md`, developer decision 2026-08-24): one
+                 * round shape is left in the system and it is the radio
+                 * button, whose circle is what tells it apart from a checkbox.
+                 */
+                className="size-2 border-2 border-foreground bg-surface"
                 aria-hidden="true"
               />
               <span className="flex min-w-0 items-baseline gap-2">

@@ -1,9 +1,12 @@
 import {
   addConnection,
+  AgentAlreadyBoundError,
+  agentMonitoringKey,
   AgentWriteRefusedError,
   authorize,
   archiveAgent,
   archiveConnection,
+  enablePullProductionCalls,
   connectionOptionMetadata,
   ConnectionRestoreRefusedError,
   getAgent,
@@ -16,6 +19,8 @@ import {
   registerAgent,
   restoreAgent,
   restoreConnection,
+  sealAgentMonitoringKey,
+  UnprocessableInputError,
   updateAgent,
   updateConnection,
   type Agent,
@@ -283,6 +288,9 @@ function flagWhenGiven(
 /** How many rows one page may hold, before the access layer's own ceiling. */
 const LARGEST_PAGE = 200;
 
+/** Shorter than any key a platform issues, so it cannot be one. */
+const SHORTEST_KEY = 8;
+
 function boundedLimit(value: unknown): number | undefined | Refusal {
   if (value === undefined || value === null || value === "") return undefined;
   const asked = Number(value);
@@ -353,6 +361,8 @@ const CONNECTION_KEYS = [
   "environment",
   "config",
   "credentials",
+  "platformAgentId",
+  "pullProductionCalls",
   "agentPlatformSelection",
 ] as const;
 
@@ -366,6 +376,24 @@ function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
   }
   return named;
 }
+
+/**
+ * Which Retell agent this connection reaches, and the key that proves it.
+ *
+ * **One shape, two spellings.** A request says `platformAgentId` beside
+ * `credentials` (the flow the connect sheet uses since 2026-08-24), or wraps
+ * both in the older `agentPlatformSelection` envelope. They are read into this
+ * before anything else looks at them, so the confirmation, the seal and the
+ * switch all have exactly one thing to read.
+ *
+ * The key is optional here and only here: an agent that already holds its
+ * sealed copy is never asked for it again, and the route lends that copy to
+ * the confirmation.
+ */
+type RetellChoice = {
+  readonly platformAgentId: string;
+  readonly apiKey: string | undefined;
+};
 
 type AgentPlatformSelection = {
   readonly platformAgentId: string;
@@ -412,7 +440,7 @@ function agentPlatformSelectionIn(
   if (unknownCredential !== undefined) return unknownCredential;
   const apiKey = textWhenGiven(credentials.apiKey, "a Retell API key");
   if (isRefusal(apiKey)) return apiKey;
-  if (apiKey === undefined || apiKey.trim().length < 8) {
+  if (apiKey === undefined || apiKey.trim().length < SHORTEST_KEY) {
     return {
       refused: true,
       error: "unprocessable",
@@ -488,50 +516,132 @@ function connectionIn(value: unknown): NewConnection | Refusal {
 }
 
 /**
- * Confirm a discovered Retell candidate inside the generic create request.
- * The selection and its key stop here; only the normalized connection reaches
- * the database, and only Retell chat keeps the key because that access method
- * needs it for every simulation.
+ * Which Retell agent a connection request names, whichever spelling it used.
+ *
+ * A request that says both is refused rather than reconciled: two answers to
+ * one question is exactly the shape that lets a client believe it picked one
+ * agent while Egma wrote another.
  */
-async function confirmAgentPlatformSelection(
+function retellChoiceIn(
+  body: Body,
+  selection: AgentPlatformSelection | undefined,
+): RetellChoice | undefined | Refusal {
+  const named = textWhenGiven(body.platformAgentId, "a platform agent id");
+  if (isRefusal(named)) return named;
+
+  if (selection !== undefined) {
+    if (named !== undefined) {
+      return invalid(
+        "a connection names the picked agent in platformAgentId or in " +
+          "agentPlatformSelection, and not in both",
+      );
+    }
+    return { platformAgentId: selection.platformAgentId, apiKey: selection.apiKey };
+  }
+  if (named === undefined || named.trim() === "") return undefined;
+
+  const credentials =
+    typeof body.credentials === "object" &&
+    body.credentials !== null &&
+    !Array.isArray(body.credentials)
+      ? (body.credentials as Body)
+      : undefined;
+  const apiKey = textWhenGiven(credentials?.apiKey, "a Retell API key");
+  if (isRefusal(apiKey)) return apiKey;
+
+  return {
+    platformAgentId: named.trim(),
+    ...(apiKey === undefined ? { apiKey: undefined } : { apiKey: apiKey.trim() }),
+  };
+}
+
+/** Whether this save also starts pulling the agent's production calls. */
+function pullFlagIn(value: unknown): boolean | Refusal {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== "boolean") {
+    return invalid("pullProductionCalls is written as true or false");
+  }
+  return value;
+}
+
+/**
+ * What a confirmed Retell connection leaves behind for the routes to finish:
+ * the connection to write, and the custody facts the agent takes from it.
+ */
+type ConfirmedConnection = {
+  readonly connection: NewConnection;
+  /** Present only for Retell, which is the only platform with an account. */
+  readonly custody?: { readonly platformAgentId: string; readonly apiKey: string };
+};
+
+/**
+ * Confirm the picked Retell agent with the key, immediately before the write.
+ *
+ * **Discovery is only a snapshot**, so the id a person picked minutes ago is
+ * re-read here: the agent still exists, it is still the right modality, and —
+ * for a phone connection — the number typed into the sheet is still routed to
+ * that agent. A number that has stopped answering is refused rather than
+ * stored, which is the whole reason the save spends a round trip.
+ *
+ * Only the normalized connection reaches the database. The key travels no
+ * further than the agent's own sealed column, and Retell chat keeps its own
+ * copy on the connection because that access method needs it for every
+ * simulation.
+ */
+async function confirmRetellAgent(
   wanted: NewConnection,
-  selected: AgentPlatformSelection | undefined,
+  choice: RetellChoice | undefined,
+  lentKey: string | undefined,
   fetchImpl: typeof fetch | undefined,
-): Promise<NewConnection | Refusal> {
-  if (selected === undefined) {
+): Promise<ConfirmedConnection | Refusal> {
+  if (wanted.agentPlatform !== "retell") {
+    if (choice !== undefined) {
+      return invalid(
+        "platformAgentId names an agent on a platform Egma can list, and only " +
+          "Retell is one",
+      );
+    }
+    return { connection: wanted };
+  }
+  if (choice === undefined) {
+    /*
+     * **A phone connection is the one that cannot be taken on trust.** A
+     * number is not an identity: it is routed at the provider and can stop
+     * answering for the agent it was picked for, so Egma has to re-read the
+     * route before it stores one. Every other Retell connection carries the
+     * platform agent id in its own config, where the registry checks it.
+     */
     if (
-      wanted.agentPlatform === "retell" &&
       wanted.connectionType === "phone_number" &&
       wanted.accessVariant === "phone_number.public_e164" &&
       wanted.modality === "voice"
     ) {
       return invalid(
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm " +
+          "the number still reaches the selected agent",
       );
     }
-    return wanted;
+    return { connection: wanted };
   }
-  if (wanted.credentials !== undefined) {
-    return invalid(
-      "a discovered connection puts account credentials in agentPlatformSelection, not credentials",
-    );
-  }
-  if (wanted.agentPlatform !== "retell") {
-    return invalid(
-      "agentPlatformSelection can confirm only a candidate returned by agent discovery",
-    );
+
+  const apiKey = choice.apiKey ?? lentKey;
+  if (apiKey === undefined || apiKey.trim().length < SHORTEST_KEY) {
+    return {
+      refused: true,
+      error: "unprocessable",
+      message: "Paste a Retell API key, then try again.",
+    };
   }
 
   const candidate = (() => {
     if (
       wanted.connectionType === "retell_chat_api" &&
       wanted.accessVariant === "retell_chat_api.api_key" &&
-      wanted.modality === "chat" &&
-      typeof wanted.config["retellAgentId"] === "string"
+      wanted.modality === "chat"
     ) {
       return {
         connectionType: "retell_chat_api" as const,
-        config: { retellAgentId: wanted.config["retellAgentId"] },
+        config: { retellAgentId: choice.platformAgentId },
       };
     }
     if (
@@ -549,13 +659,14 @@ async function confirmAgentPlatformSelection(
   })();
   if (candidate === undefined) {
     return invalid(
-      "agentPlatformSelection does not match a connection candidate returned by agent discovery",
+      "a Retell connection is the chat API or a phone number, and a phone " +
+        "connection carries the number Egma dials in config.phoneNumber",
     );
   }
 
   const checked = await confirmRetellCandidate(
-    selected.apiKey,
-    selected.platformAgentId,
+    apiKey,
+    choice.platformAgentId,
     candidate,
     fetchImpl,
   );
@@ -576,15 +687,178 @@ async function confirmAgentPlatformSelection(
 
   const { credentials: _unconfirmedCredentials, ...withoutCredentials } = wanted;
   return {
-    ...withoutCredentials,
-    agentPlatform: checked.candidate.agentPlatform,
-    connectionType: checked.candidate.connectionType,
-    accessVariant: checked.candidate.accessVariant,
-    modality: checked.candidate.modality,
-    config: checked.candidate.config,
-    ...(checked.candidate.connectionType === "retell_chat_api"
-      ? { credentials: { apiKey: selected.apiKey } }
-      : {}),
+    connection: {
+      ...withoutCredentials,
+      agentPlatform: checked.candidate.agentPlatform,
+      connectionType: checked.candidate.connectionType,
+      accessVariant: checked.candidate.accessVariant,
+      modality: checked.candidate.modality,
+      config: checked.candidate.config,
+      ...(checked.candidate.connectionType === "retell_chat_api"
+        ? { credentials: { apiKey } }
+        : {}),
+    },
+    custody: { platformAgentId: choice.platformAgentId, apiKey },
+  };
+}
+
+/**
+ * The custody half of a connect save: the key lands on the agent, and the
+ * checkbox — when it was ticked — starts the pull.
+ *
+ * **The seal happens whether or not the switch does.** A key is pasted once
+ * per agent, ever, so the agent has to hold it from the first save even when
+ * nobody asked for monitoring yet; that is what lets the next connect flow for
+ * the same agent ask for no key at all.
+ *
+ * **A refusal here is relayed, never thrown.** The binding rule and the pull
+ * switch both answer in sentences a person reads, so they come back as
+ * refusals rather than as a fault. `boundElsewhere` below is checked before
+ * the connection is written wherever the agent is known in advance, so the
+ * ordinary way to meet this rule is a save that wrote nothing at all.
+ */
+async function takeCustody(
+  acting: AuthContext,
+  agentId: string,
+  custody: { readonly platformAgentId: string; readonly apiKey: string },
+  pull: boolean,
+): Promise<Refusal | undefined> {
+  try {
+    await sealAgentMonitoringKey(acting, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: custody.platformAgentId,
+      apiKey: custody.apiKey,
+    });
+    if (pull) {
+      await enablePullProductionCalls(acting, {
+        agentId,
+        agentPlatform: "retell",
+        platformAgentId: custody.platformAgentId,
+        apiKey: custody.apiKey,
+      });
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof UnprocessableInputError) {
+      return { refused: true, error: "unprocessable", message: error.message };
+    }
+    if (lostToPullUniqueness(error)) {
+      return {
+        refused: true,
+        error: "unprocessable",
+        message:
+          `${custody.platformAgentId} is already watched by another agent in ` +
+          "this project. One Egma agent watches one Retell agent, so turn " +
+          "that agent's switch off first, or connect without ticking Pull " +
+          "production calls.",
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * The agent a registration would land on, when it would land on one that
+ * already exists — asked before anything is written.
+ *
+ * **A registration can reuse.** `registerAgent` matches a living connection
+ * naming the same vendor agent and answers with the agent that already holds
+ * it, so a request that names no agent id can still settle on one that is
+ * already bound. That is the path where the binding rule used to be met only
+ * *after* the agent and its connection were written, which left a live
+ * connection on an agent the save was refused for — and a second press wrote
+ * a second one.
+ *
+ * **It reads the reuse key rather than re-deciding reuse.** The factory owns
+ * the rule and keeps owning it; this asks the same question of the page of
+ * agents the project can already answer with, and it asks it only for the one
+ * connection shape that has a reuse key. Everything else creates a fresh,
+ * unbound agent, which no binding rule can refuse.
+ *
+ * A miss here is not a hole: `takeCustody` still meets the access layer's own
+ * refusal, and the register route undoes its connection when it does.
+ */
+async function reusedAgentFor(
+  acting: AuthContext,
+  wanted: NewConnection,
+): Promise<Agent | undefined> {
+  const vendorAgent = wanted.config["retellAgentId"];
+  if (
+    wanted.connectionType !== "retell_chat_api" ||
+    typeof vendorAgent !== "string" ||
+    vendorAgent === ""
+  ) {
+    return undefined;
+  }
+  const page = await listAgents(acting, {});
+  return page.items.find((one) =>
+    one.connections.some(
+      (connection) =>
+        connection.connectionType === "retell_chat_api" &&
+        connection.config["retellAgentId"] === vendorAgent,
+    ),
+  );
+}
+
+/**
+ * Whether a write lost to the one-switched-on-agent rule.
+ *
+ * The same reading `monitoring.ts` does, and for the same reason: the index is
+ * what decides, because a read that checked first and wrote second would be a
+ * race with the very next request. What it buys here is the sentence — without
+ * it a person who ticked "Pull production calls" for a platform agent another
+ * egma agent already watches got a fault, after their connection was written.
+ *
+ * It walks the `cause` chain because the query layer hands the driver's error
+ * back wrapped.
+ */
+function lostToPullUniqueness(error: unknown): boolean {
+  for (
+    let at: unknown = error, depth = 0;
+    at !== undefined && at !== null && depth < 4;
+    depth += 1
+  ) {
+    if (typeof at !== "object") break;
+    const carrier = at as { constraint?: unknown; cause?: unknown };
+    if (carrier.constraint === "agent_pulled_platform_agent_unique") return true;
+    at = carrier.cause;
+  }
+  return false;
+}
+
+/**
+ * The binding rule, asked *before* anything is written.
+ *
+ * **One egma agent binds to one platform agent.** The access layer refuses the
+ * second binding inside the transaction that would replace the first, which is
+ * where the rule has to live to be race-free. This asks the same question one
+ * step earlier, so the ordinary refusal leaves no connection behind on an
+ * agent the save was never allowed to touch.
+ *
+ * It is not a substitute for the guard underneath and is not written as one:
+ * two saves arriving together both read `null` here and one of them still
+ * meets the real rule in the transaction.
+ */
+function boundElsewhere(
+  known: Agent,
+  choice: RetellChoice | undefined,
+): Refusal | undefined {
+  if (choice === undefined) return undefined;
+  if (
+    known.platformAgentId === null ||
+    known.platformAgentId === choice.platformAgentId
+  ) {
+    return undefined;
+  }
+  return {
+    refused: true,
+    error: "unprocessable",
+    message: new AgentAlreadyBoundError(
+      known.name,
+      known.platformAgentId,
+      choice.platformAgentId,
+    ).message,
   };
 }
 
@@ -804,7 +1078,7 @@ export async function agentRoutes(
       const body = (request.body ?? {}) as Body;
       const unknown = unknownKeyIn(
         body,
-        ["agentPlatform", "credentials"],
+        ["agentPlatform", "credentials", "agentId"],
         "an agent discovery",
       );
       if (unknown !== undefined) return refused(reply, unknown);
@@ -822,34 +1096,57 @@ export async function agentRoutes(
         });
       }
 
-      if (
-        typeof body.credentials !== "object" ||
-        body.credentials === null ||
-        Array.isArray(body.credentials)
-      ) {
-        return refused(reply, {
-          refused: true,
-          error: "unprocessable",
-          message: "Paste a Retell API key, then try again.",
-        });
+      const namedAgent = textWhenGiven(body.agentId, "an agent");
+      if (isRefusal(namedAgent)) return refused(reply, namedAgent);
+
+      /*
+       * **A key is pasted once per agent, ever.** So a listing either carries
+       * the paste, or names the agent whose sealed copy it wants to spend.
+       * Naming both is a request with two answers to one question, and the
+       * plaintext never travels back out either way.
+       */
+      let pasted: string | undefined;
+      if (body.credentials !== undefined) {
+        if (
+          typeof body.credentials !== "object" ||
+          body.credentials === null ||
+          Array.isArray(body.credentials)
+        ) {
+          return refused(reply, {
+            refused: true,
+            error: "unprocessable",
+            message: "Paste a Retell API key, then try again.",
+          });
+        }
+        const credentials = body.credentials as Body;
+        const unknownCredential = unknownKeyIn(
+          credentials,
+          ["apiKey"],
+          "Retell account credentials",
+        );
+        if (unknownCredential !== undefined) {
+          return refused(reply, unknownCredential);
+        }
+        const apiKey = textWhenGiven(credentials.apiKey, "a Retell API key");
+        if (isRefusal(apiKey)) return refused(reply, apiKey);
+        if (apiKey === undefined || apiKey.trim().length < SHORTEST_KEY) {
+          return refused(reply, {
+            refused: true,
+            error: "unprocessable",
+            message: "Paste a Retell API key, then try again.",
+          });
+        }
+        pasted = apiKey.trim();
       }
-      const credentials = body.credentials as Body;
-      const unknownCredential = unknownKeyIn(
-        credentials,
-        ["apiKey"],
-        "Retell account credentials",
-      );
-      if (unknownCredential !== undefined) {
-        return refused(reply, unknownCredential);
-      }
-      const apiKey = textWhenGiven(credentials.apiKey, "a Retell API key");
-      if (isRefusal(apiKey)) return refused(reply, apiKey);
-      if (apiKey === undefined || apiKey.trim().length < 8) {
-        return refused(reply, {
-          refused: true,
-          error: "unprocessable",
-          message: "Paste a Retell API key, then try again.",
-        });
+
+      if (pasted !== undefined && namedAgent !== undefined) {
+        return refused(
+          reply,
+          invalid(
+            "a discovery carries a pasted key or names the agent whose stored " +
+              "key to spend, and not both",
+          ),
+        );
       }
 
       const acting = await actingProject(auth, request, "writes into");
@@ -859,10 +1156,20 @@ export async function agentRoutes(
         projectId: acting.projectId,
       });
 
-      const found = await discoverRetellAgents(
-        apiKey.trim(),
-        options.retellFetch,
-      );
+      const spending =
+        pasted ??
+        (namedAgent === undefined
+          ? undefined
+          : await agentMonitoringKey(acting, namedAgent));
+      if (spending === undefined) {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message: "Paste a Retell API key, then try again.",
+        });
+      }
+
+      const found = await discoverRetellAgents(spending, options.retellFetch);
       if (found.kind === "invalid_key") {
         return refused(reply, {
           refused: true,
@@ -981,13 +1288,19 @@ export async function agentRoutes(
         ? undefined
         : connectionIn(body.connection);
     if (isRefusal(inline)) return refused(reply, inline);
+    const inlineBody = (body.connection ?? {}) as Body;
     const inlineSelection =
       body.connection === undefined
         ? undefined
-        : agentPlatformSelectionIn(
-            (body.connection as Body).agentPlatformSelection,
-          );
+        : agentPlatformSelectionIn(inlineBody.agentPlatformSelection);
     if (isRefusal(inlineSelection)) return refused(reply, inlineSelection);
+    const inlineChoice =
+      body.connection === undefined
+        ? undefined
+        : retellChoiceIn(inlineBody, inlineSelection);
+    if (isRefusal(inlineChoice)) return refused(reply, inlineChoice);
+    const pull = pullFlagIn(inlineBody.pullProductionCalls);
+    if (isRefusal(pull)) return refused(reply, pull);
 
     const acting = await writingIn(auth, project);
     if (isRefusal(acting)) return refused(reply, acting);
@@ -999,20 +1312,91 @@ export async function agentRoutes(
     const confirmedInline =
       inline === undefined
         ? undefined
-        : await confirmAgentPlatformSelection(
+        : await confirmRetellAgent(
             inline,
-            inlineSelection,
+            inlineChoice,
+            undefined,
             options.retellFetch,
           );
     if (isRefusal(confirmedInline)) return refused(reply, confirmedInline);
+
+    /*
+     * The agent this registration would reuse, and whether it is already bound
+     * somewhere else. Asked here so the ordinary refusal writes nothing at all.
+     */
+    if (confirmedInline !== undefined) {
+      const reusing = await reusedAgentFor(acting, confirmedInline.connection);
+      const bound =
+        reusing === undefined ? undefined : boundElsewhere(reusing, inlineChoice);
+      if (bound !== undefined) return refused(reply, bound);
+    }
 
     const registered = await registerAgent(acting, {
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
       agentPlatform,
-      ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
+      ...(confirmedInline === undefined
+        ? {}
+        : { connection: confirmedInline.connection }),
     });
+
+    /*
+     * The key lands on the agent this registration settled on — created,
+     * reused or extended alike — because custody belongs to the identity, not
+     * to the request that happened to carry the paste.
+     */
+    if (confirmedInline?.custody !== undefined) {
+      /*
+       * A registration can reuse an agent that already exists, so this is the
+       * path where the binding rule can be met without the request ever naming
+       * an agent id. The refusal is the access layer's own sentence.
+       */
+      const stopped = await takeCustody(
+        acting,
+        registered.agent.id,
+        confirmedInline.custody,
+        pull,
+      );
+      if (stopped !== undefined) {
+        /*
+         * **A refusal un-writes exactly what this request wrote, and nothing
+         * else.** That is the whole rule, and each of its three halves was
+         * learned by getting it wrong:
+         *
+         * - **The connection, when this request created one.** `created` and
+         *   `connection_added` each wrote a row; `reused` wrote none. On
+         *   `reused` the connection predates this request — the registration
+         *   rotated its credential and nothing more — so archiving it would
+         *   take away a working way into an agent over a refusal that was only
+         *   ever about the pull switch, and could leave that agent with no way
+         *   in at all.
+         * - **Never the agent.** An agent this request created is unbound the
+         *   instant it is written, so its custody step can only be refused if
+         *   another writer bound it in the window between the insert and the
+         *   seal — which means the agent is theirs, and `archiveAgent`
+         *   cascades over every live connection on it, including the one they
+         *   had just attached.
+         * - **Never a row this request only read.** The pre-check above
+         *   catches the ordinary case before anything is written at all; this
+         *   is the raced one, and a racing request owns less than it thinks.
+         *
+         * A refused creator therefore leaves at worst an empty live agent row,
+         * which is a row and not a loss.
+         */
+        if (
+          registered.connection !== undefined &&
+          registered.result !== "reused"
+        ) {
+          await archiveConnection(
+            acting,
+            registered.agent.id,
+            registered.connection.id,
+          );
+        }
+        return refused(reply, stopped);
+      }
+    }
 
     // Created and extended each wrote a row; reused wrote none, and saying 201
     // for that would be the protocol claiming something the `result` field is
@@ -1136,6 +1520,10 @@ export async function agentRoutes(
     if (isRefusal(wanted)) return refused(reply, wanted);
     const selection = agentPlatformSelectionIn(body.agentPlatformSelection);
     if (isRefusal(selection)) return refused(reply, selection);
+    const choice = retellChoiceIn(body, selection);
+    if (isRefusal(choice)) return refused(reply, choice);
+    const pull = pullFlagIn(body.pullProductionCalls);
+    if (isRefusal(pull)) return refused(reply, pull);
 
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
@@ -1143,18 +1531,59 @@ export async function agentRoutes(
       organizationId: acting.organizationId,
       projectId: acting.projectId,
     });
-    if (selection !== undefined && (await getAgent(acting, agentId)) === undefined) {
+    /*
+     * **The agent is read before the write when a Retell agent was picked**,
+     * because two questions depend on it: whether it exists at all, and
+     * whether it is already bound to a different platform agent. Asking after
+     * the connection was written would leave a connection on an agent this
+     * save was never allowed to bind.
+     */
+    const known = choice === undefined ? undefined : await getAgent(acting, agentId);
+    if (choice !== undefined && known === undefined) {
       return refused(reply, NO_SUCH_AGENT);
     }
-    const confirmed = await confirmAgentPlatformSelection(
+    const bound = known === undefined ? undefined : boundElsewhere(known, choice);
+    if (bound !== undefined) return refused(reply, bound);
+    /*
+     * **The key this agent already holds is lent to the confirmation.** One
+     * paste per agent, ever: a second connection onto the same agent asks for
+     * no key, so the sealed copy is what proves the picked agent — and it is
+     * read here rather than sent back to the browser to be sent in again.
+     */
+    const lent =
+      choice?.apiKey === undefined
+        ? await agentMonitoringKey(acting, agentId)
+        : undefined;
+    const confirmed = await confirmRetellAgent(
       wanted,
-      selection,
+      choice,
+      lent,
       options.retellFetch,
     );
     if (isRefusal(confirmed)) return refused(reply, confirmed);
 
-    const added = await addConnection(acting, agentId, confirmed);
+    const added = await addConnection(acting, agentId, confirmed.connection);
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
+
+    if (confirmed.custody !== undefined) {
+      const stopped = await takeCustody(acting, agentId, confirmed.custody, pull);
+      if (stopped !== undefined) {
+        /*
+         * **A refused save leaves nothing live behind**, the same backstop the
+         * register path carries. `boundElsewhere` above catches the ordinary
+         * case before a row exists; this is the raced one — two requests both
+         * read an unbound agent, both write, and custody serializes them, so
+         * the loser is holding a connection on an agent it was not allowed to
+         * bind. For Retell chat that connection carries its own sealed key,
+         * which makes leaving it a live way in rather than only a stray row.
+         *
+         * The agent is never archived here: this path is only ever given one
+         * that already existed, so it was not this request's to remove.
+         */
+        await archiveConnection(acting, agentId, added.id);
+        return refused(reply, stopped);
+      }
+    }
 
     return reply.code(201).send({ connection: describedConnection(added) });
   });

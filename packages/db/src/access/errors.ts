@@ -382,6 +382,35 @@ export class UnprocessableInputError extends Error {
 }
 
 /**
+ * A save asked one egma agent to bind to a second platform agent.
+ *
+ * **A subclass, because the sentence is the whole of the answer** — every
+ * layer that relays an `UnprocessableInputError` word for word is right about
+ * this one too. What the subclass buys is the two ids, so a caller that wants
+ * to say something else can, and so a test can assert the binding rather than
+ * the prose.
+ *
+ * **The sentence names both agents and gives the way out.** Retell gives a
+ * voice agent and a chat agent different ids; one egma agent holds one
+ * binding, so the second platform agent belongs to a second egma agent. Saying
+ * only "already bound" would leave somebody guessing which of the two ids
+ * Egma is keeping.
+ */
+export class AgentAlreadyBoundError extends UnprocessableInputError {
+  readonly boundTo: string;
+  readonly asked: string;
+
+  constructor(agentName: string, boundTo: string, asked: string) {
+    super(
+      `${agentName} is Retell agent ${boundTo}. Register ${asked} as its own agent.`,
+    );
+    this.name = "AgentAlreadyBoundError";
+    this.boundTo = boundTo;
+    this.asked = asked;
+  }
+}
+
+/**
  * A write named a persona by a name that more than one active persona in the
  * project answers to.
  *

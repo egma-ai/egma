@@ -3,6 +3,11 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { connectionsOnRow, type ListedConnection } from "@/lib/agents.ts";
 
 /**
@@ -54,19 +59,21 @@ export function modalityLabel(modality: string): string {
  * quiet rather than a warning, because being unwired is a fact about setup and
  * not a failure anybody has had yet.
  *
- * **The overflow chip counts rather than lists.** Two links, then "+3" — and
- * the chip opens the agent, which is the one page that holds every connection.
- * A row that grew a line per connection would be a different height per agent,
- * and a column of ragged rows is what makes a dense list hard to scan.
+ * **The overflow chip counts rather than lists, and opens what it counts.**
+ * Two links, then "+3" — and pressing the chip drops a popover holding every
+ * connection this agent has, each one a link to its own sheet (`IZJ-0`). It is
+ * links and nothing else: no rename, no delete, no facts. There is no agent
+ * page behind it any more, so a chip that only navigated would now have
+ * nowhere honest to go.
  */
 export function ConnectionsOnRow({
   connections,
-  agentHref,
+  agentName,
   hrefOf,
 }: {
   readonly connections: readonly ListedConnection[];
-  /** Where the overflow chip goes: the one page that holds them all. */
-  readonly agentHref: string;
+  /** Whose connections these are, for the control that says so out loud. */
+  readonly agentName: string;
   readonly hrefOf: (connection: ListedConnection) => string;
 }) {
   if (connections.length === 0) {
@@ -97,13 +104,7 @@ export function ConnectionsOnRow({
         </Link>
       ))}
       {overflow === 0 ? null : (
-        /*
-         * The chip is a link and says what it counts. "+3" alone is a number a
-         * screen reader would read as a number; the hidden half names what the
-         * number is of, so the same control means the same thing however it is
-         * read.
-         */
-        <Badge asChild shape="count">
+        <Popover>
           {/*
            * **The chip is not underlined, and the links beside it are.** A cell
            * link in this product wears an underline (`DESIGN.md`), and a chip
@@ -111,11 +112,41 @@ export function ConnectionsOnRow({
            * surface, and an underline inside that border reads as a second,
            * broken link rather than as one control.
            */}
-          <Link className="flex-none no-underline" href={agentHref}>
-            <span aria-hidden="true">{`+${String(overflow)}`}</span>
-            <span className="sr-only">{`${String(overflow)} more connections`}</span>
-          </Link>
-        </Badge>
+          <PopoverTrigger asChild>
+            <Badge asChild shape="count">
+              <button className="flex-none cursor-pointer no-underline" type="button">
+                <span aria-hidden="true">{`+${String(overflow)}`}</span>
+                <span className="sr-only">
+                  {`Show all ${String(connections.length)} connections for ${agentName}`}
+                </span>
+              </button>
+            </Badge>
+          </PopoverTrigger>
+          {/*
+           * 224px and 34px rows, off `IZJ-0`, and the panel grows from the chip
+           * it was opened from — the origin `tailwind-theme.css` reads off
+           * Radix for every popover in the product.
+           */}
+          <PopoverContent
+            align="start"
+            className="w-[224px] p-0 py-1.5"
+            aria-label={`Connections for ${agentName}`}
+          >
+            <ul className="m-0 flex list-none flex-col p-0">
+              {connections.map((one) => (
+                <li key={one.id} className="contents">
+                  <Link
+                    className="flex min-h-[34px] items-center truncate px-4 text-sm text-foreground transition-colors duration-(--duration-hover) ease-out pointer-hover:bg-surface-soft"
+                    href={hrefOf(one)}
+                    title={one.name}
+                  >
+                    {one.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
       )}
     </span>
   );

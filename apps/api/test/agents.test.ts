@@ -1,6 +1,8 @@
 import {
   createAgent,
   createProject,
+  enablePullProductionCalls,
+  sealAgentMonitoringKey,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -378,7 +380,7 @@ describe("discovering simulation agents", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm the number still reaches the selected agent",
     });
     const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(read.body.connections).toEqual([]);
@@ -404,7 +406,7 @@ describe("discovering simulation agents", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm the number still reaches the selected agent",
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -475,6 +477,557 @@ describe("discovering simulation agents", () => {
     });
 
     expect(connectionOf(connected).agentPlatform).toBe("retell");
+  });
+
+  /**
+   * **One egma agent binds to one platform agent** (the rule the connect
+   * ticket confirmed while building). Retell gives a voice agent and a chat
+   * agent different ids, so a second connection picking a *different* Retell
+   * agent under one egma agent is asking for a second binding.
+   *
+   * Overwriting quietly is the dangerous half: monitoring would go on running
+   * under the same name while reading a different Retell agent, and one
+   * agent's production calls would accumulate against another's results
+   * history. So it is refused, in a sentence that names both and says where
+   * the second one belongs.
+   */
+  /** A Retell account holding one voice agent, one chat agent and one number. */
+  function retellAccountAnswering(): typeof fetch {
+    return vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v2/list-agents") {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                agent_id: "agent_voice_1",
+                agent_name: "Front desk",
+                channel: "voice",
+              },
+              {
+                agent_id: "agent_chat_9",
+                agent_name: "Web chat",
+                channel: "chat",
+              },
+            ],
+            has_more: false,
+          }),
+          { status: 200 },
+        );
+      }
+      if (path.startsWith("/get-phone-number/")) {
+        return new Response(
+          JSON.stringify({
+            phone_number: "+14155550100",
+            nickname: "Main",
+            inbound_agents: [{ agent_id: "agent_voice_1" }],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected Retell request ${path}`);
+    }) as unknown as typeof fetch;
+  }
+
+  it("refuses a second Retell agent under one egma agent, and writes nothing", async () => {
+    api = await createApi("retell_second_binding_refused");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    // The first connection binds the agent, exactly as it does today.
+    const first = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const bound = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(agentOf(bound).platformAgentId).toBe("agent_voice_1");
+
+    // And the second one, for another Retell agent, is refused by name.
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "Front desk is Retell agent agent_voice_1. Register agent_chat_9 as its own agent.",
+    });
+
+    /*
+     * Nothing was written: not a second connection, and — the half that
+     * matters — not the binding or the sealed key underneath it.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(1);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(after).monitoringApiKeyHint).toBe("WXYZ");
+  });
+
+  /**
+   * **The checkbox starts the pull on the same save.** Monitoring begins where
+   * the connection is made rather than on a screen of its own, and the switch
+   * is the only stored monitoring choice in the product (ADR-0015).
+   */
+  it("starts pulling production calls on the save that ticked the box", async () => {
+    api = await createApi("retell_connect_starts_pulling");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    expect(agentOf(created).pullProductionCalls).toBe(false);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    const connected = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(connected.status, JSON.stringify(connected.body)).toBe(201);
+
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(agentOf(after).pullProductionCalls).toBe(true);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    // The key is sealed on the agent, and only its last characters come back.
+    expect(agentOf(after).monitoringKeyPresent).toBe(true);
+    expect(agentOf(after).monitoringApiKeyHint).toBe("WXYZ");
+    expect(JSON.stringify(after.body)).not.toContain("retell-secret-confirm-WXYZ");
+  });
+
+  /**
+   * The save re-reads the picked agent before it stores anything, in the
+   * spelling the connect sheet now uses.
+   *
+   * Discovery is a snapshot: a number that has stopped answering for the
+   * picked agent between listing and saving is refused rather than stored.
+   */
+  it("refuses a phone number that no longer reaches the picked agent", async () => {
+    api = await createApi("retell_platform_agent_id_verified");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Front desk",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (path.startsWith("/get-phone-number/")) {
+          return new Response(
+            JSON.stringify({
+              phone_number: "+14155550100",
+              nickname: "Main",
+              inbound_agents: [{ agent_id: "agent_somebody_else" }],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "That phone number is no longer routed to the selected agent. Load the account again.",
+    });
+    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(read.body.connections).toEqual([]);
+    // Nothing was bound and no key was sealed by a save that did not land.
+    expect(agentOf(read).platformAgentId).toBeNull();
+    expect(agentOf(read).monitoringKeyPresent).toBe(false);
+  });
+
+  /**
+   * The raced second binding, and the connection it must not leave behind.
+   *
+   * **The pre-check and the rule are two different moments.** The route reads
+   * the agent and finds it unbound, then confirms the candidate with Retell,
+   * then writes the connection, and only then does custody meet the binding
+   * rule inside its own transaction. Two requests arriving together both pass
+   * the read; one of them meets the rule after it has already written.
+   *
+   * The race is seeded honestly rather than described: the agent is bound
+   * through the access layer *from inside the Retell call*, which is the exact
+   * window between the pre-check and the write. What is asserted is that the
+   * loser leaves nothing live — for a chat connection that row would carry its
+   * own sealed key, so leaving it is leaving a way in, not a stray record.
+   */
+  it("puts back the connection it wrote when the binding rule refuses it", async () => {
+    api = await createApi("retell_raced_binding_undone");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    const acting = contextFor(ada, "admin");
+
+    let bound = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          /*
+           * The other request wins here: between this request's pre-check,
+           * which read an unbound agent, and the write it is about to make.
+           */
+          if (!bound) {
+            bound = true;
+            await sealAgentMonitoringKey(acting, {
+              agentId,
+              agentPlatform: "retell",
+              platformAgentId: "agent_voice_1",
+              apiKey: "retell-secret-the-winner-ABCD",
+            });
+          }
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_chat_9",
+                  agent_name: "Web chat",
+                  channel: "chat",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-the-loser-WXYZ" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "Front desk is Retell agent agent_voice_1. Register agent_chat_9 as its own agent.",
+    });
+
+    /*
+     * Nothing live is left: no way into the agent through the connection this
+     * request wrote, and the winner's binding and key stand untouched.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toEqual([]);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(after).monitoringApiKeyHint).toBe("ABCD");
+
+    // It was put back rather than never written, which is the honest record.
+    const { rows } = await api.database.sql<{
+      archived_at: string | null;
+    }>("select archived_at from connection where agent_id = $1", [agentId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.archived_at).not.toBeNull();
+  });
+
+  /**
+   * A registration refused by custody leaves its agent alive.
+   *
+   * **The cleanup archives the connection and never the agent**, and the
+   * reason is sharper than tidiness. An agent a registration just created is
+   * unbound the instant it is written, so the binding rule can only refuse it
+   * if another writer bound it in the window between the insert and the seal —
+   * which means the agent is that writer's, and archiving it would take every
+   * live connection on it, including the one they had just attached. The one
+   * branch that destroyed somebody else's work was the only branch that could
+   * fire.
+   *
+   * The refusal used here is the other one custody can answer with — the
+   * one-switched-on-agent rule — because it is reachable without a race and it
+   * runs the same cleanup. What is asserted is the shape of that cleanup: the
+   * connection put back, the agent still alive, and the agent that already
+   * watches this platform agent untouched.
+   */
+  it("leaves the agent alive when custody refuses the registration", async () => {
+    api = await createApi("retell_register_cleanup_keeps_agent");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const acting = contextFor(ada, "admin");
+
+    // The agent that already watches this Retell agent, and its own way in.
+    const watching = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Night line",
+    });
+    const watchingId = String(agentOf(watching).id);
+    await enablePullProductionCalls(acting, {
+      agentId: watchingId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_voice_1",
+      apiKey: "retell-secret-the-winner-ABCD",
+    });
+
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-the-loser-WXYZ" },
+      },
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "agent_voice_1 is already watched by another agent in this project. " +
+        "One Egma agent watches one Retell agent, so turn that agent's switch " +
+        "off first, or connect without ticking Pull production calls.",
+    });
+
+    /*
+     * The agent this registration made is still here, with no live way in.
+     * Archiving it was what cascaded over connections that were never this
+     * request's to touch.
+     */
+    const { rows } = await api.database.sql<{
+      id: string;
+      archived_at: string | null;
+    }>("select id, archived_at from agent where name = 'Front desk'");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.archived_at, "the refused registration archived its agent").toBeNull();
+
+    const made = await get(
+      `/v1/agents/${String(rows[0]?.id)}`,
+      withKey(ada.secret),
+    );
+    expect(made.body.connections).toEqual([]);
+    expect(agentOf(made).pullProductionCalls).toBe(false);
+
+    // And the agent that was already watching is exactly as it was.
+    const winner = await get(`/v1/agents/${watchingId}`, withKey(ada.secret));
+    expect(agentOf(winner).pullProductionCalls).toBe(true);
+    expect(agentOf(winner).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(winner).monitoringApiKeyHint).toBe("ABCD");
+  });
+
+  /**
+   * A registration that *reused* an agent leaves its way in alone.
+   *
+   * **`reused` means this request wrote no connection.** The registration
+   * rotated the credential on a connection that was already there and nothing
+   * more, so a custody refusal has nothing of its own to put back — and
+   * archiving that row would take away a working way into somebody's agent
+   * over a refusal that was only ever about the pull switch. An agent whose
+   * one connection is the reused one would have been left unreachable by a
+   * request that failed.
+   */
+  it("archives nothing when the registration reused the connection it refused on", async () => {
+    api = await createApi("retell_reused_connection_survives");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const acting = contextFor(ada, "admin");
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    // The agent and the chat connection that is its only way in.
+    const first = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-the-first-WXYZ" },
+      },
+    });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const agentId = String(agentOf(first).id);
+    const connectionId = String(
+      (first.body.connection as Record<string, unknown>).id,
+    );
+
+    // And another agent that already watches the same Retell agent, so the
+    // pull switch-on below is refused after the reuse has happened.
+    const watching = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Night line",
+    });
+    const watchingId = String(agentOf(watching).id);
+    await enablePullProductionCalls(acting, {
+      agentId: watchingId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_chat_9",
+      apiKey: "retell-secret-the-winner-ABCD",
+    });
+
+    // The same registration again, this time asking for production calls.
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-the-second-WXYZ" },
+      },
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "agent_chat_9 is already watched by another agent in this project. " +
+        "One Egma agent watches one Retell agent, so turn that agent's switch " +
+        "off first, or connect without ticking Pull production calls.",
+    });
+
+    /*
+     * The way in that was there before this request is still there. It was
+     * never this request's to remove: the registration reused it.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(1);
+    expect(
+      (after.body.connections as readonly Record<string, unknown>[])[0]?.id,
+      "the refused registration archived a connection it did not write",
+    ).toBe(connectionId);
+
+    // And the agent that was already watching is exactly as it was.
+    const winner = await get(`/v1/agents/${watchingId}`, withKey(ada.secret));
+    expect(agentOf(winner).pullProductionCalls).toBe(true);
+    expect(agentOf(winner).monitoringApiKeyHint).toBe("ABCD");
+  });
+
+  /** The ordinary second connection: the same Retell agent, another way in. */
+  it("adds a second way into the Retell agent it is already bound to", async () => {
+    api = await createApi("retell_same_binding_reconnect");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    for (const body of [
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        name: "second line",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    ]) {
+      const added = await post(
+        `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+        withKey(ada.secret),
+        body,
+      );
+      expect(added.status, JSON.stringify(added.body)).toBe(201);
+    }
+
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(2);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
   });
 
   it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
@@ -1189,7 +1742,7 @@ describe("a livekit connection", () => {
       payload: { topology: "agent-dials-out" },
       message:
         'a connection has no key "topology"; it holds name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection",
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection",
     },
     {
       named: "a credential key that does not belong",
@@ -1575,7 +2128,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1613,7 +2166,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection',
     });
   });
 });

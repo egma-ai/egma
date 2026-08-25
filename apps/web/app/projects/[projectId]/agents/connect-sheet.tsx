@@ -10,6 +10,7 @@ import {
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -27,10 +28,7 @@ import { agentPlatformText } from "@/lib/agents.ts";
 import {
   agentPlatformChoices,
   agentsForOption,
-  candidatesForOption,
-  optionNamed,
   optionsForPlatform,
-  type ConnectionCandidate,
   type ConnectionOption,
   type ConnectionOptionCatalog,
   type DiscoveredAgent,
@@ -53,32 +51,33 @@ import {
 import { AgentOnboardingProgress } from "./onboarding-progress.tsx";
 
 /**
- * Connecting an agent: one panel, over the list, that does both halves.
+ * Connecting an agent: one panel, over the list, one save.
  *
- * **It used to be two pages.** Register the agent on one, then be forwarded to
- * a second for its first connection — and an agent that got no further sat in
- * the list with nothing behind it. The boards put both in one side sheet
- * (`7E0-0` … `7TU-0`): the agent at the top, the way in under it, one submit.
- * `DESIGN.md` records the side sheet as where an agent or a connection is
- * created, read and edited.
+ * **It used to be two ideas.** Register the agent, then add a connection — and
+ * the Retell half asked a person to copy an agent id out of another product by
+ * hand, behind a "Load Retell agents" button they had to know to press. The
+ * boards of 2026-08-24 (`I79-0`, `ICT-0`, `II3-0`) draw one sheet: the agent
+ * at the top, the way in under it, one submit, and no step anywhere that Egma
+ * could have taken itself.
  *
- * **The "Platform" select names both the new agent's platform and the first
- * connection's platform.** Registration stores it on the agent. The connection
- * keeps it in its request while that older request shape still exists, and the
- * database checks that the two facts do not conflict.
+ * **The key loads the account the moment it looks like a key.** No button:
+ * pasting a key is the person saying "this is my account", and asking them to
+ * confirm it by pressing something is asking twice. The agents come back by
+ * name and the pick is by name; the id never appears in the flow.
+ *
+ * **One paste per agent, ever.** The save seals the key on the agent, so a
+ * second connection onto the same agent shows no key field at all — the sheet
+ * says which key the agent holds and lists the account with it.
+ *
+ * **"Create a new agent" is last.** Reuse is the ordinary case and creation is
+ * the fallback, so the picker reads as a list of agents with a way to make one
+ * under it rather than a create form with a list attached.
  *
  * **Modality is a control on Retell and a sentence on LiveKit**, because that
  * is what the catalog says. Retell offers a chat option and a voice option, so
  * the segmented control chooses between two real connection shapes. LiveKit
  * offers voice and nothing else, so a two-way control there would offer a
- * choice that does not exist; the board draws a line of text and so does this.
- *
- * **Retell keeps its discovery block, which the board does not draw.** The
- * board shows one "Retell API key" box. That box cannot make either Retell
- * connection: a Retell phone connection *requires* `agentPlatformSelection`,
- * and a Retell chat connection has no other supplier of `retellAgentId`. The
- * key box is the first field of the block, so the board's first step is still
- * the first step.
+ * choice that does not exist.
  */
 
 export type ConnectSheetResult = {
@@ -90,6 +89,27 @@ export type ConnectSheetResult = {
 
 /** What "create a new agent" is, as a value the select can hold. */
 const NEW_AGENT = "";
+
+/**
+ * Shorter than any key Retell issues, so the account is not read for it.
+ *
+ * It is a floor rather than a format: the server is what decides whether a key
+ * works, and a browser inventing a stricter shape would refuse a key that does.
+ */
+const SHORTEST_KEY = 8;
+
+/**
+ * The platforms an agent can be connected on: Retell and LiveKit, and no
+ * third one (founder ruling, 2026-08-24).
+ *
+ * **The catalog carries one more.** A phone number belongs to no platform in
+ * particular, so the registry lists it under a platform-less option labelled
+ * "Any or unknown" — which is a true thing about a connection type and a
+ * meaningless answer to "what runs your agent". Offering it let somebody
+ * register an agent bound to nothing, which nothing downstream can monitor.
+ * The catalog is not changed; this sheet chooses what it offers from it.
+ */
+const OFFERED_PLATFORMS: readonly string[] = ["retell", "livekit"];
 
 /**
  * The connection half of the write, typed from the operation that carries it.
@@ -154,9 +174,20 @@ export function ConnectAgentSheet({
     readonly DiscoveredAgent[] | null
   >(null);
   const [discoveredAgentId, setDiscoveredAgentId] = useState("");
-  const [candidateIndex, setCandidateIndex] = useState(0);
   const [discovering, setDiscovering] = useState(false);
   const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
+  /** Whether this save also starts pulling the agent's production calls. */
+  const [pullCalls, setPullCalls] = useState(false);
+  /**
+   * The Retell agent the person chose themselves, if they have chosen one.
+   *
+   * **It is the id, not a flag.** The picker's *value* is what the current
+   * modality can show, and a modality that cannot reach the chosen agent has
+   * to show something else — so the value is not a record of what was chosen.
+   * Kept apart, the choice survives the trip through a modality that does not
+   * have it, and the way back restores it.
+   */
+  const [handPicked, setHandPicked] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -212,9 +243,13 @@ export function ConnectAgentSheet({
           window.location.replace("/sign-in");
         } else if (read.status === "ready") {
           setCatalog(read.value);
-          const first = read.value.items[0];
+          // The first option on a platform this sheet offers — never the
+          // catalog's own first item, which may be the platform-less one.
+          const first = read.value.items.find((one) =>
+            OFFERED_PLATFORMS.includes(one.agentPlatform ?? ""),
+          );
           if (first !== undefined) {
-            setPlatformValue(first.agentPlatform ?? "unknown");
+            setPlatformValue(first.agentPlatform ?? "");
             setModality(first.modality);
             setAccessVariant(first.accessVariant);
           }
@@ -238,11 +273,9 @@ export function ConnectAgentSheet({
   const platformFixed = !creating && boundPlatform !== null;
   const selectedPlatform = platformFixed
     ? boundPlatform
-    : platformValue === "unknown"
+    : platformValue === ""
       ? null
-      : platformValue === ""
-        ? null
-        : platformValue;
+      : platformValue;
 
   const platformOptions = optionsForPlatform(catalog, selectedPlatform);
   const modalities = [...new Set(platformOptions.map((one) => one.modality))];
@@ -257,16 +290,32 @@ export function ConnectAgentSheet({
 
   const usesAgentDiscovery = option?.agentPlatform === "retell";
   const matchingAgents = agentsForOption(discoveredAgents, option);
-  const chosenDiscoveredAgent = matchingAgents.find(
-    (one) => one.platformAgentId === discoveredAgentId,
-  );
-  const matchingCandidates =
-    chosenDiscoveredAgent === undefined
-      ? []
-      : candidatesForOption(chosenDiscoveredAgent, option);
-  const chosenCandidate = matchingCandidates[candidateIndex];
-  const chosenCandidateOption =
-    chosenCandidate === undefined ? undefined : optionNamed(catalog, chosenCandidate);
+  /**
+   * The key this flow will use, and where it came from.
+   *
+   * An agent that already holds one is never asked again (`ICT-0`): the sheet
+   * says which key it holds and every listing spends the sealed copy, which
+   * the server reads for itself. Otherwise the paste is the key, and it is the
+   * paste that will be sealed by this save.
+   */
+  const sealedKeyHint = known?.monitoringKeyPresent === true
+    ? known.monitoringApiKeyHint
+    : null;
+  /** The platform agent this egma agent is already bound to, or nothing. */
+  const boundPlatformAgentId = known?.platformAgentId ?? null;
+  const asksForKey = usesAgentDiscovery && sealedKeyHint === null;
+  const pasted = discoveryKey.trim();
+  /** Long enough to be a key at all, which is when the account is read. */
+  const keyLooksReal = pasted.length >= SHORTEST_KEY;
+  /** Which agent this connection will be made on, for the words that name it. */
+  const namedAgent = creating
+    ? agentName.trim() === ""
+      ? "this agent"
+      : agentName.trim()
+    : (known?.name ?? "this agent");
+  const phoneNumber = draft.config["phoneNumber"]?.trim() ?? "";
+  const needsPhoneNumber =
+    usesAgentDiscovery && option?.connectionType === "phone_number";
   const liveKitForm = liveKitDispatchForm({
     connectionType: option?.connectionType,
     option,
@@ -284,20 +333,40 @@ export function ConnectAgentSheet({
     Object.values(draft.credentials).some((value) => value !== "");
   useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
 
+  /**
+   * Forget what was typed for one connection shape, and keep the account.
+   *
+   * **The account is not part of the draft.** `discoverAgents` answers the
+   * whole Retell account and this sheet filters it by the chosen option, so
+   * switching Chat↔Voice is a different view of the same answer rather than a
+   * reason to ask again. Clearing it here left the person stranded: the
+   * listing's own effect watches the key and the agent, neither of which a
+   * modality switch touches, so nothing re-ran and the picker stayed empty
+   * with Connect disabled until they retyped the key.
+   *
+   * The pick is kept too. It survives a switch that has it on both sides, and
+   * the effect below corrects it when the new modality cannot reach it — so
+   * Voice → Chat → Voice comes back to the agent it started on.
+   *
+   * The account is dropped where the account genuinely changes: a new key, or
+   * a different agent whose sealed key opens a different one.
+   */
   function forgetConnectionDraft(): void {
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
-    setDiscoveryKey("");
-    setDiscoveredAgents(null);
-    setDiscoveredAgentId("");
-    setCandidateIndex(0);
     setDiscoverRefused(null);
     setRefused(null);
   }
 
+  /** Drop the account listing itself, and everything read out of it. */
+  function forgetDiscoveredAccount(): void {
+    setDiscoveredAgents(null);
+    setDiscoveredAgentId("");
+    setHandPicked(null);
+  }
+
   function choosePlatform(next: string): void {
-    const platform = next === "unknown" ? null : next;
-    const forPlatform = optionsForPlatform(catalog, platform);
+    const forPlatform = optionsForPlatform(catalog, next);
     const first = forPlatform[0];
     setPlatformValue(next);
     setModality(first?.modality ?? "");
@@ -321,6 +390,15 @@ export function ConnectAgentSheet({
     setChosenAgent(next);
     setAgentNameProblem(null);
     setRefused(null);
+    /*
+     * The key belongs to the agent, so changing agent drops the paste and the
+     * account it opened. Keeping them would leave one agent's list on screen
+     * under another agent's name.
+     */
+    setDiscoveryKey("");
+    setPullCalls(false);
+    forgetDiscoveredAccount();
+    forgetConnectionDraft();
   }
 
   function chooseLiveKitDispatch(next: LiveKitDispatch): void {
@@ -331,80 +409,137 @@ export function ConnectAgentSheet({
     }));
   }
 
-  function chooseFirstDiscoveredCandidate(
-    found: readonly DiscoveredAgent[],
-    selectedOption = option,
-  ): void {
-    const first = found.find(
-      (one) => candidatesForOption(one, selectedOption).length > 0,
-    );
-    setDiscoveredAgentId(first?.platformAgentId ?? "");
-    setCandidateIndex(0);
-  }
+  /**
+   * Read the Retell account, by itself.
+   *
+   * **There is no button.** The listing runs when the key looks like a key, or
+   * at once for an agent that already holds one — pressing something to
+   * confirm a paste is asking the same question twice. It is debounced so that
+   * a paste is one request rather than one per keystroke, and every answer
+   * that lands after the question changed is dropped.
+   */
+  useEffect(() => {
+    if (!usesAgentDiscovery) return undefined;
+    const spending: { readonly credentials: { readonly apiKey: string } } | { readonly agentId: string } | null =
+      asksForKey
+        ? keyLooksReal
+          ? { credentials: { apiKey: pasted } }
+          : null
+        : chosenAgent === NEW_AGENT
+          ? null
+          : { agentId: chosenAgent };
+    if (spending === null) {
+      setDiscoveredAgents(null);
+      setDiscoveredAgentId("");
+      setDiscoverRefused(null);
+      return undefined;
+    }
 
-  async function findAgents(): Promise<void> {
-    if (
-      discovering ||
-      discoveryKey.trim() === "" ||
-      option?.agentPlatform !== "retell"
-    ) {
-      return;
-    }
+    let current = true;
     setDiscoverRefused(null);
-    setDiscoveredAgents(null);
-    setDiscoveredAgentId("");
-    setCandidateIndex(0);
     setDiscovering(true);
-    const answer = await platformAnswer(
-      discoverAgents(
-        {
-          projectId,
-          agentPlatform: option.agentPlatform,
-          credentials: { apiKey: discoveryKey },
-        },
-        { client: platformClient },
-      ),
-    );
-    setDiscovering(false);
-    if (answer.status === "signed-out") {
-      window.location.replace("/sign-in");
+    const settle = setTimeout(() => {
+      void platformAnswer(
+        discoverAgents(
+          { projectId, agentPlatform: "retell", ...spending },
+          { client: platformClient },
+        ),
+      ).then((answer) => {
+        if (!current) return;
+        setDiscovering(false);
+        if (answer.status === "signed-out") {
+          window.location.replace("/sign-in");
+          return;
+        }
+        if (answer.status !== "ready") {
+          setDiscoveredAgents(null);
+          setDiscoveredAgentId("");
+          setDiscoverRefused(answer.refusal);
+          return;
+        }
+        // Discovery never returns a credential. The paste stays in its field
+        // until the save seals it on the agent.
+        setDiscoveredAgents(answer.value.agents);
+      });
+    }, 350);
+
+    return () => {
+      current = false;
+      clearTimeout(settle);
+      setDiscovering(false);
+    };
+  }, [usesAgentDiscovery, asksForKey, keyLooksReal, pasted, chosenAgent, projectId]);
+
+  /**
+   * The picked agent, kept true to the list under it — and pre-selected on the
+   * one this egma agent is already bound to.
+   *
+   * **One egma agent binds to one platform agent.** An agent Egma already
+   * knows as `agent_voice_1` is offered that agent, so the ordinary second
+   * connection is right without anybody choosing again. Picking another one is
+   * still allowed to be attempted: the server holds the rule and answers in
+   * place, and a control that refused locally would be a second opinion able
+   * to disagree with it.
+   *
+   * **Changing modality changes what can be reached, not what was chosen.**
+   * An account's chat agents and its voice agents are different sets, so a
+   * modality that cannot reach the chosen agent shows something else — and the
+   * choice is remembered beside the value rather than replacing it, so coming
+   * back restores it. A pick is only forgotten when the account itself is.
+   */
+  useEffect(() => {
+    if (matchingAgents.length === 0) {
+      if (discoveredAgentId !== "") setDiscoveredAgentId("");
       return;
     }
-    if (answer.status !== "ready") {
-      setDiscoverRefused(answer.refusal);
-      return;
-    }
-    // Discovery never returns a credential. The key stays in this password
-    // field until the selected candidate is confirmed for the generic write.
-    setDiscoveredAgents(answer.value.agents);
-    chooseFirstDiscoveredCandidate(answer.value.agents);
-  }
+    /*
+     * **Nothing is pre-selected until Egma knows what this agent is bound
+     * to.** The account listing and the agent read race, and picking the
+     * list's first entry while the read is still in flight would show one
+     * agent and then swap it for another under the person's eyes.
+     */
+    if (chosenAgent !== NEW_AGENT && known === null) return;
+
+    const reachable = (id: string | null): boolean =>
+      id !== null && matchingAgents.some((one) => one.platformAgentId === id);
+
+    /*
+     * What this modality should show, in the order the answers outrank one
+     * another:
+     *
+     * 1. **The choice, whenever this modality can reach it.** A person who
+     *    picked an agent has said which agent this is about, and a switch to
+     *    Chat and back is not them changing their mind. The correction below
+     *    used to overwrite the pick itself, so the round trip quietly landed
+     *    them on the account's first agent — the wrong provider agent, saved
+     *    without anything having said so.
+     * 2. **The binding, while nobody has chosen.** One egma agent binds to one
+     *    platform agent, so the ordinary second connection is right without
+     *    anybody choosing again.
+     * 3. **What is already showing**, when this modality can still reach it.
+     * 4. **The first agent it can reach**, which is the only answer left.
+     */
+    const wanted = reachable(handPicked)
+      ? (handPicked ?? "")
+      : handPicked === null && reachable(boundPlatformAgentId)
+        ? (boundPlatformAgentId ?? "")
+        : reachable(discoveredAgentId)
+          ? discoveredAgentId
+          : (matchingAgents[0]?.platformAgentId ?? "");
+
+    if (discoveredAgentId !== wanted) setDiscoveredAgentId(wanted);
+  }, [
+    matchingAgents,
+    discoveredAgentId,
+    boundPlatformAgentId,
+    handPicked,
+    chosenAgent,
+    known,
+  ]);
 
   /** Everything the connection half of this panel is about to send. */
   function connectionBody(chosen: ConnectionOption): ConnectionBody {
     const common = { ...(name.trim() === "" ? {} : { name: name.trim() }) };
-    if (
-      usesAgentDiscovery &&
-      chosenCandidate !== undefined &&
-      chosenCandidateOption !== undefined
-    ) {
-      return {
-        ...common,
-        agentPlatform: chosenCandidate.agentPlatform,
-        connectionType: chosenCandidate.connectionType,
-        accessVariant: chosenCandidate.accessVariant,
-        modality: chosenCandidate.modality,
-        config: chosenCandidate.config,
-        // The server rechecks this one-time selection immediately before the
-        // generic write. It discards the selection itself and retains the key
-        // only when the chosen access variant needs it for simulation.
-        agentPlatformSelection: {
-          platformAgentId: discoveredAgentId,
-          credentials: { apiKey: discoveryKey },
-        },
-      };
-    }
-
     const config: Record<string, string> = {};
     for (const field of chosen.fields) {
       const written = draft.config[field.key]?.trim() ?? "";
@@ -415,6 +550,28 @@ export function ConnectAgentSheet({
       const written = draft.credentials[field.field]?.trim() ?? "";
       if (written !== "") credentials[field.field] = written;
     }
+
+    /*
+     * **Retell names the picked agent and hands over the paste.** The server
+     * confirms the id against the account immediately before the write, seals
+     * the key on the agent, and — when the box is ticked — starts the pull in
+     * the same save. Nothing here sends an id somebody typed: the id came from
+     * the account listing and the person picked a name.
+     */
+    if (usesAgentDiscovery) {
+      return {
+        ...common,
+        agentPlatform: chosen.agentPlatform,
+        connectionType: chosen.connectionType,
+        accessVariant: chosen.accessVariant,
+        modality: chosen.modality,
+        config,
+        platformAgentId: discoveredAgentId,
+        ...(asksForKey ? { credentials: { apiKey: pasted } } : {}),
+        ...(pullCalls ? { pullProductionCalls: true } : {}),
+      };
+    }
+
     return {
       ...common,
       agentPlatform: chosen.agentPlatform,
@@ -461,26 +618,9 @@ export function ConnectAgentSheet({
       return;
     }
 
-    if (creating && newAgentPlatform === null) {
-      setRefused({
-        error: "unprocessable",
-        message: "Choose Retell or LiveKit for the new agent.",
-      });
+    if (usesAgentDiscovery && !retellReady) {
+      setRefused({ error: "unprocessable", message: whyNotYet ?? "" });
       return;
-    }
-
-    if (usesAgentDiscovery) {
-      if (
-        chosenCandidate === undefined ||
-        chosenCandidateOption === undefined ||
-        discoveryKey.trim() === ""
-      ) {
-        setRefused({
-          error: "unprocessable",
-          message: "Load the Retell account, then select an available connection.",
-        });
-        return;
-      }
     }
 
     const body = connectionBody(option);
@@ -489,8 +629,13 @@ export function ConnectAgentSheet({
     setSaving(true);
 
     if (creating) {
-      // Kept beside the typed request as well as the early user-facing guard
-      // because `creating` is not a TypeScript discriminant for the platform.
+      /*
+       * The platform-less option is never offered, so this cannot be reached
+       * by anything a person can press. It stays because `agentPlatform` is
+       * nullable on a connection option and `creating` is not a TypeScript
+       * discriminant for it — the narrowing has to happen somewhere, and
+       * silently is better than a sentence nobody can produce.
+       */
       if (newAgentPlatform === null) {
         setSaving(false);
         return;
@@ -531,17 +676,30 @@ export function ConnectAgentSheet({
     });
   }
 
-  const discoveryReady =
-    !usesAgentDiscovery ||
-    (chosenCandidate !== undefined &&
-      chosenCandidateOption !== undefined &&
-      discoveryKey.trim() !== "");
-  const canSubmit = discoveryReady && liveKitForm.ready;
-  const submitWhy = !discoveryReady
-    ? "Load the Retell account, then select an available connection."
-    : !liveKitForm.ready
-      ? "Enter the exact LiveKit agent name, or choose automatic dispatch."
-      : undefined;
+  /**
+   * What is still missing, said in one sentence and never in a list.
+   *
+   * The order is the order of the fields, so the sentence changes as somebody
+   * fills them in and always names the next thing rather than the last one.
+   */
+  const whyNotYet: string | undefined = !usesAgentDiscovery
+    ? undefined
+    : asksForKey && !keyLooksReal
+      ? "Paste your Retell API key."
+      : discoveredAgentId === ""
+        ? discovering
+          ? "Egma is reading your Retell account."
+          : `Choose the Retell ${modalityLabel(shownModality ?? "voice").toLowerCase()} agent this connection reaches.`
+        : needsPhoneNumber && phoneNumber === ""
+          ? "Type the phone number Egma calls in a simulation."
+          : undefined;
+  const retellReady = !usesAgentDiscovery || whyNotYet === undefined;
+  const canSubmit = retellReady && liveKitForm.ready;
+  const submitWhy =
+    whyNotYet ??
+    (liveKitForm.ready
+      ? undefined
+      : "Enter the exact LiveKit agent name, or choose automatic dispatch.");
 
   /**
    * The picker's options: making one, plus every agent this screen has read.
@@ -569,7 +727,16 @@ export function ConnectAgentSheet({
   ];
 
   function body(): ReactNode {
-    if (role !== null && !mayAuthor) {
+    /*
+     * **While the role is unknown there is no form.** A deep link opens this
+     * panel before the session read has answered, and a form drawn then is an
+     * enabled credential field in front of somebody Egma has not identified —
+     * who may turn out to be a viewer, and be told so only after they had
+     * pasted a key into it. The list gates its own Connect control the same
+     * way, for the same reason.
+     */
+    if (role === null) return <Loading what="what you can do here" />;
+    if (!mayAuthor) {
       return (
         <NotFound
           message={`Your ${role} role cannot connect agents. Ask an organization admin to change your role, then try again.`}
@@ -593,26 +760,35 @@ export function ConnectAgentSheet({
       <>
         {onboarding ? <AgentOnboardingProgress current="connection" /> : null}
 
-        <Field label="Agent" htmlFor="agent-choice">
+          {/*
+          * **Creation is last.** Reuse is the ordinary case, so the list reads
+          * as the agents this project already has with a way to make one under
+          * them (`I79-0`). Putting it first made a new agent the default answer
+          * to "which agent is this", which is how one vendor agent ends up
+          * registered twice.
+          */}
+        <Field label="Agent*" htmlFor="agent-choice">
           <Select
+            aria-required="true"
             id="agent-choice"
             value={chosenAgent}
-            disabled={discovering || saving}
+            disabled={saving}
             onChange={(event) => chooseAgent(event.target.value)}
           >
-            <option value={NEW_AGENT}>Create a new agent</option>
             {choices.map((one) => (
               <option key={one.id} value={one.id}>
                 {one.label}
               </option>
             ))}
+            <option value={NEW_AGENT}>Create a new agent</option>
           </Select>
         </Field>
 
         {creating ? (
-          <SheetGroup eyebrow="New agent" contained>
-            <Field label="Name" htmlFor="agent-name">
+          <SheetGroup eyebrow="New agent">
+            <Field label="Name*" htmlFor="agent-name">
               <Input
+                aria-required="true"
                 id="agent-name"
                 value={agentName}
                 placeholder="Front desk"
@@ -630,10 +806,7 @@ export function ConnectAgentSheet({
               {agentNameProblem === null ? null : (
                 <Problem id="agent-name-problem">{agentNameProblem}</Problem>
               )}
-              <Help>
-                Its name in Egma. Its prompt, model and tools stay where you
-                configure them.
-              </Help>
+              <Help>Its name in Egma, and nowhere else.</Help>
             </Field>
             {platformField()}
           </SheetGroup>
@@ -645,7 +818,7 @@ export function ConnectAgentSheet({
             <ModalityChoice
               value={shownModality}
               modalities={modalities}
-              disabled={discovering || saving}
+              disabled={saving}
               onChange={chooseModality}
             />
           ) : (
@@ -660,7 +833,7 @@ export function ConnectAgentSheet({
               <Select
                 id="access-variant"
                 value={option.accessVariant}
-                disabled={discovering}
+                disabled={saving}
                 onChange={(event) => chooseOption(event.target.value)}
               >
                 {modalityOptions.map((one) => (
@@ -672,7 +845,7 @@ export function ConnectAgentSheet({
             </Field>
           ) : null}
 
-          <Field label="Connection name (optional)" htmlFor="connection-name">
+          <Field label="Connection name [optional]" htmlFor="connection-name">
             <Input
               id="connection-name"
               value={name}
@@ -685,28 +858,37 @@ export function ConnectAgentSheet({
           </Field>
 
           {usesAgentDiscovery ? (
-            <AgentDiscoverySetup
+            <RetellSetup
               apiKey={discoveryKey}
-              loaded={discoveredAgents !== null}
+              asksForKey={asksForKey}
+              sealedKeyHint={sealedKeyHint}
               agents={matchingAgents}
+              loaded={discoveredAgents !== null}
               selectedAgent={discoveredAgentId}
-              candidates={matchingCandidates}
-              selectedCandidate={candidateIndex}
+              modality={shownModality ?? "voice"}
               discovering={discovering}
               refusal={discoverRefused}
+              phoneNumber={draft.config["phoneNumber"] ?? ""}
+              needsPhoneNumber={needsPhoneNumber}
+              pullCalls={pullCalls}
+              agentName={namedAgent}
+              disabled={saving}
               onKeyChange={(value) => {
                 setDiscoveryKey(value);
-                setDiscoveredAgents(null);
-                setDiscoveredAgentId("");
-                setCandidateIndex(0);
+                forgetDiscoveredAccount();
                 setDiscoverRefused(null);
               }}
-              onDiscover={() => void findAgents()}
               onAgentChange={(next) => {
+                setHandPicked(next);
                 setDiscoveredAgentId(next);
-                setCandidateIndex(0);
               }}
-              onCandidateChange={setCandidateIndex}
+              onPhoneNumberChange={(phoneNumber) =>
+                setDraft((current) => ({
+                  ...current,
+                  config: { ...current.config, phoneNumber },
+                }))
+              }
+              onPullChange={setPullCalls}
             />
           ) : (
             <ConnectionFields
@@ -753,20 +935,23 @@ export function ConnectAgentSheet({
         <Select
           id="agent-platform"
           value={platformValue}
-          disabled={discovering || saving}
+          disabled={saving}
           onChange={(event) => choosePlatform(event.target.value)}
         >
-          {agentPlatformChoices(catalog).map((one) => (
-            <option key={one.value} value={one.value}>
-              {one.label}
-            </option>
-          ))}
+          {agentPlatformChoices(catalog)
+            .filter((one) => OFFERED_PLATFORMS.includes(one.value))
+            .map((one) => (
+              <option key={one.value} value={one.value}>
+                {one.label}
+              </option>
+            ))}
         </Select>
       </Field>
     );
   }
 
-  const usable = role === null || mayAuthor;
+  /** The submit exists once Egma knows whose it would be, and not before. */
+  const usable = role !== null && mayAuthor;
 
   return (
     <Sheet
@@ -831,17 +1016,16 @@ function labelFor(name: string, platforms: string | null): string {
 /**
  * A named group of fields inside the sheet, under a letter-spaced eyebrow.
  *
- * `contained` is the NEW AGENT block, which the board draws on the canvas
- * colour inside a hairline (`7E0-0`) — the one block in the panel that is about
- * a different record from the rest of it.
+ * **The grey box is gone.** The NEW AGENT block used to be drawn on the canvas
+ * colour inside a hairline; the 2026-08-24 boards put its fields flush with
+ * the rest of the panel (`I79-0`), so a group is now an eyebrow and the fields
+ * under it, and nothing else.
  */
 function SheetGroup({
   eyebrow,
-  contained = false,
   children,
 }: {
   readonly eyebrow: string;
-  readonly contained?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -849,14 +1033,7 @@ function SheetGroup({
       <p className="m-0 text-2xs tracking-(--tracking-label) text-faint uppercase">
         {eyebrow}
       </p>
-      <div
-        className={cn(
-          "flex flex-col gap-3",
-          contained && "border border-border bg-background p-4",
-        )}
-      >
-        {children}
-      </div>
+      <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
 }
@@ -870,8 +1047,11 @@ function SheetGroup({
  * arrow keys move between the segments and only the chosen one is a tab stop,
  * which is the behaviour every operating system gives a radio group.
  *
- * The chosen segment carries the Ember Wash fill *and* the heavier weight, so
- * the state is not colour alone.
+ * **The chosen segment carries a two-pixel Ember line on its top edge**, over
+ * a plain fill, plus weight 500 so the state is not colour alone (`DESIGN.md`,
+ * developer decision 2026-08-24). The Ember Wash fill it used to wear is the
+ * primary action's own surface, and a segment wearing it read as a button to
+ * press rather than as the choice already made.
  */
 function ModalityChoice({
   value,
@@ -904,14 +1084,29 @@ function ModalityChoice({
           <button
             aria-checked={one === value}
             className={cn(
-              "flex min-h-(--control-md) cursor-pointer items-center justify-center px-6",
+              "relative flex min-h-(--control-md) cursor-pointer items-center justify-center px-6",
               "border-0 bg-transparent text-sm",
-              "transition-[color,background-color] duration-(--duration-hover) ease-out",
+              "transition-colors duration-(--duration-hover) ease-out",
               "disabled:cursor-not-allowed disabled:opacity-55",
               index > 0 && "border-l border-border",
+              /*
+               * The line is drawn by the segment rather than added as an
+               * element, so switching segments moves one painted edge instead
+               * of mounting and unmounting a bar.
+               */
+              "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:content-['']",
+              /*
+               * `bg-brand`, which is Ember. `accent` is the neutral quiet
+               * surface in this theme, so `bg-accent` drew the founder's
+               * two-pixel Ember line in grey — the state was there and the
+               * brand signal was not.
+               */
+              "before:origin-left before:bg-brand before:transition-[opacity,transform]",
+              "before:duration-(--duration-hover) before:ease-out",
+              "motion-reduce:before:transition-none",
               one === value
-                ? "bg-surface-active font-medium text-foreground"
-                : "text-muted-foreground pointer-hover:text-foreground",
+                ? "font-medium text-foreground before:scale-x-100 before:opacity-100"
+                : "text-muted-foreground before:scale-x-0 before:opacity-0 pointer-hover:text-foreground",
             )}
             disabled={disabled}
             key={one}
@@ -966,79 +1161,113 @@ function ModalityLine({
 }
 
 /**
- * The Retell account, its agents, and the route this connection will take.
+ * The Retell half of the sheet: the key, the account it opens, the number Egma
+ * dials, and whether this save also starts pulling production calls.
  *
- * The key loads the account and is kept in the field until the chosen candidate
- * is confirmed for the write. Egma stores it only when the chosen access
- * variant needs it for a simulation.
+ * **The key is asked for once per agent, ever.** An agent that already holds
+ * one shows a line saying which key it holds and no field at all (`ICT-0`);
+ * the account listing spends the sealed copy, which never leaves the server.
+ *
+ * **The listing is not a step.** It runs from the key, and the person picks
+ * their agent by name. The Retell agent id is not typed anywhere and is not
+ * shown anywhere: what a person knows their agent by is its name.
  */
-function AgentDiscoverySetup({
+function RetellSetup({
   apiKey,
-  loaded,
+  asksForKey,
+  sealedKeyHint,
   agents,
+  loaded,
   selectedAgent,
-  candidates,
-  selectedCandidate,
+  modality,
   discovering,
   refusal,
+  phoneNumber,
+  needsPhoneNumber,
+  pullCalls,
+  agentName,
+  disabled,
   onKeyChange,
-  onDiscover,
   onAgentChange,
-  onCandidateChange,
+  onPhoneNumberChange,
+  onPullChange,
 }: {
   readonly apiKey: string;
-  readonly loaded: boolean;
+  readonly asksForKey: boolean;
+  /** The last characters of the key this agent already holds, or null. */
+  readonly sealedKeyHint: string | null;
   readonly agents: readonly DiscoveredAgent[];
+  readonly loaded: boolean;
   readonly selectedAgent: string;
-  readonly candidates: readonly ConnectionCandidate[];
-  readonly selectedCandidate: number;
+  readonly modality: Modality;
   readonly discovering: boolean;
   readonly refusal: Refusal | null;
+  readonly phoneNumber: string;
+  readonly needsPhoneNumber: boolean;
+  readonly pullCalls: boolean;
+  /** Whose calls the checkbox would pull, named in its own label. */
+  readonly agentName: string;
+  readonly disabled: boolean;
   readonly onKeyChange: (value: string) => void;
-  readonly onDiscover: () => void;
   readonly onAgentChange: (value: string) => void;
-  readonly onCandidateChange: (value: number) => void;
+  readonly onPhoneNumberChange: (value: string) => void;
+  readonly onPullChange: (value: boolean) => void;
 }) {
+  const pulls = useId();
+  const spoken = modalityLabel(modality).toLowerCase();
+
   return (
     <>
-      <Field label="Retell API key" htmlFor="retell-api-key">
-        <Input
-          id="retell-api-key"
-          value={apiKey}
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={discovering}
-          onChange={(event) => onKeyChange(event.target.value)}
-        />
-        <Help>
-          Egma uses this key to load your Retell agents and their available
-          connections. Egma stores it only when the selected access method
-          needs it.
-        </Help>
-      </Field>
-      <Button
-        type="button"
-        variant="secondary"
-        disabled={apiKey.trim() === ""}
-        busy={discovering}
-        onClick={onDiscover}
-      >
-        {discovering ? "Loading agents…" : "Load Retell agents"}
-      </Button>
+      {asksForKey ? (
+        <Field label="Retell API key*" htmlFor="retell-api-key">
+          <Input
+            aria-required="true"
+            id="retell-api-key"
+            value={apiKey}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={disabled}
+            onChange={(event) => onKeyChange(event.target.value)}
+          />
+        </Field>
+      ) : sealedKeyHint === null ? null : (
+        <p className="m-0 text-sm leading-(--line-normal) text-faint">
+          {`This agent already holds its Retell key (…${sealedKeyHint}). No key is asked again.`}
+        </p>
+      )}
       {refusal === null ? null : <Problem>{refusal.message}</Problem>}
 
+      {/*
+       * The account, once it answers — and the panel travels in rather than
+       * appearing, so a section that was not there a moment ago explains where
+       * it came from. `DESIGN.md`'s popover pair is the shortest one that
+       * still explains an arrival.
+       */}
       {!loaded ? null : agents.length === 0 ? (
         <Empty
-          title="No Retell agents support this access"
-          lead="Select another access method, or use a key for the account that holds the agent you want to test."
+          title={`No Retell ${spoken} agents on this account`}
+          lead="Switch the modality above, or use a key for the account that holds the agent you want to test."
         />
       ) : (
-        <>
-          <Field label="Retell agent" htmlFor="retell-agent">
+        <div
+          className="flex flex-col gap-3"
+          data-slot="retell-account"
+        >
+          <Field
+            label={`Retell ${spoken} agent*`}
+            htmlFor="retell-agent"
+            hint={
+              asksForKey
+                ? "Loaded from your account with the key above."
+                : "Loaded from your account with the stored key."
+            }
+          >
             <Select
+              aria-required="true"
               id="retell-agent"
               value={selectedAgent}
+              disabled={disabled}
               onChange={(event) => onAgentChange(event.target.value)}
             >
               {agents.map((one) => (
@@ -1048,33 +1277,46 @@ function AgentDiscoverySetup({
               ))}
             </Select>
           </Field>
-          <Field label="Connection" htmlFor="discovered-connection">
-            <Select
-              id="discovered-connection"
-              value={String(selectedCandidate)}
-              onChange={(event) =>
-                onCandidateChange(Number.parseInt(event.target.value, 10))
-              }
+
+          {!needsPhoneNumber ? null : (
+            <Field
+              label="Phone number*"
+              htmlFor="retell-phone-number"
+              hint="The number Egma calls in a simulation, like +15551234567."
             >
-              {candidates.map((candidate, index) => (
-                <option
-                  key={`${candidate.accessVariant}:${String(index)}`}
-                  value={String(index)}
-                >
-                  {candidateLabel(candidate)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </>
+              <Input
+                aria-required="true"
+                className="font-mono"
+                id="retell-phone-number"
+                inputMode="tel"
+                value={phoneNumber}
+                placeholder="+15551234567"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={disabled}
+                onChange={(event) => onPhoneNumberChange(event.target.value)}
+              />
+            </Field>
+          )}
+
+          {/*
+           * **Off by default, and it starts on this save.** Monitoring begins
+           * where the connection is made rather than on a screen of its own;
+           * the first switch-on brings the last 30 days with it.
+           */}
+          <div className="flex items-center gap-2.5">
+            <Checkbox
+              checked={pullCalls}
+              disabled={disabled}
+              id={pulls}
+              onChange={(event) => onPullChange(event.target.checked)}
+            />
+            <label className="cursor-pointer text-sm text-foreground" htmlFor={pulls}>
+              {`Pull production calls for ${agentName}`}
+            </label>
+          </div>
+        </div>
       )}
     </>
   );
-}
-
-function candidateLabel(candidate: ConnectionCandidate): string {
-  const phoneNumber = candidate.config.phoneNumber;
-  return phoneNumber === undefined
-    ? candidate.productLabel
-    : `${candidate.productLabel} · ${phoneNumber}`;
 }

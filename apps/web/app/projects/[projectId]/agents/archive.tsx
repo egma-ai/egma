@@ -10,12 +10,13 @@ import { Form, FormActions, Problem } from "@/ui/form.tsx";
 /**
  * The confirmation in front of the one destructive thing these screens offer.
  *
- * **It says "Archive", and it says it because that is what happens.** There is
- * no delete in the contract for an agent or for a connection — `archiveAgent`
- * and `archiveConnection` are the whole of it — and a control labelled Delete
- * over a write that archives would be the screen telling a person their data is
- * gone when the API kept it. The boards draw a destructive slot; the word in it
- * is the API's.
+ * **It says "Delete", and the write underneath still archives.** (Founder
+ * ruling, 2026-08-24.) A person removing an agent means delete, and the
+ * sentence beside the button is what keeps that honest: it says what stops and
+ * says that stored transcripts stay stored. The soft write is why the history
+ * an organization is answerable for survives a mistake — that is an argument
+ * for how Egma stores it, not for making somebody read the word "archive"
+ * when they meant delete.
  *
  * **It names the thing, which `DESIGN.md` asks of every destructive dialog**,
  * and it says what stops. What it cannot say is a number: the counts of
@@ -67,7 +68,7 @@ export function ArchiveConfirm({
           {refused === null ? null : <Problem>{refused.message}</Problem>}
           <FormActions>
             <Button type="submit" variant="destructive" disabled={busy}>
-              {busy ? "Archiving…" : "Archive"}
+              {busy ? "Deleting…" : "Delete"}
             </Button>
             <Button type="button" variant="secondary" onClick={dismiss}>
               Cancel

@@ -6,10 +6,11 @@ import { cn } from "@/lib/utils";
 /**
  * A text field at the 8px input radius.
  *
- * No focus ring of its own: `globals.css` draws the two-pixel Ember indicator
- * on every focusable element from outside every cascade layer, so focus here is
- * the same focus as everywhere else in the product and cannot be turned off by
- * a class.
+ * No focus style of its own: `globals.css` decides focus for every control in
+ * the product from outside every cascade layer, so no class here can turn it
+ * off. **A text field's focus is quiet** — its hairline darkens to ink, in
+ * place, and it draws no ring (`DESIGN.md`, developer decision 2026-08-24).
+ * The two-pixel Ember indicator is still what every other control wears.
  *
  * **A field inside a `Field` describes itself with that field's hint.** The id
  * arrives through context rather than through a prop, because a caller wiring
