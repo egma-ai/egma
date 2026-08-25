@@ -3,7 +3,9 @@ import type {
   StartMonitoringResponse,
 } from "@egma/platform-api/client";
 
+import type { ListedAgentWithConnections } from "./agents.ts";
 import { projectPath } from "./project-context.ts";
+import { agentPlatformLabel, transcriptsPath } from "./transcripts.ts";
 
 export type RetellAgentChoices = DiscoverRetellVoiceAgentsResponse;
 export type RetellAgentChoice = RetellAgentChoices["agents"][number];
@@ -20,26 +22,93 @@ export type StartOutcome = StartMonitoringResponse;
 export type RefusedWatch = StartMonitoringResponse["refused"][number];
 
 /**
- * Where the start-monitoring flow lives.
+ * The old Start-monitoring address, kept as a deep link and nothing else.
  *
- * **The address says what happens there, and that is the whole rename.** It
- * used to be `monitoring/setup`, which named an object that no longer exists:
- * there is no monitoring setup row, no per-platform integration, and nothing
- * on that page to save. What a person does there is *start monitoring* one
- * agent — the only stored monitoring choice in the product (ADR-0015).
- *
- * **A link from an agent carries that agent.** Without it the flow opens on
- * "register agents from the Retell account" with Retell chosen, so a LiveKit
- * agent lands on the Retell key form instead of its own instructions, and an
- * unbound Retell agent can be started as a *second* Egma agent for the same
- * Retell agent. The page reads the name back and falls through to the account
- * option when it names nothing it can see.
+ * The full page it named is retired: monitoring is one verb on the Transcripts
+ * screen now, and the route that survives renders that screen with the picker
+ * already open. Anything already pointing here — the CLI, the docs, somebody's
+ * notes — still lands where it meant to, and carries its `?agent=` through.
  */
 export function startMonitoringPath(projectId: string, agentId?: string): string {
   const path = projectPath(projectId, "monitoring", "start");
   return agentId === undefined
     ? path
     : `${path}?agent=${encodeURIComponent(agentId)}`;
+}
+
+/** The query the Transcripts screen reads a sheet out of, and its one value. */
+export const SHEET_PARAMETER = "sheet";
+export const MONITOR_SHEET = "monitor";
+export const AGENT_PARAMETER = "agent";
+
+/**
+ * Where "Monitor an agent" leads: **the address the person is already on**,
+ * with the picker asked for in the query.
+ *
+ * That is the whole of the blanket rule made concrete. A sheet is a state of
+ * the Transcripts screen rather than a page of its own, so opening one is a
+ * push onto the same path: nothing reloads, Back closes it, and a copied link
+ * reopens exactly what the sender was looking at.
+ */
+export function monitorAgentPath(projectId: string, agentId?: string): string {
+  const asked = new URLSearchParams({ [SHEET_PARAMETER]: MONITOR_SHEET });
+  if (agentId !== undefined) asked.set(AGENT_PARAMETER, agentId);
+  return `${transcriptsPath(projectId)}?${asked.toString()}`;
+}
+
+/**
+ * Which platform the picker treats an agent as being on.
+ *
+ * The agent's own binding is the answer wherever it has one, because that is
+ * the fact monitoring is stored against. A connection answers only where its
+ * type pins one platform, and `phone_number` pins none.
+ *
+ * **An agent that answers neither is treated as Retell**, and that is a
+ * decision rather than a guess: Retell is the pull platform, so it is the only
+ * branch with anything to do, and starting pull is exactly the act that writes
+ * the binding this agent is missing. The board draws no platform control, so
+ * there is nowhere to ask.
+ */
+export function pickerPlatformOf(
+  agent: Pick<ListedAgentWithConnections, "agentPlatform" | "connections">,
+): "retell" | "livekit" {
+  if (agent.agentPlatform === "retell" || agent.agentPlatform === "livekit") {
+    return agent.agentPlatform;
+  }
+  for (const connection of agent.connections) {
+    const named = platformOfConnectionType(connection.connectionType);
+    if (named !== null) return named;
+  }
+  return "retell";
+}
+
+/**
+ * Whether an agent belongs in the picker at all.
+ *
+ * **Retell-precise and LiveKit-approximate, on purpose.** A Retell agent
+ * leaves the list the moment its pull switch is on, because that switch is a
+ * stored fact. A LiveKit agent stays listed always, because there is no
+ * LiveKit monitored-state to read — push stores nothing, and inventing a row
+ * to remember that somebody once read the instructions would contradict the
+ * stores-nothing ruling. Re-opening idempotent instructions is harmless.
+ */
+export function notYetMonitored(
+  agent: Pick<
+    ListedAgentWithConnections,
+    "agentPlatform" | "connections" | "pullProductionCalls"
+  >,
+): boolean {
+  return pickerPlatformOf(agent) === "livekit" || !agent.pullProductionCalls;
+}
+
+/**
+ * How one agent reads in the picker: its name, then the platform that decides
+ * which half of the sheet it opens. Board `JN2-0` draws `Support line · Retell`.
+ */
+export function pickerAgentLabel(
+  agent: Pick<ListedAgentWithConnections, "name" | "agentPlatform" | "connections">,
+): string {
+  return `${agent.name} · ${agentPlatformLabel(pickerPlatformOf(agent))}`;
 }
 
 /**

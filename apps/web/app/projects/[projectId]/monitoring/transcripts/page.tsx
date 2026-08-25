@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   listApiKeys,
@@ -17,7 +17,12 @@ import {
 } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
-import { startMonitoringPath } from "../../../../../lib/monitoring.ts";
+import {
+  AGENT_PARAMETER,
+  MONITOR_SHEET,
+  monitorAgentPath,
+  SHEET_PARAMETER,
+} from "../../../../../lib/monitoring.ts";
 import {
   COLUMNS,
   DEFAULT_WINDOW,
@@ -34,6 +39,7 @@ import {
   quietState,
   recentWindow,
   transcriptPath,
+  transcriptsPath,
   watchesProduction,
   WIDEST_WINDOW,
   WINDOW_PARAMETER,
@@ -61,6 +67,7 @@ import {
   ProductPage,
 } from "../../../../../ui/shell.tsx";
 import { Notice } from "../../../../ui.tsx";
+import { MonitorAgentSheet } from "../monitor-sheet.tsx";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -125,7 +132,39 @@ export default function MonitoringTranscriptsPage() {
   );
 }
 
-function Transcripts({ projectId }: { readonly projectId: string }) {
+/**
+ * The same screen, with the picker insisted on by the route rather than asked
+ * for in the query.
+ *
+ * It is what the retired Start-monitoring address renders now. A route that
+ * *names* a panel is the address for that panel, so it does not have to ask —
+ * and rendering the screen rather than redirecting to it is what keeps the old
+ * link from costing a reload.
+ */
+export function TranscriptsWithMonitorSheet({
+  projectId,
+  agentId,
+}: {
+  readonly projectId: string;
+  readonly agentId: string | null;
+}) {
+  return (
+    <AppShell>
+      <Transcripts projectId={projectId} forced={{ agentId }} />
+    </AppShell>
+  );
+}
+
+function Transcripts({
+  projectId,
+  forced,
+}: {
+  readonly projectId: string;
+  /** The picker a route insists on, whatever the query string says. */
+  readonly forced?: { readonly agentId: string | null };
+}) {
+  const router = useRouter();
+  const query = useSearchParams();
   /**
    * Which window this page is on, read out of the address.
    *
@@ -470,6 +509,42 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
     </Select>
   );
 
+  /**
+   * Whether the picker is open, and which agent a link named for it.
+   *
+   * **Which panel is open is in the address, and nowhere else.** That is the
+   * whole of the blanket rule here: the action is a link to this same path with
+   * `sheet=monitor` on it, so opening reloads nothing, Back closes it, and a
+   * copied link reopens it. A route that names the panel outright — the retired
+   * Start-monitoring address — wins over the query, because that address *is*
+   * the panel.
+   */
+  const monitoring =
+    forced !== undefined || query.get(SHEET_PARAMETER) === MONITOR_SHEET;
+  const askedFor = forced?.agentId ?? query.get(AGENT_PARAMETER);
+
+  /**
+   * Close by taking the sheet out of the address and leaving everything else in
+   * it — the chosen window above all, which this page keeps in the address of
+   * its own accord. Replaced rather than pushed, so Back still means the page
+   * before this one rather than the sheet again.
+   */
+  function closeSheet(): void {
+    const asked = new URLSearchParams(globalThis.location.search);
+    asked.delete(SHEET_PARAMETER);
+    asked.delete(AGENT_PARAMETER);
+    const rest = asked.toString();
+    const home = transcriptsPath(projectId);
+    router.replace(rest === "" ? home : `${home}?${rest}`);
+  }
+
+  /** The one action this screen offers, and the same control wherever it sits. */
+  const monitorAnAgent = (
+    <Button asChild>
+      <Link href={monitorAgentPath(projectId)}>{LIST.monitorAgent}</Link>
+    </Button>
+  );
+
   return (
     <ProductPage wide>
       {/*
@@ -479,15 +554,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         which project it belongs to, and the table under it says what it holds.
         The purpose sentence stays where a form needs one.
       */}
-      <PageHeader
-        title={LIST.title}
-        toolbar={filters}
-        action={
-          <Button asChild>
-            <Link href={startMonitoringPath(projectId)}>{LIST.startMonitoring}</Link>
-          </Button>
-        }
-      />
+      <PageHeader title={LIST.title} toolbar={filters} action={monitorAnAgent} />
       <PageBody>
         {state.status === "failed" ? (
           <Failure
@@ -519,7 +586,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           />
         ) : null}
 
-        {quiet === "set-up-capture" ? <SetUp /> : null}
+        {quiet === "set-up-capture" ? <SetUp action={monitorAnAgent} /> : null}
 
         {quiet === "key-names-the-organization" ? (
           <Empty
@@ -566,17 +633,32 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           </>
         ) : null}
       </PageBody>
+
+      {monitoring ? (
+        <MonitorAgentSheet
+          projectId={projectId}
+          askedFor={askedFor}
+          onClose={closeSheet}
+          /*
+           * Something started pulling, so this list is stale: the thirty-day
+           * import the first switch-on runs lands behind it. Asking again is
+           * the whole of the refresh — the read is the page.
+           */
+          onStarted={() => setAttempt((one) => one + 1)}
+        />
+      ) : null}
     </ProductPage>
   );
 }
 
-/** Provider-specific teaching lives once, in the start-monitoring flow. */
-function SetUp() {
+/**
+ * Nothing has ever arrived here, which is the state monitoring exists for — so
+ * it is where the one monitoring verb lives (board `JGS-0`). The
+ * provider-specific teaching is inside the picker, once.
+ */
+function SetUp({ action }: { readonly action: ReactNode }) {
   return (
-    <Empty
-      title={QUIET.setUp.title}
-      lead={QUIET.setUp.lead}
-    />
+    <Empty title={QUIET.setUp.title} lead={QUIET.setUp.lead} action={action} />
   );
 }
 
