@@ -59,6 +59,18 @@ type Field = "name" | "scenario" | "expectedBehaviors" | "personas";
 /** One woken cell: which test's, and which of its four fields. */
 type Woken = { readonly testId: string; readonly field: Field };
 
+/**
+ * One edit session: a cell, and *which time* it was woken.
+ *
+ * **The cell is not the identity a late answer needs.** Leaving a cell and
+ * coming back to it is a new session over the same two coordinates, so a save
+ * still in flight from the first one would match the second on `testId` and
+ * `field` and clear a draft somebody is in the middle of typing. `at` is what
+ * tells the two apart: a counter that moves on every wake, so a session is
+ * only ever itself.
+ */
+type Session = Woken & { readonly at: number };
+
 /** Content fields mint a version; the name is identity and mints a revision. */
 function isContent(field: Field): boolean {
   return field !== "name";
@@ -127,6 +139,21 @@ function draftOf(test: ListedTest): Draft {
 
 function trimmedBehaviors(behaviors: readonly string[]): readonly string[] {
   return behaviors.map((one) => one.trim()).filter((one) => one !== "");
+}
+
+/** Whether a draft still says exactly what a finished save carried. */
+function holdsWhatWasSent(
+  held: Draft | null,
+  field: Field,
+  sent: string | readonly string[],
+): boolean {
+  if (held === null) return false;
+  if (field === "name") return held.name.trim() === sent;
+  if (field === "scenario") return held.scenario.trim() === sent;
+  if (field === "expectedBehaviors") {
+    return sameList(trimmedBehaviors(held.expectedBehaviors), sent as readonly string[]);
+  }
+  return sameList(held.personas, sent as readonly string[]);
 }
 
 function sameList(left: readonly string[], right: readonly string[]): boolean {
@@ -638,7 +665,19 @@ export function TestsGrid(props: GridProps) {
    * breath as the state, so it is true at every instant rather than at every
    * render.
    */
-  const wokenNow = useRef<Woken | null>(null);
+  const wokenNow = useRef<Session | null>(null);
+  /** Moves on every wake, so no two edit sessions can be mistaken for one. */
+  const wakes = useRef(0);
+  /**
+   * The draft as it is *now*, for the same reason `wokenNow` exists.
+   *
+   * A commit that succeeds closes its cell — but only if the cell still holds
+   * what was sent. Somebody who pressed Enter and kept typing is still in the
+   * same session, so `at` cannot tell that apart; what tells it apart is that
+   * the draft has moved past the value the answer is about. Closing then would
+   * throw the newer words away.
+   */
+  const draftNow = useRef<Draft | null>(null);
   /**
    * The cells with a save in flight, which is a set and not a flag.
    *
@@ -745,16 +784,23 @@ export function TestsGrid(props: GridProps) {
     openEntry();
   }, [writing, openEntry]);
 
-  /** Wake one cell, in state and in the ref that answers "which one now?". */
+  /** Wake one cell, in state and in the refs that answer "which one now?". */
   function woken(next: Woken | null): void {
-    wokenNow.current = next;
+    wakes.current += 1;
+    wokenNow.current = next === null ? null : { ...next, at: wakes.current };
     setActive(next);
+  }
+
+  /** The draft, in state and in the ref that is true before the next render. */
+  function holdDraft(next: Draft | null): void {
+    draftNow.current = next;
+    setCellDraft(next);
   }
 
   function wake(test: ListedTest, field: Field): void {
     if (!mayAuthor) return;
     woken({ testId: test.id, field });
-    setCellDraft(draftOf(test));
+    holdDraft(draftOf(test));
     setCellRefused(null);
     // Waking a cell closes a picker of its own from a previous wake, and
     // leaves the entry row's alone.
@@ -771,25 +817,27 @@ export function TestsGrid(props: GridProps) {
    * throw away what was typed with no refusal and no record — the one thing
    * this grid promises never to do.
    */
-  function rest(mine?: Woken): void {
-    const now = wokenNow.current;
-    if (
-      mine !== undefined &&
-      (now?.testId !== mine.testId || now.field !== mine.field)
-    ) {
-      return;
-    }
+  function rest(mine?: Session): void {
+    if (mine !== undefined && wokenNow.current?.at !== mine.at) return;
     woken(null);
-    setCellDraft(null);
+    holdDraft(null);
     setCellRefused(null);
     setPicking(null);
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
-    // Which cell this commit is of, held across the await so the answer can
-    // only ever land back on the cell that asked — and so that one cell's
-    // save in flight never speaks for another's.
-    const mine = { testId: test.id, field };
+    /*
+     * Which edit session this commit belongs to, held across the await so the
+     * answer can only ever land back on the session that asked. Not the cell:
+     * leaving a cell and coming back is a new session over the same two
+     * coordinates, and an answer from the old one must neither close it nor
+     * speak into it.
+     */
+    const held = wokenNow.current;
+    const mine: Session =
+      held !== null && held.testId === test.id && held.field === field
+        ? held
+        : { testId: test.id, field, at: wakes.current };
     const key = `${mine.testId}:${mine.field}`;
     if (cellDraft === null || inFlight.current.has(key)) return;
     const stored = draftOf(test);
@@ -855,12 +903,13 @@ export function TestsGrid(props: GridProps) {
         window.location.replace("/sign-in");
         return;
       }
-      const now = wokenNow.current;
-      const stillMine = now?.testId === mine.testId && now.field === mine.field;
+      // The session that asked, and whether it is still the one on screen.
+      const stillMine = wokenNow.current?.at === mine.at;
       if (answer.status !== "ready") {
-        // A refusal belongs beside the cell it is about. If the caret has moved
-        // on, the sentence has nowhere truthful to sit, and the save simply did
-        // not happen — the stored value stands either way.
+        // A refusal belongs beside the session it is about. If that session has
+        // ended — the caret moved, or the cell was left and re-entered — the
+        // sentence has nowhere truthful to sit, and the save simply did not
+        // happen: the stored value stands either way.
         if (stillMine) setCellRefused(answer.refusal.message);
         return;
       }
@@ -870,7 +919,14 @@ export function TestsGrid(props: GridProps) {
         revision: answer.value.revision,
       });
       onSaved(answer.value);
-      rest(mine);
+      /*
+       * Close the cell only if it still holds exactly what was sent. Pressing
+       * Enter and carrying on typing stays one session, so `at` cannot tell
+       * that apart — but the draft has moved past what this answer is about,
+       * and closing would take the newer words with it. Left open, the next
+       * commit saves them.
+       */
+      if (holdsWhatWasSent(draftNow.current, field, value)) rest(mine);
     };
 
     // Behind whatever this test is already saving, and nothing else.
@@ -980,7 +1036,7 @@ export function TestsGrid(props: GridProps) {
             projectId={projectId}
             picking={woken && picking === test.id}
             onPick={(open) => setPicking(open ? test.id : null)}
-            onChange={setCellDraft}
+            onChange={holdDraft}
             onKnown={setKnown}
             onCommit={() => void commit(test, field)}
             onCancel={rest}
