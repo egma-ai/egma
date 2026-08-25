@@ -44,6 +44,30 @@ import { ConfirmDialog } from "./parts.tsx";
  * says so before the request rather than after it, and repeats the platform's
  * own sentence when a request is refused anyway.
  *
+ * **The save grammar, whole.** Every rule below exists because a version
+ * guard makes two saves of one test contend, and because a request is awaited
+ * while a person keeps typing. Four rules, and together they close the family:
+ *
+ * 1. **Different tests save in parallel; one test saves in order.** Separate
+ *    rows carry separate guards, so they cannot contend. Two cells of one test
+ *    would carry the same version, so they queue, and a queued save reads its
+ *    version or revision when it is sent — from the answer the save in front
+ *    of it received, never from the render that started it.
+ * 2. **A wake seeds from the newest intent.** The stored row, with any
+ *    unfinished save of it laid over the top, because the row still shows what
+ *    that save is replacing.
+ * 3. **An answer closes only its own session, and only over what it sent.**
+ *    Leaving a cell and returning is a new session, so a late answer from the
+ *    old one neither closes it nor speaks into it; and pressing Enter and
+ *    carrying on typing never leaves the session, so the draft itself is what
+ *    says the answer has been overtaken.
+ * 4. **A commit is dropped only when it is an identical resubmit** — the blur
+ *    that follows an Enter. Anything a person actually changed queues.
+ *
+ * What that buys is one sentence: a version conflict can only be a write this
+ * client did not make, so the refusal in the cell means another person moved
+ * the test, and it is never about something the person in front of it did.
+ *
  * The look is `LNC-0`, `LUT-0` and boards 10–14 of Paper page 04B: a Pure Paper
  * panel inside one hairline, hairlines between every cell, a woken cell inside
  * a 2px ink edge, add-affordances only on the woken cell, and a ghost row at
@@ -58,6 +82,18 @@ type Field = "name" | "scenario" | "expectedBehaviors" | "personas";
 
 /** One woken cell: which test's, and which of its four fields. */
 type Woken = { readonly testId: string; readonly field: Field };
+
+/**
+ * One edit session: a cell, and *which time* it was woken.
+ *
+ * **The cell is not the identity a late answer needs.** Leaving a cell and
+ * coming back to it is a new session over the same two coordinates, so a save
+ * still in flight from the first one would match the second on `testId` and
+ * `field` and clear a draft somebody is in the middle of typing. `at` is what
+ * tells the two apart: a counter that moves on every wake, so a session is
+ * only ever itself.
+ */
+type Session = Woken & { readonly at: number };
 
 /** Content fields mint a version; the name is identity and mints a revision. */
 function isContent(field: Field): boolean {
@@ -127,6 +163,30 @@ function draftOf(test: ListedTest): Draft {
 
 function trimmedBehaviors(behaviors: readonly string[]): readonly string[] {
   return behaviors.map((one) => one.trim()).filter((one) => one !== "");
+}
+
+/** Whether two committed values say the same thing, of whichever shape. */
+function sameSent(
+  left: string | readonly string[],
+  right: string | readonly string[],
+): boolean {
+  if (typeof left === "string" || typeof right === "string") return left === right;
+  return sameList(left, right);
+}
+
+/** Whether a draft still says exactly what a finished save carried. */
+function holdsWhatWasSent(
+  held: Draft | null,
+  field: Field,
+  sent: string | readonly string[],
+): boolean {
+  if (held === null) return false;
+  if (field === "name") return held.name.trim() === sent;
+  if (field === "scenario") return held.scenario.trim() === sent;
+  if (field === "expectedBehaviors") {
+    return sameList(trimmedBehaviors(held.expectedBehaviors), sent as readonly string[]);
+  }
+  return sameList(held.personas, sent as readonly string[]);
 }
 
 function sameList(left: readonly string[], right: readonly string[]): boolean {
@@ -638,23 +698,33 @@ export function TestsGrid(props: GridProps) {
    * breath as the state, so it is true at every instant rather than at every
    * render.
    */
-  const wokenNow = useRef<Woken | null>(null);
+  const wokenNow = useRef<Session | null>(null);
+  /** Moves on every wake, so no two edit sessions can be mistaken for one. */
+  const wakes = useRef(0);
   /**
-   * The cells with a save in flight, which is a set and not a flag.
+   * The draft as it is *now*, for the same reason `wokenNow` exists.
    *
-   * **A flag made one cell's save stop another cell's.** Blurring cell A starts
-   * its request; committing cell B while that request is still open met a
-   * global "something is saving" and returned early, so B's edit was neither
-   * sent nor kept — and waking the next cell replaced the draft, so what was
-   * typed into B went with it. Silently, which is the one thing this grid
-   * promises never to do.
-   *
-   * Two different cells are independent by construction: each save carries only
-   * its own field and only its own version or revision guard, so they cannot
-   * overwrite one another and there is nothing to serialize. What the set still
-   * refuses is the same cell twice — an Enter followed by the blur it causes.
+   * A commit that succeeds closes its cell — but only if the cell still holds
+   * what was sent. Somebody who pressed Enter and kept typing is still in the
+   * same session, so `at` cannot tell that apart; what tells it apart is that
+   * the draft has moved past the value the answer is about. Closing then would
+   * throw the newer words away.
    */
-  const inFlight = useRef<Set<string>>(new Set());
+  const draftNow = useRef<Draft | null>(null);
+  /**
+   * What each cell's unfinished save is trying to make true.
+   *
+   * **A wake seeds from the newest intent, not from the row.** The row still
+   * shows the value a save is in the middle of replacing, so a cell woken while
+   * its own save is in flight used to start from the value the person had just
+   * typed over. Blurring it without touching anything then committed that older
+   * value back — against the version their own save had just minted, so it
+   * landed, and their edit was undone by a click that changed nothing.
+   *
+   * Seeded from here instead, that blur commits a value equal to what is
+   * stored, and the unchanged path absorbs it without a request.
+   */
+  const intent = useRef<Map<string, string | readonly string[]>>(new Map());
   /**
    * The tail of each test's queue, so one test's saves happen in order.
    *
@@ -711,7 +781,7 @@ export function TestsGrid(props: GridProps) {
   useEffect(() => {
     queued.current = new Map();
     latest.current = new Map();
-    inFlight.current = new Set();
+    intent.current = new Map();
   }, [projectId, suiteId]);
 
   /* Every persona a row already names has a name, so a cell can show it. */
@@ -745,16 +815,44 @@ export function TestsGrid(props: GridProps) {
     openEntry();
   }, [writing, openEntry]);
 
-  /** Wake one cell, in state and in the ref that answers "which one now?". */
+  /** Wake one cell, in state and in the refs that answer "which one now?". */
   function woken(next: Woken | null): void {
-    wokenNow.current = next;
+    wakes.current += 1;
+    wokenNow.current = next === null ? null : { ...next, at: wakes.current };
     setActive(next);
+  }
+
+  /** The draft, in state and in the ref that is true before the next render. */
+  function holdDraft(next: Draft | null): void {
+    draftNow.current = next;
+    setCellDraft(next);
+  }
+
+  /** The stored row, with any unfinished save of it laid over the top. */
+  function newestIntent(test: ListedTest): Draft {
+    const held = draftOf(test);
+    const pending = (of: Field): string | readonly string[] | undefined =>
+      intent.current.get(`${test.id}:${of}`);
+    const name = pending("name");
+    const scenario = pending("scenario");
+    const behaviors = pending("expectedBehaviors");
+    const personas = pending("personas");
+    return {
+      name: typeof name === "string" ? name : held.name,
+      scenario: typeof scenario === "string" ? scenario : held.scenario,
+      expectedBehaviors: Array.isArray(behaviors)
+        ? [...(behaviors as readonly string[])]
+        : held.expectedBehaviors,
+      personas: Array.isArray(personas)
+        ? [...(personas as readonly string[])]
+        : held.personas,
+    };
   }
 
   function wake(test: ListedTest, field: Field): void {
     if (!mayAuthor) return;
     woken({ testId: test.id, field });
-    setCellDraft(draftOf(test));
+    holdDraft(newestIntent(test));
     setCellRefused(null);
     // Waking a cell closes a picker of its own from a previous wake, and
     // leaves the entry row's alone.
@@ -771,27 +869,29 @@ export function TestsGrid(props: GridProps) {
    * throw away what was typed with no refusal and no record — the one thing
    * this grid promises never to do.
    */
-  function rest(mine?: Woken): void {
-    const now = wokenNow.current;
-    if (
-      mine !== undefined &&
-      (now?.testId !== mine.testId || now.field !== mine.field)
-    ) {
-      return;
-    }
+  function rest(mine?: Session): void {
+    if (mine !== undefined && wokenNow.current?.at !== mine.at) return;
     woken(null);
-    setCellDraft(null);
+    holdDraft(null);
     setCellRefused(null);
     setPicking(null);
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
-    // Which cell this commit is of, held across the await so the answer can
-    // only ever land back on the cell that asked — and so that one cell's
-    // save in flight never speaks for another's.
-    const mine = { testId: test.id, field };
+    /*
+     * Which edit session this commit belongs to, held across the await so the
+     * answer can only ever land back on the session that asked. Not the cell:
+     * leaving a cell and coming back is a new session over the same two
+     * coordinates, and an answer from the old one must neither close it nor
+     * speak into it.
+     */
+    const held = wokenNow.current;
+    const mine: Session =
+      held !== null && held.testId === test.id && held.field === field
+        ? held
+        : { testId: test.id, field, at: wakes.current };
     const key = `${mine.testId}:${mine.field}`;
-    if (cellDraft === null || inFlight.current.has(key)) return;
+    if (cellDraft === null) return;
     const stored = draftOf(test);
     const problem = whyFieldRefuses(field, cellDraft);
     if (problem !== null) {
@@ -814,11 +914,23 @@ export function TestsGrid(props: GridProps) {
           : sameList(value as readonly string[], field === "expectedBehaviors"
               ? stored.expectedBehaviors
               : stored.personas);
+    /*
+     * **A cell drops only an identical resubmit.** The guard exists for one
+     * thing: Enter commits, and the blur it causes commits the same value a
+     * moment later. Blanket-blocking every commit while a save was in flight
+     * threw away a real edit instead — words typed after Enter were neither
+     * sent nor queued, and waking the next cell replaced the draft that held
+     * them. A changed value queues behind the save in front of it like any
+     * other, and goes with the version that save mints.
+     */
+    const flying = intent.current.get(key);
+    if (flying !== undefined && sameSent(flying, value)) return;
     if (unchanged) {
       rest(mine);
       return;
     }
-    inFlight.current.add(key);
+    // What this cell is now trying to make true, from here until it answers.
+    intent.current.set(key, value);
     setCellRefused(null);
 
     /*
@@ -850,17 +962,23 @@ export function TestsGrid(props: GridProps) {
           { client: platformClient },
         ),
       );
-      inFlight.current.delete(key);
+      // Clear the intent only if it is still this save's. A newer commit on
+      // the same cell has already replaced it and is waiting its turn.
+      const standing = intent.current.get(key);
+      if (standing !== undefined && sameSent(standing, value)) {
+        intent.current.delete(key);
+      }
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
         return;
       }
-      const now = wokenNow.current;
-      const stillMine = now?.testId === mine.testId && now.field === mine.field;
+      // The session that asked, and whether it is still the one on screen.
+      const stillMine = wokenNow.current?.at === mine.at;
       if (answer.status !== "ready") {
-        // A refusal belongs beside the cell it is about. If the caret has moved
-        // on, the sentence has nowhere truthful to sit, and the save simply did
-        // not happen — the stored value stands either way.
+        // A refusal belongs beside the session it is about. If that session has
+        // ended — the caret moved, or the cell was left and re-entered — the
+        // sentence has nowhere truthful to sit, and the save simply did not
+        // happen: the stored value stands either way.
         if (stillMine) setCellRefused(answer.refusal.message);
         return;
       }
@@ -870,7 +988,14 @@ export function TestsGrid(props: GridProps) {
         revision: answer.value.revision,
       });
       onSaved(answer.value);
-      rest(mine);
+      /*
+       * Close the cell only if it still holds exactly what was sent. Pressing
+       * Enter and carrying on typing stays one session, so `at` cannot tell
+       * that apart — but the draft has moved past what this answer is about,
+       * and closing would take the newer words with it. Left open, the next
+       * commit saves them.
+       */
+      if (holdsWhatWasSent(draftNow.current, field, value)) rest(mine);
     };
 
     // Behind whatever this test is already saving, and nothing else.
@@ -980,7 +1105,7 @@ export function TestsGrid(props: GridProps) {
             projectId={projectId}
             picking={woken && picking === test.id}
             onPick={(open) => setPicking(open ? test.id : null)}
-            onChange={setCellDraft}
+            onChange={holdDraft}
             onKnown={setKnown}
             onCommit={() => void commit(test, field)}
             onCancel={rest}
