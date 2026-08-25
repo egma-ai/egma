@@ -757,6 +757,120 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("sends a second cell's edit while the first is still in flight", async () => {
+    // A's PATCH is held open. B is committed while it hangs — two different
+    // cells, each carrying only its own field and its own guard, so there is
+    // nothing to serialize and nothing may be dropped.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: {
+          tests: [
+            testBody({ personas: [PERSONA] }),
+            testBody({
+              id: "tst_2",
+              versionId: "tstv_2",
+              revision: "rev_2",
+              name: "Cancels service",
+              scenario: "The caller cancels.",
+              personas: [PERSONA],
+            }),
+          ],
+          nextPageToken: null,
+        },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({ personas: [PERSONA], scenario: "A saved late." }),
+        waitFor: held,
+      },
+      "/v1/tests/tst_2": {
+        status: 200,
+        body: testBody({
+          id: "tst_2",
+          versionId: "tstv_2",
+          revision: "rev_2",
+          name: "Cancels service",
+          scenario: "B saved while A hung.",
+          personas: [PERSONA],
+        }),
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    // Commit A by blurring it. Its request hangs.
+    const rowA = (await screen.findByText("Books service")).closest("tr");
+    if (rowA === null) throw new Error("row A is not on screen");
+    fireEvent.click(within(rowA).getByText("The caller books service."));
+    const scenarioA = within(rowA).getByLabelText("Scenario");
+    fireEvent.change(scenarioA, { target: { value: "A saved late." } });
+    fireEvent.keyDown(scenarioA, { key: "Enter" });
+
+    // Wake B, type, and commit it while A is still pending.
+    const rowB = screen.getByText("Cancels service").closest("tr");
+    if (rowB === null) throw new Error("row B is not on screen");
+    fireEvent.click(within(rowB).getByText("The caller cancels."));
+    const scenarioB = within(rowB).getByLabelText("Scenario");
+    fireEvent.change(scenarioB, { target: { value: "B saved while A hung." } });
+    fireEvent.keyDown(scenarioB, { key: "Enter" });
+
+    // B's request goes out at once rather than waiting on A or being dropped.
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.path === "/v1/tests/tst_2"),
+      ).toEqual([
+        {
+          path: "/v1/tests/tst_2",
+          method: "PATCH",
+          body: {
+            scenario: "B saved while A hung.",
+            expectedVersionId: "tstv_2",
+          },
+        },
+      ]);
+    });
+
+    release();
+
+    // Both saves land, each carrying only its own field and its own guard.
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { scenario: "A saved late.", expectedVersionId: "tstv_1" },
+        },
+        {
+          path: "/v1/tests/tst_2",
+          method: "PATCH",
+          body: {
+            scenario: "B saved while A hung.",
+            expectedVersionId: "tstv_2",
+          },
+        },
+      ]);
+    });
+
+    // And both rows read back what was saved — nothing was lost on the way.
+    await waitFor(() => {
+      expect(screen.getByText("A saved late.")).toBeTruthy();
+    });
+    expect(screen.getByText("B saved while A hung.")).toBeTruthy();
+  });
+
   it("lands a late cell save on its own cell, never on the one now being typed in", async () => {
     // A's PATCH is held open. While it hangs, the caret moves to B and types.
     let release!: () => void;

@@ -639,7 +639,22 @@ export function TestsGrid(props: GridProps) {
    * render.
    */
   const wokenNow = useRef<Woken | null>(null);
-  const savingNow = useRef(false);
+  /**
+   * The cells with a save in flight, which is a set and not a flag.
+   *
+   * **A flag made one cell's save stop another cell's.** Blurring cell A starts
+   * its request; committing cell B while that request is still open met a
+   * global "something is saving" and returned early, so B's edit was neither
+   * sent nor kept — and waking the next cell replaced the draft, so what was
+   * typed into B went with it. Silently, which is the one thing this grid
+   * promises never to do.
+   *
+   * Two different cells are independent by construction: each save carries only
+   * its own field and only its own version or revision guard, so they cannot
+   * overwrite one another and there is nothing to serialize. What the set still
+   * refuses is the same cell twice — an Enter followed by the blur it causes.
+   */
+  const inFlight = useRef<Set<string>>(new Set());
   const [cellDraft, setCellDraft] = useState<Draft | null>(null);
   const [cellRefused, setCellRefused] = useState<string | null>(null);
   /**
@@ -733,10 +748,12 @@ export function TestsGrid(props: GridProps) {
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
-    if (cellDraft === null || savingNow.current) return;
     // Which cell this commit is of, held across the await so the answer can
-    // only ever land back on the cell that asked.
+    // only ever land back on the cell that asked — and so that one cell's
+    // save in flight never speaks for another's.
     const mine = { testId: test.id, field };
+    const key = `${mine.testId}:${mine.field}`;
+    if (cellDraft === null || inFlight.current.has(key)) return;
     const stored = draftOf(test);
     const problem = whyFieldRefuses(field, cellDraft);
     if (problem !== null) {
@@ -763,7 +780,7 @@ export function TestsGrid(props: GridProps) {
       rest(mine);
       return;
     }
-    savingNow.current = true;
+    inFlight.current.add(key);
     setCellRefused(null);
     /*
      * One field, and the guard the platform asks that field for. A content
@@ -783,7 +800,7 @@ export function TestsGrid(props: GridProps) {
         { client: platformClient },
       ),
     );
-    savingNow.current = false;
+    inFlight.current.delete(key);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
