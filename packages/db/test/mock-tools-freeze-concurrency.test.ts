@@ -172,6 +172,7 @@ beforeAll(async () => {
 
   frontDesk = (
     await createAgent(auth, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
@@ -186,6 +187,7 @@ beforeAll(async () => {
 
   nightDesk = (
     await createAgent(auth, {
+      agentPlatform: "retell",
       name: "Night desk",
       connection: {
         agentPlatform: "retell",

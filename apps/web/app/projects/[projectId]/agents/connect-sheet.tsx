@@ -62,15 +62,10 @@ import { AgentOnboardingProgress } from "./onboarding-progress.tsx";
  * `DESIGN.md` records the side sheet as where an agent or a connection is
  * created, read and edited.
  *
- * **The "Platform" select addresses the connection, not the agent, and that is
- * the one place this panel and the boards genuinely disagree.** The board draws
- * Platform inside the NEW AGENT block, which reads as a column on the agent.
- * `registerAgent` has no such field — `additionalProperties: false` — and an
- * agent's own `agentPlatform` is written only when Start monitoring binds it.
- * So the value is sent as `connection.agentPlatform`, which is where the
- * contract keeps it, and it is drawn where the board draws it while a new agent
- * is being made. Choosing a platform for an agent egma will never write one to
- * would be a control that lies.
+ * **The "Platform" select names both the new agent's platform and the first
+ * connection's platform.** Registration stores it on the agent. The connection
+ * keeps it in its request while that older request shape still exists, and the
+ * database checks that the two facts do not conflict.
  *
  * **Modality is a control on Retell and a sentence on LiveKit**, because that
  * is what the catalog says. Retell offers a chat option and a voice option, so
@@ -457,11 +452,20 @@ export function ConnectAgentSheet({
 
   async function connect(): Promise<void> {
     if (!mayAuthor || saving || option === undefined) return;
+    const newAgentPlatform = option.agentPlatform;
 
     if (creating && agentName.trim() === "") {
       // Checked here so nobody waits for a round trip to learn a field is
       // empty. The server checks it again, and the server is what decides.
       setAgentNameProblem("An agent needs a name, so that a list can tell it apart.");
+      return;
+    }
+
+    if (creating && newAgentPlatform === null) {
+      setRefused({
+        error: "unprocessable",
+        message: "Choose Retell or LiveKit for the new agent.",
+      });
       return;
     }
 
@@ -485,9 +489,20 @@ export function ConnectAgentSheet({
     setSaving(true);
 
     if (creating) {
+      // Kept beside the typed request as well as the early user-facing guard
+      // because `creating` is not a TypeScript discriminant for the platform.
+      if (newAgentPlatform === null) {
+        setSaving(false);
+        return;
+      }
       const answer = await platformAnswer(
         registerAgent(
-          { projectId, name: agentName.trim(), connection: body },
+          {
+            projectId,
+            name: agentName.trim(),
+            agentPlatform: newAgentPlatform,
+            connection: body,
+          },
           { client: platformClient },
         ),
       );
@@ -547,12 +562,7 @@ export function ConnectAgentSheet({
             label:
               known === null
                 ? "This agent"
-                : labelFor(
-                    known.name,
-                    known.agentPlatform === null
-                      ? null
-                      : agentPlatformLabel(known.agentPlatform),
-                  ),
+                : labelFor(known.name, agentPlatformLabel(known.agentPlatform)),
           },
         ]
       : []),

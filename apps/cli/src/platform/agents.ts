@@ -56,6 +56,8 @@ export type NewConnection = {
 
 export type Registration = {
   readonly name: string;
+  /** Which product or framework runs the agent. */
+  readonly agentPlatform: Exclude<ConnectionInput["agentPlatform"], null>;
   /** Which project the agent lands in. Omit and the key's own project applies. */
   readonly project?: string | undefined;
   readonly connection: NewConnection;
@@ -314,6 +316,7 @@ export async function registerAgent(
   const answer = await registerAgentRequest(
     {
       name: registration.name,
+      agentPlatform: registration.agentPlatform,
       ...(registration.project === undefined
         ? {}
         : { projectId: registration.project }),

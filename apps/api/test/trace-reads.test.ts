@@ -244,7 +244,7 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     expect(trace?.environment).toBe("default");
     expect(trace?.connectionType).toBe("");
     expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(trace?.agentPlatform).toBe("livekit_agents");
+    expect(trace?.agentPlatform).toBe("livekit");
     expect(trace?.platformAgentId).toBe("");
     expect(trace?.platformAgentName).toBe("");
     expect(trace?.platformAgentVersion).toBe("");
@@ -544,7 +544,7 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
     });
     expect(detail.trace.startedAt).toBe("2026-08-02T18:04:40.281989Z");
     expect(detail.trace.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(detail.trace.agentPlatform).toBe("livekit_agents");
+    expect(detail.trace.agentPlatform).toBe("livekit");
     expect(detail.trace.platformAgentId).toBe("");
     expect(detail.trace.platformAgentName).toBe("");
     expect(detail.trace.platformAgentVersion).toBe("");
@@ -657,7 +657,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       toolArguments: "",
       toolResult: "",
       providerCallId: "room-wire",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       platformAgentId: "",
       platformAgentName: "",
       platformAgentVersion: "",

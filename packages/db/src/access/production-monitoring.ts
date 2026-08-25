@@ -148,7 +148,7 @@ function openedMonitoringKey(envelope: string): string {
 export type AgentPullState = {
   readonly agentId: string;
   readonly pullProductionCalls: boolean;
-  readonly agentPlatform: AgentPlatform | null;
+  readonly agentPlatform: AgentPlatform;
   readonly platformAgentId: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly scanKind: MonitoringScanKind | null;
@@ -368,6 +368,7 @@ export async function registerAgentPullingProductionCalls(
   const agentId = await db().transaction(async (tx) => {
     const written = await insertAgentWithin(tx, auth, projectId, {
       name: input.name,
+      agentPlatform: input.agentPlatform,
     });
     await bindAndOpen(tx, auth, projectId, {
       agentId: written.id,
@@ -440,7 +441,7 @@ export async function readAgentPullState(
   if (row === undefined) return undefined;
   return {
     ...row,
-    agentPlatform: row.agentPlatform as AgentPlatform | null,
+    agentPlatform: row.agentPlatform as AgentPlatform,
     scanKind: row.scanKind as MonitoringScanKind | null,
     lastReceivedAt: row.lastReceivedAt ?? null,
   };

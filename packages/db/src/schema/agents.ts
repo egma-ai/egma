@@ -32,9 +32,9 @@ import {
  *
  * The agent owns its platform binding, and the connection does not. Which
  * platform a connection reaches is answered by its connection type where the
- * type pins one (`retell_chat_api` -> retell, `livekit_room` ->
- * livekit_agents), else through the agent, else unknown — `phone_number`
- * spans platforms. The agent's own binding is what production monitoring
+ * type pins one (`retell_chat_api` -> retell, `livekit_room` -> livekit), else
+ * through the agent — `phone_number` spans platforms. The agent's own binding
+ * is what production monitoring
  * needs: the platform, that platform's identity for this agent, and the
  * sealed monitoring key egma pulls its finished production conversations
  * with. See ADR-0015.
@@ -47,7 +47,7 @@ import {
  */
 
 /** The products or frameworks that run or expose an agent. */
-export const AGENT_PLATFORMS = ["retell", "livekit_agents"] as const;
+export const AGENT_PLATFORMS = ["retell", "livekit"] as const;
 export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 
 /** The direct paths Egma's simulator can select to reach an agent. */
@@ -97,10 +97,11 @@ export const agent = pgTable(
     name: text("name").notNull(),
     /**
      * Which platform runs this agent, and that platform's own identity for
-     * it. Both null until somebody binds the agent — a bare roster entry is
-     * lawful, and a LiveKit agent that only ever pushes never needs either.
+     * it. Every agent declares its platform when it is registered. The
+     * platform's own identifier stays optional because not every platform
+     * gives Egma one.
      */
-    agentPlatform: text("agent_platform"),
+    agentPlatform: text("agent_platform").notNull(),
     platformAgentId: text("platform_agent_id"),
     /**
      * The platform key egma pulls this agent's production conversations with,
@@ -143,8 +144,8 @@ export const agent = pgTable(
       "agent_monitoring_key_hint_agrees",
       sql`(${table.monitoringApiKey} is null) = (${table.monitoringApiKeyHint} is null)`,
     ),
-    // A key names the platform it opens. Without the platform there is no
-    // provider to spend it against, so the pair is meaningless apart.
+    // Kept as a named database invariant even though the platform column is
+    // now required: a monitoring key always names the platform that opens it.
     check(
       "agent_monitoring_key_needs_platform",
       sql`${table.monitoringApiKey} is null or ${table.agentPlatform} is not null`,

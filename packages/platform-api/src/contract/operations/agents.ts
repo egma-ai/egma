@@ -15,10 +15,10 @@ const agent = {
     id: stringIdSchema,
     projectId: stringIdSchema,
     name: { type: "string" },
-    agentPlatform: nullable({
+    agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit_agents"],
-    }),
+      enum: ["retell", "livekit"],
+    },
     platformAgentId: nullable({ type: "string" }),
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
@@ -60,10 +60,10 @@ const connection = {
     agentId: stringIdSchema,
     projectId: stringIdSchema,
     name: { type: "string" },
-    agentPlatform: nullable({
+    agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit_agents"],
-    }),
+      enum: ["retell", "livekit"],
+    },
     connectionType: {
       type: "string",
       enum: ["retell_chat_api", "phone_number", "livekit_room"],
@@ -153,7 +153,7 @@ const connectionInput = {
     name: { type: "string" },
     agentPlatform: nullable({
       type: "string",
-      enum: ["retell", "livekit_agents"],
+      enum: ["retell", "livekit"],
     }),
     connectionType: {
       type: "string",
@@ -325,7 +325,7 @@ export const agentOperations = {
               properties: {
                 agentPlatform: nullable({
                   type: "string",
-                  enum: ["retell", "livekit_agents"],
+                  enum: ["retell", "livekit"],
                 }),
                 agentPlatformLabel: { type: "string" },
                 connectionType: {
@@ -420,9 +420,13 @@ export const agentOperations = {
         type: "object",
         properties: {
           name: { type: "string" },
+          agentPlatform: {
+            type: "string",
+            enum: ["retell", "livekit"],
+          },
           connection: connectionInput,
         },
-        required: ["name"],
+        required: ["name", "agentPlatform"],
         additionalProperties: false,
       },
     },

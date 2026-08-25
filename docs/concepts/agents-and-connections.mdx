@@ -18,7 +18,7 @@ Every connection states five separate facts:
 
 | Fact | Meaning | Example |
 |---|---|---|
-| **Agent platform** | The product or framework the customer uses | Retell, LiveKit Agents, or unknown |
+| **Agent platform** | The product or framework the customer uses | Retell or LiveKit |
 | **Connection type** | The path the simulator uses to reach the agent | `retell_chat_api`, `phone_number`, `livekit_room` |
 | **Access variant** | How Egma gets access to that path | API key, public E.164 number, project credentials, token endpoint |
 | **Modality** | The conversation form | `chat` or `voice` |
@@ -36,21 +36,21 @@ The supported combinations are:
 |---|---|---|---|---|
 | Retell | `retell_chat_api` | `retell_chat_api.api_key` | chat | Retell chat |
 | Retell | `phone_number` | `phone_number.public_e164` | voice | Retell phone |
-| LiveKit Agents | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
-| LiveKit Agents | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
-| LiveKit Agents | `phone_number` | `phone_number.public_e164` | voice | Phone number |
+| LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
+| LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
+| LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
 ## Platform and connection type are independent
 
-A LiveKit Agents worker can answer a public phone number. In that case:
+A LiveKit worker can answer a public phone number. In that case:
 
-- agent platform is LiveKit Agents;
+- agent platform is LiveKit;
 - connection type is `phone_number`;
 - access variant is `phone_number.public_e164`;
 - modality is voice.
 
-The phone adapter does not need to know that LiveKit Agents runs the agent. It
+The phone adapter does not need to know that LiveKit runs the agent. It
 dials the number with Egma's own telephony configuration.
 
 The same agent can also have a `livekit_room` connection. That connection joins
@@ -99,6 +99,7 @@ Create an agent with an inline Retell chat connection:
 ```json
 {
   "name": "order-line",
+  "agentPlatform": "retell",
   "connection": {
     "agentPlatform": "retell",
     "connectionType": "retell_chat_api",
@@ -162,7 +163,7 @@ and it belongs to the agent rather than to any connection.
 
 An agent may name the platform that runs it, hold that platform's API key, and
 carry one switch: **pull production calls**. With the switch on, Egma polls
-Retell for that agent's completed conversations. A LiveKit Agents agent needs no
+Retell for that agent's completed conversations. A LiveKit agent needs no
 switch — its own process sends spans over OTLP.
 
 The key an agent holds for monitoring and the credentials a connection holds for

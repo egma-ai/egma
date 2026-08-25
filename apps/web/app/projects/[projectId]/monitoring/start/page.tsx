@@ -67,7 +67,7 @@ import {
  *   because simulation custody and monitoring custody are two jobs kept
  *   apart — lists the account with it so the platform agent id is confirmed
  *   rather than typed, and commits.
- * - **LiveKit Agents** is push: the customer's own process sends spans to the
+ * - **LiveKit** is push: the customer's own process sends spans to the
  *   OTLP door with the project key. There is nothing to configure and nothing
  *   to switch, so that branch is *instructions*. It consults no server state
  *   and changes none — a screen that read one would be this page quietly
@@ -87,7 +87,7 @@ export default function StartMonitoringPage() {
   );
 }
 
-type Platform = "retell" | "livekit_agents";
+type Platform = "retell" | "livekit";
 
 /** One account listing, and the key it was read with. */
 type Listing = {
@@ -114,9 +114,9 @@ const COPY = {
     "A Retell chat connection knows the Retell agent id and fills it in below. A phone connection does not know it, so it fills in nothing.",
   noConnection: "None",
   platform: "Platform",
-  platformHint: "Where this agent runs. Retell is pulled; LiveKit Agents pushes.",
+  platformHint: "Where this agent runs. Retell is pulled; LiveKit pushes.",
   retell: "Retell",
-  livekit: "LiveKit Agents",
+  livekit: "LiveKit",
   key: "Retell API key",
   keyHint:
     "The key Egma pulls production calls with. It is a monitoring-only credential, so it is asked for even when a connection already holds one.",
@@ -368,13 +368,13 @@ function Picker({
               }
             >
               <option value="retell">{COPY.retell}</option>
-              <option value="livekit_agents">{COPY.livekit}</option>
+              <option value="livekit">{COPY.livekit}</option>
             </Select>
           </Field>
         </Form>
       </Section>
 
-      {platform === "livekit_agents" ? (
+      {platform === "livekit" ? (
         <LiveKitInstructions projectId={projectId} />
       ) : (
         <RetellPath
@@ -892,7 +892,7 @@ function Outcome({
 }
 
 /**
- * The LiveKit Agents half: instructions, and nothing else.
+ * The LiveKit half: instructions, and nothing else.
  *
  * **It consults no server state and changes none.** Push is ungated by design:
  * the OTLP door authenticates with the project key, tenancy comes from the

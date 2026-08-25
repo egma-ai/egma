@@ -209,7 +209,7 @@ function aSpanOf(spanId: string): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "",
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",

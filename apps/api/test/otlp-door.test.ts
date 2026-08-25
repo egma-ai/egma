@@ -215,7 +215,7 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
     expect(accepted.statusCode).toBe(200);
     const [livekit] = await pendingSegments(ingestStore());
     expect(livekit?.records[0]).toMatchObject({
-      agent_platform: "livekit_agents",
+      agent_platform: "livekit",
       // The framework's own session span, which is the platform saying the
       // conversation is over. Nothing infers it from the span having no parent.
       ends_trace: true,

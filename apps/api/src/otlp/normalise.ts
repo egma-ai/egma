@@ -247,7 +247,7 @@ export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
 
 /** A scope proves the framework, not how the caller reached the agent. */
 const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
-  [LIVEKIT_SCOPE]: "livekit_agents",
+  [LIVEKIT_SCOPE]: "livekit",
 };
 
 const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];

@@ -52,9 +52,9 @@ export function startMonitoringPath(projectId: string, agentId?: string): string
  */
 export function platformOfConnectionType(
   connectionType: string,
-): "retell" | "livekit_agents" | null {
+): "retell" | "livekit" | null {
   if (connectionType === "retell_chat_api") return "retell";
-  if (connectionType === "livekit_room") return "livekit_agents";
+  if (connectionType === "livekit_room") return "livekit";
   return null;
 }
 

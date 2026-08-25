@@ -146,6 +146,7 @@ beforeAll(async () => {
     "/v1/agents",
     { authorization: `Bearer ${key}` },
     {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",

@@ -66,7 +66,7 @@ describe("the key-pair shape", () => {
     expect(result.registered.agent.name).toBe("front-desk");
     expect(result.registered.connection).toMatchObject({
       name: "livekit_room-1",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",
@@ -126,7 +126,7 @@ describe("the token-endpoint shape", () => {
     expect(result.kind).toBe("registered");
     if (result.kind !== "registered") return;
     expect(result.registered.connection).toMatchObject({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
       modality: "voice",
@@ -198,8 +198,8 @@ describe("the server-owned connection form", () => {
         JSON.stringify({
           items: [
             {
-              agentPlatform: "livekit_agents",
-              agentPlatformLabel: "LiveKit Agents",
+              agentPlatform: "livekit",
+              agentPlatformLabel: "LiveKit",
               connectionType: "livekit_room",
               accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
               accessVariantLabel: "LiveKit project credentials — Recommended",
@@ -230,8 +230,8 @@ describe("the server-owned connection form", () => {
               ],
             },
             {
-              agentPlatform: "livekit_agents",
-              agentPlatformLabel: "LiveKit Agents",
+              agentPlatform: "livekit",
+              agentPlatformLabel: "LiveKit",
               connectionType: "livekit_room",
               accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
               accessVariantLabel: "Customer token endpoint — Advanced",
@@ -272,10 +272,10 @@ describe("the server-owned connection form", () => {
     if (result.kind !== "catalog") return;
     const livekit = connectionOptionsForPlatform(
       result.catalog,
-      "livekit_agents",
+      "livekit",
     );
     expect(livekit[0]).toMatchObject({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",

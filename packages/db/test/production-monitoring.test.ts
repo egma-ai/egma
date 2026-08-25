@@ -87,7 +87,7 @@ async function agentNamed(
   name: string,
   customer: typeof acme = acme,
 ): Promise<string> {
-  const created = await createAgent(at(customer, ada), { name });
+  const created = await createAgent(at(customer, ada), { agentPlatform: "retell", name });
   return created.id;
 }
 
@@ -594,7 +594,7 @@ describe('"last heard from"', () => {
   it("stamps nothing for a platform agent this project does not pull", async () => {
     const agentId = await pulling("Front desk", "agent_retell_voice_1");
     await recordPulledCallReceived(at(acme, ada), {
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       platformAgentId: "some-livekit-room",
       receivedAt: new Date(SETUP_TIME.getTime() + 60_000),
     });

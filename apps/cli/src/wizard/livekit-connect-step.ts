@@ -177,7 +177,7 @@ export async function connectLiveKitStep(
 
   const variants = connectionOptionsForPlatform(
     catalog.catalog,
-    "livekit_agents",
+    "livekit",
   ).filter(
     (option) =>
       option.simulatorAdapter &&

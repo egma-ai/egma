@@ -128,6 +128,7 @@ describe("the CLI and API suite contract", () => {
     });
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: {
         agentPlatform: "retell",

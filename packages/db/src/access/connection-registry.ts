@@ -434,7 +434,7 @@ function accessVariantMetadata(
 
 const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
   retell: "Retell",
-  livekit_agents: "LiveKit Agents",
+  livekit: "LiveKit",
 };
 
 type ConnectionOption = {
@@ -461,21 +461,21 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     productLabel: "Retell phone",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     productLabel: "LiveKit project credentials",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -903,7 +903,7 @@ export const CONNECTION_REGISTRY: Readonly<
   },
   livekit_room: {
     label: "LiveKit room",
-    agentPlatforms: ["livekit_agents"],
+    agentPlatforms: ["livekit"],
     // Voice only, and only because voice is the lane that exists. The registry
     // may not claim what no code can run, so `chat` arrives here in the same
     // commit as the code that conducts a livekit chat.
@@ -1139,8 +1139,8 @@ export function noSimulatorAdapterMessage(
  *
  * The connection row holds no platform of its own (ADR-0015). Where the type
  * names exactly one platform it answers on its own; where it names several or
- * any — `phone_number` spans platforms — the agent's own binding answers, and
- * where the agent has none, nobody does.
+ * any — `phone_number` spans platforms — the agent's declared platform
+ * answers.
  */
 export function platformOfConnectionType(
   connectionType: string,

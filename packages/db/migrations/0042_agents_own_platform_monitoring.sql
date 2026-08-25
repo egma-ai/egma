@@ -27,6 +27,14 @@
 -- `revision` leaves `agent` and `connection` — concurrent edits become
 -- last-writer-wins, accepted pre-launch. Grader library revisions are a
 -- different system and are untouched.
+--
+-- Every agent must name its platform after this cutover. An old agent inherits
+-- it only when its connections agree on one non-null platform. A bare agent or
+-- an agent whose connections name different platforms stops this migration.
+-- Migration 0038 stored LiveKit as `livekit_agents`; normalize that shipped
+-- value before deciding whether the connections agree and before copying it.
+-- This incompatibility is accepted prelaunch; there is no older API or data
+-- contract to preserve.
 
 TRUNCATE TABLE "retell_call_retry";--> statement-breakpoint
 CREATE TABLE "monitoring_state" (
@@ -74,6 +82,25 @@ ALTER TABLE "connection" DROP CONSTRAINT "connection_agent_platform_allowed";-->
 ALTER TABLE "connection" DROP CONSTRAINT "connection_kind_allowed";--> statement-breakpoint
 DROP INDEX "retell_call_retry_due_idx";--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "agent_platform" text;--> statement-breakpoint
+UPDATE "agent"
+SET "agent_platform" = "one_platform"."agent_platform"
+FROM (
+	SELECT
+		"agent_id",
+		min(CASE
+			WHEN "agent_platform" = 'livekit_agents' THEN 'livekit'
+			ELSE "agent_platform"
+		END) AS "agent_platform"
+	FROM "connection"
+	WHERE "agent_platform" IS NOT NULL
+	GROUP BY "agent_id"
+	HAVING count(DISTINCT CASE
+		WHEN "agent_platform" = 'livekit_agents' THEN 'livekit'
+		ELSE "agent_platform"
+	END) = 1
+) AS "one_platform"
+WHERE "agent"."id" = "one_platform"."agent_id";--> statement-breakpoint
+ALTER TABLE "agent" ALTER COLUMN "agent_platform" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "platform_agent_id" text;--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "monitoring_api_key" text;--> statement-breakpoint
 ALTER TABLE "agent" ADD COLUMN "monitoring_api_key_hint" text;--> statement-breakpoint
@@ -92,7 +119,7 @@ ALTER TABLE "agent" DROP COLUMN "revision";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "agent_platform";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "revision";--> statement-breakpoint
 ALTER TABLE "retell_call_retry" DROP COLUMN "retell_monitored_agent_id";--> statement-breakpoint
-ALTER TABLE "agent" ADD CONSTRAINT "agent_platform_allowed" CHECK ("agent"."agent_platform" in ('retell', 'livekit_agents'));--> statement-breakpoint
+ALTER TABLE "agent" ADD CONSTRAINT "agent_platform_allowed" CHECK ("agent"."agent_platform" in ('retell', 'livekit'));--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_monitoring_key_hint_agrees" CHECK (("agent"."monitoring_api_key" is null) = ("agent"."monitoring_api_key_hint" is null));--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_monitoring_key_needs_platform" CHECK ("agent"."monitoring_api_key" is null or "agent"."agent_platform" is not null);--> statement-breakpoint
 ALTER TABLE "agent" ADD CONSTRAINT "agent_pull_needs_binding" CHECK ("agent"."pull_production_calls" = false or ("agent"."agent_platform" is not null and "agent"."platform_agent_id" is not null and "agent"."monitoring_api_key" is not null));--> statement-breakpoint

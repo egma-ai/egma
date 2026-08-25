@@ -412,7 +412,7 @@ async function agentFor(
     "POST",
     "/v1/agents",
     await mintKey(api.app, person.cookie, `${name} key`, projectId),
-    { name },
+    { agentPlatform: "retell", name },
   );
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   return String((registered.body.agent as { id: string }).id);

@@ -98,6 +98,7 @@ async function seedCustomer(
   apiKey: string,
 ): Promise<Seeded> {
   const created = await createAgent(auth, {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: {
       agentPlatform: "retell",
@@ -434,6 +435,7 @@ describe("the connection door", () => {
 
     // Put the connection back for whatever runs after this file's tests.
     const restored = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
       name: "Front desk restored",
       connection: {
         agentPlatform: "retell",
@@ -639,7 +641,7 @@ describe("a livekit connection's two credential shapes, through the claim", () =
     connection: Record<string, unknown>,
   ): Promise<string> {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -734,6 +736,7 @@ describe("archiving a target out from under work", () => {
     name: string,
   ): Promise<{ agentId: string; connectionId: string }> {
     const created = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
       name,
       connection: {
         agentPlatform: "retell",

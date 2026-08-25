@@ -533,7 +533,7 @@ async function register(
     const name = attempt === 1 ? wanted : `${wanted}-${attempt}`;
 
     const result = await registerAgent(
-      { name, connection: selected.connection },
+      { name, agentPlatform: "retell", connection: selected.connection },
       platform,
     );
 

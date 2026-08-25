@@ -309,7 +309,7 @@ export async function monitoringRoutes(
     if (given(text(body.agentPlatform)) !== RETELL) {
       return unprocessable(
         reply,
-        "Egma pulls production calls from Retell. A LiveKit Agents agent " +
+        "Egma pulls production calls from Retell. A LiveKit agent " +
           "pushes its own spans and needs no setup here.",
       );
     }
