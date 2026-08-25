@@ -985,13 +985,13 @@ describe("what a project recorded in production", () => {
       // returning to the current project must keep the same settled context.
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .getByText("New project", { exact: true })
         .click();
       await page.waitForURL(new RegExp(`/new-project$`));
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .locator("button[data-menu-item]")
         .first()
         .click();
@@ -2500,8 +2500,9 @@ describe("the complete product, walked in order in a second project", () => {
       await expect.poll(() => selectorOf(walk).innerText()).toContain("Default");
 
       await selectorOf(walk).click();
-      await walk.fill("#project-search", "Supp");
-      await walk.keyboard.press("Enter");
+      await walk
+        .getByRole("menuitem", { name: "Support", exact: true })
+        .click();
 
       await walk.waitForURL(`${origin}/projects/${second}/agents`);
       await expect.poll(() => selectorOf(walk).innerText()).toContain("Support");
@@ -3570,8 +3571,9 @@ describe("the complete product, walked in order in a second project", () => {
          * screen — so Back has to undo it.
          */
         await selectorOf(walk).click();
-        await walk.fill("#project-search", "Default");
-        await walk.keyboard.press("Enter");
+        await walk
+          .getByRole("menuitem", { name: "Default", exact: true })
+          .click();
         await walk.waitForURL(`${origin}/projects/${first}/tests`);
 
         await walk.goBack();

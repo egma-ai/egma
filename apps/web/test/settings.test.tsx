@@ -503,7 +503,7 @@ describe("project settings", () => {
       name: /^Organization Acme, project Default\./,
     });
     fireEvent.click(selectors[0]!);
-    const outbound = screen.getByRole("button", { name: "Outbound" });
+    const outbound = screen.getByRole("menuitem", { name: "Outbound" });
     fireEvent.click(outbound);
     expect(routed.push).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
@@ -512,7 +512,7 @@ describe("project settings", () => {
     expect(document.activeElement).toBe(selectors[0]);
 
     fireEvent.click(selectors[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Outbound" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings");
     expect(confirm).not.toHaveBeenCalled();
