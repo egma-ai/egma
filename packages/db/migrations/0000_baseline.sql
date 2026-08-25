@@ -1,10 +1,8 @@
 -- PRE-PRODUCTION BASELINE RESET, confirmed by the founder on 2026-08-25.
 -- This file replaces PostgreSQL migrations 0000 through 0046. Self-hosted
--- databases that ran them must be recreated. A managed store may instead adopt
--- this exact file hash only after an operator verifies every old ledger hash
--- and the logical schema; old ledger rows may remain for rollback. The baseline
--- creates only the current schema and current catalog rows; it carries no
--- rename, backfill, or general compatibility path.
+-- databases that ran them must be recreated. The baseline creates only the
+-- current schema and current catalog rows; it carries no rename, backfill, or
+-- compatibility path.
 CREATE EXTENSION IF NOT EXISTS citext;
 --> statement-breakpoint
 CREATE TABLE "account" (
