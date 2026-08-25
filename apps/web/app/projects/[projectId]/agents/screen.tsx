@@ -27,7 +27,8 @@ import { ArchiveConfirm } from "./archive.tsx";
 import { ConnectAgentSheet } from "./connect-sheet.tsx";
 import { ConnectionsOnRow } from "./connection-facts.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
-import { RowMenu, RowMenuDestructive, RowMenuLink } from "./row-menu.tsx";
+import { RenameAgentSheet } from "./rename-sheet.tsx";
+import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 
 /**
  * The agents of one project: the landing page of the product, and the one
@@ -124,6 +125,8 @@ export function AgentsScreen({
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
   /** The agent a confirmation is standing in front of. */
   const [archiving, setArchiving] = useState<ListedAgentWithConnections | null>(null);
+  /** The agent whose name is being changed, in the sheet that changes it. */
+  const [renaming, setRenaming] = useState<ListedAgentWithConnections | null>(null);
 
   const carried = after !== null && after.project === projectId ? after.page : null;
 
@@ -152,17 +155,6 @@ export function AgentsScreen({
   const home = projectPath(projectId, "agents");
   const sheet = openSheet(forced, query);
 
-  /** Every environment label this screen can see, offered as a suggestion. */
-  const environments = [
-    ...new Set(
-      items.flatMap((agent) =>
-        agent.connections.flatMap((one) =>
-          one.environment === null ? [] : [one.environment],
-        ),
-      ),
-    ),
-  ];
-
   /**
    * One page for every role, and the control that changes data is disabled
    * rather than removed. A viewer sees what egma can do here and is told
@@ -187,15 +179,18 @@ export function AgentsScreen({
   /**
    * The one action this screen is for, and the same control wherever it stands.
    *
-   * `/agents/new` is still its address. The panel it opens is drawn over this
-   * list either way, so the address is kept rather than swapped for a query —
-   * it is the one every CLI message and every piece of documentation already
-   * points at.
+   * **It changes query state and never navigates** (the founder's blanket
+   * ruling of 2026-08-24: opening any sheet never redirects or reloads the
+   * page). The panel was always drawn over this list; sending the browser to
+   * `/agents/new` to draw it meant a reload in the middle of the product's
+   * first job. `/agents/new` survives as a deep-link alias that renders the
+   * same panel in place, so every CLI message and every piece of documentation
+   * still lands where it always did.
    */
   const connect = () =>
     role === null ? undefined : mayConnect ? (
       <Button asChild>
-        <Link href={projectPath(projectId, "agents", "new")}>Connect an agent</Link>
+        <Link href={`${home}?sheet=connect`}>Connect an agent</Link>
       </Button>
     ) : (
       <Button type="button" disabled why={whyNot}>
@@ -247,7 +242,7 @@ export function AgentsScreen({
         width: "360px",
         cell: (agent) => (
           <ConnectionsOnRow
-            agentHref={projectPath(projectId, "agents", agent.id)}
+            agentName={agent.name}
             connections={agent.connections}
             hrefOf={(one) =>
               `${home}?sheet=connection&agent=${encodeURIComponent(agent.id)}&connection=${encodeURIComponent(one.id)}`
@@ -265,21 +260,22 @@ export function AgentsScreen({
         key: "menu",
         header: "Actions",
         action: true,
+        /*
+         * **Two items, and they are the two things the row is.** The row is
+         * the agent now — there is no detail page to open and no second place
+         * to connect from — so the menu holds renaming it and deleting it and
+         * nothing else (`I2Z-0`).
+         */
         cell: (agent) => (
           <RowMenu label={`Actions for ${agent.name}`}>
-            <RowMenuLink href={projectPath(projectId, "agents", agent.id)}>
-              Open agent
-            </RowMenuLink>
-            <RowMenuLink
-              href={`${home}?sheet=connect&agent=${encodeURIComponent(agent.id)}`}
-            >
-              Connect
-            </RowMenuLink>
+            <RowMenuItem onSelect={() => setRenaming(agent)} why={whyNotChange}>
+              Rename agent
+            </RowMenuItem>
             <RowMenuDestructive
               onSelect={() => setArchiving(agent)}
               why={whyNotChange}
             >
-              Archive agent
+              Delete agent
             </RowMenuDestructive>
           </RowMenu>
         ),
@@ -463,36 +459,16 @@ export function AgentsScreen({
           mayAuthor={mayAuthor}
           role={role}
           onClose={close}
-          onConnected={(result) => {
+          onConnected={() => {
             /*
-             * **A create lands on the record it just made.**
+             * **A save closes onto the list, and nothing navigates.**
              *
-             * Registering an agent writes two things — the agent and the first
-             * way in to it — and the page that holds both is the agent's own:
-             * its identity, whether egma pulls its production calls, and its
-             * connections. Closing onto the list instead left somebody who had
-             * just made something looking at a list of everything, with the
-             * one row they wanted to see somewhere in it.
-             *
-             * It replaces rather than pushes, because the address behind is
-             * `…/agents/new` — the panel they just finished with. Back should
-             * be the list they opened it from, not the form opening again. The
-             * onboarding forward above keeps its push: that flow began on the
-             * agent's own page and the step behind it is a real one.
-             *
-             * Adding a connection to an agent that already existed is the
-             * other half of this panel and is not a create: that one closes
-             * onto the list it was opened over, which is where the row it
-             * changed is.
+             * There is no agent page to land on any more: the row is the agent,
+             * and the row this save just wrote is right there behind the panel.
+             * `replace` rather than `push`, because the address behind is the
+             * panel that was just finished with — Back should be the list it
+             * was opened from, not the form opening again.
              */
-            if (sheet.onboarding === true) {
-              router.push(projectPath(projectId, "agents", result.agentId));
-              return;
-            }
-            if (result.created) {
-              router.replace(projectPath(projectId, "agents", result.agentId));
-              return;
-            }
             router.replace(home);
             refresh();
           }}
@@ -504,7 +480,6 @@ export function AgentsScreen({
           projectId={projectId}
           agentId={sheet.agentId}
           connectionId={sheet.connectionId}
-          environments={environments}
           mayAuthor={mayAuthor}
           role={role}
           onClose={close}
@@ -512,9 +487,23 @@ export function AgentsScreen({
         />
       ) : null}
 
+      {renaming === null ? null : (
+        <RenameAgentSheet
+          projectId={projectId}
+          agent={renaming}
+          mayAuthor={mayAuthor}
+          {...(whyNotChange === undefined ? {} : { why: whyNotChange })}
+          onClose={() => setRenaming(null)}
+          onRenamed={() => {
+            setRenaming(null);
+            reload();
+          }}
+        />
+      )}
+
       {archiving === null ? null : (
         <ArchiveConfirm
-          title="Archive agent"
+          title="Delete agent"
           onArchive={async () => {
             const done = await platformAnswer(
               archiveAgent(
@@ -534,7 +523,7 @@ export function AgentsScreen({
             reload();
           }}
         >
-          {`Egma stops testing “${archiving.name}”. Every connection on it is archived with it and every run waiting on it stops. Transcripts already stored stay stored, and this screen has no way to bring it back.`}
+          {`Egma stops testing “${archiving.name}”. Every connection on it goes with it and every run waiting on it stops. Transcripts already stored stay stored, and this screen has no way to bring it back.`}
         </ArchiveConfirm>
       )}
     </ProductPage>

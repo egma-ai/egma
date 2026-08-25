@@ -31,9 +31,10 @@ export type TraceSpan = {
 export type DiscoverAgentsData = {
     body: {
         agentPlatform: 'retell';
-        credentials: {
+        credentials?: {
             apiKey: string;
         };
+        agentId?: string;
     };
     path?: never;
     query?: {
@@ -256,8 +257,10 @@ export type RegisterAgentData = {
             credentials?: {
                 [key: string]: unknown;
             };
+            platformAgentId?: string;
+            pullProductionCalls?: boolean;
             /**
-             * Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.
+             * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
              */
             agentPlatformSelection?: {
                 platformAgentId: string;
@@ -575,8 +578,10 @@ export type AddConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
+        platformAgentId?: string;
+        pullProductionCalls?: boolean;
         /**
-         * Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.
+         * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
             platformAgentId: string;

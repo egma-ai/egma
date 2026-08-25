@@ -2574,24 +2574,30 @@ describe("the complete product, walked in order in a second project", () => {
        */
       await walk.getByRole("radio", { name: "Voice" }).click();
       await walk.fill("#connection-name", "Retell staging");
-      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
+      /*
+       * **The key reads the account by itself.** There is no "Load Retell
+       * agents" button any more (founder ruling, 2026-08-24): pasting a key is
+       * the person saying "this is my account", and asking them to confirm it
+       * by pressing something asked the same question twice.
+       */
       const discoveryResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname === "/v1/agents:discover",
       );
-      await walk.getByRole("button", { name: "Load Retell agents" }).click();
+      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       const discovered = await discoveryResponse;
       expect(discovered.status(), await discovered.text()).toBe(200);
+      expect(
+        await walk.getByRole("button", { name: "Load Retell agents" }).count(),
+        "the account loads itself, so there is no button to press",
+      ).toBe(0);
+      // The pick is by name, and the number Egma dials is typed.
       await walk.waitForSelector("#retell-agent");
       await expect.poll(() => walk.inputValue("#retell-agent")).toBe(
         BROWSER_RETELL_AGENT,
       );
-      await expect.poll(() =>
-        walk
-          .locator("#discovered-connection option:checked")
-          .textContent(),
-      ).toContain(BROWSER_RETELL_NUMBER);
+      await walk.fill("#retell-phone-number", BROWSER_RETELL_NUMBER);
       /*
        * **One write, both halves.** `registerAgent` carries the connection, so
        * there is no window in which the agent exists and nothing can reach it.
@@ -2606,14 +2612,12 @@ describe("the complete product, walked in order in a second project", () => {
       expect(connected.status(), await connected.text()).toBe(201);
 
       /*
-       * **The panel closes onto the agent it just made**, which is the record
-       * the person created rather than the list of everything that holds it.
-       * The address is read from the product — the browser is standing on it —
-       * rather than reconstructed from a database id.
+       * **The panel closes onto the list, because the row is the agent.** The
+       * agent page is retired (founder ruling, 2026-08-24): everything it held
+       * is on the row behind the panel, so a save that navigated would be
+       * taking somebody away from what they just made.
        */
-      await walk.waitForURL(
-        new RegExp(`/projects/${second}/agents/agt_[^/?#]+$`),
-      );
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
       agentAddress = walk.url();
       await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Retell staging");
@@ -2646,28 +2650,29 @@ describe("the complete product, walked in order in a second project", () => {
       // The connection's own address still exists and still opens the same
       // panel; the row's link, read off the list below, is the query form of it.
       const storedConnectionId = stored.rows[0]?.id ?? "";
-      connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
+      const storedAgentId = (
+        await instance.database.sql<{ id: string }>(
+          `select id from agent where name = 'The Support line'`,
+        )
+      ).rows[0]?.id ?? "";
+      connectionAddress =
+        `${origin}/projects/${second}/agents/${storedAgentId}` +
+        `/connections/${storedConnectionId}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
       /*
-       * The agent's page is its identity, whether Egma pulls its production
-       * calls, and its connections. Nothing else.
-       *
-       * The absences are asserted only after the connection's own name has
-       * landed. A page still loading says none of these words either, so
-       * checking them first would pass for the wrong reason — and go on
-       * passing after the connections it is meant to guard stopped being drawn.
+       * **The agents screen carries nothing about testing or monitoring**, and
+       * the agent page that carried both is gone. The absences are asserted
+       * only after the connection's own name has landed: a page still loading
+       * says none of these words either, so checking them first would pass for
+       * the wrong reason.
        */
-      const agentPage = await walk.innerText("main");
-      expect(agentPage).toContain("Connections");
-      // The pull switch, which is the only stored monitoring choice in the
-      // product and lives on the agent that owns it (ADR-0015). Nothing binds
-      // this agent to a platform yet, so it reads off and says so.
-      expect(agentPage).toContain("Production calls");
-      expect(agentPage).toContain("Not bound");
-      expect(agentPage).not.toContain("Recent runs");
-      expect(agentPage).not.toContain("Attached tests");
+      const agentsScreen = await walk.innerText("main");
+      expect(agentsScreen).toContain("Connections");
+      expect(agentsScreen).not.toContain("Production calls");
+      expect(agentsScreen).not.toContain("Recent runs");
+      expect(agentsScreen).not.toContain("Attached tests");
 
       /*
        * And the list says egma can reach it, without anybody opening it. This
@@ -2698,15 +2703,19 @@ describe("the complete product, walked in order in a second project", () => {
       await named
         .getByRole("button", { name: "Actions for The Support line" })
         .click();
-      const openAgent = walk.getByRole("menuitem", {
-        name: "Open agent",
-        exact: true,
+      /*
+       * **Two items, and they are the two things the row is.** There is no
+       * agent page to open and no second place to connect from, so the menu is
+       * exactly Rename agent and Delete agent (`I2Z-0`).
+       */
+      const menu = walk.getByRole("menu", {
+        name: "Actions for The Support line",
       });
-      await openAgent.waitFor();
+      await menu.waitFor();
       expect(
-        new URL((await openAgent.getAttribute("href")) ?? "/", origin).toString(),
-        "the registered agent has a row whose menu opens it",
-      ).toBe(agentAddress);
+        await menu.getByRole("menuitem").allInnerTexts(),
+        "the row menu is rename and delete, and nothing that used to lead away",
+      ).toEqual(["Rename agent", "Delete agent"]);
       await walk.keyboard.press("Escape");
       // And the way in is named on the row, as a link that opens it over the
       // list rather than as four facts nobody can press.
@@ -3190,6 +3199,8 @@ describe("the complete product, walked in order in a second project", () => {
         // sentence is the form itself rather than the address of it.
         says: "Its name in Egma",
       },
+      // The agent's own address is retired and lands on the list, which is the
+      // one agent screen. It still says the agent's name, on its row.
       { what: "one agent", address: agentAddress, says: "The Support line" },
       {
         what: "Add a connection",
@@ -4380,15 +4391,14 @@ describe("the complete product, walked in order in a second project", () => {
         expect(trail.filter((name) => name === "Active")).toEqual([]);
         expect(trail.filter((name) => name === "Archived")).toEqual([]);
 
-        // Enter opens the row's menu on its first item, and Enter again
-        // follows it to the agent this row is a row for.
+        // Enter opens the row's menu on its first item, which is renaming the
+        // agent this row is a row for.
         await walk.keyboard.press("Enter");
         await walk
-          .getByRole("menuitem", { name: "Open agent", exact: true })
+          .getByRole("menuitem", { name: "Rename agent", exact: true })
           .waitFor();
-        expect(await focused()).toBe("Open agent");
-        await walk.keyboard.press("Enter");
-        await walk.waitForURL(agentAddress);
+        expect(await focused()).toBe("Rename agent");
+        await walk.keyboard.press("Escape");
         await saysWithin(walk, "The Support line");
       },
       SETTLE,

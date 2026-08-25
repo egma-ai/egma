@@ -93,6 +93,33 @@
 ):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 
 /*
+ * A text field's focus is quiet: its hairline darkens to ink, in place.
+ *
+ * (Developer decision, 2026-08-24, recorded in `DESIGN.md`.) A person typing
+ * has already been told where they are by the caret, and the 2px Ember ring
+ * around every box in a form made a sheet flash orange with each Tab. The ring
+ * stays everywhere it is the only answer — buttons, links, selects,
+ * checkboxes, radios, menu items, tabs — because those controls carry no caret
+ * and nothing else on them moves.
+ *
+ * **It answers `:focus`, not `:focus-visible`.** A field clicked into and a
+ * field tabbed into are the same field being typed in, and one of the two
+ * showing no state at all would make the border mean "reached by keyboard"
+ * rather than "this is where your typing goes".
+ *
+ * The specificity is deliberate rather than lucky: `:is(input, textarea)` with
+ * a `:not()` and `:focus` outweighs the ring rule above, so a text field
+ * cannot end up wearing both.
+ */
+:is(input, textarea):not(
+  [type="checkbox"], [type="radio"], [type="button"], [type="submit"],
+  [type="reset"], [type="file"], [type="range"], [type="color"], [type="image"]
+):focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
+/*
  * Inside a menu the ring turns inward.
  *
  * The panel holds its items on 4px of padding and scrolls, so a ring drawn 3px

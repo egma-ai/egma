@@ -24,14 +24,16 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 export const discoverAgents = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     agentPlatform: 'retell';
-    credentials: {
+    credentials?: {
         apiKey: string;
     };
+    agentId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<DiscoverAgentsResponses, DiscoverAgentsErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'agentPlatform' },
-                { in: 'body', key: 'credentials' }
+                { in: 'body', key: 'credentials' },
+                { in: 'body', key: 'agentId' }
             ] }]);
     return (options?.client ?? client).post<DiscoverAgentsResponses, DiscoverAgentsErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -112,8 +114,10 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
         credentials?: {
             [key: string]: unknown;
         };
+        platformAgentId?: string;
+        pullProductionCalls?: boolean;
         /**
-         * Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.
+         * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
             platformAgentId: string;
@@ -219,6 +223,8 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     credentials?: {
         [key: string]: unknown;
     };
+    platformAgentId?: string;
+    pullProductionCalls?: boolean;
     agentPlatformSelection?: {
         platformAgentId: string;
         credentials: {
@@ -237,6 +243,8 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
                 { in: 'body', key: 'credentials' },
+                { in: 'body', key: 'platformAgentId' },
+                { in: 'body', key: 'pullProductionCalls' },
                 { in: 'body', key: 'agentPlatformSelection' }
             ] }]);
     return (options?.client ?? client).post<AddConnectionResponses, AddConnectionErrors, ThrowOnError>({

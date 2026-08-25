@@ -277,6 +277,11 @@ const CONTEXT_REQUIRING = [
   "disablePullProductionCalls",
   "dueRetellCallRetries",
   "enablePullProductionCalls",
+  // Custody without an observation: the key a person pastes when they connect
+  // an agent is sealed on the agent whether or not they also start pulling,
+  // and every later listing for that agent spends the sealed copy.
+  "sealAgentMonitoringKey",
+  "agentMonitoringKey",
   "recordPulledCallReceived",
   "recordRetellCallAttempt",
   "sweepExpiredRetellCallMarkers",

@@ -412,6 +412,85 @@ export async function disablePullProductionCalls(
   return stopped.length > 0;
 }
 
+/**
+ * Bind an agent to its platform agent and seal its key, without turning the
+ * pull switch on.
+ *
+ * **This exists because the key is pasted once per agent, ever** (the
+ * founder's ruling of 2026-08-24), and connecting an agent is where a person
+ * pastes it — whether or not they also tick "Pull production calls". Sealing
+ * it there is what lets every later connect flow for the same agent list the
+ * account without asking for the secret a second time.
+ *
+ * It is deliberately *not* `enablePullProductionCalls` with a flag. That
+ * function flips the switch and opens the machine notebook, which is the act
+ * of starting an observation; this one only records custody. A save that asks
+ * for both calls both, in that order, and the switch alone decides what the
+ * poller does.
+ */
+export async function sealAgentMonitoringKey(
+  auth: AuthContext,
+  input: {
+    readonly agentId: string;
+    readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string;
+    readonly apiKey: unknown;
+    readonly now?: Date | undefined;
+  },
+): Promise<void> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const apiKey = monitoringKey(input.apiKey);
+  const platformAgentId = boundPlatformAgentId(input.platformAgentId);
+  const now = input.now ?? new Date();
+
+  await db()
+    .update(agent)
+    .set({
+      agentPlatform: input.agentPlatform,
+      platformAgentId,
+      monitoringApiKey: sealCredentials({ apiKey }),
+      monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectId)),
+        eq(agent.id, input.agentId),
+        isNull(agent.archivedAt),
+      ),
+    );
+}
+
+/**
+ * The plaintext monitoring key one agent holds, or nothing when it holds none.
+ *
+ * **It never leaves the server.** The one caller is the API listing a Retell
+ * account for an agent that has already been given its key: the browser asks
+ * by agent id, and the answer is a list of agents rather than the secret that
+ * read it.
+ */
+export async function agentMonitoringKey(
+  auth: AuthContext,
+  agentId: string,
+): Promise<string | undefined> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const [row] = await db()
+    .select({ monitoringApiKey: agent.monitoringApiKey })
+    .from(agent)
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectId)),
+        eq(agent.id, agentId),
+      ),
+    )
+    .limit(1);
+  const sealed = row?.monitoringApiKey ?? null;
+  if (sealed === null) return undefined;
+  return openedMonitoringKey(sealed);
+}
+
 /** Read one agent's pull state. No credential column is selected. */
 export async function readAgentPullState(
   auth: AuthContext,

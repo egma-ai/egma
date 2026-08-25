@@ -14,13 +14,12 @@ import {
   Sheet,
   SheetBody,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { Refusal } from "@/lib/api.ts";
-import { NO_ENVIRONMENT, type ListedConnection } from "@/lib/agents.ts";
+import type { ListedConnection } from "@/lib/agents.ts";
 import {
   optionNamed,
   type ConnectionOption,
@@ -35,7 +34,7 @@ import { useProjectRead } from "@/ui/resource.ts";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
 import { ArchiveConfirm } from "./archive.tsx";
-import { modalityLabel } from "./connection-facts.tsx";
+import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 import { ConnectionFields, type Draft } from "./[agentId]/connections/fields.tsx";
 import {
   configForLiveKitDispatch,
@@ -75,7 +74,6 @@ type Answered = { readonly connection: ListedConnection };
 /** Everything the edit half holds, seeded from the record when Edit is pressed. */
 type Editing = {
   readonly name: string;
-  readonly environment: string;
   readonly draft: Draft;
   readonly dispatch: LiveKitDispatch;
   /** What the dispatch mode was when editing began, so "changed" is truthful. */
@@ -86,7 +84,6 @@ export function ConnectionSheet({
   projectId,
   agentId,
   connectionId,
-  environments = [],
   mayAuthor,
   role,
   onClose,
@@ -95,8 +92,6 @@ export function ConnectionSheet({
   readonly projectId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  /** Environment labels already in use nearby, offered as suggestions. */
-  readonly environments?: readonly string[];
   readonly mayAuthor: boolean;
   /** Null while the session read is in flight, so nothing is claimed yet. */
   readonly role: string | null;
@@ -169,7 +164,6 @@ export function ConnectionSheet({
     connection !== null &&
     editing !== null &&
     (editing.name !== connection.name ||
-      editing.environment !== (connection.environment ?? "") ||
       editing.dispatch !== editing.startingDispatch ||
       JSON.stringify(editing.draft.config) !== JSON.stringify(connection.config));
   useUnsavedChanges(changed && !saving, saving);
@@ -181,7 +175,6 @@ export function ConnectionSheet({
     setNameProblem(null);
     setEditing({
       name: connection.name,
-      environment: connection.environment ?? "",
       draft: { config: { ...connection.config }, credentials: {} },
       dispatch,
       startingDispatch: dispatch,
@@ -238,16 +231,6 @@ export function ConnectionSheet({
           projectId,
           name: wanted,
           config,
-          /*
-           * Sent only when it moved. `environment` is nullable in and out, so
-           * an empty box means unlabelled and `null` is how that is written.
-           */
-          ...(editing.environment === (connection.environment ?? "")
-            ? {}
-            : {
-                environment:
-                  editing.environment.trim() === "" ? null : editing.environment.trim(),
-              }),
         },
         { client: platformClient },
       ),
@@ -297,7 +280,7 @@ export function ConnectionSheet({
     if (editing !== null && option !== undefined) {
       return (
         <>
-          <Field label="Name" htmlFor="edit-connection-name">
+          <Field label="Name*" htmlFor="edit-connection-name">
             <Input
               id="edit-connection-name"
               value={editing.name}
@@ -313,41 +296,6 @@ export function ConnectionSheet({
               }}
             />
             {nameProblem === null ? null : <Problem>{nameProblem}</Problem>}
-          </Field>
-
-          {/*
-           * **A box with suggestions, not a select.** The board draws a select,
-           * and the contract takes free text with no operation that lists the
-           * labels a project uses — so a select here would have to invent the
-           * set and would refuse a label somebody is already running with. The
-           * suggestions are the labels egma can see on this screen, which is
-           * what a select would have offered, and typing past them still works.
-           */}
-          <Field label="Env" htmlFor="edit-connection-environment">
-            <Input
-              id="edit-connection-environment"
-              value={editing.environment}
-              list={environments.length === 0 ? undefined : "connection-environments"}
-              placeholder={NO_ENVIRONMENT}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => {
-                const next = event.target.value;
-                setEditing((current) =>
-                  current === null ? current : { ...current, environment: next },
-                );
-              }}
-            />
-            {environments.length === 0 ? null : (
-              <datalist id="connection-environments">
-                {environments.map((one) => (
-                  <option key={one} value={one} />
-                ))}
-              </datalist>
-            )}
-            <Help>
-              {`Which deployment this points at. An empty box means ${NO_ENVIRONMENT.toLowerCase()}.`}
-            </Help>
           </Field>
 
           <ConnectionFields
@@ -408,10 +356,6 @@ export function ConnectionSheet({
   }
 
   const title = connection === null ? "Connection" : connection.name;
-  const lead =
-    connection === null
-      ? null
-      : `${connection.productLabel} · ${modalityLabel(connection.modality)}`;
   const whyNotMine =
     role === null
       ? undefined
@@ -441,65 +385,60 @@ export function ConnectionSheet({
               void save();
             }}
           >
+            {/*
+              * **The head is the name and a ⋮, and no subtitle** (`ITZ-0`).
+              * The old "Retell phone · Voice" line under the name said what
+              * the Access row says two lines below it, and the first thing a
+              * panel says should be the record rather than its category.
+              *
+              * **Managing lives in the menu, and reading lives in the body.**
+              * Edit and Delete used to stand in the footer under a record
+              * nobody had asked to change yet, which made every read of a
+              * connection look like a form.
+              */}
             <SheetHeader>
               <SheetTitle>{title}</SheetTitle>
-              {lead === null ? null : <SheetDescription>{lead}</SheetDescription>}
+              {connection === null || role === null || editing !== null ? null : (
+                <RowMenu label={`Actions for ${connection.name}`}>
+                  <RowMenuItem
+                    onSelect={startEditing}
+                    {...(whyNotRead === undefined ? {} : { why: whyNotRead })}
+                  >
+                    Edit connection
+                  </RowMenuItem>
+                  <RowMenuDestructive
+                    onSelect={() => setArchiving(true)}
+                    {...(mayAuthor ? {} : { why: whyNotMine })}
+                  >
+                    Delete connection
+                  </RowMenuDestructive>
+                </RowMenu>
+              )}
             </SheetHeader>
             <SheetBody>{body()}</SheetBody>
-            {connection === null || role === null ? null : (
-              <SheetFooter
-                destructive={
-                  <Button
-                    className="text-failure"
-                    disabled={!mayAuthor}
-                    onClick={() => setArchiving(true)}
-                    size="lg"
-                    type="button"
-                    variant="ghost"
-                    title={mayAuthor ? undefined : whyNotMine}
-                    aria-describedby={mayAuthor ? undefined : whySaid}
-                  >
-                    Archive
-                  </Button>
-                }
-              >
-                {editing === null ? (
-                  <Button
-                    disabled={!mayAuthor || option === undefined}
-                    onClick={startEditing}
-                    size="lg"
-                    type="button"
-                    variant="secondary"
-                    title={whyNotRead}
-                    aria-describedby={whyNotRead === undefined ? undefined : whySaid}
-                  >
-                    Edit
-                  </Button>
-                ) : (
-                  <>
-                    <Button
-                      disabled={saving || !changed || !liveKitForm.ready}
-                      size="lg"
-                      type="submit"
-                      title={
-                        liveKitForm.ready
-                          ? undefined
-                          : "Enter the exact LiveKit agent name, or choose automatic dispatch."
-                      }
-                      aria-describedby={liveKitForm.ready ? undefined : whySaid}
-                    >
-                      {saving ? "Saving…" : "Save"}
-                    </Button>
-                    <Button
-                      onClick={() => setEditing(null)}
-                      size="lg"
-                      type="button"
-                      variant="secondary"
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                )}
+            {connection === null || role === null || editing === null ? null : (
+              <SheetFooter>
+                <Button
+                  disabled={saving || !changed || !liveKitForm.ready}
+                  size="lg"
+                  type="submit"
+                  title={
+                    liveKitForm.ready
+                      ? undefined
+                      : "Enter the exact LiveKit agent name, or choose automatic dispatch."
+                  }
+                  aria-describedby={liveKitForm.ready ? undefined : whySaid}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  onClick={() => setEditing(null)}
+                  size="lg"
+                  type="button"
+                  variant="secondary"
+                >
+                  Cancel
+                </Button>
               </SheetFooter>
             )}
           </form>
@@ -508,7 +447,7 @@ export function ConnectionSheet({
 
       {archiving && connection !== null ? (
         <ArchiveConfirm
-          title="Archive connection"
+          title="Delete connection"
           onArchive={archive}
           onClose={() => setArchiving(false)}
           onArchived={() => {
@@ -553,12 +492,27 @@ function ReadRow({
 /**
  * The record, read.
  *
+ * **Five kinds of row and no more** (`ITZ-0`, `JYY-0`, `K40-0`): Name, Access,
+ * the rows the catalog names for what is stored, the Config block, and
+ * Created. Updated-at, Env and Platform left with the 2026-08-24 boards —
+ * Platform because Access already says which product this is, Updated-at
+ * because nobody reads a connection to find out when it was touched, and Env
+ * because the product stopped speaking that word (the column stays where it
+ * is, unspoken).
+ *
+ * **The phone number is not a row.** It shows inside the Config block and
+ * nowhere else, so the panel does not say the same fact twice in two shapes.
+ *
  * **The labelled rows come from the catalog and the raw block comes from the
  * record**, and both are drawn because they answer different questions. A row
- * says what a value *is* — "Retell agent ID" — in the registry's own words. The
- * block says what egma actually stored. A key from a newer server has no label
- * in this browser, so it is listed by its own name and loses nothing while
- * clients and servers roll forward separately.
+ * says what a value *is* — "Retell agent ID" — in the registry's own words.
+ * The block says what egma actually stored. A key from a newer server has no
+ * label in this browser, so it is listed by its own name and loses nothing
+ * while clients and servers roll forward separately.
+ *
+ * **A credential is never here.** A read answers whether one is present and a
+ * hint of which it is; the hint is drawn as its last characters and the secret
+ * is not in the answer at all.
  */
 function ReadConnection({
   connection,
@@ -571,23 +525,18 @@ function ReadConnection({
   const rows: readonly { readonly label: string; readonly value: string }[] = [
     ...(option?.fields.flatMap((field) => {
       const value = connection.config[field.key];
-      return value === undefined ? [] : [{ label: field.label, value }];
+      return value === undefined || field.key === PHONE_NUMBER
+        ? []
+        : [{ label: field.label, value }];
     }) ?? []),
     ...Object.entries(connection.config)
-      .filter(([key]) => !known.has(key))
+      .filter(([key]) => !known.has(key) && key !== PHONE_NUMBER)
       .map(([key, value]) => ({ label: key, value })),
   ];
 
   return (
     <>
       <ReadRow label="Name">{connection.name}</ReadRow>
-      <ReadRow label="Env">{connection.environment ?? NO_ENVIRONMENT}</ReadRow>
-      <ReadRow label="Platform">
-        {option?.agentPlatformLabel ??
-          (connection.agentPlatform === null
-            ? "Any or unknown"
-            : agentPlatformLabel(connection.agentPlatform))}
-      </ReadRow>
       <ReadRow label="Access">
         {option?.accessVariantLabel ?? connection.accessVariant}
       </ReadRow>
@@ -596,15 +545,28 @@ function ReadConnection({
           {row.value}
         </ReadRow>
       ))}
+      {connection.credentialsHint === null ? null : (
+        <ReadRow label="Credentials" mono>
+          {`…${connection.credentialsHint}`}
+        </ReadRow>
+      )}
       <div className="flex min-w-0 flex-col gap-2">
         <p className="m-0 text-sm text-faint">Config</p>
         <pre className="m-0 overflow-x-auto border border-border bg-surface-soft p-3 font-mono text-sm text-muted-foreground">
           {JSON.stringify(connection.config)}
         </pre>
       </div>
-      <p className="m-0 text-sm text-faint">
-        {`Created ${asListInstant(connection.createdAt)} · Updated ${asListInstant(connection.updatedAt)}`}
-      </p>
+      <ReadRow label="Created">{asListInstant(connection.createdAt)}</ReadRow>
     </>
   );
 }
+
+/**
+ * The one config key that has no row of its own.
+ *
+ * A phone connection is the number, so the number was the row *and* the whole
+ * of the Config block under it — the same fact drawn twice, one line apart.
+ * The boards keep it in the block, which is the place that says what Egma
+ * actually stored.
+ */
+const PHONE_NUMBER = "phoneNumber";

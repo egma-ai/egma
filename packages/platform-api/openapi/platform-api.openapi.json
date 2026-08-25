@@ -62,11 +62,14 @@
                       "apiKey"
                     ],
                     "additionalProperties": false
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
-                  "agentPlatform",
-                  "credentials"
+                  "agentPlatform"
                 ],
                 "additionalProperties": false
               }
@@ -566,9 +569,15 @@
                         "type": "object",
                         "additionalProperties": true
                       },
+                      "platformAgentId": {
+                        "type": "string"
+                      },
+                      "pullProductionCalls": {
+                        "type": "boolean"
+                      },
                       "agentPlatformSelection": {
                         "type": "object",
-                        "description": "Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.",
+                        "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
                         "properties": {
                           "platformAgentId": {
                             "type": "string"
@@ -2313,9 +2322,15 @@
                     "type": "object",
                     "additionalProperties": true
                   },
+                  "platformAgentId": {
+                    "type": "string"
+                  },
+                  "pullProductionCalls": {
+                    "type": "boolean"
+                  },
                   "agentPlatformSelection": {
                     "type": "object",
-                    "description": "Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.",
+                    "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
                     "properties": {
                       "platformAgentId": {
                         "type": "string"

@@ -272,6 +272,7 @@ export type {
 } from "../schema/agents.ts";
 
 export {
+  agentMonitoringKey,
   checkpointMonitoringPage,
   claimDueMonitoringPull,
   deleteRetellCallRetry,
@@ -287,6 +288,7 @@ export {
   registerAgentPullingProductionCalls,
   releaseMonitoringLease,
   renewMonitoringLease,
+  sealAgentMonitoringKey,
   sweepExpiredRetellCallMarkers,
   transientRetellCallState,
   yieldMonitoringLease,

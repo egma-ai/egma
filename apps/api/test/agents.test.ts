@@ -378,7 +378,7 @@ describe("discovering simulation agents", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm the number still reaches the selected agent",
     });
     const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(read.body.connections).toEqual([]);
@@ -404,7 +404,7 @@ describe("discovering simulation agents", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm the number still reaches the selected agent",
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1189,7 +1189,7 @@ describe("a livekit connection", () => {
       payload: { topology: "agent-dials-out" },
       message:
         'a connection has no key "topology"; it holds name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection",
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection",
     },
     {
       named: "a credential key that does not belong",
@@ -1575,7 +1575,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1613,7 +1613,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection',
     });
   });
 });

@@ -6,7 +6,7 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
-The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The palette and the logo's own treatment rules did not move.
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. The palette and the logo's own treatment rules did not move.
 
 ## Product context
 
@@ -102,7 +102,8 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 - Carbon is for maximum contrast and dark evidence surfaces.
 - Body text uses Midnight Ink or Graphite.
 - Shadows use restrained orange-brown.
-- Focus uses a two-pixel Ember indicator with clear space around it.
+- Focus uses a two-pixel Ember indicator with clear space around it, on every control except a text field.
+- **A text field shows focus by its hairline darkening to ink, in place**, and draws no ring. The two-pixel Ember indicator stays on buttons, links, selects, checkboxes, radios, menu items and tabs, which carry no caret and have nothing else to move. The field answers `:focus` rather than `:focus-visible`, because a field clicked into and a field tabbed into are the same field being typed in. (Developer decision, 2026-08-24. This replaces the one-indicator-everywhere rule above it, and it is the only rule in this file that moved with that session.)
 
 ### Product state
 
@@ -113,6 +114,7 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 | Failure | `#b44444` | Failed, errored, invalid, or destructive |
 
 - Every state includes a word and an icon or shape. Color is supporting information.
+- **A status marker is a square.** Every small mark that stands for a state — a step marker beside a transcript line, a dot on a row — is a square of the same size, never a circle. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24.)
 - Brand orange does not mean passed, failed, skipped, or errored.
 - Destructive actions use the failure color inside a clear confirmation flow.
 - Dark theme uses lighter status values that keep the same meanings.
@@ -257,12 +259,14 @@ The measurements, all of them theme values:
 - Destructive actions require confirmation and say what will happen. The action that opens the confirmation is a text action in the failure colour, kept at the far end of a footer from the normal save. The button inside the confirmation is a filled failure-colour button.
 - Pointer press feedback uses a subtle scale. Keyboard activation is immediate.
 - A link inside a table cell is underlined in the text colour and turns Ember under a pointer.
+- **A segmented control's chosen segment carries a two-pixel Ember line on its top edge**, over a plain fill, plus weight 500 so the state is not colour alone. It is the narrow active edge this file already asks Ember for, moved to the edge a person reads first. A wash fill is not used here: the wash is the primary action's own surface, and a segment wearing it reads as a button to press rather than a choice already made. (Developer decision, 2026-08-24.)
 
 ### Forms and Settings
 
 - Use one clear page title and a short purpose statement.
 - Group related fields on Pure Paper surfaces.
 - Keep labels visible. Placeholder text is not a label.
+- **One label grammar, everywhere.** A mandatory field's label ends in `*`. An optional field's label ends in `[optional]`, in square brackets. A field carries at most one faint help line, and that line says what to write or where the value comes from — never how Egma stores it. (Developer decision, 2026-08-24. The lines that explained storage — “One paste, ever…”, “From your Retell…”, “Off by default…” — were deleted with it.)
 - Save state is truthful: unchanged, saving, saved, or failed.
 - Editing after save clears the saved state.
 - Protect drafts during link, project, tab, reload, and write-in-flight navigation.
