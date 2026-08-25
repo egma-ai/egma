@@ -12,14 +12,18 @@ the ``assistant`` the model plays, and the agent under test is the
 ``user`` it is answering.
 """
 
+# The prompt is product copy. Its long lines stay intact so source and runtime match.
+# ruff: noqa: E501
+
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from .model import CONCLUDE_MARKER, ModelClient, PersonaReply
+from pipecat.processors.aggregators.llm_context import LLMContext
+
+from .model import PERSONA_TOOLS, ModelClient, PersonaReply
 
 OPENING_NUDGE = (
     "(The conversation is open and the agent is listening. Speak your first turn.)"
@@ -28,40 +32,36 @@ OPENING_NUDGE = (
 models answer a user message, and an empty history has none to answer."""
 
 _PROMPT_FRAME = """\
-You are playing a person in a live conversation with a customer service \
-agent. You are the person; the agent is who you are talking to.
+# Background
 
-Who you are, exactly as authored:
+Here's the bigger picture - you are part of a broader voice agent testing platform where you perform the role of a simulated human that is calling a **voice agent** to test that voice agent under a particular scenario.
 
-{traits}
+You have certain quirks of your own behavior and your own personality and how you do things in certain situations. Your job is to emulate a given scenario with your specific personality traits and emulate the scenario so that we can look at the conversation between you (the simulated human persona) and the voice agent to evaluate at scale how the voice agent behaves under the given scenario.
 
-Why you are here today:
+# Your personality
+
+{personality}
+
+# The situation you are trying to roleplay with the agent
 
 {scenario}
 
-How to conduct yourself:
-- Stay in character as this person for the whole exchange. Never mention \
-being simulated, tested, or an AI.
-- Speak one conversational turn at a time, in plain spoken words — no \
-lists, no headings, no stage directions.
-- Pursue what you came for until it is concluded to your satisfaction, \
-and let your persona decide how patiently.
-- When your goal is concluded and nothing further is needed, say a brief \
-goodbye and end your reply with {marker}.
+# Important Rules
+
+- Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
+- The roleplay language is {language}
+- You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include your name, appointment details, or other details that someone in your situation might have handy.
+- Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
+- When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
 """
 
 
 def compose_system_prompt(traits: dict[str, Any], scenario_instructions: str) -> str:
-    """Human traits and scenario, composed into the persona's instructions.
-
-    Contract v3 admits the complete human-traits value and excludes technical
-    voice. Render that complete value so every authored human fact reaches the
-    model, without a model or deployment fallback.
-    """
+    """The exact platform prompt, filled from the claimed persona and test."""
     return _PROMPT_FRAME.format(
-        traits=json.dumps(traits, indent=2, sort_keys=True),
+        personality=traits["personality"],
         scenario=scenario_instructions,
-        marker=CONCLUDE_MARKER,
+        language=traits["language"],
     )
 
 
@@ -106,11 +106,19 @@ class Persona:
         """The exact provider input for this point in the conversation."""
         return messages_for(self._system_prompt, history)
 
-    async def reply_to(self, messages: list[dict[str, str]]) -> PersonaReply:
+    def context(self, history: Sequence[Turn]) -> LLMContext:
+        """The provider-neutral messages and tools for one persona turn."""
+        return LLMContext(
+            messages=self.messages(history),
+            tools=PERSONA_TOOLS,
+            tool_choice="auto",
+        )
+
+    async def reply_to(self, context: LLMContext) -> PersonaReply:
         """Ask the configured model without changing its provider contract."""
-        return await self._model.reply(messages)
+        return await self._model.reply(context)
 
     async def next_turn(self, history: Sequence[Turn]) -> PersonaReply:
         """What the persona says next, given everything said so far —
         and whether, having said it, they consider the exchange concluded."""
-        return await self.reply_to(self.messages(history))
+        return await self.reply_to(self.context(history))

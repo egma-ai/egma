@@ -15,20 +15,17 @@ export { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 export type PersonaTraits = {
   readonly personality: string;
   readonly language: string;
-  /** How they come across: warm, brisk, formal, distracted. */
-  readonly manner?: string | undefined;
-  /** How long they will stay with something before they push. */
-  readonly patience?: string | undefined;
   /** Where they sound like they are from. */
   readonly accent?: string | undefined;
   /** What is going on around them while they talk. */
   readonly backgroundNoise?: string | undefined;
-  /** What they do when the agent gets it wrong, or will not budge. */
-  readonly underFriction?: string | undefined;
 };
 
 export type EgmaProvidedPersonaVersion = {
-  /** Fixed forever. A catalog edit adds a new id; it never changes this row. */
+  /**
+   * Fixed after launch. A later catalog edit adds a new id; only an explicit
+   * pre-launch migration may rewrite this row in place.
+   */
   readonly id: string;
   readonly version: number;
   readonly traits: PersonaTraits;
@@ -44,12 +41,21 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
+const DEFAULT_PERSONA_MODELS: PersonaModels = {
+  ...RECOMMENDED_PERSONA_MODELS,
+  llm: {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+  },
+};
+
 /**
  * Every persona Egma provides.
  *
- * Prior versions stay in this list. A change to behavior or execution adds a
- * new fixed version and makes it the last entry. This is what lets a fresh
- * installation understand a version that an older installation pinned.
+ * After launch, prior versions stay in this list. A change to behavior or
+ * execution adds a new fixed version and makes it the last entry. This is what
+ * lets a fresh installation understand a version that an older installation
+ * pinned.
  */
 export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
   {
@@ -64,14 +70,10 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
           personality:
             "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
           language: "en-US",
-          manner: "Clear, natural, and conversational.",
-          patience: "Starts patient and gives the agent time to explain.",
           accent: "Neutral American English.",
           backgroundNoise: "None.",
-          underFriction:
-            "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
         },
-        models: RECOMMENDED_PERSONA_MODELS,
+        models: DEFAULT_PERSONA_MODELS,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
       },
     ],

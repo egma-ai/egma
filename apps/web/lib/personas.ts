@@ -59,22 +59,16 @@ export type PersonaModelCatalogEntry = PersonaForm["modelCatalog"][number];
 export type TraitsDraft = {
   readonly personality: string;
   readonly language: string;
-  readonly manner: string;
-  readonly patience: string;
   readonly accent: string;
   readonly backgroundNoise: string;
-  readonly underFriction: string;
 };
 
 /** What a persona egma has not been told anything about starts as. */
 export const BLANK_TRAITS: TraitsDraft = {
   personality: "",
   language: "en-US",
-  manner: "",
-  patience: "",
   accent: "",
   backgroundNoise: "",
-  underFriction: "",
 };
 
 /** The stored traits, as the editor holds them. */
@@ -82,11 +76,8 @@ export function draftOf(traits: PersonaTraits): TraitsDraft {
   return {
     personality: traits.personality,
     language: traits.language,
-    manner: traits.manner ?? "",
-    patience: traits.patience ?? "",
     accent: traits.accent ?? "",
     backgroundNoise: traits.backgroundNoise ?? "",
-    underFriction: traits.underFriction ?? "",
   };
 }
 
@@ -116,11 +107,8 @@ export function describedTraits(
     readonly label: string;
     readonly value: string | undefined;
   }[] = [
-    { label: "Manner", value: traits.manner },
-    { label: "Patience", value: traits.patience },
     { label: "Accent", value: traits.accent },
     { label: "Background noise", value: traits.backgroundNoise },
-    { label: "Under friction", value: traits.underFriction },
   ];
   return [
     ...required,
@@ -161,7 +149,10 @@ export function modelsDraftOf(models: PersonaModels): ModelsDraft {
 export function modelsFrom(draft: ModelsDraft): PersonaModels {
   const speed = Number(draft.speed);
   const models = {
-    llm: { provider: draft.llmProvider, model: draft.llmModel },
+    llm: {
+      provider: draft.llmProvider,
+      model: draft.llmModel,
+    },
     stt: { provider: draft.sttProvider, model: draft.sttModel },
     tts: {
       provider: draft.ttsProvider,

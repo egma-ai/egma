@@ -12,6 +12,8 @@ export type ModelSelection = {
   readonly model: string;
 };
 
+export type LlmSelection = ModelSelection;
+
 export type SpeechSelection = ModelSelection & {
   readonly voiceId: string;
   readonly speed: number;
@@ -19,7 +21,7 @@ export type SpeechSelection = ModelSelection & {
 
 /** The complete executable model choice owned by one persona version. */
 export type PersonaModels = {
-  readonly llm: ModelSelection;
+  readonly llm: LlmSelection;
   readonly stt: ModelSelection;
   readonly tts: SpeechSelection;
 };
@@ -109,7 +111,14 @@ export function validPersonaModels(value: unknown): PersonaModels {
 }
 
 export function validGraderModel(value: unknown): GraderModel {
-  return validSelection("llm", value);
+  const selection = validSelection("llm", value);
+  const entry = catalogEntry("llm", selection.provider, selection.model);
+  if (entry?.graderEligible !== true) {
+    throw new UnprocessableInputError(
+      `${selection.model} is not a supported grader model`,
+    );
+  }
+  return selection;
 }
 
 function sameSelection(a: ModelSelection, b: ModelSelection): boolean {
@@ -188,5 +197,15 @@ export const RECOMMENDED_PERSONA_MODELS: PersonaModels = {
   tts: recommendedSpeech(),
 };
 
+function recommendedGraderModel(): GraderModel {
+  const entry = PROVIDERS_BY_JOB.llm.find(
+    (candidate) => candidate.graderEligible === true,
+  );
+  if (entry === undefined) {
+    throw new Error("the provider catalog ships no grader-eligible LLM");
+  }
+  return { provider: entry.provider, model: entry.model };
+}
+
 export const RECOMMENDED_GRADER_MODEL: GraderModel =
-  recommendedSelection("llm");
+  recommendedGraderModel();

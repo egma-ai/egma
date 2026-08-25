@@ -235,11 +235,8 @@ type WrittenTraits =
 const HUMAN_TRAIT_FIELDS = [
   "personality",
   "language",
-  "manner",
-  "patience",
   "accent",
   "backgroundNoise",
-  "underFriction",
 ] as const;
 
 function traitsIn(value: unknown): WrittenTraits {
@@ -365,6 +362,7 @@ export async function personaRoutes(
         job: entry.job,
         model: entry.model,
         label: entry.label,
+        ...("modelLabel" in entry ? { modelLabel: entry.modelLabel } : {}),
         ...("recommendedVoiceId" in entry
           ? { recommendedVoiceId: entry.recommendedVoiceId }
           : {}),
@@ -544,7 +542,9 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
     const models =
-      "models" in body ? validPersonaModels(body.models) : undefined;
+      "models" in body
+        ? validPersonaModels(body.models)
+        : undefined;
 
     const expectedVersionId = given(text(body.expectedVersionId));
     if (

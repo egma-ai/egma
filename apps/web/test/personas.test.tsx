@@ -87,17 +87,52 @@ const RECOMMENDED_MODELS: PersonaModels = {
 const PERSONA_FORM: PersonaForm = {
   modelCatalog: [
     { provider: "openai", job: "llm", model: "gpt-4o-mini", label: "OpenAI" },
+    { provider: "openai", job: "llm", model: "gpt-4o", label: "OpenAI" },
+    {
+      provider: "openai",
+      job: "llm",
+      model: "gpt-5.6-terra",
+      label: "OpenAI",
+    },
+    ...["gpt-5.6-sol", "gpt-5.6-luna"].map((model) => ({
+      provider: "openai" as const,
+      job: "llm" as const,
+      model,
+      label: "OpenAI",
+    })),
+    ...["gpt-5.5", "gpt-5.4"].map((model) => ({
+      provider: "openai" as const,
+      job: "llm" as const,
+      model,
+      label: "OpenAI",
+    })),
     {
       provider: "openai",
       job: "stt",
       model: "gpt-live-transcribe",
       label: "OpenAI",
     },
+    ...[
+      "gpt-realtime-whisper",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+    ].map((model) => ({
+      provider: "openai" as const,
+      job: "stt" as const,
+      model,
+      label: "OpenAI",
+    })),
     {
       provider: "deepgram",
       job: "stt",
       model: "nova-3-general",
       label: "Deepgram",
+    },
+    {
+      provider: "cartesia",
+      job: "stt",
+      model: "ink-2",
+      label: "Cartesia",
     },
     {
       provider: "cartesia",
@@ -107,12 +142,27 @@ const PERSONA_FORM: PersonaForm = {
       recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
     },
     {
+      provider: "cartesia",
+      job: "tts",
+      model: "sonic-preview",
+      label: "Cartesia",
+      modelLabel: "Sonic 3.6 (Beta)",
+      recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    },
+    {
       provider: "openai",
       job: "tts",
       model: "gpt-4o-mini-tts",
       label: "OpenAI",
       recommendedVoiceId: "alloy",
     },
+    ...["tts-1", "tts-1-hd"].map((model) => ({
+      provider: "openai" as const,
+      job: "tts" as const,
+      model,
+      label: "OpenAI",
+      recommendedVoiceId: "alloy",
+    })),
   ],
   recommendedModels: RECOMMENDED_MODELS,
   speedRange: { slowest: 0.6, fastest: 1.5 },
@@ -205,11 +255,8 @@ const RITA: Persona = {
   traits: {
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
     language: "en-US",
-    manner: "Warm and direct.",
-    patience: "Waits once before asking again.",
     accent: "Neutral American English.",
     backgroundNoise: "A quiet kitchen.",
-    underFriction: "Gets louder when the agent mishears her.",
   },
   models: RECOMMENDED_MODELS,
   revision: "revision-one",
@@ -230,12 +277,15 @@ const DEFAULT_PERSONA: Persona = {
     personality:
       "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
     language: "en-US",
-    manner: "Clear, natural, and conversational.",
-    patience: "Starts patient and gives the agent time to explain.",
     accent: "Neutral American English.",
     backgroundNoise: "None.",
-    underFriction:
-      "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
+  },
+  models: {
+    ...RECOMMENDED_MODELS,
+    llm: {
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    },
   },
   revision: "revision-default-persona",
   isDefault: true,
@@ -596,15 +646,11 @@ describe("authoring a persona", () => {
     });
     render(<NewPersonaPage />);
 
-    for (const humanTrait of [
-      "Manner",
-      "Patience",
-      "Under friction",
-      "Accent",
-      "Background noise",
-      "Language",
-    ]) {
+    for (const humanTrait of ["Accent", "Background noise", "Language"]) {
       expect(await screen.findByLabelText(humanTrait), humanTrait).toBeDefined();
+    }
+    for (const retiredTrait of ["Manner", "Patience", "Under friction"]) {
+      expect(screen.queryByLabelText(retiredTrait), retiredTrait).toBeNull();
     }
     expect(screen.queryByLabelText("Voice provider")).toBeNull();
 
@@ -640,22 +686,16 @@ describe("authoring a persona", () => {
       traits: {
         personality: "Seventy, and gets louder when she mishears.",
         language: "en-US",
-        manner: "",
-        patience: "",
         accent: "",
         backgroundNoise: "",
-        underFriction: "",
       },
       models: RECOMMENDED_MODELS,
     });
     expect(Object.keys((written?.body as { traits: object }).traits)).toEqual([
       "personality",
       "language",
-      "manner",
-      "patience",
       "accent",
       "backgroundNoise",
-      "underFriction",
     ]);
     expect(asked.map((one) => one.path)).toContain(
       "/v1/persona-form?projectId=prj_1",
@@ -825,9 +865,13 @@ describe("one persona's sheet", () => {
     expect(written).not.toHaveProperty("description");
   });
 
-  it("selects exact model pairs and sends one complete models value", async () => {
+  it("filters models by provider and sends one complete models value", async () => {
     const changedModels: PersonaModels = {
       ...RECOMMENDED_MODELS,
+      llm: {
+        provider: "openai",
+        model: "gpt-4o",
+      },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: {
         provider: "openai",
@@ -851,13 +895,69 @@ describe("one persona's sheet", () => {
     render(<PersonaPage />);
 
     await openEditor();
-    const stt = screen.getByLabelText("Speech-to-text model");
-    fireEvent.change(stt, {
-      target: { value: JSON.stringify(["deepgram", "nova-3-general"]) },
+    expect(
+      Array.from(
+        (screen.getByLabelText("Speech-to-text provider") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.text),
+    ).toEqual(["OpenAI", "Deepgram", "Cartesia"]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Speech-to-text model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.value),
+    ).toEqual([
+      "gpt-live-transcribe",
+      "gpt-realtime-whisper",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+    ]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.text),
+    ).toEqual(["sonic-3.5", "Sonic 3.6 (Beta) — sonic-preview"]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Language model") as HTMLSelectElement).options,
+      ).map((option) => option.value),
+    ).toEqual([
+      "gpt-4o-mini",
+      "gpt-4o",
+      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+    ]);
+    fireEvent.change(screen.getByLabelText("Language model"), {
+      target: { value: "gpt-5.6-terra" },
     });
-    fireEvent.change(screen.getByLabelText("Text-to-speech model"), {
-      target: { value: JSON.stringify(["openai", "gpt-4o-mini-tts"]) },
+    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Language model"), {
+      target: { value: "gpt-4o" },
     });
+    fireEvent.change(screen.getByLabelText("Speech-to-text provider"), {
+      target: { value: "deepgram" },
+    });
+    const stt = screen.getByLabelText("Speech-to-text model") as HTMLSelectElement;
+    expect(stt.value).toBe("nova-3-general");
+    expect(Array.from(stt.options).map((option) => option.value)).toEqual([
+      "nova-3-general",
+    ]);
+    fireEvent.change(screen.getByLabelText("Text-to-speech provider"), {
+      target: { value: "openai" },
+    });
+    expect(
+      (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement).value,
+    ).toBe("gpt-4o-mini-tts");
+    expect(
+      Array.from(
+        (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.value),
+    ).toEqual(["gpt-4o-mini-tts", "tts-1", "tts-1-hd"]);
     expect((screen.getByLabelText("Voice") as HTMLInputElement).value).toBe(
       "alloy",
     );
@@ -873,6 +973,13 @@ describe("one persona's sheet", () => {
       expectedRevision: "revision-one",
       expectedVersionId: "prsv_1",
       models: changedModels,
+    });
+    const body = asked.find((one) => one.method === "PATCH")?.body as {
+      models?: PersonaModels;
+    };
+    expect(body.models?.llm).toEqual({
+      provider: "openai",
+      model: "gpt-4o",
     });
   });
 
@@ -1049,6 +1156,10 @@ describe("one persona's sheet", () => {
    */
   it("writes an older version forward as a new one", async () => {
     const current = { ...RITA, version: 2, versionId: "prsv_2" };
+    const historicalModels: PersonaModels = {
+      ...RITA.models,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    };
     const { asked } = apiAnswers({
       ...reads(current),
       "GET /v1/personas/prs_1/versions": {
@@ -1071,7 +1182,7 @@ describe("one persona's sheet", () => {
                 ...RITA.traits,
                 personality: "Seventy, and out of patience.",
               },
-              models: RITA.models,
+              models: historicalModels,
               createdAt: "2026-08-15T10:00:00.000Z",
             },
           ],
@@ -1101,7 +1212,10 @@ describe("one persona's sheet", () => {
       expectedRevision: "revision-one",
       expectedVersionId: "prsv_2",
       traits: { personality: "Seventy, and out of patience." },
-      models: RITA.models,
+      models: {
+        ...historicalModels,
+        llm: { provider: "openai", model: "gpt-5.6-terra" },
+      },
     });
   });
 
@@ -1376,7 +1490,7 @@ describe("one persona's sheet", () => {
 
     // The catalog's own word for a provider, rather than the id a persona
     // stores. It arrives with the authoring choices, so it is waited for.
-    await within(panel).findByText("OpenAI · gpt-4o-mini");
+    await within(panel).findByText("OpenAI · gpt-5.6-terra");
 
     expect(
       Array.from(panel.querySelectorAll("dt"), (term) => term.textContent),
@@ -1384,11 +1498,8 @@ describe("one persona's sheet", () => {
       "Description",
       "Personality",
       "Language",
-      "Manner",
-      "Patience",
       "Accent",
       "Background noise",
-      "Under friction",
       "Language model",
       "Speech-to-text model",
       "Text-to-speech model",
@@ -1404,12 +1515,9 @@ describe("one persona's sheet", () => {
       "Regular conversationalist persona",
       "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       "en-US",
-      "Clear, natural, and conversational.",
-      "Starts patient and gives the agent time to explain.",
       "Neutral American English.",
       "None.",
-      "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
-      "OpenAI · gpt-4o-mini",
+      "OpenAI · gpt-5.6-terra",
       "OpenAI · gpt-live-transcribe",
       "Cartesia · sonic-3.5",
       "1×",

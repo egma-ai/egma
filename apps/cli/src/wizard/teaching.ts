@@ -55,9 +55,9 @@ export const LEARN_CARDS: readonly LearnCard[] = [
     heading: "A persona",
     lines: [
       "The synthetic person on the",
-      "other end: their manner, their",
-      "patience, how they behave when",
-      "things go wrong.",
+      "other end: their personality,",
+      "language, and how they behave",
+      "when things go wrong.",
       "",
       "A test names the personas it",
       "should be run with. Naming none",

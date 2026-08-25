@@ -122,7 +122,7 @@ class PhoneCall:
                 f"{BACKEND_VARIABLE} on this container to one of "
                 f"{sorted(BACKENDS)}"
             )
-        # **The moment a carrier's own refusals belong.** Contract v3 already
+        # **The moment a carrier's own refusals belong.** Contract v4 already
         # proved that this phone work order carries a complete route. Here a
         # call is about to be placed, so backend-specific value checks belong
         # here and a refusal names why this simulation cannot dial.

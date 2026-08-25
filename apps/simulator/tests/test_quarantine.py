@@ -263,7 +263,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         def spec_for(connection, platform=None):
             document = {
-                "contract_version": 3,
+                "contract_version": 4,
                 "simulation_id": "sim-unconfigured",
                 "modality": "voice",
                 "connection": connection,
@@ -279,16 +279,19 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                     "llm": {
                         "provider": "openai",
                         "model": "gpt-4o-mini",
+                        "adapter": "openai_chat_completions",
                         "key": "sentinel-llm-key",
                     },
                     "stt": {
                         "provider": "deepgram",
                         "model": "nova-3-general",
+                        "adapter": "deepgram",
                         "key": "sentinel-stt-key",
                     },
                     "tts": {
                         "provider": "cartesia",
                         "model": "sonic-3.5",
+                        "adapter": "cartesia",
                         "voice_id": "warm-alto-2",
                         "speed": 1.0,
                         "key": "sentinel-tts-key",

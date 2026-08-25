@@ -342,15 +342,20 @@ which is the only record of a report that never got through. Both survive the
 container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
-Every simulation carries one simulation work order. Its pinned
-persona version supplies the required LLM, STT and TTS selections, and the API
-adds only the provider keys those selections need. Chat carries only the LLM
-key; voice carries all three. There is no container model or key fallback.
+Every production simulation carries one contract-v4 work order. Its pinned
+persona version supplies the LLM, STT, and TTS selections. The model catalog
+resolves each selection to a simulator adapter. The API then adds only the
+provider keys those adapters need. Chat carries only the LLM key; voice carries
+all three. There is no container model or key fallback.
 
-The supported pairs are OpenAI `gpt-4o-mini` for the LLM; Deepgram
-`nova-3-general` or OpenAI `gpt-live-transcribe` for STT; and Cartesia
-`sonic-3.5` or OpenAI `gpt-4o-mini-tts` for TTS. The TTS selection also owns
-the voice id and speed. Persona traits contain behavior only.
+The current LLM catalog offers OpenAI `gpt-4o-mini`, `gpt-4o`,
+`gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.4`.
+Reasoning effort remains an LLM catalog capability, but this release fixes
+every reasoning-capable model at `none`; persona authors cannot turn reasoning
+on. Non-reasoning models carry no reasoning parameter. The TTS selection also
+owns the voice id and speed. The platform Default Persona v1 selects
+`gpt-5.6-terra` with reasoning effort `none`. Persona traits contain behavior
+only.
 
 Two deployment controls remain:
 

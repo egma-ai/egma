@@ -46,11 +46,8 @@ afterEach(async () => {
 const TRAITS: PersonaTraits = {
   personality: "Calls about a bill and wants it settled today.",
   language: "en-US",
-  manner: "Clear and direct.",
-  patience: "Waits once before asking again.",
   accent: "Neutral American English.",
   backgroundNoise: "A quiet room.",
-  underFriction: "Asks for a manager without becoming rude.",
 };
 
 /** One browser request: a session cookie, and the project in the address. */
@@ -131,20 +128,39 @@ describe("creating and reading a persona", () => {
     expect(form.statusCode).toBe(200);
     expect(form.body.recommendedModels).toEqual(RECOMMENDED_PERSONA_MODELS);
     expect(form.body.speedRange).toEqual(SPEED_RANGE);
-    expect(form.body.modelCatalog).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          job: "stt",
-          provider: "openai",
-          model: "gpt-live-transcribe",
-        }),
-        expect.objectContaining({
-          job: "stt",
-          provider: "deepgram",
-          model: "nova-3-general",
-        }),
-      ]),
-    );
+    const catalog = form.body.modelCatalog as readonly Record<string, unknown>[];
+    expect(
+      catalog.map(
+        (entry) => `${entry.job}:${entry.provider}:${entry.model}`,
+      ),
+    ).toEqual([
+      "llm:openai:gpt-4o-mini",
+      "llm:openai:gpt-4o",
+      "llm:openai:gpt-5.6-terra",
+      "llm:openai:gpt-5.6-sol",
+      "llm:openai:gpt-5.6-luna",
+      "llm:openai:gpt-5.5",
+      "llm:openai:gpt-5.4",
+      "stt:openai:gpt-live-transcribe",
+      "stt:openai:gpt-realtime-whisper",
+      "stt:openai:gpt-4o-transcribe",
+      "stt:openai:gpt-4o-mini-transcribe",
+      "stt:deepgram:nova-3-general",
+      "stt:cartesia:ink-2",
+      "tts:cartesia:sonic-3.5",
+      "tts:cartesia:sonic-preview",
+      "tts:openai:gpt-4o-mini-tts",
+      "tts:openai:tts-1",
+      "tts:openai:tts-1-hd",
+    ]);
+    for (const entry of catalog.filter((candidate) => candidate.job === "llm")) {
+      expect(entry).not.toHaveProperty("reasoningEffort");
+      expect(entry).not.toHaveProperty("reasoningEfforts");
+      expect(entry).not.toHaveProperty("recommendedReasoningEffort");
+    }
+    expect(
+      catalog.find((entry) => entry.model === "sonic-preview"),
+    ).toMatchObject({ modelLabel: "Sonic 3.6 (Beta)" });
   });
 
   it("answers the whole persona, with both expectations a write will name", async () => {
@@ -243,6 +259,26 @@ describe("creating and reading a persona", () => {
         "Provider, model, voice id, and speed belong in models.",
     });
 
+    for (const [field, value] of Object.entries({
+      manner: "Clear and direct.",
+      patience: "Waits once before asking again.",
+      underFriction: "Asks for a manager without becoming rude.",
+    })) {
+      const removedTrait = await browse("POST", "/v1/personas", ada, {
+        projectId: ada.projectId,
+        name: `No retired ${field}`,
+        traits: { ...TRAITS, [field]: value },
+        models: RECOMMENDED_PERSONA_MODELS,
+      });
+      expect(removedTrait.statusCode, field).toBe(422);
+      expect(removedTrait.body, field).toEqual({
+        error: "unprocessable",
+        message:
+          `persona traits have unsupported fields ${field}. ` +
+          "Provider, model, voice id, and speed belong in models.",
+      });
+    }
+
     const missingModels = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
       name: "No implicit execution",
@@ -311,6 +347,41 @@ describe("creating and reading a persona", () => {
     }
   });
 
+  it("keeps reasoning policy out of persona writes", async () => {
+    api = await createApi("personas_reasoning_off");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const terra = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    };
+
+    const made = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "No-thinking Nina",
+      traits: TRAITS,
+      models: terra,
+    });
+    expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
+    expect(personaIn(made).models.llm).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    });
+
+    const refused = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Thinking-on Tom",
+      traits: TRAITS,
+      models: {
+        ...terra,
+        llm: { ...terra.llm, reasoningEffort: "high" },
+      },
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(String(refused.body.message)).toMatch(
+      /unsupported fields reasoningEffort/i,
+    );
+  });
+
   /**
    * **A persona says who is calling, never what they are calling about.**
    *
@@ -367,24 +438,23 @@ describe("creating and reading a persona", () => {
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        manner: "Clear, natural, and conversational.",
-        patience: "Starts patient and gives the agent time to explain.",
         accent: "Neutral American English.",
         backgroundNoise: "None.",
-        underFriction:
-          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
       },
-      models: RECOMMENDED_PERSONA_MODELS,
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        llm: {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+        },
+      },
     });
     expect(Object.keys(found?.traits ?? {}).sort()).toEqual(
       [
         "accent",
         "backgroundNoise",
         "language",
-        "manner",
-        "patience",
         "personality",
-        "underFriction",
       ].sort(),
     );
     expect(items.filter((one) => one.isDefault)).toHaveLength(1);

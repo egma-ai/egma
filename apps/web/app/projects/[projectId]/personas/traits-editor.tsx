@@ -70,29 +70,6 @@ export function TraitFields({
       </Field>
 
       <FormRow>
-        <Field label="Manner" htmlFor="persona-manner" hint="Optional.">
-          <Textarea
-            id="persona-manner"
-            value={draft.manner}
-            rows={2}
-            disabled={disabled}
-            placeholder="Warm, brisk, formal, distracted"
-            onChange={set("manner")}
-          />
-        </Field>
-        <Field label="Patience" htmlFor="persona-patience" hint="Optional.">
-          <Textarea
-            id="persona-patience"
-            value={draft.patience}
-            rows={2}
-            disabled={disabled}
-            placeholder="How long they stay with something before they push"
-            onChange={set("patience")}
-          />
-        </Field>
-      </FormRow>
-
-      <FormRow>
         <Field label="Accent" htmlFor="persona-accent" hint="Optional.">
           <Input
             id="persona-accent"
@@ -120,21 +97,6 @@ export function TraitFields({
           />
         </Field>
       </FormRow>
-
-      <Field
-        label="Under friction"
-        htmlFor="persona-under-friction"
-        hint="Optional. What they do when the agent gets it wrong or will not budge."
-      >
-        <Textarea
-          id="persona-under-friction"
-          value={draft.underFriction}
-          rows={2}
-          disabled={disabled}
-          placeholder="Repeats louder, asks for a person, ends the conversation"
-          onChange={set("underFriction")}
-        />
-      </Field>
 
     </>
   );

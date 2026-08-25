@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:egma:simulation-contract:spec:v3",
-  "title": "Simulation spec (v3)",
-  "description": "The only simulation work-order contract. The connection type selects the simulator adapter, the access variant selects its authority and configuration, and the agent platform records provenance only. The pinned persona version supplies one complete LLM, STT, and TTS selection. The control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
+  "$id": "urn:egma:simulation-contract:spec:v4",
+  "title": "Simulation spec (v4)",
+  "description": "The only simulation work-order contract. The connection type selects the simulator connection adapter, the access variant selects its authority and configuration, and the agent platform records provenance only. The pinned persona version supplies one complete LLM, STT, and TTS selection. The model catalog resolves each selection's runtime adapter, while the control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
     "contract_version": {
       "description": "The one spec version this simulator implements.",
       "type": "integer",
-      "const": 3
+      "const": 4
     },
     "simulation_id": {
       "description": "The simulation this spec conducts. Opaque to the simulator.",
@@ -90,23 +90,11 @@
               "type": "string",
               "minLength": 1
             },
-            "manner": {
-              "type": "string",
-              "minLength": 1
-            },
-            "patience": {
-              "type": "string",
-              "minLength": 1
-            },
             "accent": {
               "type": "string",
               "minLength": 1
             },
             "backgroundNoise": {
-              "type": "string",
-              "minLength": 1
-            },
-            "underFriction": {
               "type": "string",
               "minLength": 1
             }
@@ -201,73 +189,46 @@
       }
     },
     "llm_selection": {
-      "description": "The persona brain. This release has one proved direct LLM adapter.",
+      "description": "The persona brain. Provider and model identify the catalog entry; adapter is the catalog-owned runtime dispatch key.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "model", "key"],
+      "required": ["provider", "model", "adapter", "key"],
       "properties": {
-        "provider": { "type": "string", "const": "openai" },
-        "model": { "type": "string", "const": "gpt-4o-mini" },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "reasoning_effort": {
+          "type": "string",
+          "minLength": 1
+        },
         "key": { "type": "string", "minLength": 1 }
       }
     },
     "stt_selection": {
-      "description": "The persona ears. The provider and model form one closed pair. OpenAI always uses the realtime adapter.",
+      "description": "The persona ears. Provider and model identify the catalog entry; adapter is the catalog-owned runtime dispatch key.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "model"],
+      "required": ["provider", "model", "adapter"],
       "properties": {
-        "provider": {
-          "type": "string",
-          "enum": ["deepgram", "openai"]
-        },
-        "model": { "type": "string" },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
         "key": { "type": "string", "minLength": 1 }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": { "provider": { "const": "deepgram" } },
-            "required": ["provider"]
-          },
-          "then": {
-            "properties": { "model": { "const": "nova-3-general" } }
-          },
-          "else": {
-            "properties": { "model": { "const": "gpt-live-transcribe" } }
-          }
-        }
-      ]
+      }
     },
     "tts_selection": {
       "description": "The persona mouth. Voice and speed live with the provider and model that interpret them.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "model", "voice_id", "speed"],
+      "required": ["provider", "model", "adapter", "voice_id", "speed"],
       "properties": {
-        "provider": {
-          "type": "string",
-          "enum": ["cartesia", "openai"]
-        },
-        "model": { "type": "string" },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
         "voice_id": { "type": "string", "minLength": 1 },
         "speed": { "type": "number", "minimum": 0.6, "maximum": 1.5 },
         "key": { "type": "string", "minLength": 1 }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": { "provider": { "const": "cartesia" } },
-            "required": ["provider"]
-          },
-          "then": {
-            "properties": { "model": { "const": "sonic-3.5" } }
-          },
-          "else": {
-            "properties": { "model": { "const": "gpt-4o-mini-tts" } }
-          }
-        }
-      ]
+      }
     },
     "mock_tool": {
       "description": "One mock tool name and its resolved answer.",

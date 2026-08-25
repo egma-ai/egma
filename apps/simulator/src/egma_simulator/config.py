@@ -33,12 +33,14 @@ bare simulator and a container use the same limit unless an operator supplies
 ``EGMA_SIMULATOR_CAPACITY`` explicitly.
 """
 
-STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime")
+STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime", "cartesia_manual")
 """What the persona hears with. ``scripted`` needs no account and no network.
 
 ``openai_realtime`` holds a socket open and transcribes while the agent is
 still talking. The segmented OpenAI adapter was removed: an OpenAI STT
-selection has one meaning and cannot reach ``/audio/transcriptions``."""
+selection has one meaning and cannot reach ``/audio/transcriptions``.
+``cartesia_manual`` streams audio to Cartesia and uses Egma's own VAD frames
+to finalize each turn."""
 
 TTS_PROVIDERS = ("scripted", "openai", "cartesia")
 """What the persona speaks with. ``scripted`` needs no account and no network."""
@@ -267,7 +269,7 @@ class MediaSettings:
         has no media backend. A work order cannot create one.
 
         **It never refuses.** This runs for every simulation, and most
-        simulations never dial. Contract v3 gives a phone simulation one
+        simulations never dial. Contract v4 gives a phone simulation one
         complete carrier and gives every non-phone simulation none. A missing
         deployment media backend is still checked by the phone plug, because
         failing chat work over a phone path it never uses would be wrong.

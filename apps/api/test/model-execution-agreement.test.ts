@@ -9,7 +9,6 @@ import {
   connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   validPersonaModels,
-  type ModelJob,
   type PersonaModels,
   type ProviderCatalogEntry,
 } from "@egma/db";
@@ -25,7 +24,7 @@ type JsonObject = Readonly<Record<string, unknown>>;
 const schema = JSON.parse(
   await readFile(
     new URL(
-      "../../../packages/simulation-contract/schemas/simulation-spec.v3.schema.json",
+      "../../../packages/simulation-contract/schemas/simulation-spec.v4.schema.json",
       import.meta.url,
     ),
     "utf8",
@@ -67,66 +66,36 @@ function object(value: unknown, name: string): JsonObject {
   return value as JsonObject;
 }
 
-function literalsFor(node: unknown, property: "provider" | "model"): string[] {
+function schemaLiterals(node: unknown): string[] {
   if (typeof node !== "object" || node === null) return [];
   if (Array.isArray(node)) {
-    return [...new Set(node.flatMap((entry) => literalsFor(entry, property)))];
+    return [...new Set(node.flatMap(schemaLiterals))];
   }
 
   const held = node as Record<string, unknown>;
   const values: string[] = [];
-  const properties = object(held.properties ?? {}, "schema properties");
-  const definition = properties[property];
-  if (definition !== undefined) {
-    const rules = object(definition, `${property} rules`);
-    if (typeof rules.const === "string") values.push(rules.const);
-    if (Array.isArray(rules.enum)) {
-      values.push(
-        ...rules.enum.filter(
-          (value): value is string => typeof value === "string",
-        ),
-      );
-    }
+  if (typeof held.const === "string") values.push(held.const);
+  if (Array.isArray(held.enum)) {
+    values.push(
+      ...held.enum.filter(
+        (value): value is string => typeof value === "string",
+      ),
+    );
   }
   for (const child of Object.values(held)) {
-    values.push(...literalsFor(child, property));
+    values.push(...schemaLiterals(child));
   }
   return [...new Set(values)];
-}
-
-function acceptedContractPairs(job: ModelJob): string[] {
-  const definitions = object(schema.$defs, "contract definitions");
-  const selection = object(definitions[`${job}_selection`], `${job} selection`);
-  const providers = literalsFor(selection, "provider");
-  const models = literalsFor(selection, "model");
-  const accepted: string[] = [];
-
-  for (const provider of providers) {
-    for (const model of models) {
-      const candidate = structuredClone(validVoiceSpec);
-      const selections = candidate.models as Record<
-        string,
-        Record<string, unknown>
-      >;
-      const chosen = selections[job];
-      if (chosen === undefined) {
-        throw new Error(`the fixture has no ${job} selection`);
-      }
-      chosen.provider = provider;
-      chosen.model = model;
-      if (specComplaints(candidate).length === 0) {
-        accepted.push(`${job}:${provider}:${model}`);
-      }
-    }
-  }
-  return accepted.sort();
 }
 
 function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
   if (entry.job === "llm") {
     return {
       ...RECOMMENDED_PERSONA_MODELS,
-      llm: { provider: entry.provider, model: entry.model },
+      llm: {
+        provider: entry.provider,
+        model: entry.model,
+      },
     };
   }
   if (entry.job === "stt") {
@@ -147,16 +116,28 @@ function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
   };
 }
 
-describe("one executable model catalog", () => {
-  it("agrees across authoring, credentials, and the simulation contract", () => {
-    const catalogPairs = PROVIDER_CATALOG.map(
-      (entry) => `${entry.job}:${entry.provider}:${entry.model}`,
-    ).sort();
-    const contractPairs = (["llm", "stt", "tts"] as const)
-      .flatMap(acceptedContractPairs)
-      .sort();
+function contractSpecUsing(entry: ProviderCatalogEntry): Record<string, unknown> {
+  const candidate = structuredClone(validVoiceSpec);
+  const selections = candidate.models as Record<
+    "llm" | "stt" | "tts",
+    Record<string, unknown>
+  >;
+  const selected = selections[entry.job];
+  selected.provider = entry.provider;
+  selected.model = entry.model;
+  selected.adapter = entry.adapter;
+  if (entry.job === "llm") {
+    if (entry.reasoningEffort === undefined) {
+      delete selected.reasoning_effort;
+    } else {
+      selected.reasoning_effort = entry.reasoningEffort;
+    }
+  }
+  return candidate;
+}
 
-    expect(contractPairs).toEqual(catalogPairs);
+describe("one executable model catalog", () => {
+  it("keeps catalog membership in the catalog and wire shape in the contract", () => {
     expect(
       [...new Set(PROVIDER_CATALOG.map((entry) => entry.provider))].sort(),
     ).toEqual([...PROVIDER_ACCOUNTS].sort());
@@ -166,10 +147,15 @@ describe("one executable model catalog", () => {
         provider: entry.provider,
         model: entry.model,
       });
+      expect(specComplaints(contractSpecUsing(entry))).toEqual([]);
       expect(providerAccountFor(entry.provider)).toBe(entry.provider);
     }
 
     const definitions = object(schema.$defs, "contract definitions");
+    expect(schemaLiterals(definitions.stt_selection)).toEqual([]);
+    expect(schemaLiterals(definitions.tts_selection)).toEqual([]);
+    expect(schemaLiterals(definitions.llm_selection)).toEqual([]);
+
     const tts = object(definitions.tts_selection, "tts selection");
     const speed = object(
       object(tts.properties, "tts properties").speed,
@@ -189,9 +175,24 @@ describe("one executable model catalog", () => {
       voiceId: RECOMMENDED_ENTRY.tts.recommendedVoiceId,
       speed: RECOMMENDED_ENTRY.tts.recommendedSpeed,
     });
+    const graderEntry = PROVIDER_CATALOG.find(
+      (entry) =>
+        entry.job === "llm" &&
+        "graderEligible" in entry &&
+        entry.graderEligible === true,
+    );
     expect(RECOMMENDED_GRADER_MODEL).toEqual({
-      provider: RECOMMENDED_ENTRY.llm.provider,
-      model: RECOMMENDED_ENTRY.llm.model,
+      provider: graderEntry?.provider,
+      model: graderEntry?.model,
+    });
+
+    const terra = PROVIDER_CATALOG.find(
+      (entry) => entry.job === "llm" && entry.model === "gpt-5.6-terra",
+    );
+    expect(terra).toMatchObject({
+      provider: "openai",
+      adapter: "openai_chat_completions",
+      reasoningEffort: "none",
     });
   });
 

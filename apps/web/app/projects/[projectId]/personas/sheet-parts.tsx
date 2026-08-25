@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils";
  * **They are here rather than in `apps/web/ui/` because they are one screen's
  * arrangement, not a shared behaviour.** The sheet itself, its head, its body,
  * its footer and its motion are ticket 01's `components/ui/sheet.tsx`; what is
- * below is how *a persona* fills one: a labelled group, a read pair, the two-up
- * grid the boards put Manner beside Patience in, the frozen-version list, and
- * the panel that says what a save will do to the version number.
+ * below is how *a persona* fills one: a labelled group, a read pair, the
+ * two-column facts grid, the frozen-version list, and the panel that says what
+ * a save will do to the version number.
  *
  * Every measurement is read off page `C-0` of the Paper file
  * (`9UB-0`, `AF0-0`, `B0B-0`, `CDP-0`, `CQ1-0`, `CSF-0`) with
@@ -69,9 +69,9 @@ export type Read = {
  * **A definition list because that is what it is**: a screen reader reads each
  * value with the name of the value, which a stack of `<div>`s does not give.
  *
- * The boards put Manner beside Patience and Accent beside Background noise,
- * and everything else across the panel. That is a two-column grid with a
- * `col-span-2` on the wide ones rather than nested rows — nesting rows inside a
+ * Short facts can share a row, and sentence-length facts take the panel width.
+ * That is a two-column grid with a `col-span-2` on the wide ones rather than
+ * nested rows — nesting rows inside a
  * `<dl>` is not a shape the element allows, and the grid keeps every label on
  * the same baseline down the column.
  */

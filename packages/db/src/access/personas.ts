@@ -79,11 +79,8 @@ export type { PersonaTraits };
 
 /** Human traits that can be described but are not required. */
 const DESCRIBED_TRAITS = [
-  "manner",
-  "patience",
   "accent",
   "backgroundNoise",
-  "underFriction",
 ] as const;
 
 type DescribedTrait = (typeof DESCRIBED_TRAITS)[number];
@@ -362,11 +359,8 @@ const sameTraitsField: {
 } = {
   personality: (a, b) => a.personality === b.personality,
   language: (a, b) => a.language === b.language,
-  manner: (a, b) => a.manner === b.manner,
-  patience: (a, b) => a.patience === b.patience,
   accent: (a, b) => a.accent === b.accent,
   backgroundNoise: (a, b) => a.backgroundNoise === b.backgroundNoise,
-  underFriction: (a, b) => a.underFriction === b.underFriction,
 };
 
 /**

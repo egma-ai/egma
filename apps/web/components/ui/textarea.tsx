@@ -6,12 +6,12 @@ import { cn } from "@/lib/utils";
 /**
  * Somewhere to write more than a line, at the 8px input radius.
  *
- * A persona's manner and what they do under friction are sentences, and a
- * single-line field for a sentence is a field that scrolls sideways while
- * somebody is still deciding what to say. It grows with a `rows` count rather
- * than auto-sizing, so the page's layout is decided by the page — and a caller
- * that wants it to follow its content says so with a class, which is how the
- * Tests area's one-line behaviour rows ask for it.
+ * A persona's personality can be several sentences, and a single-line field
+ * for that text scrolls sideways while somebody is still deciding what to say.
+ * It grows with a `rows` count rather than auto-sizing, so the page's layout is
+ * decided by the page — and a caller that wants it to follow its content says
+ * so with a class, which is how the Tests area's one-line behaviour rows ask
+ * for it.
  *
  * `resize-y` is deliberate: sideways resizing pulls a field out of the column
  * it was laid out in, and every form in this product is a column.

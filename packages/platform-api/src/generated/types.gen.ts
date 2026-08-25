@@ -2803,11 +2803,8 @@ export type ListPersonasResponses = {
             traits: {
                 personality: string;
                 language: string;
-                manner?: string;
-                patience?: string;
                 accent?: string;
                 backgroundNoise?: string;
-                underFriction?: string;
             };
             models: {
                 llm: {
@@ -2846,11 +2843,8 @@ export type CreatePersonaData = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -2921,11 +2915,8 @@ export type CreatePersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3002,6 +2993,7 @@ export type GetPersonaFormResponses = {
             job: 'llm' | 'stt' | 'tts';
             model: string;
             label: string;
+            modelLabel?: string;
             recommendedVoiceId?: string;
         }>;
         recommendedModels: {
@@ -3083,11 +3075,8 @@ export type GetPersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3124,11 +3113,8 @@ export type UpdatePersonaData = {
         traits?: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models?: {
             llm: {
@@ -3203,11 +3189,8 @@ export type UpdatePersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3289,11 +3272,8 @@ export type ListPersonaVersionsResponses = {
             traits: {
                 personality: string;
                 language: string;
-                manner?: string;
-                patience?: string;
                 accent?: string;
                 backgroundNoise?: string;
-                underFriction?: string;
             };
             models: {
                 llm: {
@@ -3424,11 +3404,8 @@ export type GetPersonaVersionResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3510,11 +3487,8 @@ export type ForkPersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3601,11 +3575,8 @@ export type SetDefaultPersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3694,11 +3665,8 @@ export type ArchivePersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -3786,11 +3754,8 @@ export type RestorePersonaResponses = {
         traits: {
             personality: string;
             language: string;
-            manner?: string;
-            patience?: string;
             accent?: string;
             backgroundNoise?: string;
-            underFriction?: string;
         };
         models: {
             llm: {
@@ -4860,11 +4825,8 @@ export type GetSimulationResponses = {
             traits: {
                 personality: string;
                 language: string;
-                manner?: string;
-                patience?: string;
                 accent?: string;
                 backgroundNoise?: string;
-                underFriction?: string;
             } | null;
         };
         agent: {

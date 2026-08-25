@@ -56,11 +56,8 @@ const rita = {
     personality:
       "Rita is 70, hard of hearing, answers questions with stories, and gets louder when the agent mishears her.",
     language: "en-US",
-    manner: "Talkative and direct.",
-    patience: "Waits once before asking again.",
     accent: "Neutral American English.",
     backgroundNoise: "A quiet kitchen.",
-    underFriction: "Gets louder when the agent mishears her.",
   },
 } as const satisfies NewPersona;
 
@@ -328,7 +325,7 @@ describe("editing a persona's model selection", () => {
       editPersona(actingAsAcme(), created.id, {
         models: {
           ...RECOMMENDED_PERSONA_MODELS,
-          stt: { provider: "openai", model: "gpt-4o-transcribe" },
+          stt: { provider: "openai", model: "gpt-4o-transcribe-unsupported" },
         },
       }),
     ).rejects.toThrow(/supported openai stt model/i);
@@ -454,6 +451,22 @@ describe("a persona that fails validation", () => {
 
     expect(await rowCounts()).toEqual(before);
   });
+
+  it.each(["manner", "patience", "underFriction"])(
+    "refuses the removed %s trait and writes nothing",
+    async (removedTrait) => {
+      const before = await rowCounts();
+      const input = {
+        ...rita,
+        traits: { ...ritaTraits, [removedTrait]: "Legacy behavior." },
+      } as unknown as NewPersona;
+
+      await expect(createPersona(actingAsAcme(), input)).rejects.toThrow(
+        `persona traits have unsupported fields ${removedTrait}`,
+      );
+      expect(await rowCounts()).toEqual(before);
+    },
+  );
 
   it("refuses stale edit fields clearly and versions nothing", async () => {
     const created = await createPersona(actingAsAcme(), rita);

@@ -202,11 +202,8 @@ const simulationSchema = {
           properties: {
             personality: stringSchema,
             language: stringSchema,
-            manner: stringSchema,
-            patience: stringSchema,
             accent: stringSchema,
             backgroundNoise: stringSchema,
-            underFriction: stringSchema,
           },
           required: ["personality", "language"],
           additionalProperties: false,

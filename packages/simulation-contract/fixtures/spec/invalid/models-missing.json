@@ -1,5 +1,5 @@
 {
-  "contract_version": 3,
+  "contract_version": 4,
   "simulation_id": "sim_fixture_models_missing",
   "modality": "chat",
   "connection": {

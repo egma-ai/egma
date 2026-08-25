@@ -413,6 +413,7 @@ const THE_PERSONA_LIBRARY = [
 
 /** One executable provider/model catalog shared by persona and grader writes. */
 const THE_MODELS = [
+  "MODEL_ADAPTERS",
   "MODEL_JOBS",
   "MODEL_PROVIDERS",
   "PROVIDERS_BY_JOB",
@@ -422,6 +423,7 @@ const THE_MODELS = [
   "RECOMMENDED_PERSONA_MODELS",
   "SPEED_RANGE",
   "graderModelFromRow",
+  "catalogEntry",
   "isModelProvider",
   "personaModelsFromRow",
   "sameGraderModel",

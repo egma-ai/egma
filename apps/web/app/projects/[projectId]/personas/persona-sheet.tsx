@@ -203,14 +203,8 @@ function traitReads(traits: PersonaTraits): readonly Read[] {
   return [
     { label: "Personality", value: traits.personality, wide: true },
     { label: "Language", value: traits.language, wide: true },
-    ...pair("Manner", traits.manner),
-    ...pair("Patience", traits.patience),
     ...pair("Accent", traits.accent),
     ...pair("Background noise", traits.backgroundNoise),
-    ...pair("Under friction", traits.underFriction).map((one) => ({
-      ...one,
-      wide: true,
-    })),
   ];
 }
 
@@ -576,7 +570,8 @@ export function PersonaSheet({
           expectedRevision: persona.revision,
           expectedVersionId: persona.versionId,
           traits: version.traits,
-          models: version.models,
+          // Reusing history authors a new version under today's model policy.
+          models: modelsFrom(modelsDraftOf(version.models)),
         },
         { client: platformClient },
       ),

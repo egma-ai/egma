@@ -10197,19 +10197,10 @@
                               "language": {
                                 "type": "string"
                               },
-                              "manner": {
-                                "type": "string"
-                              },
-                              "patience": {
-                                "type": "string"
-                              },
                               "accent": {
                                 "type": "string"
                               },
                               "backgroundNoise": {
-                                "type": "string"
-                              },
-                              "underFriction": {
                                 "type": "string"
                               }
                             },
@@ -10471,19 +10462,10 @@
                       "language": {
                         "type": "string"
                       },
-                      "manner": {
-                        "type": "string"
-                      },
-                      "patience": {
-                        "type": "string"
-                      },
                       "accent": {
                         "type": "string"
                       },
                       "backgroundNoise": {
-                        "type": "string"
-                      },
-                      "underFriction": {
                         "type": "string"
                       }
                     },
@@ -10624,19 +10606,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -10906,6 +10879,9 @@
                           "label": {
                             "type": "string"
                           },
+                          "modelLabel": {
+                            "type": "string"
+                          },
                           "recommendedVoiceId": {
                             "type": "string"
                           }
@@ -11173,19 +11149,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -11446,19 +11413,10 @@
                       "language": {
                         "type": "string"
                       },
-                      "manner": {
-                        "type": "string"
-                      },
-                      "patience": {
-                        "type": "string"
-                      },
                       "accent": {
                         "type": "string"
                       },
                       "backgroundNoise": {
-                        "type": "string"
-                      },
-                      "underFriction": {
                         "type": "string"
                       }
                     },
@@ -11605,19 +11563,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -11909,19 +11858,10 @@
                               "language": {
                                 "type": "string"
                               },
-                              "manner": {
-                                "type": "string"
-                              },
-                              "patience": {
-                                "type": "string"
-                              },
                               "accent": {
                                 "type": "string"
                               },
                               "backgroundNoise": {
-                                "type": "string"
-                              },
-                              "underFriction": {
                                 "type": "string"
                               }
                             },
@@ -12315,19 +12255,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -12590,19 +12521,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -12912,19 +12834,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -13245,19 +13158,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -13574,19 +13478,10 @@
                         "language": {
                           "type": "string"
                         },
-                        "manner": {
-                          "type": "string"
-                        },
-                        "patience": {
-                          "type": "string"
-                        },
                         "accent": {
                           "type": "string"
                         },
                         "backgroundNoise": {
-                          "type": "string"
-                        },
-                        "underFriction": {
                           "type": "string"
                         }
                       },
@@ -17800,19 +17695,10 @@
                                 "language": {
                                   "type": "string"
                                 },
-                                "manner": {
-                                  "type": "string"
-                                },
-                                "patience": {
-                                  "type": "string"
-                                },
                                 "accent": {
                                   "type": "string"
                                 },
                                 "backgroundNoise": {
-                                  "type": "string"
-                                },
-                                "underFriction": {
                                   "type": "string"
                                 }
                               },

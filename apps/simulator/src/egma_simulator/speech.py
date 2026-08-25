@@ -9,8 +9,8 @@ speaking rather than for words — the voice activity detector. It is an
 internal simulator choice, not authored persona data.
 
 Both legs are ordinary Pipecat frame processors, in the two places a
-real provider's service sits — Cartesia or OpenAI speaking, and Deepgram
-or OpenAI Realtime listening —
+real provider's service sits — Cartesia or OpenAI speaking, and Cartesia,
+Deepgram, or OpenAI Realtime listening —
 so the pipeline assembled around them is the same pipeline either way.
 The listening leg goes further and is a Pipecat STT service, the very
 class a real one subclasses; the speaking leg deliberately is not, and
@@ -414,13 +414,13 @@ class SpeechProviders:
     def from_models(cls, models: SelectedModels, *, vad: str) -> SpeechProviders:
         """Resolve the direct adapters from the required models block.
 
-        OpenAI STT means its realtime socket. The segmented transcription
-        endpoint is not a second interpretation of the same selection.
+        The catalog already resolved provider/model into one implementation.
+        This boundary reads that decision; it does not infer an endpoint from
+        the provider name.
         """
-        stt = "openai_realtime" if models.stt.provider == "openai" else "deepgram"
         return cls(
-            stt=stt,
-            tts=models.tts.provider,
+            stt=models.stt.adapter,
+            tts=models.tts.adapter,
             vad=vad,
             stt_key=models.stt.key,
             tts_key=models.tts.key,
@@ -593,6 +593,8 @@ def _ears(
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt == "openai_realtime":
         return _openai_realtime_ears(providers)
+    if providers.stt == "cartesia_manual":
+        return _cartesia_ears(providers)
     if providers.stt != "deepgram":
         return ScriptedSTT(), None
 
@@ -623,6 +625,50 @@ def _ears(
                 "is connected; a turn spoken before it is would be lost"
             )
         await connection_ready.wait()
+
+    return leg, connected
+
+
+def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
+    """The public signal shared by websocket services once they accept audio."""
+    opened = asyncio.Event()
+
+    @leg.event_handler("on_connected")
+    async def _opened(_leg: object) -> None:
+        opened.set()
+
+    return opened
+
+
+def _cartesia_ears(
+    providers: SpeechProviders,
+) -> tuple[FrameProcessor, Callable[[], Awaitable[None]]]:
+    """What the agent said, streamed through Cartesia's stock STT service.
+
+    Pipecat sends Cartesia a ``finalize`` command when Egma's local VAD emits
+    ``VADUserStoppedSpeakingFrame``. This keeps the transcript and Egma's turn
+    timing on the same boundary instead of asking Cartesia to decide when the
+    agent stopped talking.
+    """
+    from pipecat.services.cartesia.stt import CartesiaSTTService
+
+    if not providers.stt_key:
+        raise SpeechFault("the cartesia_manual listening leg was chosen without a key")
+    if not providers.stt_model:
+        raise SpeechFault(
+            "the cartesia_manual listening leg was chosen without a model"
+        )
+
+    leg = CartesiaSTTService(
+        api_key=providers.stt_key,
+        settings=CartesiaSTTService.Settings(model=providers.stt_model),
+    )
+    opened = _connection_opened_by(leg)
+
+    async def connected() -> None:
+        # Cartesia needs no separate session-configuration message. Its public
+        # event fires only after the websocket is open and can accept audio.
+        await opened.wait()
 
     return leg, connected
 
@@ -723,9 +769,55 @@ def _openai_realtime_ears(
     on, so the two are wired together by the assembly order.
 
     The stock service owns the rate its socket requires and converts the
-    pipeline audio itself.
+    pipeline audio itself. Egma changes one request field for
+    ``gpt-live-transcribe`` because that model accepts plural ``languages``;
+    Pipecat 1.7 still sends the older singular ``language`` field.
     """
-    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+    from pipecat.services.openai._constants import OPENAI_SAMPLE_RATE
+    from pipecat.services.openai.stt import (
+        OpenAIRealtimeSTTService as PipecatOpenAIRealtimeSTTService,
+    )
+
+    class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
+        """Pipecat's realtime service with the live model's current wire shape."""
+
+        async def _send_session_update(self) -> None:
+            if self._settings.model != "gpt-live-transcribe":
+                await super()._send_session_update()
+                return
+
+            transcription: dict[str, object] = {
+                "model": self._settings.model,
+                # Egma does not yet carry persona language into speech legs.
+                # Preserve the existing English behavior in the field this
+                # model accepts. Language capability is separate catalog work.
+                "languages": ["en"],
+            }
+            if self._settings.prompt:
+                transcription["prompt"] = self._settings.prompt
+
+            audio_input: dict[str, object] = {
+                "format": {"type": "audio/pcm", "rate": OPENAI_SAMPLE_RATE},
+                "transcription": transcription,
+            }
+            if self._turn_detection is False:
+                audio_input["turn_detection"] = None
+            elif self._turn_detection is not None:
+                audio_input["turn_detection"] = self._turn_detection
+            if self._settings.noise_reduction:
+                audio_input["noise_reduction"] = {
+                    "type": self._settings.noise_reduction
+                }
+
+            await self._ws_send(
+                {
+                    "type": "session.update",
+                    "session": {
+                        "type": "transcription",
+                        "audio": {"input": audio_input},
+                    },
+                }
+            )
 
     if not providers.stt_key:
         raise SpeechFault("the openai_realtime listening leg was chosen without a key")
@@ -744,11 +836,7 @@ def _openai_realtime_ears(
         settings=OpenAIRealtimeSTTService.Settings(model=providers.stt_model),
     )
 
-    opened = asyncio.Event()
-
-    @leg.event_handler("on_connected")
-    async def _opened(_leg: object) -> None:
-        opened.set()
+    opened = _connection_opened_by(leg)
 
     async def connected() -> None:
         # **Two gates, because an open socket is not yet able to hear.**

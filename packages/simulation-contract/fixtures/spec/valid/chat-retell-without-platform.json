@@ -1,5 +1,5 @@
 {
-  "contract_version": 3,
+  "contract_version": 4,
   "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWET",
   "modality": "chat",
   "connection": {
@@ -29,15 +29,18 @@
     "llm": {
       "provider": "openai",
       "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
       "key": "fixture-not-a-real-secret-persona-model-0001"
     },
     "stt": {
       "provider": "openai",
-      "model": "gpt-live-transcribe"
+      "model": "gpt-live-transcribe",
+      "adapter": "openai_realtime"
     },
     "tts": {
       "provider": "openai",
       "model": "gpt-4o-mini-tts",
+      "adapter": "openai",
       "voice_id": "alloy",
       "speed": 1
     }
