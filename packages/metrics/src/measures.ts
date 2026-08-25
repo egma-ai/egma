@@ -9,21 +9,20 @@
  * what the simulator emits, and it is read by the control plane the same way the
  * schemas are: at the write door, before anything is stored.
  *
- * The catalog exists because of one failure it rules out. A grader names the
- * measure it reads as a string, and a string that names nothing produces a
- * grader that reads nothing, judges nothing, and is `skipped` forever — green,
- * silent, and wrong. That is the exact false trust egma exists to kill, so the
- * write door refuses a measure this file does not name. A typo is a refusal at
- * the moment it is written rather than a check that quietly never fires.
+ * The catalog exists because of one failure it rules out. A grader definition
+ * can name the metric it reads as a string, and a string that names nothing
+ * would make the definition impossible to execute honestly. The write door
+ * therefore refuses a metric this file does not name. A typo is a refusal at
+ * the moment it is written, not a grader that quietly produces no result.
  *
  * **Each measure now also carries its span-level definition**, which is the
  * second half of the same guarantee. A name pins what a grader may ask for; the
  * definition beside it pins what egma computes when asked — so the dropdown a
  * developer picks from and the arithmetic that answers them are one list read
  * twice, and a measure cannot be offered that nothing knows how to compute.
- * Added 2026-08-14, when latency became a grader egma actually executes: the
- * numbers on the metrics display and the numbers inside the grader are one
- * module's, and this is where that module is told what to compute.
+ * Added 2026-08-14 so the metrics display and any grader that later consumes a
+ * metric use one module's arithmetic. This is where that module is told what to
+ * compute; the catalog itself does not grade a conversation.
  *
  * `measure-catalog.md` beside this file is the same catalog in prose, for a
  * person deciding what to bound. The two are held to each other by the
@@ -66,16 +65,16 @@
 export const MEASURE_CATALOG_VERSION = 5;
 
 /**
- * How a measure is reduced to the one number a threshold is applied to.
+ * How a metric series can be reduced to one observed number.
  *
- * They live here, with the measures, rather than beside the grader that applies
+ * They live here, with the metrics, rather than beside a grader that may consume
  * them: which reductions make sense is a fact about what was measured — a
  * latency taken every turn has a p90 and a turn count taken once does not
  * usefully have one — so the catalog is where both halves of "what may a
- * threshold ask" are written down together.
+ * consumer ask" are written down together.
  *
- * A latency grader almost always wants a percentile. A mean hides the one turn
- * that took nine seconds, which is the turn the caller hung up on.
+ * When latency is graded, a percentile often says more than a mean: a mean can
+ * hide the one turn that took nine seconds.
  */
 export const MEASURE_AGGREGATIONS = [
   "mean",
@@ -116,8 +115,8 @@ export type MeasureSource =
  * ingest, one per measurement, named for exactly the name in this catalog and
  * with the span's own duration as the number. `terminal_fact` measures arrive
  * on the status transition that ends the simulation, inside its facts, and the
- * control plane records them under the catalog name — so a threshold grader
- * reads one vocabulary whether the number was timed or counted.
+ * control plane records them under the catalog name — so every consumer reads
+ * one vocabulary whether the number was timed or counted.
  * `platform_telemetry` measures arrive only as the agent platform's own
  * account of itself — inside a recognised framework's stage spans, or in the
  * block its platform reported — because what happened inside the agent is a
@@ -135,9 +134,9 @@ export type MeasureOrigin =
  * **A word rather than prose, because the shared measure module switches on it
  * and the switch is exhaustive.** A rule nothing implements stops the
  * TypeScript build, and a measure whose rule is `no_span_carries_it` is refused
- * at the write door instead of becoming a grader that is `skipped` forever. So
- * the list a form offers, the list a write accepts and the list the module can
- * answer are one list, and no two of them can drift apart.
+ * at the write door instead of becoming an executable definition that can never
+ * receive its input. So the list a form offers, the list a write accepts and the
+ * list the module can answer are one list, and no two of them can drift apart.
  *
  * - `timing_spans_named_for_it` — every span the ingest door filed as `timing`
  *   whose name is this measure's own name. The span's own duration **is** the
@@ -349,7 +348,7 @@ export const CATALOGED_MEASURES: readonly string[] = MEASURE_CATALOG.map(
 
 /**
  * The measures egma computes from a conversation's spans — the shorter list,
- * and the one that matters to anything judging.
+ * and the one that matters to any grader.
  *
  * **Three surfaces read exactly this, which is the point of it existing.** The
  * shared measure module implements it, the **Use** form's dropdown offers it,

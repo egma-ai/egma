@@ -1,9 +1,6 @@
 import {
-  appendVerdicts,
   claimSimulations,
   completeSimulation,
-  listGraders,
-  PREDEFINED_GRADERS,
   startSimulation,
 } from "@egma/db";
 import { newId } from "@egma/ids";
@@ -66,7 +63,7 @@ async function readyToRun(
   connection: Record<string, unknown> = RETELL,
   options: TestApiOptions = {},
 ): Promise<ReadyRun> {
-  api = await createApi(label, options);
+  api = await createApi(label, { traceStore: true, ...options });
   const customer = await signUp(api.app, `${label}@acme.example`, "Acme");
   const key = await projectKeyFor(api.app, customer);
 
@@ -151,28 +148,6 @@ describe("suite-selected run reads", () => {
       endingReason: "agent_ended",
     });
 
-    const behaviorCopy = (await listGraders(auth)).items.find(
-      (one) => one.libraryId === PREDEFINED_GRADERS.expectedBehaviors,
-    );
-    if (behaviorCopy === undefined) {
-      throw new Error("the project has no expected-behaviors grader");
-    }
-    await appendVerdicts(auth, [{
-      traceId: simulationId,
-      graderId: behaviorCopy.id,
-      graderVersionId: behaviorCopy.versionId,
-      assertion: "behavior_1",
-      source: "simulation",
-      verdict: "passed",
-      score: 1,
-      rationale: "The agent confirmed the new time.",
-      citedSpanIds: [],
-      runId,
-      agentId: ready.agentId,
-      agentVersionId: "",
-      judgedAtMicroseconds: BigInt(Date.now()) * 1000n,
-    }]);
-
     const createdAt = new Date(String(started.body.createdAt));
     const matching = [
       ["suiteId", ready.suiteId],
@@ -180,7 +155,6 @@ describe("suite-selected run reads", () => {
       ["connectionId", ready.connectionId],
       ["testId", ready.testId],
       ["status", "completed"],
-      ["verdict", "passed"],
       ["since", new Date(createdAt.getTime() - 1_000).toISOString()],
       ["until", new Date(createdAt.getTime() + 1_000).toISOString()],
     ] as const;
@@ -195,7 +169,6 @@ describe("suite-selected run reads", () => {
       ["connectionId", newId("con")],
       ["testId", newId("tst")],
       ["status", "canceled"],
-      ["verdict", "failed"],
       ["since", new Date(createdAt.getTime() + 1_000).toISOString()],
       ["until", new Date(createdAt.getTime() - 1_000).toISOString()],
     ] as const;
@@ -203,6 +176,14 @@ describe("suite-selected run reads", () => {
       const query = new URLSearchParams({ [field]: value }).toString();
       expect(await listedRunIds(ready.key, query), field).not.toContain(runId);
     }
+
+    const retired = await request(
+      api.app,
+      "GET",
+      "/v1/runs?verdict=passed",
+      ready.key,
+    );
+    expect(retired.statusCode).toBe(422);
   });
 });
 

@@ -8,17 +8,12 @@ import {
   refusalResponse,
   stringIdSchema,
 } from "../schemas.ts";
+import { gradingStateSchema } from "./grades.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
-const numberSchema = { type: "number" } as const;
 const booleanSchema = { type: "boolean" } as const;
 const pageSizeSchema = { type: "integer", minimum: 1, maximum: 200 } as const;
-
-export const verdictSchema = {
-  type: "string",
-  enum: ["passed", "failed", "skipped", "errored"],
-} as const;
 
 const runStatusSchema = {
   type: "string",
@@ -28,11 +23,6 @@ const runStatusSchema = {
 export const simulationStatusSchema = {
   type: "string",
   enum: ["queued", "claimed", "running", "completed", "failed", "canceled"],
-} as const;
-
-const gradingStandingSchema = {
-  type: "string",
-  enum: ["not_required", "waiting", "pending", "graded"],
 } as const;
 
 const modalitySchema = {
@@ -53,57 +43,6 @@ const endingReasonSchema = {
     "orphaned",
     "dispatch_failed",
   ],
-} as const;
-
-export const verdictCountsSchema = {
-  type: "object",
-  properties: {
-    passed: integerSchema,
-    failed: integerSchema,
-    skipped: integerSchema,
-    errored: integerSchema,
-    total: integerSchema,
-  },
-  required: ["passed", "failed", "skipped", "errored", "total"],
-  additionalProperties: false,
-} as const;
-
-export const outcomeSchema = {
-  type: "object",
-  properties: {
-    verdict: verdictSchema,
-    score: nullable(numberSchema),
-    counts: verdictCountsSchema,
-  },
-  required: ["verdict", "score", "counts"],
-  additionalProperties: false,
-} as const;
-
-export const recordedVerdictSchema = {
-  type: "object",
-  properties: {
-    graderId: stringIdSchema,
-    assertion: stringSchema,
-    assertionText: nullable(stringSchema),
-    required: booleanSchema,
-    verdict: verdictSchema,
-    score: numberSchema,
-    rationale: stringSchema,
-    citedTurns: arrayOf(stringSchema),
-    judgedAt: dateTimeSchema,
-  },
-  required: [
-    "graderId",
-    "assertion",
-    "assertionText",
-    "required",
-    "verdict",
-    "score",
-    "rationale",
-    "citedTurns",
-    "judgedAt",
-  ],
-  additionalProperties: false,
 } as const;
 
 const mockToolProperties = {
@@ -209,9 +148,6 @@ const runHeaderSchema = {
     finishedCount: integerSchema,
     gradableCount: integerSchema,
     gradedCount: integerSchema,
-    verdict: nullable(verdictSchema),
-    score: nullable(numberSchema),
-    verdictCounts: verdictCountsSchema,
     resultsUrl: stringSchema,
     createdAt: dateTimeSchema,
     startedAt: nullable(dateTimeSchema),
@@ -241,9 +177,6 @@ const runHeaderSchema = {
     "finishedCount",
     "gradableCount",
     "gradedCount",
-    "verdict",
-    "score",
-    "verdictCounts",
     "resultsUrl",
     "createdAt",
     "startedAt",
@@ -256,7 +189,6 @@ const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
-    counts: verdictCountsSchema,
     connectionSnapshot: connectionSnapshotSchema,
     agent: nullable(identitySchema),
     connection: nullable({
@@ -270,7 +202,6 @@ const runDetailSchema = {
   },
   required: [
     ...runHeaderSchema.required,
-    "counts",
     "connectionSnapshot",
     "agent",
     "connection",
@@ -289,10 +220,7 @@ const runSimulationSchema = {
     personaName: stringSchema,
     personaVersionId: stringIdSchema,
     status: simulationStatusSchema,
-    grading: gradingStandingSchema,
-    verdict: nullable(verdictSchema),
-    score: nullable(numberSchema),
-    counts: nullable(verdictCountsSchema),
+    gradingState: nullable(gradingStateSchema),
     reason: nullable(endingReasonSchema),
     modality: modalitySchema,
     hasRecording: booleanSchema,
@@ -308,10 +236,7 @@ const runSimulationSchema = {
     "personaName",
     "personaVersionId",
     "status",
-    "grading",
-    "verdict",
-    "score",
-    "counts",
+    "gradingState",
     "reason",
     "modality",
     "hasRecording",
@@ -343,7 +268,6 @@ const runEventSchema = {
         testName: nullable(stringSchema),
         personaName: nullable(stringSchema),
         status: simulationStatusSchema,
-        verdict: nullable(verdictSchema),
         reason: nullable(endingReasonSchema),
       },
       required: [
@@ -354,7 +278,6 @@ const runEventSchema = {
         "testName",
         "personaName",
         "status",
-        "verdict",
         "reason",
       ],
       additionalProperties: false,
@@ -439,7 +362,6 @@ export const runOperations = {
         connectionId: stringIdSchema,
         testId: stringIdSchema,
         status: runStatusSchema,
-        verdict: verdictSchema,
         since: dateTimeSchema,
         until: dateTimeSchema,
         ...pageQuery,

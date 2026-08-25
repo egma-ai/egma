@@ -7,12 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { GRADING } from "../../../../../../lib/grading-copy.ts";
 import { asSecond } from "../../../../../../lib/instants.ts";
 import {
   platformAnswer,
   platformClient,
 } from "../../../../../../lib/platform-client.ts";
+import { withoutCurrentGrade } from "../../../../../../lib/simulations.ts";
 import {
   DETAIL,
   FACTS,
@@ -34,12 +34,11 @@ import {
   somethingFailed,
   stepsInside,
   transcriptsPath,
-  turnsCited,
   workedOutMetric,
   type Detail,
   type Facts as TraceFacts,
+  type Grade,
   type Measured,
-  type Outcome,
   type Step,
 } from "../../../../../../lib/transcripts.ts";
 /*
@@ -50,12 +49,12 @@ import {
  * with the same two words written out twice. `shownScore` turned a score into
  * a figure here and in `ui/run-status.tsx`, with the same rounding and the
  * same dash for a proportion of nothing. Two copies of a rule about how a
- * verdict reads is two chances for a simulation's page and a production
+ * score reads is two chances for a simulation's page and a production
  * transcript's page to start saying it differently.
  */
 import { SPEAKERS } from "../../../../../../ui/evidence.tsx";
 import { shownScore } from "../../../../../../ui/run-status.tsx";
-import { JudgmentCard } from "../../../../../judgment-card.tsx";
+import { GradeCard } from "../../../../../grade-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import { Loading } from "../../../../../../ui/page-state.tsx";
 import {
@@ -138,43 +137,18 @@ const SUMMARY_FACT = cn(
   "max-[620px]:last:col-span-full max-[620px]:last:border-e-0",
 );
 
-/**
- * What egma made of the exchange, on the quieter surface a result sits on.
- *
- * It stacks earlier than the strip above it — 900px rather than 620px — because
- * a tally reads as a sentence and needs the width a duration does not.
- */
-const OUTCOME_STRIP = cn(
+/** Grading state, combined score, and grade count. */
+const GRADE_STRIP = cn(
   "mt-6 grid grid-cols-3 overflow-clip rounded-card border border-border bg-surface-soft",
   "max-[900px]:grid-cols-2",
 );
 
-const OUTCOME_FACT = cn(
+const GRADE_FACT = cn(
   FACT,
-  /*
-   * The diagnostic lane is a fourth fact in three columns, so it wraps onto a
-   * row of its own — and a wrapped row with no rule above it reads as part of
-   * the fact it sits under, which for a lane that must never colour the verdict
-   * beside it is exactly the wrong reading.
-   */
   "nth-[n+4]:border-t",
   "max-[900px]:border-t",
   "max-[900px]:nth-[2n]:border-e-0",
   "max-[900px]:nth-[-n+2]:border-t-0",
-);
-
-/**
- * The colour a verdict paints the figure it is the verdict of.
- *
- * Read off `data-verdict` on the fact above it, so the attribute is what does
- * the painting rather than a label nothing reads. A verdict word nobody has a
- * colour for leaves the figure in the ordinary text colour, which is the safe
- * direction: a new word is legible before anyone has decided what it means.
- */
-const VERDICT_COLOUR = cn(
-  "[[data-verdict=passed]_&]:text-success",
-  "[[data-verdict=failed]_&]:text-failure",
-  "[[data-verdict=errored]_&]:text-failure",
 );
 
 /** A disclosure's own marker is replaced by one this page draws. */
@@ -237,7 +211,7 @@ const VIEWS: readonly { readonly id: View; readonly label: string }[] = [
  *
  * Re-homed under the project with the rest of the monitoring section, and
  * unchanged in everything it draws: the turns with their timings, the steps
- * inside each one, the measures above and the verdicts below.
+ * inside each one, the measures, and its grades.
  *
  * **Two things have to be in the address for this page to open at all**, and
  * both are now there. The window, because a name is not a prefix of the store's
@@ -254,6 +228,7 @@ export default function TranscriptPage({
   const { projectId, transcriptId } = use(params);
   const now = useMinuteClock();
   const [state, setState] = useState<State>({ status: "loading" });
+  const [revision, setRevision] = useState(0);
   const [view, setView] = useState<View>("transcript");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -296,7 +271,18 @@ export default function TranscriptPage({
     return () => {
       current = false;
     };
-  }, [projectId, transcriptId]);
+  }, [projectId, revision, transcriptId]);
+
+  useEffect(() => {
+    if (
+      state.status !== "read" ||
+      !["pending", "running"].includes(state.detail.gradingState)
+    ) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setRevision((held) => held + 1), 2000);
+    return () => clearTimeout(timer);
+  }, [state]);
 
   if (state.status === "loading") {
     // The same frame the route boundary draws, so the wait for the API reads
@@ -459,12 +445,12 @@ export default function TranscriptPage({
         <PageBody>
         <Summary facts={detail.trace} />
         <Measures measured={detail.metrics ?? []} />
-        {detail.outcome ? (
-          <OutcomeSummary
-            outcome={detail.outcome}
-            diagnostics={detail.diagnostics ?? null}
-          />
-        ) : null}
+        <GradeSummary
+          state={detail.gradingState}
+          combinedScore={detail.combinedScore}
+          grades={detail.grades}
+          history={detail.gradeHistory}
+        />
 
         {/*
           The audio of this exchange, where egma is the one who had it.
@@ -624,7 +610,6 @@ function Fact({
   readonly value: string;
   readonly className: string;
   readonly valueClassName?: string;
-  readonly "data-verdict"?: string;
   readonly title?: string;
 }) {
   return (
@@ -662,20 +647,20 @@ function Summary({ facts }: { facts: TraceFacts }) {
 /**
  * What this exchange measured — the metrics display.
  *
- * **Above the verdicts and apart from them, because a measure measures and a
- * grader judges.** Nothing here is green or red: a duration is not good or bad
+ * **Above the grades and apart from them, because a metric records an observed
+ * fact and a grader gives a score.** Nothing here is green or red: a duration is not good or bad
  * until somebody has written down a bound, and the section below is where that
  * decision shows up. Putting them in one block would make every number look like
  * a check that passed.
  *
  * **Every number here came off the platform's one shared measure module**, which
- * is the same module a `latency` grader is judged through — and that includes
- * the **reduction**, the single measurement a bound is held against. This page
+ * is also the only module a future metric-based grader may read — and that
+ * includes the **reduction**, the single measurement a bound is held against. This page
  * renders what it was handed and derives nothing. Taking the maximum here would
  * look harmless and would be a second implementation of exactly the number a
- * verdict rests on: correct while both happen to take the maximum, silently
+ * grader could use: correct while both happen to take the maximum, silently
  * wrong the first day a grader reduces by p90 instead. A developer who found the
- * page and the verdict disagreeing would be right to stop believing both.
+ * page and the grade evidence disagreeing would be right to stop believing both.
  *
  * A measure the spans do not carry is absent rather than shown empty, and an
  * exchange with none says so in a sentence — "nothing was measured" is a fact
@@ -714,70 +699,94 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
   );
 }
 
-/** What was judged, in the words a tally is read in. Written once, so the two
- * lanes below cannot come to count the same rows two ways. */
-function tallyOf(counts: Outcome["counts"]): string {
-  const said = [`${counts.passed}/${counts.total} passed`];
-  if (counts.failed > 0) said.push(`${counts.failed} failed`);
-  if (counts.skipped > 0) said.push(`${counts.skipped} skipped`);
-  if (counts.errored > 0) said.push(`${counts.errored} errored`);
-  return said.join(" · ");
+function gradingStateLabel(state: Detail["gradingState"]): string {
+  switch (state) {
+    case "not_requested":
+      return "Not requested";
+    case "pending":
+      return "Waiting";
+    case "running":
+      return "Grading";
+    case "complete":
+      return "Complete";
+    case "error":
+      return "Error";
+  }
 }
 
-/**
- * What egma made of this exchange: the verdict, the number, and what was
- * counted — over the graders that can fail something.
- *
- * **The diagnostics sit beside it and never in it**, which is the same
- * arrangement a run's results make and for the same reason. A grader carrying
- * `required: false` is judged exactly as a blocking one is and reports the same
- * fraction, and it can never change the word to its left. Folded in, it would
- * move a verdict it is not allowed to move; left out altogether, it would be a
- * grader somebody switched on that judges in silence — and the failures on the
- * cards further down the page would have nothing up here to belong to.
- *
- * One figure rather than the run page's grid, because this page is one exchange:
- * three cards of one row each would be furniture around a single number.
- */
-function OutcomeSummary({
-  outcome,
-  diagnostics,
+/** Trace-level grading progress, the display-only mean, and individual grades. */
+function GradeSummary({
+  state,
+  combinedScore,
+  grades,
+  history,
 }: {
-  outcome: Outcome;
-  diagnostics: Outcome | null;
+  readonly state: Detail["gradingState"];
+  readonly combinedScore: number | null;
+  readonly grades: readonly Grade[];
+  readonly history: readonly Grade[];
 }) {
-  return (
-    <section className={OUTCOME_STRIP} aria-label="Grading outcome">
-      <Fact
-        className={OUTCOME_FACT}
-        data-verdict={outcome.verdict}
-        label="Verdict"
-        value={outcome.verdict}
-        valueClassName={VERDICT_COLOUR}
-      />
-      <Fact className={OUTCOME_FACT} label="Score" value={shownScore(outcome.score)} />
-      <Fact className={OUTCOME_FACT} label="Checks" value={tallyOf(outcome.counts)} />
-      {/*
-        **The fraction is the point of this lane, so it is on the line.** A
-        diagnostic is switched on to be read rather than to decide, and passed ÷
-        counted is the number that reading produces — the counts beside it are a
-        different true statement, because a skipped assertion leaves the
-        denominator and stays in the count.
+  const earlier = grades.reduce<readonly Grade[]>(
+    (remaining, grade) => withoutCurrentGrade(grade, remaining),
+    history,
+  );
 
-        Deliberately uncoloured, whatever it says. `data-verdict` is what paints
-        a fact red, and a red diagnostic here would read as a reason the verdict
-        to its left is red — which is the one thing it can never be.
-      */}
-      {diagnostics === null ? null : (
+  return (
+    <section className="mt-8" aria-label="Grades">
+      <div className={GRADE_STRIP}>
         <Fact
-          className={OUTCOME_FACT}
-          title={GRADING.diagnosticAside}
-          label={GRADING.diagnosticLane}
-          value={
-            `${diagnostics.verdict} · ${GRADING.diagnosticScore} ` +
-            `${shownScore(diagnostics.score)} · ${tallyOf(diagnostics.counts)}`
-          }
+          className={GRADE_FACT}
+          label="Grading state"
+          value={gradingStateLabel(state)}
         />
+        <Fact
+          className={GRADE_FACT}
+          label="Combined score"
+          value={shownScore(combinedScore)}
+        />
+        <Fact
+          className={GRADE_FACT}
+          label="Current grades"
+          value={String(grades.length)}
+        />
+      </div>
+      <p className="mt-3 mb-0 max-w-[72ch] text-sm text-muted-foreground">
+        The combined score is the arithmetic mean of all selected grader scores.
+        It is not a pass or fail result.
+      </p>
+      {grades.length === 0 ? (
+        <Notice>
+          {state === "not_requested"
+            ? "No grader was selected for this transcript."
+            : state === "error"
+              ? "Grading ended before Egma could produce every selected grade."
+              : "Individual grades will appear here when they are available."}
+        </Notice>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          {grades.map((grade) => (
+            <GradeCard
+              key={`${grade.projectGraderId}:${grade.gradedAt}`}
+              grade={grade}
+            />
+          ))}
+        </div>
+      )}
+      {earlier.length === 0 ? null : (
+        <details className="mt-4 rounded-card border border-border bg-surface p-4">
+          <summary className={DISCLOSURE}>
+            Earlier grades ({String(earlier.length)})
+          </summary>
+          <div className="mt-4 grid gap-3">
+            {earlier.map((grade) => (
+              <GradeCard
+                key={`${grade.projectGraderId}:${grade.gradedAt}`}
+                grade={grade}
+                historical
+              />
+            ))}
+          </div>
+        </details>
       )}
     </section>
   );
@@ -835,7 +844,7 @@ function TranscriptView({
         <Notice>{DETAIL.noTurns}</Notice>
       ) : (
         <div className={LIST_SURFACE}>
-          {detail.turns.map((turn, position) => (
+          {detail.turns.map((turn) => (
             <Fragment key={turn.spanId}>
               <Turn
                 turn={turn}
@@ -843,14 +852,6 @@ function TranscriptView({
                 selectedId={selectedId}
                 onSelect={onSelect}
               />
-              {(detail.verdicts ?? [])
-                .filter((judgment) => turnsCited(judgment).includes(position + 1))
-                .map((judgment) => (
-                  <JudgmentCard
-                    key={`${judgment.graderId}:${judgment.assertion}:${judgment.judgedAt}`}
-                    judgment={judgment}
-                  />
-                ))}
             </Fragment>
           ))}
         </div>

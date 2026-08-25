@@ -78,7 +78,7 @@
       }
     },
     "failed_event": {
-      "description": "The simulator could not honestly finish the simulation. Failed is about conducting, never about the agent's conduct — an agent that behaved badly still completes, and the graders judge it later.",
+      "description": "The simulator could not honestly finish the simulation. Failed is about conducting, never about the agent's conduct — an agent that behaved badly still completes, and the graders grade it later.",
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "event_id", "at", "status", "reason", "facts"],

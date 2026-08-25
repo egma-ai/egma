@@ -14,9 +14,8 @@ import { cn } from "@/lib/utils";
  * A button that opens a small panel, and everything that has to be true of one
  * before somebody without a pointer can use it.
  *
- * There are three of these in the product — the organization and project
- * selector, the account menu, and the test editor's choosers — and there will
- * be more. Writing the behaviour once is what stops the second one being the
+ * The organization and project controls, account menu, and editor choosers all
+ * use this behavior. Writing it once is what stops a later control being the
  * first one with the keyboard left out.
  *
  * **The panel is the kit's anchored surface.** `components/ui/popover.tsx` is
@@ -30,7 +29,7 @@ import { cn } from "@/lib/utils";
  * **The list of items is still this file's, and that is the reason for
  * `Popover` rather than the kit's `DropdownMenu`.** A dropdown menu keeps its
  * own register of items: only what it was handed as an item takes the arrow
- * keys, and it reads every printable key as a jump to a matching item. Two
+ * keys, and it reads every printable key as a jump to a matching item. Some
  * panels here hold a field to type in, which that would take the keys away
  * from, and the account menu's dark-theme switch is a `role="switch"` rather
  * than an item, which that would leave reachable by pointer alone. So the
@@ -40,8 +39,7 @@ import { cn } from "@/lib/utils";
  * - **The arrow keys move between items**, Home and End reach the ends, and
  *   opening moves focus into the panel.
  * - An item marked `data-menu-focus-first` takes focus when the panel opens.
- *   The selector's search field uses it, which is what makes typing to filter
- *   work without anybody reaching for the field first.
+ *   This lets a panel with a field put the keyboard there before its rows.
  *
  * **A panel holding a text field is not a `menu`.** `role="menu"` promises a
  * list of commands, and neither ARIA nor a screen reader's menu mode expects a

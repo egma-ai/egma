@@ -224,7 +224,7 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
 
 ## Get a trace
 
-Returns the full transcript and judgment results for a single trace.
+Returns the full transcript, metrics, and trace-level grades.
 
 **`GET /v1/traces/:traceId`**
 
@@ -268,17 +268,32 @@ Returns the full transcript and judgment results for a single trace.
   The Egma simulation ID for this trace, if it was conducted by Egma's simulator. `null` for production traces.
 </ResponseField>
 
-<ResponseField name="verdicts" type="array">
-  Grader verdicts for this trace. Each verdict includes the grader ID, the result, and any assertion details.
+<ResponseField name="gradingState" type="string">
+  Whole-trace grading progress: `not_requested`, `pending`, `running`,
+  `complete`, or `error`.
 </ResponseField>
 
-<ResponseField name="outcome" type="object | null">
-  The aggregate pass/fail result from required graders.
+<ResponseField name="grades" type="array">
+  The current grade from each selected project grader. Each grade includes
+  `projectGraderId`, `graderDefinitionId`, `graderDefinitionVersion`,
+  `graderName`, a normalized `score` or `null`, `details`, the frozen
+  `passThreshold`, its individual `result`, and `gradedAt`.
 </ResponseField>
 
-<ResponseField name="diagnostics" type="object | null">
-  The aggregate result from diagnostic-only (non-required) graders.
+<ResponseField name="gradeHistory" type="array">
+  Every appended grade for the trace. When a project grader runs more than
+  once, its latest grade is current and older grades remain here.
 </ResponseField>
+
+<ResponseField name="combinedScore" type="number | null">
+  The unweighted arithmetic mean of the current scores. It is `null` while
+  selected grading is unfinished or when a selected grader errors.
+</ResponseField>
+
+An individual grade result can be `passed`, `failed`, or `errored`. It applies
+only to that grader. Egma does not assign an overall `passed` or `failed` result
+to the trace, test, test suite, or run, and it does not apply a threshold to
+`combinedScore`.
 
 ```bash title="Get a trace"
 curl "https://your-egma-instance/v1/traces/4bf92f3577b34da6a3ce929d0e0e4736?from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z" \

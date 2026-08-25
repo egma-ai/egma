@@ -3,6 +3,7 @@
 import {
   BotIcon,
   ClipboardCheckIcon,
+  ChevronsUpDownIcon,
   MessageSquareTextIcon,
   PlayIcon,
   ScaleIcon,
@@ -39,7 +40,13 @@ import {
 } from "@/components/ui/sidebar";
 
 import { readJson } from "../lib/api.ts";
-import { organizationOf, roleOf, type Me, type Project } from "../lib/me.ts";
+import {
+  organizationOf,
+  roleOf,
+  type Me,
+  type Organization,
+  type Project,
+} from "../lib/me.ts";
 import {
   activeSectionIn,
   navigationFor,
@@ -201,7 +208,7 @@ export function ProductShellBoundary({ children }: { readonly children: ReactNod
  *
  * Each icon says what its row says. `MessageSquareText` for the monitoring row
  * because the row says Transcripts, and `ScaleIcon` for graders because a
- * grader weighs a thing and returns a verdict — neither imitates the Egma mark,
+ * grader weighs a trace and returns a score — neither imitates the Egma mark,
  * which `DESIGN.md` forbids of a product icon.
  */
 const NAVIGATION_ICONS: Record<SectionId, LucideIcon> = {
@@ -257,7 +264,7 @@ function Navigation({
     <SidebarProvider onNavigate={onNavigate}>
       {/*
        * The 16px gutter is the bar's, and it is on every block in the column
-       * rather than on the column itself. The wordmark bar's hairline has to
+       * rather than on the column itself. The organization bar's hairline has to
        * run the full 224px, so the `<aside>` can carry no side padding — and
        * the rows are 192px wide with their Ember mark exactly on the gutter,
        * which is what the boards draw (`725-0`, `72Z-0`).
@@ -286,6 +293,137 @@ function Navigation({
         </nav>
       </SidebarContent>
     </SidebarProvider>
+  );
+}
+
+/*
+ * Billing is not part of `/api/me` yet. Every organization in this release is
+ * on the same plan, so this stays explicit UI copy instead of pretending the
+ * session contains subscription data. Do not show it without a real
+ * organization; a loading or failed session has made no plan claim.
+ */
+const CURRENT_PLAN = { badge: "Free", name: "Free Plan" } as const;
+
+const ROLE_LABEL: Record<Role, string> = {
+  admin: "Admin",
+  member: "Member",
+  viewer: "Viewer",
+};
+
+/**
+ * The organization identity at the top of the signed-in sidebar.
+ *
+ * There is one organization per session today, so this panel gives context and
+ * does not offer a false switcher. The paired arrows still open a useful
+ * surface: organization name, current plan and the person's real membership
+ * role. Organization settings stay out until that product level exists.
+ *
+ * **The mark is identity, not a control.** It sits beside the menu trigger
+ * rather than inside it, so the hover plate, focus indicator and press feedback
+ * cover only the organization control. The organization name stays on the
+ * 14px product-text step; making it smaller would leave the accepted scale.
+ */
+function OrganizationMenu({
+  organization,
+  role,
+  settled,
+}: {
+  readonly organization: Organization | undefined;
+  readonly role: Role | null;
+  readonly settled: boolean;
+}) {
+  const mark = (
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      className="size-(--sidebar-mark-size) flex-none [[data-theme=dark]_&]:invert"
+      src="/brand/egma-mark-light.svg"
+      alt="Egma"
+      width={32}
+      height={32}
+    />
+  );
+
+  if (organization === undefined) {
+    return (
+      <>
+        {mark}
+        <div
+          className="flex min-h-(--control-lg) min-w-0 flex-1 items-center px-2"
+          data-slot="organization-status"
+        >
+          <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
+            {settled ? "No organization" : "Checking your session…"}
+          </span>
+        </div>
+      </>
+    );
+  }
+
+  const initial = organization.name.trim().slice(0, 1).toUpperCase() || "E";
+
+  return (
+    <>
+      {mark}
+      <Menu
+        label={`Open organization menu for ${organization.name}`}
+        triggerClassName={cn(
+          "flex min-h-(--control-lg) w-full min-w-0 items-center gap-1 px-2",
+          "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          "transition-transform duration-(--duration-press) ease-out",
+          "pointer-hover:border-border pointer-hover:bg-surface-soft",
+          "[&:active:not(:focus-visible)]:scale-97",
+          "motion-reduce:transition-none",
+          "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+        )}
+        openClassName="border-border bg-surface-soft"
+        placement="below-start"
+        panelRole="dialog"
+        panelClassName="w-[280px] p-3"
+        trigger={
+          <>
+            <span
+              className="min-w-0 flex-1 overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground"
+              data-slot="organization-name"
+            >
+              {organization.name}
+            </span>
+            <Badge className="px-1 text-xs" shape="count" data-slot="organization-plan">
+              {CURRENT_PLAN.badge}
+            </Badge>
+            <ChevronsUpDownIcon
+              className="size-3 flex-none text-faint"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
+          </>
+        }
+      >
+        {() => (
+          <div className="flex min-w-0 items-center gap-3 p-2" data-slot="organization-summary">
+            <span
+              className="grid size-10 flex-none place-items-center rounded-none border border-border bg-surface-soft text-sm text-muted-foreground"
+              aria-hidden="true"
+            >
+              {initial}
+            </span>
+            <span className="min-w-0">
+              <span className="block overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
+                {organization.name}
+              </span>
+              <span className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{CURRENT_PLAN.name}</span>
+                {role === null ? null : (
+                  <>
+                    <span className="h-3 w-px bg-border" aria-hidden="true" />
+                    <span>{ROLE_LABEL[role]}</span>
+                  </>
+                )}
+              </span>
+            </span>
+          </div>
+        )}
+      </Menu>
+    </>
   );
 }
 
@@ -370,9 +508,10 @@ function AccountMenu({
           <span
             className={cn(
               "grid size-(--control-md) flex-none place-items-center",
-              "rounded-full border border-border bg-surface-soft text-sm",
+              "rounded-none border border-border bg-surface-soft text-sm",
               compact && "size-(--tap-target)",
             )}
+            data-slot="account-avatar"
             aria-hidden="true"
           >
             {initial}
@@ -580,29 +719,13 @@ function ShellFrame({
           "max-[900px]:hidden",
         )}
       >
-        {/*
-         * The wordmark, and a link home.
-         *
-         * `[[data-theme=dark]_&]:invert` is the whole of the dark-theme
-         * treatment: the asset is black line art on nothing, so inverting it
-         * gives white line art on nothing. `DESIGN.md` forbids recolouring the
-         * logo and this does not recolour it — it is the same two-value mark,
-         * the way a black wordmark is printed white on a dark page.
-         */}
-        <SidebarBrand>
-          <Link
-            className="inline-flex items-center rounded-button no-underline"
-            href="/"
-            aria-label="Egma home"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              className="h-6 w-auto [[data-theme=dark]_&]:invert"
-              src="/brand/egma-wordmark.svg"
-              alt="Egma"
-              height={24}
-            />
-          </Link>
+        {/* Organization context owns the top bar; project context stays below. */}
+        <SidebarBrand className="gap-2 [&>[data-slot=menu]]:min-w-0 [&>[data-slot=menu]]:flex-1">
+          <OrganizationMenu
+            organization={organization}
+            role={role}
+            settled={session.settled}
+          />
         </SidebarBrand>
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
@@ -753,7 +876,7 @@ export function ProductPage({
  * **The title moved into a bar of its own**, 56px tall over a hairline with
  * 24px of side padding, which is `71V-0`. It is where a person looks to answer
  * "what am I on", so it stays put while the page scrolls under it and it is
- * the same 56px as the wordmark bar across the divider from it.
+ * the same 56px as the organization bar across the divider from it.
  *
  * **The page's actions are not in that bar.** They sit in the toolbar row
  * below it, hard right, opposite whatever the page filters by — which is the

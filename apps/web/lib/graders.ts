@@ -3,154 +3,113 @@ import type {
   ListGradersResponse,
 } from "@egma/platform-api/client";
 
-/**
- * The graders of one project, as `/v1/grader-library` and `/v1/graders`
- * answer them.
- *
- * **Two levels, and keeping them apart is the whole of this file.** A
- * **grader library** entry is a definition sitting on a shelf: the judge
- * prompt, the kind of judgment, and what pressing **Use** asks for. A
- * **grader** is a running copy of one — the row that actually judges this
- * project, and the row a verdict names. Pressing Use is what turns the first
- * into the second, and deleting the copy is what stops it judging. There is no
- * enable flag anywhere, because a copy that exists is a copy that judges.
- *
- * **Every read here names a project**, like every other product read. A library
- * entry egma ships belongs to nobody in particular, so the shelf reads the same
- * in every project — but a running copy is the project's own, and a screen that
- * asked for "the graders" without saying which project would be a screen that
- * showed one project's judging under another's address.
- *
- * The shape is the API's own, field names included. Renaming its fields on the
- * way in would put a second vocabulary between the contract and the page, and
- * the two would drift the first time the API grew a field.
- */
+/** API response aliases. Their fields stay owned by the generated client. */
+export type GraderLibraryPage = ListGraderLibraryResponse;
+export type ProjectGradersPage = ListGradersResponse;
+
+/** True UI aliases for the generated response's nested resources. */
+export type GraderLibraryEntry =
+  GraderLibraryPage["graderLibraryEntries"][number];
+export type ProjectGrader = ProjectGradersPage["graders"][number];
+export type GraderType = ProjectGrader["type"];
+export type GraderOwner = ProjectGrader["owner"];
+export type GraderModality = ProjectGrader["modalities"][number];
+export type ProjectGraderScope = ProjectGrader["scope"];
+export type SimulationScopeSelector =
+  ProjectGraderScope["simulations"][number];
+export type GraderSettingDefinition =
+  GraderLibraryEntry["settingDefinitions"][number];
 
 /**
- * One value an entry's **Use** form asks for, exactly as the entry declares it.
+ * The one predefined definition whose stored key needs product copy.
  *
- * **The form is drawn from this and never written by a page.** Latency declares
- * a measure from egma's catalog and a bound; the expected-behaviors entry
- * declares nothing, because its assertions are each test's own sentences. A
- * dropdown whose options were typed into a browser would be a second copy of
- * the measure catalog, wrong the first time a measure joined or left — and the
- * first sign of it would be a write refused for offering exactly what the form
- * offered.
+ * The id, not the name, proves that this is Egma's Expected behaviors grader.
+ * An organization is allowed to give a custom grader the same name, and that
+ * custom name must stay exactly as the organization wrote it.
  */
-export type GraderParameter = {
-  readonly name: string;
-  readonly label: string;
-  readonly kind: string;
-  readonly means: string;
-  /** Present on a parameter that is one of a list; absent on one typed into. */
-  readonly options?: readonly {
-    readonly value: string;
-    readonly label: string;
-    readonly means: string;
-    readonly unit: string;
-  }[];
+export const EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID =
+  "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW";
+
+export function graderDefinitionDisplayName(
+  definitionId: string,
+  name: string,
+): string {
+  return definitionId === EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID
+    ? "Expected behaviors"
+    : name;
+}
+
+export function graderOwnerLabel(owner: GraderOwner): string {
+  return owner === "egma" ? "Egma" : "Organization";
+}
+
+export function graderTypeLabel(type: GraderType): string {
+  return type === "llm_as_judge" ? "LLM judge" : "Code";
+}
+
+export function graderModalitiesLabel(
+  modalities: readonly GraderModality[],
+): string {
+  if (modalities.length === 2) return "Chat and voice";
+  if (modalities[0] === "chat") return "Chat";
+  if (modalities[0] === "voice") return "Voice";
+  return "None";
+}
+
+/** Compact table copy. The nested selector list belongs in the detail sheet. */
+export function scopeSummary(scope: ProjectGraderScope): string {
+  const all = scope.simulations.some((selector) => selector.kind === "all");
+  const suites = scope.simulations.filter(
+    (selector) => selector.kind === "test_suite",
+  ).length;
+  const tests = scope.simulations.filter(
+    (selector) => selector.kind === "test",
+  ).length;
+  const simulations = all
+    ? "All simulations"
+    : suites + tests === 0
+      ? "Simulations off"
+      : [
+          suites === 0
+            ? null
+            : `${String(suites)} test suite${suites === 1 ? "" : "s"}`,
+          tests === 0
+            ? null
+            : `${String(tests)} test${tests === 1 ? "" : "s"}`,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(", ");
+  const production =
+    scope.production === null
+      ? "Production off"
+      : `${String(scope.production.samplePercent)}% of production`;
+  return `${simulations} · ${production}`;
+}
+
+/** Product copy kept for callers that show the two evidence sources separately. */
+export function simulationScopeLabel(grader: ProjectGrader): string {
+  const all = grader.scope.simulations.some(
+    (selector) => selector.kind === "all",
+  );
+  return all
+    ? "Grades all simulations"
+    : grader.scope.simulations.length === 0
+      ? "Does not grade simulations"
+      : "Grades selected simulations";
+}
+
+export function productionScopeLabel(grader: ProjectGrader): string {
+  return grader.scope.production === null
+    ? "Production off"
+    : `Grades ${String(grader.scope.production.samplePercent)}% of production`;
+}
+
+export const EMPTY_GRADER_SCOPE: ProjectGraderScope = {
+  simulations: [],
+  production: null,
 };
 
-/** One entry on the shelf. */
-export type LibraryEntry =
-  ListGraderLibraryResponse["graderLibraryEntries"][number];
-
-export type LibraryPage = ListGraderLibraryResponse;
-
-/**
- * One running copy: what this project is judged by.
- *
- * `libraryId` is what the row *is*: the stable definition family, so a renamed
- * copy is still a copy of the same entry. `config` holds only the copy's
- * filled-in values. Each grader version points at one immutable shared
- * definition revision; no prompt or source code is duplicated in this shape.
- */
-export type RunningGrader = ListGradersResponse["graders"][number];
-
-export type RunningPage = ListGradersResponse;
-
-/**
- * The generated contract currently leaves a library entry's parameters as
- * unknown values. This is the one local refinement the forms still need.
- */
-export function parametersOf(
-  entry: LibraryEntry,
-): readonly GraderParameter[] {
-  return entry.params as readonly GraderParameter[];
-}
-
-/** Assertions held in a running grader's otherwise open configuration. */
-export function assertionsOf(copy: RunningGrader): readonly unknown[] {
-  if (typeof copy.config !== "object" || copy.config === null) return [];
-  const assertions = (copy.config as { readonly assertions?: unknown })
-    .assertions;
-  return Array.isArray(assertions) ? assertions : [];
-}
-
-/** Where the two grader screens live inside one project. */
-export const GRADERS_SECTION = "graders";
-export const RUNNING_GRADERS_STEP = "running";
-
-/**
- * What was typed into a Use form, as the API takes it: text stays text, a
- * number becomes one.
- *
- * **A number is sent as a number.** An input's value is a string, and a bound
- * arriving as `"2000"` is refused by the write door with a message about types
- * — correct, and useless to somebody who typed a perfectly good number. The
- * conversion happens once, here, at the edge that knows the control was
- * numeric.
- *
- * A parameter left blank is left out rather than sent empty, so the refusal a
- * developer reads is the entry's own — "this grader needs a bound" — rather
- * than one about the empty string.
- */
-export function filledParams(
-  params: readonly GraderParameter[],
-  filled: Readonly<Record<string, string>>,
-): Record<string, string | number> {
-  const written: Record<string, string | number> = {};
-  for (const parameter of params) {
-    const typed = filled[parameter.name] ?? "";
-    if (typed.trim() === "") continue;
-    written[parameter.name] =
-      parameter.kind === "number" ? Number(typed) : typed.trim();
-  }
-  return written;
-}
-
-/** The first option of each list, which is what a dropdown shows unchosen. */
-export function firstChoices(
-  params: readonly GraderParameter[],
-): Record<string, string> {
-  const chosen: Record<string, string> = {};
-  for (const parameter of params) {
-    const first = parameter.options?.[0];
-    if (first !== undefined) chosen[parameter.name] = first.value;
-  }
-  return chosen;
-}
-
-/**
- * The unit a typed value is counted in: the unit of the option that was chosen.
- *
- * **Only where exactly one parameter offers options**, and that restraint is
- * the point. Nothing in an entry's declaration says which typed value belongs
- * to which choice — an entry asking for two measures and two bounds would be
- * four parameters with no link between them — so with more than one list to
- * choose from there is no honest answer and this gives none. Matching any
- * filled value against any parameter's options is a guess that happens to be
- * right while exactly one list exists, and is wrong silently the day a second
- * one arrives.
- */
-export function unitOf(
-  params: readonly GraderParameter[],
-  filled: Readonly<Record<string, string>>,
-): string | undefined {
-  const listed = params.filter((parameter) => parameter.options !== undefined);
-  if (listed.length !== 1) return undefined;
-  const only = listed[0];
-  if (only === undefined) return undefined;
-  return only.options?.find((option) => option.value === filled[only.name])
-    ?.unit;
-}
+export const ALL_SIMULATIONS_SCOPE: ProjectGraderScope = {
+  simulations: [{ kind: "all" }],
+  production: null,
+};

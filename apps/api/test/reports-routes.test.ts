@@ -1,6 +1,6 @@
 import { newId } from "@egma/ids";
 import { createPersona, getSimulation } from "@egma/db";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
@@ -11,6 +11,10 @@ import {
   type TestApiOptions,
 } from "./support/api.ts";
 import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
+import {
   contextFor,
   NEUTRAL_TRAITS,
   projectKeyFor,
@@ -18,6 +22,7 @@ import {
   signUp,
   type Customer,
 } from "./support/traces.ts";
+import { fileTranscriptOf } from "./support/recordings.ts";
 
 /**
  * The report door, over real HTTP against real Postgres: the shipped
@@ -38,6 +43,17 @@ let api: TestApi;
 afterEach(async () => {
   await api?.close();
 });
+
+const storage: ObjectStorage = await startObjectStorage("reports-routes");
+
+afterAll(() => {
+  if (storage.available) storage.stop();
+});
+
+function runningStorage(): Extract<ObjectStorage, { available: true }> {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage;
+}
 
 const RESCHEDULING = {
   name: "Reschedules a booked appointment",
@@ -174,6 +190,7 @@ async function aCustomerReadyToRun(
 }> {
   api = await createApi(label, {
     ...options,
+    traceStore: options.traceStore ?? true,
     retellFetch: options.retellFetch ?? RETELL_CHAT_FETCH,
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -418,42 +435,56 @@ describe("the lifecycle lands", () => {
     expect(row?.claimedBy).toBe(CONDUCTOR);
   });
 
-  it("lands a completed conversation with its facts, mints grading work, finalizes the run", async () => {
-    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
-      "reports_completed",
-    );
-    const { runId, simulationId } = await aRunningSimulation(
-      key,
-      connectionId,
-      versionId,
-    );
+  it.skipIf(!storage.available)(
+    "lands a completed conversation with its facts, mints grading work, finalizes the run",
+    async () => {
+      const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+        "reports_completed",
+        { ingestStore: runningStorage().ingestStore },
+      );
+      const { runId, simulationId } = await aRunningSimulation(
+        key,
+        connectionId,
+        versionId,
+      );
 
-    const answered = await report(simulationId, [
-      terminalEvent("completed", "persona_concluded"),
-    ]);
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body).toEqual({
-      simulation_id: simulationId,
-      status: "completed",
-    });
+      // The completion handoff may create grading work only after this trace is
+      // query-visible. File the evidence before the terminal report so this test
+      // proves that complete two-fact handoff rather than completion alone.
+      await fileTranscriptOf(
+        api,
+        simulationId,
+        { human: "Please move my appointment.", agent: "I moved it." },
+        new Date(STARTED_AT),
+      );
 
-    // The row says what the conduction measured, not what the wire clock saw.
-    const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    expect(row?.status).toBe("completed");
-    expect(row?.endingReason).toBe("persona_concluded");
-    expect(row?.turnCount).toBe(14);
-    expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
-    expect(row?.startedAt?.toISOString()).toBe("2026-08-05T09:00:00.000Z");
-    expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
+      const answered = await report(simulationId, [
+        terminalEvent("completed", "persona_concluded"),
+      ]);
+      expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body).toEqual({
+        simulation_id: simulationId,
+        status: "completed",
+      });
 
-    // The landing minted the judgement and froze the header, exactly as the
-    // access layer promises every terminal transition does.
-    expect(await gradingJobsFor(simulationId)).toBe(1);
-    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
-    expect(header.body.status).toBe("completed");
-    expect(header.body.completedCount).toBe(1);
-    expect(header.body.failedCount).toBe(0);
-  });
+      // The row says what the conduction measured, not what the wire clock saw.
+      const row = await getSimulation(contextFor(ada, "member"), simulationId);
+      expect(row?.status).toBe("completed");
+      expect(row?.endingReason).toBe("persona_concluded");
+      expect(row?.turnCount).toBe(14);
+      expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
+      expect(row?.startedAt?.toISOString()).toBe("2026-08-05T09:00:00.000Z");
+      expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
+
+      // The completed landing queued its frozen whole-trace grading plan and
+      // finalized the run header.
+      expect(await gradingJobsFor(simulationId)).toBe(1);
+      const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
+      expect(header.body.status).toBe("completed");
+      expect(header.body.completedCount).toBe(1);
+      expect(header.body.failedCount).toBe(0);
+    },
+  );
 
   it("declines reported moments that cannot be true, and lands on its own stamps", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
@@ -652,8 +683,8 @@ describe("the lifecycle lands", () => {
     expect(row?.endingReason).toBe("simulator_error");
     expect(row?.turnCount).toBe(3);
 
-    // A failed conversation is judged too — errored, never left unjudged.
-    expect(await gradingJobsFor(simulationId)).toBe(1);
+    // No completed trace exists, so the execution failure creates no grade job.
+    expect(await gradingJobsFor(simulationId)).toBe(0);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
     expect(header.body.failedCount).toBe(1);
@@ -704,7 +735,7 @@ describe("the lifecycle lands", () => {
     expect(row?.endingReason).toBeNull();
     expect(row?.turnCount).toBe(6);
 
-    // A canceled conversation was never judged — no grading work minted.
+    // A canceled conversation is not graded, so no grading work is created.
     expect(await gradingJobsFor(simulationId)).toBe(0);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("canceled");

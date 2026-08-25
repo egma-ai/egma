@@ -87,9 +87,8 @@ const INSTANCE_SCOPED = ["instanceIsClaimed", "platformFacts"];
  * arrives carrying the `AuthContext` narrowed to that row's own organization
  * and project, which is what all of the work afterwards goes through; the
  * heartbeat can stamp only a row already claimed under the caller's own name
- * and answers one boolean egma wrote; the sweep files each orphan's grading
- * work under the tenancy the row itself carries and answers identifiers and
- * no content; `resolveSimulationStanding` is the claim's context derived
+ * and answers one boolean egma wrote; the sweep ends orphaned simulations and
+ * answers identifiers and no content; `resolveSimulationStanding` is the claim's context derived
  * again, by the id the claim handed out, for every call that comes back
  * about a row — the report door's lifecycle claims and the ingest door's
  * arriving spans alike — lifecycle stamps and filing pins, and no content.
@@ -105,9 +104,7 @@ const WORK_DISPATCHING = [
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
   "claimDueMonitoringPull",
-  // Which process, out of however many are running, drains the pending prefix.
-  // One claim per deployment rather than one per customer: the prefix holds
-  // every project's evidence, so there is no customer to name.
+  // One claim per deployment drains the shared durable-ingestion prefix.
   "openDrainOwnership",
 ];
 
@@ -128,34 +125,20 @@ const WORK_DISPATCHING = [
  * answers fingerprints, the other answers which ids exist — which is why they
  * are a pair of their own rather than a third and fourth read.
  *
- * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
- * other table. They need no window because a verdict is filed under the
- * conversation it judges, so naming the conversation is already the bound.
- * `readRunVerdicts` is that read one grain up — a run's outcome and each of its
- * conversations', both from the same fold over the same rows — and it is a door
- * of its own because a run's verdicts are filed under the run and not under any
- * one conversation.
- *
- * `recordProductionTraces` is here rather than among the work-dispatching pair,
- * and that is the whole shape of production grading: the door that already knows
- * whose spans these are writes the queue row, with the tenancy it already
- * resolved, so nothing on the judging side ever has to ask across customers what
- * has finished.
- *
- * `regrade` and `reopenGradingJob` are the one way a judgment is ever revisited,
- * and neither is an edit: they reopen the queue so the engine judges again at
- * a simulation's pinned versions or a production trace's current versions,
- * narrowed to one grader identity when the ask names one.
+ * Grades are append-only ClickHouse rows. A trace read returns their complete
+ * history, its current row per project grader, and the display-only combined
+ * score. Regrading reopens the whole frozen trace plan; it never edits history.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
-  "advanceProductionSampling",
   // Taking a persona out of a project's authoring lists, and putting them
   // back. Neither removes a row: a run that pinned a version stays
   // interpretable, and a removal somebody regrets stays undoable.
   "archivePersona",
+  "archiveProjectGrader",
   "appendSpans",
-  "appendVerdicts",
+  "appendGrades",
+  "applicableGraders",
   "applyRepositoryChangeSet",
   "cancelRun",
   "changeRole",
@@ -177,24 +160,26 @@ const CONTEXT_REQUIRING = [
   "createAgent",
   "createApiKey",
   "createInvitation",
+  "createCustomLlmGrader",
   "createMockTool",
   "createPersona",
+  // A predefined definition grades nothing until a project has a
+  // `project_grader` policy for it. Project creation adds the fixed Expected
+  // behaviors project grader; the catalog definition itself names no customer.
   "createProject",
   "createTest",
   "createTestSuite",
   "archiveAgent",
   "archiveConnection",
   "deactivateUser",
-  "deleteGrader",
   // The library's delete, which in v0 exists to refuse: every entry on the
   // shelf is one egma ships, and egma's are undeletable because the next boot
   // writes them again.
-  "deleteGraderLibraryEntry",
   "deleteMockTool",
   "deleteTest",
   "deleteTestSuite",
   "setDefaultPersona",
-  "editGrader",
+  "editProjectGrader",
   "editMockTool",
   "editPersona",
   "forkPersona",
@@ -212,16 +197,17 @@ const CONTEXT_REQUIRING = [
   "finishMonitoringScan",
   "getAgent",
   "getConnection",
-  "getGrader",
+  "getExecutableGraderDefinition",
   // The shelf: one entry, and one page of it. Both answer egma's entries
   // beside the caller's own, with owner derived from tenancy rather than
   // stored — which is the whole reason that one table's tenancy is nullable.
   "getGraderLibraryEntry",
-  "getGraderVersion",
+  "getGraderDefinitionVersion",
   "getGradingJob",
   "getGradingJobForTrace",
   "getPersona",
   "getPersonaVersion",
+  "getProjectGrader",
   "getRun",
   "getSimulation",
   "getSimulationExecutionEvidence",
@@ -233,7 +219,6 @@ const CONTEXT_REQUIRING = [
   "listApiKeys",
   "listConnections",
   "listGraderLibrary",
-  "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
   "listTestVersions",
@@ -241,21 +226,20 @@ const CONTEXT_REQUIRING = [
   "listPendingInvitations",
   "listPersonas",
   "listPersonaVersions",
+  "listProjectGraders",
   "listProjects",
   // Everything that has changed about one run since a point, in the order it
   // changed. The read a follower resumes from after a crash, and the reason
   // the events are a record rather than a rendering of the mutable rows.
   "listRunEvents",
   "listRuns",
-  // The same list with its judgment folded in: a page of runs, each carrying
-  // its machinery counts and its verdict, read from both stores at once so a
-  // row and the page it opens can never disagree.
-  "listRunHistory",
-  "readRunFold",
+  // One bounded page of simulations with lifecycle and grading state. Grade
+  // rows stay on the trace-grade reads rather than being folded into this list.
   "listSimulations",
   "listTests",
   "listTestSuites",
   "listTraces",
+  "useGraderInProject",
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
@@ -266,52 +250,45 @@ const CONTEXT_REQUIRING = [
   // route. Startup reconciles that deployment-owned route from a complete
   // environment bundle and can name no organization or project.
   "reconcileDeploymentCarrierSettings",
-  // The other half of a key-only verdict row: what a page shows a person, read
-  // from the versions the conversation was pinned to rather than from the live
-  // test.
-  "readAssertionShelf",
-  "readAssertionWords",
   "readAgentPullState",
-  // Asks one question and answers it about the acting customer: does this
-  // project belong to them. The drainer holds a scope it read out of a sealed
-  // object and must not write under a pair Postgres has never agreed to.
   "isProjectOfOrganization",
-  // The same question with deletion in the answer: whether the pair is live,
-  // archived since the evidence was accepted, or was never real. The drainer
-  // tells a project removed after the fact from a binding that could not exist.
   "projectOfOrganizationState",
+  // The immutable plan receipt recorded for one production trace.
+  "readProductionGradingPlan",
   "readProject",
-  "readRunVerdicts",
+  "readRunGradingProgress",
+  "readSimulationGradingStates",
   "readTrace",
-  "readVerdicts",
-  // The one writer for "a pulled call reached the store". Its merge is
-  // monotone, because the instant it is given comes from the evidence and a
-  // replayed segment therefore carries an older one than the row already holds.
-  "recordPulledCallReceived",
+  "readTraceGrades",
+  "readTraceGrading",
+  "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
+  "recordProductionGradingPlan",
+  // The durable drainer's grading handoffs after evidence is query-visible.
+  // A completed simulation row authorizes one; a supported explicit production
+  // end authorizes the other. Neither infers completion from an ordinary span.
   "recordProductionTraces",
-  // Poll progress belongs to the pulled agent's own notebook, never to a
-  // simulation connection. A call that lands writes nothing here at all; only
-  // one that did not leaves a short-lived retry row behind it.
+  "recordSimulationTraces",
+  // Poll progress belongs to the pulled agent, never to a
+  // simulation connection.
   "checkpointMonitoringPage",
   "deleteRetellCallRetry",
   "disablePullProductionCalls",
   "dueRetellCallRetries",
   "enablePullProductionCalls",
+  "recordPulledCallReceived",
   "recordRetellCallAttempt",
   "sweepExpiredRetellCallMarkers",
   "transientRetellCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
-  // Register a platform agent egma does not know and start pulling it, as one
-  // write. Split in two, a refused switch leaves an unbound agent behind.
   "registerAgentPullingProductionCalls",
-  "regrade",
+  "regradeTrace",
+  "requestGrading",
   "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
-  "reopenGradingJob",
   "removeMember",
   // Archive's other half, for an agent and for one way of reaching it. They
   // are separate verbs and deliberately not one: restoring an agent must never
@@ -322,10 +299,6 @@ const CONTEXT_REQUIRING = [
   "renameTestSuite",
   "renewMonitoringLease",
   "runAlreadyStartedFor",
-  // No `listGraderVersions` and no `restoreGrader`, and both were here. A
-  // running copy has no version history a person browses and no archive to come
-  // back from: it is made by pressing **Use** and deleted whole. Internally each
-  // grader version pins the exact immutable library-definition revision it runs.
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
   // only ones the context already reaches.
@@ -333,16 +306,19 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  "resolvePersonaVersions",
   "restorePersona",
   // Which active tests currently name a persona — the same question their
   // Archive asks, so a page and a refusal can never disagree about it.
   "testsUsingPersona",
+  "traceEvidenceStartedAt",
   // The dispatch path's door to the deployment's carrier route in the clear.
   // A credential-auth route may contain its SIP pair; model-provider keys do
   // not use this table or this door. It takes the context like everything else
   // and refuses every one that did not come from a simulation claim, because
   // conducting a phone simulation is the only thing egma does with this route.
   "resolvePlatformSettings",
+  "resolveProductionGraders",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
   // simulation claim, because conducting is the only thing egma does with a
@@ -353,28 +329,25 @@ const CONTEXT_REQUIRING = [
   // start-up. The deployment configuring itself again, one table over: no
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
-  "seedGraderLibrary",
   "seedPersonaLibrary",
   "seedPlatformSettings",
-  // The other half of the library seeding, one table down: a shelf full of
-  // definitions judges nothing until a project is running a copy of one, so
-  // every project that has never had the expected-behaviors copy is given it.
-  // It names no customer and takes no argument at all.
-  "seedRunningGraders",
+  "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
   // What a run froze at start. Pre-cutover run history is reset, so every run
   // this surface can read has one recorded plan.
   "getGradingPlan",
-  // The exact grader versions one simulation froze. The grading worker uses
-  // this rather than following today's current-version pointers.
+  // The exact definition versions one simulation froze. The grading worker
+  // uses these instead of following today's current-version pointers.
   "pinnedSimulationGraders",
+  "pinnedSimulationGradersOn",
   "updateAgent",
   "updateConnection",
   // A project's live name, slug and description, written against the revision
   // the edit was read at. Its counterpart `createProject` above is the one
   // factory signup uses too, so a project made from Settings is born with the
-  // same shared default-persona pointer and mandatory grader.
+  // same shared default-persona pointer and fixed Expected behaviors project
+  // grader.
   "updateProject",
   // No `testsNamingGrader`, and it was here. It counted the live tests naming a
   // grader so an archive could be refused and the blocking tests named. A test
@@ -385,9 +358,9 @@ const CONTEXT_REQUIRING = [
   // it, so it is a different decision with a different blast radius.
   "updateOrganization",
   "updateOrganizationSettings",
-  // The one door that makes a running grader: a pointer at a library entry
-  // and the answers to whatever that entry's form asked.
-  "useLibraryEntry",
+  // The run-start write that freezes the matching project graders and their
+  // definition versions. Future policy edits cannot change that recorded plan.
+  "writeGradingPlan",
   "writePlatformSettings",
   "yieldMonitoringLease",
 ];
@@ -417,26 +390,20 @@ const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
  * What egma ships on the shelf, and the vocabulary a library entry is written
  * in.
  *
- * The catalog is exported because it is the source of truth for what a
- * predefined grader *is* — the seeding writes from it, and a test that wants to
- * watch a version move hands in an edited copy of it. The two type lists are
- * exported for the reason every closed vocabulary in this schema is: the words
- * a refusal names have to be the words the constraint takes, and a list written
- * twice is a list that will one day disagree with itself. `RESERVED_LIBRARY_TYPES`
- * is the other half of that — the words that are spoken for and refused, so a
- * refusal can say "not yet" rather than "never heard of it".
+ * One catalog owns predefined definitions. Its closed type and modality lists
+ * keep the schema, resolver, and public contract on the same vocabulary.
  */
 const THE_GRADER_LIBRARY = [
-  "GRADER_LIBRARY_CATALOG",
-  "LARGEST_GRADER_SOURCE_CODE_BYTES",
-  "LIBRARY_TYPES",
+  "GRADER_DEFINITION_CATALOG",
+  "GRADER_DEFINITION_TYPES",
+  "GRADER_MODALITIES",
+  "MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER",
   // The identifiers of the entries egma ships, by the name a person calls
   // them. Exported because three things outside this module point at one — the
   // copy every project is seeded with, the engine's roster of what it can
   // execute, and the tests that press Use — and a repeated literal is an
   // identifier somebody can mistype into a pointer at nothing.
   "PREDEFINED_GRADERS",
-  "RESERVED_LIBRARY_TYPES",
 ];
 
 const THE_PERSONA_LIBRARY = [
@@ -473,11 +440,6 @@ const VALUES = [
   // A connection could not be brought back on the terms its own shape sets.
   // Four rules, four codes, and the reason travels beside the sentence.
   "ConnectionRestoreRefusedError",
-  // A library entry cannot leave the shelf while graders point at it. Their
-  // immutable versions reference exact definition revisions owned by that
-  // identity, so removing it would break old judgment history — refusal, never
-  // `set null`, never orphaned.
-  "GraderLibraryEntryInUseError",
   // The grader factory has no refusal of its own any more. A copy's delete used
   // to be turned away while a live test named it; a test names no graders, so
   // switching one off is a decision about the project with nothing in its way.
@@ -492,10 +454,6 @@ const VALUES = [
   // nothing failed and trying again will not help, and it carries the field,
   // the bound and the size so that whoever sent the record is told all three.
   "OversizeRecordError",
-  // The other refusal about the evidence rather than the store: a start instant
-  // the store cannot hold. Its own class beside the oversize one — nothing
-  // failed, and trying again will not help.
-  "UnstorableInstantError",
   "EgmaProvidedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
@@ -511,10 +469,7 @@ const VALUES = [
   "IdempotencyConflictError",
   "IdentityConflictError",
   "PersonaNamedByTestsError",
-  // A delete that named one of egma's own graders. Its own class because
-  // nothing about the request is wrong and nothing is in the way — the entry
-  // simply is not anybody's to remove.
-  "PredefinedGraderError",
+  "ProductionGradingPlanConflictError",
   "ProjectOutsideOrganizationError",
   // A slug an admin typed that a living project of the same organization
   // already holds. Its own class because the slug is the one project field
@@ -531,10 +486,6 @@ const VALUES = [
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
   "TestMovedOnError",
-  // Use named an entry this caller cannot see, or none at all. One refusal for
-  // both, because telling them apart would answer a question about somebody
-  // else's shelf.
-  "UnknownGraderLibraryEntryError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
   // A persona named by a name two living personas answer to. The same subclass
@@ -554,9 +505,11 @@ const VALUES = [
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.
   "TraceStoreRefusedError",
+  "UnstorableInstantError",
   // And the read surface's own refusal: a window that cannot be served, or a
   // page token that was not issued here. Both are 400s, and neither is a fault.
   "UnreadableTraceQueryError",
+  "GRADING_WORK_CHANNEL",
   "VIA",
   // The simulation options a browser may be told about — the five connection facts,
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
@@ -566,10 +519,6 @@ const VALUES = [
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
-  // The settled vocabulary of a running copy's scope, exported so that a form
-  // and a refusal read the same list the schema is checked against. `GRADER_READS`
-  // stood beside it and does not exist: a copy declares no evidence reads.
-  "GRADER_SCOPES",
   // A run's four machinery words, exported so the door that filters a history
   // by one refuses anything else by name rather than from a second copy of the
   // list.
@@ -594,35 +543,8 @@ const READ_LIMITS = [
   "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
-/**
- * The shipped list of agent platforms, beside the type spelled from it.
- *
- * Deciding whether a word names one is a question about that list, and a list
- * written out a second time somewhere else is a list that will one day disagree
- * with itself — quietly, as a platform whose bookkeeping stopped being written.
- */
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
-
-/**
- * How many times one conversation is handed out before egma stops trying.
- *
- * Exported for the same reason the read limits are: the service that judges
- * decides on its own last attempt to answer with what it can see rather than
- * decline again, and a bound named in two places is a bound that will one day
- * disagree with itself.
- */
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
-
-/**
- * The bounded budget one listed Retell call gets, and the lock that decides
- * which process drains.
- *
- * The ceiling is exported for the reason every other number here is: the poller
- * has to schedule against the same bound the table's own check enforces, and a
- * bound written out twice is a bound that will one day disagree with itself.
- * The lock's key is exported so an operator reading `pg_locks` can tell egma's
- * two advisory locks apart without reading the source.
- */
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**
@@ -645,48 +567,18 @@ const THE_MOCKED_WORLD = [
 ];
 
 /**
- * The fold, and the vocabulary it is written in.
- *
- * These take no `AuthContext` and are the only exports that reach nothing at
- * all: rows a caller already holds go in, arithmetic over them comes out. There
- * is no store to name a customer in, so there is no tenancy to stamp — the rows
- * were fetched by a call that stamped it already. (The other exports that take
- * no context do reach a store; each of the three groups above says on what
- * terms.)
- *
- * They are exported because the algebra has to live in exactly one place. A
- * grader's outcome, a conversation's and a run's are all this computation, no
- * row is written anywhere that records the answer, and a second implementation
- * in a query or a page would be a second answer with nothing to settle it
- * against.
+ * Pure grading rules. Rows already read under a tenant boundary go in; current
+ * rows, a display-only mean, and selector decisions come out. There is no fold
+ * that creates a trace-, test-, suite-, or run-level pass/fail result.
  */
 const THE_FOLD = [
-  // The two halves of one assertion key's round trip: the engine writes a
-  // verdict row with the first, a page reads the words back with the second.
-  // Here for the fold's own reason — they reach nothing — and together, because
-  // a format known in two packages is a format free to fork in one of them.
-  "behaviorAssertionAt",
-  "behaviorAssertionKey",
-  // `foldVerdicts` is deliberately absent, and its absence is the guard. It
-  // answers about whatever pile of rows it is handed and never asks whose they
-  // are — right inside `verdicts/`, and a loaded gun outside it, because a
-  // caller that hands it every row of a run has folded a diagnostic's failure
-  // into the headline with nothing about the call saying so. What crosses this
-  // boundary is the pair below, neither of which can be called without
-  // answering which copies only report.
-  "foldVerdictsByGrader",
-  "speakingVerdicts",
-  // Which rows decide and which only report, split before anything is folded so
-  // that the one algebra never has to ask whose rows it was handed.
-  "verdictLanes",
-  "VERDICTS",
-  // The same algebra one grain up, where a run's machinery meets its judgment.
-  // It is here rather than in the context-requiring group for the reason the
-  // three above are: it is handed what two stores already answered and reaches
-  // nothing itself. It exists so that no page decides for itself that a failed
-  // execution is a failed verdict, or that grading nobody has finished is one.
-  "foldRun",
-  "foldSimulation",
+  "combinedGradeScore",
+  "currentGrades",
+  "planGroupsFor",
+  "productionSampleSelected",
+  "resolveSimulationGraders",
+  "validatePassThreshold",
+  "validateProjectGraderScope",
 ];
 
 /**
@@ -703,19 +595,10 @@ const THE_FOLD = [
  * this module fingerprints the row and compares it against what is stored, and
  * a second implementation of the fingerprint is one of them calling a conflict
  * a replay.
- *
- * The ceiling of the refusal's bounds crosses with it: a caller reserving room
- * for the largest record this module would accept must take that size from the
- * bounds themselves, because a restated number drifts the first time a bound
- * moves.
  */
 const THE_EVIDENCE_RULES = [
   "LARGEST_BOUNDED_RECORD_BYTES",
   "refuseOversizeRecord",
-  // The other refusal over the same door: a span whose start instant a
-  // DateTime64 row and the partitioned read that guards every replay cannot be
-  // built around. Refused before staging as an oversize field is, so a segment
-  // that could never be read back is never sealed.
   "refuseUnstorableInstant",
   "spanContentHash",
 ];

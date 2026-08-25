@@ -6,7 +6,7 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
-The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; the **Egma wordmark returns to the signed-in sidebar**; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. The palette did not move. The logo's own treatment rules did not move.
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The palette and the logo's own treatment rules did not move.
 
 ## Product context
 
@@ -60,15 +60,17 @@ Rules:
 Canonical assets:
 
 - `apps/web/public/brand/egma-mark.svg`
+- `apps/web/public/brand/egma-mark-light.svg`
+- `apps/web/public/brand/egma-mark-dark.svg`
 - `apps/web/public/brand/egma-wordmark.svg`
 
 Rules:
 
 - Keep the canonical geometry, proportions, and black-and-white treatment.
 - Do not recolor, stretch, rotate, outline, shadow, or animate the logo.
-- The signed-in sidebar starts with the Egma wordmark, in a 56px bar with a hairline under it. It links to the product root. (Developer decision, 2026-08-23: "our logo, not the organization's". This replaces the earlier rule that kept the full logo out of the signed-in sidebar, which asked for exactly this approval.)
-- 2026-08-23: the sidebar wordmark follows the access pages' existing dark-theme treatment (the black line art is printed white by inversion).
-- The organization is the eyebrow above the project name, under the wordmark bar. The project is the line that opens the switcher.
+- The signed-in sidebar starts with the Egma loop mark beside the current organization, its `Free` plan chip and paired arrows, in a 56px bar with a hairline under it. Use the square light/dark mark asset, not the full wordmark. (Developer decision, 2026-08-24, from the approved Paper refinement.)
+- The sidebar mark follows the access pages' existing dark-theme treatment: black line art is printed white by inversion.
+- Project context is a separate control under the organization bar. It always shows the word `Project`, the current project name and paired arrows.
 - Auth, onboarding, and public brand surfaces may use the full logo.
 - Product icons and status symbols must not imitate the logo.
 
@@ -143,7 +145,7 @@ Use `system-ui` first, then Helvetica, Arial, and the system sans-serif fallback
 Rules:
 
 - Hierarchy comes from size, space, and restrained use of weight 500.
-- The micro label is for the two letter-spaced uppercase labels the sidebar carries — the organization over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px. (Developer decision, 2026-08-23.)
+- The micro label is for the two letter-spaced uppercase labels the sidebar carries — `Project` over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px.
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
 - Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
@@ -172,10 +174,9 @@ Allowed spacing values are `4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 72, 80, 100px`
 
 One radius, and it is none: buttons, inputs, panels, tables, sheets, menus, dialogs, chips, badges. Sharp corners are the product's shape. (Developer decision, 2026-08-23. This replaces the four-step table that named a radius per component type.)
 
-Two round shapes remain, and neither is a component corner:
+The account avatar is square for every role. (Developer decision, 2026-08-24.)
 
-- The account avatar is a circle. It is an avatar.
-- A radio button is a circle. The shape is what tells it apart from a checkbox in every operating system, and taking it away would make one control claim to be another.
+One round shape remains, and it is not a component corner: a radio button is a circle. The shape is what tells it apart from a checkbox in every operating system, and taking it away would make one control claim to be another.
 
 The four radius names stay in the theme — `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-pill` — because component class lists read them and the name says which component asked. All four are `0px`.
 
@@ -210,8 +211,8 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 - Neutral Paper is the application canvas.
 - The sidebar is a quiet paper region separated by a neutral hairline.
-- The Egma wordmark is the topmost thing in the sidebar, in a bar of its own.
-- The organization and project switcher is the topmost sidebar *control*, under that bar.
+- The organization control is the topmost thing in the sidebar. It holds the Egma mark, organization name, current plan and paired arrows in a bar of its own.
+- The project selector is a separate control under the organization bar and keeps the word `Project` visible.
 - Navigation uses text and small line icons.
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
@@ -226,7 +227,8 @@ The measurements, all of them theme values:
 | Part | Value |
 | --- | ---: |
 | Sidebar width | 224px |
-| Sidebar wordmark bar | 56px |
+| Sidebar Egma mark | 32px |
+| Sidebar organization bar | 56px |
 | Page title bar | 56px |
 | Sidebar gutter, page gutter | 16px, 24px |
 | Navigation row, toolbar control | 36px |
@@ -237,11 +239,13 @@ The measurements, all of them theme values:
 | Toolbar row | 52px |
 | Side sheet | 440px |
 
-### Organization and project switcher
+### Organization and project controls
 
-- Show the organization as the eyebrow and the project as the primary line. The project is what a person changes; the organization is the one thing they cannot. (Developer decision, 2026-08-23.)
-- Support search, keyboard use, Escape, focus return, and unsaved-work protection.
-- Open the menu from its trigger with an origin-aware transition.
+- Keep organization and project as two clear controls. The organization bar shows the Egma mark, organization name, the fixed `Free` release-plan chip and paired arrows. The project control below shows the explicit `Project` label, project name and paired arrows. (Developer decision, 2026-08-24.)
+- The organization menu is informational in the current one-organization model. It shows the organization name, `Free Plan`, and the person's real `Admin`, `Member`, or `Viewer` role. It does not offer organization switching or Organization settings yet.
+- `Free` is fixed release copy because billing data does not exist in the session yet. Show it only after a real organization has loaded; do not make a plan claim while loading or when the organization is absent.
+- The project selector is a direct list with no search field. It keeps the project name neutral when open and continues to support keyboard use, Escape, focus return, URL-based selection, and unsaved-work protection. (Developer decision, 2026-08-24.)
+- Open each menu from its trigger with an origin-aware transition.
 - Do not add fake teams, sample projects, or a second navigation model.
 
 ### Buttons and links

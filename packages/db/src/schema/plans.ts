@@ -17,7 +17,7 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 
 /**
  * The two things run creation has to write down beside the run itself: what
- * will judge it, and which request created it.
+ * will grade its traces, and which request created it.
  *
  * They live together because they are the same kind of fact — a decision made
  * once, at the door, that nothing afterwards may quietly change — and because
@@ -47,11 +47,10 @@ export const gradingPlan = pgTable(
     /** When the plan below was frozen during run start. */
     capturedAt: moment("captured_at").notNull(),
     /**
-     * The Suite-level grader snapshot. It is stored as a one-entry list so the
-     * existing column remains a JSON list, but grader items are recorded once
-     * per run instead of repeated once per test. Each Simulation row holds its
-     * own exact test and test-version pins. `access/run-plans.ts` owns the shape
-     * and is the only writer.
+     * One frozen group per test. Each group carries that test's exact identity
+     * and version plus the project graders selected by its own suite/test scope
+     * and the run modality. `access/run-plans.ts` owns the shape and is the only
+     * writer.
      */
     groups: jsonb("groups").notNull(),
     createdAt: createdAt(),
@@ -60,7 +59,7 @@ export const gradingPlan = pgTable(
     prefixCheck("grading_plan_id_prefix", table.id, "gpl"),
     oneOf("grading_plan_state_allowed", table.state, [...GRADING_PLAN_STATES]),
     // One plan per run: the plan is a property of the run, and a second one
-    // would leave two answers to "what judges this" with nothing to choose
+    // would leave two answers to "what grades this" with nothing to choose
     // between them.
     unique("grading_plan_run_id_unique").on(table.runId),
     check(
@@ -90,7 +89,7 @@ export const gradingPlan = pgTable(
  * The operations a client may safely send twice.
  *
  * **A run is the expensive kind of write**: it dials real telephony, spends a
- * real judge, and is the object a team's release gate reads. A browser that
+ * real grader, and is the object a team's release workflow reads. A browser that
  * retried a request whose answer was lost — a dropped connection, a proxy
  * timeout, somebody's second click — would produce a second run over the same
  * agent, and the two would disagree about nothing in particular while costing

@@ -222,12 +222,12 @@ describe("the organization and project selector", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
-    expect(trigger.textContent).toContain("Acme");
+    expect(trigger.textContent).toContain("Project");
     expect(trigger.textContent).toContain("Default");
 
     fireEvent.click(trigger);
     expect(
-      within(screen.getByRole("dialog")).queryByText(/project in this organization/i),
+      within(screen.getByRole("menu")).queryByText(/project in this organization/i),
     ).toBeNull();
   });
 
@@ -243,8 +243,8 @@ describe("the organization and project selector", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Organization Acme/ }));
     expect(
-      within(screen.getByRole("dialog"))
-        .getByRole("link", { name: "New project" })
+      within(screen.getByRole("menu"))
+        .getByRole("menuitem", { name: "New project" })
         .getAttribute("href"),
     ).toBe("/new-project");
   });
@@ -284,31 +284,9 @@ describe("the organization and project selector", () => {
     expect(trigger.textContent).not.toContain("Default");
     // And the way into one is never lost: every project is still offered.
     fireEvent.click(trigger);
-    const panel = within(screen.getByRole("dialog"));
+    const panel = within(screen.getByRole("menu"));
     expect(panel.getByText("Default")).toBeTruthy();
     expect(panel.getByText("Outbound")).toBeTruthy();
-  });
-
-  /**
-   * Typing filters, and Enter takes what is left. This is the whole of the
-   * keyboard path a person uses to change project, and it never touches a
-   * pointer.
-   */
-  it("is driven from the keyboard: open, type, Enter", () => {
-    open();
-
-    const search = screen.getByRole("textbox", { name: "Search projects" });
-    expect(document.activeElement).toBe(search);
-
-    // Scoped to the panel: the trigger still says which project is open, and
-    // filtering is about the list of ones you could move to.
-    const panel = within(screen.getByRole("dialog"));
-    fireEvent.change(search, { target: { value: "outb" } });
-    expect(panel.queryByText("Default")).toBeNull();
-    expect(panel.getByText("Outbound")).toBeDefined();
-
-    fireEvent.keyDown(search, { key: "Enter" });
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/agents");
   });
 
   /**
@@ -317,7 +295,7 @@ describe("the organization and project selector", () => {
    */
   it("leaves the change in the history, so Back undoes it", () => {
     open();
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("Outbound"));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("Outbound"));
 
     expect(routed.push).toHaveBeenCalledTimes(1);
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/agents");
@@ -325,19 +303,17 @@ describe("the organization and project selector", () => {
 
   it("goes nowhere when the project chosen is the one already open", () => {
     open();
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("Default"));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("Default"));
     expect(routed.push).not.toHaveBeenCalled();
   });
 
   it("closes on Escape, with focus back on the control that opened it", () => {
     const trigger = open();
-    expect(screen.getByRole("dialog")).toBeDefined();
+    const panel = screen.getByRole("menu");
 
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search projects" }), {
-      key: "Escape",
-    });
+    fireEvent.keyDown(panel, { key: "Escape" });
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -351,15 +327,13 @@ describe("the organization and project selector", () => {
    */
   it("marks the panel closed and leaves on the animation, not on the press", () => {
     const trigger = open();
-    const panel = screen.getByRole("dialog");
+    const panel = screen.getByRole("menu");
     expect(panel.dataset.slot).toBe("popover-content");
     expect(panel.dataset.state).toBe("open");
 
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search projects" }), {
-      key: "Escape",
-    });
+    fireEvent.keyDown(panel, { key: "Escape" });
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
     expect(trigger.getAttribute("data-state")).toBe("closed");
   });
 
@@ -374,7 +348,7 @@ describe("the organization and project selector", () => {
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.getByRole("menu")).toBeDefined();
 
     // Two things about a press outside, and both are the panel's own rule.
     // It starts listening on the task after it opened, so the press that
@@ -385,47 +359,25 @@ describe("the organization and project selector", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     fireEvent.pointerDown(document.body);
-    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.getByRole("menu")).toBeDefined();
     fireEvent.click(document.body);
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
     // A press elsewhere is a way of leaving, so the keyboard is not dragged
     // back to the control somebody has just moved away from.
     expect(document.activeElement).not.toBe(trigger);
   });
 
-  /**
-   * Home and End belong to the caret while somebody is typing in the search
-   * field. Stealing them for the list means the ends of the text cannot be
-   * reached, which is a worse trade than the one it buys.
-   */
-  it("leaves Home and End to the caret while the search field has focus", () => {
-    open();
+  it("opens a direct project menu without search or orange trigger text", () => {
+    const trigger = open();
+    const panel = screen.getByRole("menu");
 
-    const search = screen.getByRole("textbox", { name: "Search projects" });
-    fireEvent.change(search, { target: { value: "outbound" } });
-    const field = search as HTMLInputElement;
-    field.setSelectionRange(8, 8);
-
-    const home = fireEvent.keyDown(search, { key: "Home" });
-
-    // Not prevented, so the browser still moves the caret.
-    expect(home).toBe(true);
-    expect(document.activeElement).toBe(search);
-  });
-
-  /**
-   * A panel holding a text field is a dialog, not a menu: `role="menu"`
-   * promises a list of commands and no screen reader's menu mode expects a
-   * textbox inside one.
-   */
-  it("is a dialog rather than a menu, because it has something to type in", () => {
-    open();
-
-    const panel = screen.getByRole("dialog");
-    expect(within(panel).getAllByRole("textbox")).toHaveLength(1);
-    expect(screen.queryByRole("menu")).toBeNull();
-    expect(screen.queryAllByRole("menuitem")).toHaveLength(0);
+    expect(within(panel).queryByRole("textbox")).toBeNull();
+    expect(within(panel).getByRole("menuitem", { name: /Default/u })).toBeTruthy();
+    expect(within(panel).getByRole("menuitem", { name: "Outbound" })).toBeTruthy();
+    const projectName = trigger.querySelector('[data-slot="project-name"]');
+    expect(projectName?.classList.contains("text-foreground")).toBe(true);
+    expect(projectName?.classList.contains("text-brand")).toBe(false);
   });
 });
 
@@ -590,7 +542,7 @@ describe("a binary choice", () => {
    * the page would look any different.
    */
   it("gives the checkbox a coarse-pointer target without growing its box", () => {
-    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+    render(<Checkbox id="weekly-summary" checked onChange={() => undefined} />);
 
     const box = screen.getByRole("checkbox");
     expect(box.className).toContain("size-[18px]");
@@ -604,22 +556,22 @@ describe("a binary choice", () => {
   it("connects the field hint to the native checkbox", () => {
     render(
       <Field
-        label="Required"
-        htmlFor="required-grader"
-        hint="A required grader can stop the test from passing."
+        label="Send weekly summary"
+        htmlFor="weekly-summary"
+        hint="Email the project summary every Monday."
       >
         <Checkbox
-          id="required-grader"
+          id="weekly-summary"
           checked
           onChange={() => undefined}
         />
       </Field>,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: "Required" });
-    const hint = screen.getByText(
-      "A required grader can stop the test from passing.",
-    );
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Send weekly summary",
+    });
+    const hint = screen.getByText("Email the project summary every Monday.");
     expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
   });
 });
@@ -1000,14 +952,14 @@ describe("a dialog", () => {
     const pressed = vi.fn();
     render(
       <>
-        <button type="button" onClick={pressed}>Judge again</button>
+        <button type="button" onClick={pressed}>Grade again</button>
         <Dialog kind="sheet" title="Transcript and audio" onClose={vi.fn()}>
           <audio aria-label="Simulation recording" />
         </Dialog>
       </>,
     );
 
-    const behind = screen.getByRole("button", { name: "Judge again" });
+    const behind = screen.getByRole("button", { name: "Grade again" });
     expect(behind.closest("[aria-hidden='true']")).toBeNull();
 
     // The panel starts listening for a press outside on the task after it
@@ -1526,7 +1478,7 @@ describe("the shared draft navigation guard", () => {
     if (projectSelector === undefined) throw new Error("project selector missing");
     fireEvent.click(projectSelector);
     fireEvent.click(
-      within(screen.getByRole("dialog")).getByText("Outbound"),
+      within(screen.getByRole("menu")).getByText("Outbound"),
     );
     expect(routed.push).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
@@ -1669,18 +1621,7 @@ describe("the role the shell shows", () => {
     expect(sessionReads).toHaveLength(2);
   });
 
-  /**
-   * The bar starts with the Egma wordmark, and the project context is under it.
-   *
-   * **This assertion was the other way round until 2026-08-23.** `DESIGN.md`
-   * kept the full logo out of the signed-in sidebar and asked for explicit
-   * approval to change that rule; the developer gave it, looking at the Paper
-   * boards — "our logo, not the organization's" — and `DESIGN.md` records the
-   * decision with its date. The organization did not disappear with the change:
-   * it moved into the eyebrow above the project name, which is what the second
-   * half of this case holds.
-   */
-  it("starts the signed-in sidebar with the Egma wordmark, then project context", () => {
+  it("keeps organization and project as two clear sidebar controls", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
         <p>page</p>
@@ -1688,17 +1629,60 @@ describe("the role the shell shows", () => {
     );
 
     const sidebar = screen.getByRole("complementary");
-    const wordmark = within(sidebar).getByRole("img", { name: /egma/i });
-    expect(wordmark.getAttribute("src")).toBe("/brand/egma-wordmark.svg");
+    const organization = within(sidebar).getByRole("button", {
+      name: "Open organization menu for Acme",
+    });
+    const organizationBar = organization.closest('[data-slot="sidebar-brand"]');
+    const mark = organizationBar?.querySelector("img");
+    expect(mark?.getAttribute("src")).toBe(
+      "/brand/egma-mark-light.svg",
+    );
+    expect(mark?.getAttribute("width")).toBe("32");
+    expect(mark?.getAttribute("height")).toBe("32");
+    expect(organization.querySelector("img")).toBeNull();
+    expect(organization.textContent).toContain("Acme");
+    expect(organization.textContent).toContain("Free");
     expect(
-      within(sidebar).getByRole("link", { name: "Egma home" }).getAttribute("href"),
-    ).toBe("/");
+      organization.querySelector('[data-slot="organization-name"]')?.className,
+    ).toContain("text-sm");
+    expect(organization.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
 
-    const firstControl = sidebar.querySelector("button");
-    expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
-    /* The organization is the eyebrow now; the project is the line you press. */
-    expect(within(sidebar).getByText("Acme")).toBeTruthy();
+    const project = within(sidebar).getByRole("button", {
+      name: /^Organization Acme, project Default/u,
+    });
+    expect(project.textContent).toContain("Project");
+    expect(project.textContent).toContain("Default");
+    expect(project.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+
+    fireEvent.click(organization);
+    const summary = within(
+      screen.getByRole("dialog", { name: "Open organization menu for Acme" }),
+    );
+    expect(summary.getByText("Free Plan")).toBeTruthy();
+    expect(summary.getByText("Admin")).toBeTruthy();
+    expect(summary.queryByText("Organization settings")).toBeNull();
   });
+
+  it.each(["admin", "member", "viewer"] as const)(
+    "keeps the bottom account avatar square for a %s",
+    (role) => {
+      render(
+        <AppShell initialMe={meWith(role)}>
+          <p>page</p>
+        </AppShell>,
+      );
+
+      const account = within(screen.getByRole("complementary")).getByRole(
+        "button",
+        { name: /^Account /u },
+      );
+      const avatar = account.querySelector('[data-slot="account-avatar"]');
+      expect(avatar?.classList.contains("rounded-none")).toBe(true);
+      expect(avatar?.classList.contains("rounded-full")).toBe(false);
+    },
+  );
 
   it("keeps navigation icons decorative and every label visible", () => {
     render(
@@ -1942,7 +1926,7 @@ describe("the run address a terminal prints, stuck", () => {
     for (const one of triggers) expect(one.textContent).toContain("No project");
 
     fireEvent.click(triggers[0] as HTMLElement);
-    const panel = within(screen.getByRole("dialog"));
+    const panel = within(screen.getByRole("menu"));
     fireEvent.click(panel.getByText("Outbound"));
 
     // `inProject`, reached from an address with no project in it: there is no

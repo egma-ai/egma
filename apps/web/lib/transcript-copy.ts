@@ -106,9 +106,9 @@ export const COLUMNS = {
  *    visible.** Customer OTLP rejects that scope because no project would own
  *    the evidence. Pointing somebody back to generic export setup would miss
  *    the specific key change they need, so this replaces the teaching.
- * 4. **Traffic is arriving and nothing judges it.** Every grader starts scoped
- *    to simulations and the seeded one can only ever judge a simulation, so an
- *    absence of verdicts here is the ordinary first state rather than a fault.
+ * 4. **Traffic is arriving and no project grader grades production.** The
+ *    Expected behaviors grader grades simulations only, so an absence of grades
+ *    here is the ordinary first state rather than a fault.
  */
 export const QUIET = {
   narrowWindow: {
@@ -135,7 +135,7 @@ export const QUIET = {
     key: "Mint a key for this project",
   },
   unwatched: {
-    lead: "No grader watches production, so nothing here is judged.",
+    lead: "No project grader grades production transcripts, so no grades appear here.",
     graders: "Open Graders",
   },
 } as const;
@@ -263,16 +263,16 @@ export const FACTS = {
 /**
  * What this exchange measured — the metrics display, in words.
  *
- * **A measure measures and a grader judges**, and the two are shown apart on
- * this page for exactly that reason: the numbers below say what happened, and
- * the verdicts above say what somebody decided about it. Nothing here is green
- * or red, because a duration is not good or bad until a grader has been asked.
+ * A metric records an observed fact. A grader assigns a normalized score. The
+ * two are shown apart for exactly that reason: the numbers below say what
+ * happened, while the grades above say how a grader scored the trace. Nothing
+ * here is green or red because a duration is not good or bad by itself.
  *
- * The numbers come off egma's one shared measure module — the same module a
- * `latency` grader is judged through — and the page leads with the p90 turn,
- * because the slow tail is what a caller hangs up on. The samples a verdict
- * was decided over are the same list this figure was reduced from, so the
- * page can never be the reason somebody distrusts the judgment.
+ * The numbers come off egma's one shared measure module — the same module the
+ * response-latency grader reads through — and the page leads with the p90
+ * turn, because the slow tail is what a caller hangs up on. The samples a
+ * grade was computed over are the same list this figure was reduced from, so
+ * the page can never be the reason somebody distrusts the score.
  *
  * A measure the spans do not carry is **absent** rather than shown as nothing:
  * an empty row would read as a measurement of zero, and a chat exchange has no
@@ -288,7 +288,7 @@ export const MEASURES = {
   /**
    * Where the numbers came from, said once and only when it applies.
    *
-   * **A verdict's provenance must never be a surprise.** Some of these figures
+   * **A metric's provenance must never be a surprise.** Some of these figures
    * were not timed by anybody: Egma worked them out from the timings your
    * agent's own framework already records. A developer whose latency check
    * suddenly starts failing is owed that sentence on the same screen as the
@@ -308,7 +308,7 @@ export const MEASURES = {
    * measured and handed over was not worked out from any framework's timings,
    * so this wording is false about it — and a caveat that is itself untrue is
    * worse than none, because it is the sentence a developer decides how much to
-   * believe a verdict on. A platform-reported figure therefore takes no mark and
+   * believe a grade based on. A platform-reported figure therefore takes no mark and
    * no caveat at all; where it came from stays on the record, not on the page.
    */
   derivedOne: "from your framework's timings",

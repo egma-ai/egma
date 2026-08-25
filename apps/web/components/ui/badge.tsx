@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  *
  * The variant names are the meanings rather than shadcn's `default`,
  * `secondary` and `destructive`. A chip in this product usually carries a
- * verdict — passed, skipped, failed — and `DESIGN.md` is exact about that
+ * product result — success, warning, failure — and `DESIGN.md` is exact about that
  * being said in words with colour only supporting it. A name like `secondary`
  * would let a failed run be labelled with whatever colour happened to be
  * second, so those names are deliberately absent.

@@ -2,19 +2,17 @@
 
 import { ChevronDownIcon, ChevronsUpDownIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
+import { type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 
 /**
- * Where you are working: the organization, and the project inside it.
+ * The project where you are working.
  *
  * **It is on screen even when there is one project.** An earlier rule hid a
  * level with one thing in it as clutter. It is not clutter — it is the answer
@@ -28,31 +26,23 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
  * work because they always did — they restore an address, and an address is the
  * whole of the state.
  *
- * The organization is shown and is not a choice: one person belongs to one
- * organization in this version, and offering a menu of one would suggest
- * otherwise.
+ * Organization identity now has its own control in the shell. It is still
+ * passed here because the chooser names the organization whose projects it
+ * lists, but it is no longer repeated in this trigger.
  */
 
 /**
- * The trigger: two lines, no card, and no mark.
+ * The trigger: an explicit label over the current project.
  *
- * **The card went when the wordmark arrived.** It used to carry a square with
- * the organization's initial, a quiet "ORGANIZATION" eyebrow, the organization
- * name and the project under it — four things, because the top of the bar had
- * to answer *which Egma is this* on its own. It does not any more: the
- * wordmark bar above says the product, so this block says the two things left,
- * and the boards draw them as plain type on the sidebar's own surface
- * (`734-0`).
+ * The word **Project** stays visible even when there is only one. Organization
+ * and project are different scopes, so a quiet label is the small amount of
+ * copy that prevents the current project's name from being mistaken for an
+ * organization. The organization sits in the bar above it.
  *
- * The **organization is the eyebrow** now and the **project is the primary
- * line** — the developer's ruling of 2026-08-23, and the right way round: the
- * project is what a person changes and the organization is the one thing they
- * cannot. 12px for the eyebrow and 14px for the name, both read off the board.
- *
- * **This is a restyle of the trigger and nothing else.** Search, the keyboard
- * path, Escape, focus return, the unsaved-work guard and the origin-aware open
- * are the menu's, and none of them is touched below. Its accessible name still
- * names both, so nothing that reaches this control by name has moved.
+ * The project name stays neutral while the menu is open. Opening a chooser is
+ * not a brand state, and changing its text colour made the current context look
+ * like an action. The menu is a direct list: no search field stands between a
+ * person and the projects they can choose.
  *
  * The compact form is the mobile top bar's, where the control shares a 56px row
  * with a drawer button and the account, so it stays held to a width of its own.
@@ -92,10 +82,8 @@ export function ProjectSelector({
 }) {
   const draftNavigation = useDraftNavigation();
   const pathname = usePathname();
-  const [query, setQuery] = useState("");
 
   const current = projects.find((project) => project.id === projectId);
-  const shown = projectsMatching(projects, query);
   const organizationName = organization?.name ?? "No organization";
 
   /**
@@ -116,7 +104,6 @@ export function ProjectSelector({
   function choose(project: Project, close: () => void): void {
     if (project.id === projectId) {
       close();
-      setQuery("");
       return;
     }
     /*
@@ -127,7 +114,6 @@ export function ProjectSelector({
      * navigation untouched.
      */
     close();
-    setQuery("");
     draftNavigation.push(inProject(pathname, project.id), null);
   }
 
@@ -135,20 +121,13 @@ export function ProjectSelector({
     <Menu
       label={`Organization ${organizationName}, project ${projectName}. Choose a project`}
       triggerClassName={cn(TRIGGER, compact && TRIGGER_COMPACT)}
-      openClassName="[&_[data-slot=project-name]]:text-brand"
       placement={compact ? "below-start" : "right-start"}
-      // A panel with a field to type in, so a dialog rather than a menu.
-      panelRole="dialog"
       trigger={
         <>
-          {/*
-           * The organization, quiet and above. It is not a choice — one person
-           * belongs to one organization in this version — so it is a label
-           * rather than something with a control on it.
-           */}
+          {/* The mobile row has no room for a second line. */}
           {compact ? null : (
             <span className="block overflow-hidden text-2xs leading-(--line-normal) text-ellipsis whitespace-nowrap text-faint">
-              {organizationName}
+              Project
             </span>
           )}
           <span className="flex min-w-0 items-center justify-between gap-2">
@@ -184,36 +163,15 @@ export function ProjectSelector({
       {(close) => (
         <>
           <MenuLabel>{organizationName}</MenuLabel>
-          {projects.length > 1 ? (
-            <div className="px-1 pt-1 pb-2">
-              <Input
-                id="project-search"
-                aria-label="Search projects"
-                placeholder="Search projects"
-                value={query}
-                autoComplete="off"
-                spellCheck={false}
-                /* The field an opening menu puts focus in. */
-                data-menu-focus-first=""
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  const only = shown[0];
-                  if (only !== undefined) choose(only, close);
-                }}
-              />
-            </div>
-          ) : null}
           <div className="max-h-60 overflow-y-auto">
-            {shown.length === 0 ? (
+            {projects.length === 0 ? (
               <p className="m-0 p-3 text-sm text-muted-foreground">
-                No project matches that.
+                No projects available.
               </p>
             ) : (
-              shown.map((project) => (
+              projects.map((project) => (
                 <MenuItem
                   key={project.id}
-                  role="none"
                   selected={project.id === projectId}
                   onClick={() => choose(project, close)}
                 >
@@ -230,14 +188,7 @@ export function ProjectSelector({
           {mayCreateProject ? (
             <>
               <MenuDivider />
-              <MenuItem
-                href={NEW_PROJECT_PATH}
-                role="none"
-                onClick={() => {
-                  close();
-                  setQuery("");
-                }}
-              >
+              <MenuItem href={NEW_PROJECT_PATH} onClick={close}>
                 New project
               </MenuItem>
             </>

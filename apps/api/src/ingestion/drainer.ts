@@ -5,6 +5,7 @@ import {
   projectOfOrganizationState,
   recordPulledCallReceived,
   recordProductionTraces,
+  recordSimulationTraces,
   TraceStoreRefusedError,
   type AuthContext,
   type AgentPlatform,
@@ -115,8 +116,8 @@ meter
  *
  * The evidence-ready boundary is a promise that the named trace can be read.
  * Raising it before the rows are visible would wake a grader for a conversation
- * it would then read as empty, and an empty conversation judged is worse than
- * one judged late — the verdict looks like an answer.
+ * it would then read as empty, and an empty conversation graded is worse than
+ * one graded late — the grade looks like an answer.
  *
  * ## One drainer
  *
@@ -583,6 +584,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // Says only that this trace's evidence is readable. Every span goes in,
     // because which of them count is a question this seam already answers —
     // and answering it twice is how two readers of span shape come to disagree.
+    await recordSimulationTraces(auth, spans);
     await recordProductionTraces(auth, spans);
   } catch (cause) {
     // The rows are visible and the handoffs are not. A transient cause leaves

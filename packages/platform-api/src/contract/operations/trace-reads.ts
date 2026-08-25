@@ -10,9 +10,10 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 import {
-  outcomeSchema,
-  recordedVerdictSchema,
-} from "./runs.ts";
+  gradeProjectionProperties,
+  gradeProjectionRequired,
+  gradingStateSchema,
+} from "./grades.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -125,9 +126,8 @@ const traceDetailSchema = {
     spansTruncated: booleanSchema,
     metrics: arrayOf(metricSchema),
     simulationId: nullable(stringIdSchema),
-    verdicts: arrayOf(recordedVerdictSchema),
-    outcome: nullable(outcomeSchema),
-    diagnostics: nullable(outcomeSchema),
+    gradingState: gradingStateSchema,
+    ...gradeProjectionProperties,
   },
   required: [
     "trace",
@@ -136,9 +136,8 @@ const traceDetailSchema = {
     "spansTruncated",
     "metrics",
     "simulationId",
-    "verdicts",
-    "outcome",
-    "diagnostics",
+    "gradingState",
+    ...gradeProjectionRequired,
   ],
   additionalProperties: false,
 } as const;
@@ -209,7 +208,7 @@ export const traceReadOperations = {
       query: parameters(windowQuery, ["from", "to"]),
     },
     responses: {
-      200: { description: "The trace and its judgments.", schema: traceDetailSchema },
+      200: { description: "The trace and its grades.", schema: traceDetailSchema },
       400: refusalResponse,
       401: refusalResponse,
       403: refusalResponse,

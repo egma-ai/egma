@@ -142,7 +142,7 @@
   --destructive-pressed: #7e2d2d;
   --destructive-text: var(--color-paper);
 
-  /* Product state colors keep verdict meaning separate from brand meaning. */
+  /* Product state colors keep result meaning separate from brand meaning. */
   --good: #28775a;
   --warn: #9a691c;
   --bad: #b44444;
@@ -196,10 +196,8 @@
    * one line in the same change.
    *
    * **A round *shape* is not a component corner and is not drawn from here.**
-   * An avatar is a circle and a radio button is a circle; both say
-   * `rounded-full`, which is Tailwind's own and untouched by this block. That
-   * is the whole exception, and it is written down so the next person does not
-   * read a circular avatar as a radius that escaped.
+   * A radio button stays circular because its shape distinguishes it from a
+   * checkbox. The account avatar is square with every other component.
    */
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -318,6 +316,8 @@
    */
   --sheet-width: 440px;
   --sheet-width-wide: 640px;
+  /* The signed-in sidebar's Egma mark, larger now that it is not a trigger. */
+  --sidebar-mark-size: 32px;
   /*
    * The access panel, which is 440px for a different reason than a side sheet
    * is. A sheet is that wide because it is a modal panel over a list that
@@ -340,6 +340,7 @@
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
+  --grade-fact-min: 150px;
 
   /*
    * Orange-brown elevation, reserved for what is raised off the page.
@@ -626,9 +627,9 @@
   --color-ring: var(--focus);
 
   /*
-   * Product state. These carry verdict meaning — passed, skipped, failed — and
+   * Product state. These carry result meaning — success, warning, failure — and
    * the brand orange above never does. Keeping them named apart is what stops
-   * a filled Deep Ember button from reading as a verdict.
+   * a filled Deep Ember button from reading as a result.
    */
   --color-success: var(--good);
   --color-warning: var(--warn);

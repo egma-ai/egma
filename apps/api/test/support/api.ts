@@ -7,7 +7,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
-  seedGraderLibrary,
+  reconcileGraderCatalog,
   seedPersonaLibrary,
   seedPlatformSettings,
 } from "@egma/db";
@@ -294,10 +294,10 @@ export async function createApi(
 
   // The two fixed-id catalogs the real entry point writes before a project can
   // be created. A new project points directly at the Egma-provided persona, and
-  // its seeded grader points at the grader library, so skipping either would
-  // put this instance in a state no deployment serves requests from.
+  // its project grader points at the predefined catalog, so skipping either
+  // would put this instance in a state no deployment serves requests from.
   await seedPersonaLibrary();
-  await seedGraderLibrary();
+  await reconcileGraderCatalog();
 
   const { app, identity, drainer } = buildApi({
     config,

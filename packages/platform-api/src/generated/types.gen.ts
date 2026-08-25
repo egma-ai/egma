@@ -1321,6 +1321,14 @@ export type ListGraderLibraryErrors = {
      */
     403: Refusal;
     /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;
@@ -1330,20 +1338,30 @@ export type ListGraderLibraryError = ListGraderLibraryErrors[keyof ListGraderLib
 
 export type ListGraderLibraryResponses = {
     /**
-     * Grader library entries.
+     * Grader definitions visible to the organization, with current-project use state.
      */
     200: {
         graderLibraryEntries: Array<{
             id: string;
             name: string;
             description: string | null;
-            type: string;
             owner: 'egma' | 'organization';
-            projectId: string | null;
-            version: number;
-            prompt: string | null;
-            params: Array<unknown>;
-            outputDefinition: unknown;
+            type: 'llm_as_judge' | 'code';
+            scopeEditable: boolean;
+            currentDefinitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer';
+                defaultValue: number;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
             createdAt: string;
             updatedAt: string;
         }>;
@@ -1352,6 +1370,309 @@ export type ListGraderLibraryResponses = {
 };
 
 export type ListGraderLibraryResponse = ListGraderLibraryResponses[keyof ListGraderLibraryResponses];
+
+export type GetGraderLibraryEntryData = {
+    body?: never;
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}';
+};
+
+export type GetGraderLibraryEntryErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetGraderLibraryEntryError = GetGraderLibraryEntryErrors[keyof GetGraderLibraryEntryErrors];
+
+export type GetGraderLibraryEntryResponses = {
+    /**
+     * The grader definition and its current-project use state.
+     */
+    200: {
+        id: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        scopeEditable: boolean;
+        currentDefinitionVersion: number;
+        modalities: Array<'chat' | 'voice'>;
+        gradingInstructions: string | null;
+        requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer';
+            defaultValue: number;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        activeProjectGraderId: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type GetGraderLibraryEntryResponse = GetGraderLibraryEntryResponses[keyof GetGraderLibraryEntryResponses];
+
+export type UseGraderInProjectData = {
+    body: {
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings: {
+            [key: string]: unknown;
+        };
+        passThreshold: number;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}/use';
+};
+
+export type UseGraderInProjectErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UseGraderInProjectError = UseGraderInProjectErrors[keyof UseGraderInProjectErrors];
+
+export type UseGraderInProjectResponses = {
+    /**
+     * The new current-project grader policy.
+     */
+    201: {
+        id: string;
+        projectId: string;
+        graderDefinitionId: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        modalities: Array<'chat' | 'voice'>;
+        scopeEditable: boolean;
+        removable: boolean;
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings: {
+            [key: string]: unknown;
+        };
+        passThreshold: number;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UseGraderInProjectResponse = UseGraderInProjectResponses[keyof UseGraderInProjectResponses];
+
+export type CreateCustomGraderData = {
+    body: {
+        name: string;
+        description?: string | null;
+        gradingInstructions: string;
+        modalities: Array<'chat' | 'voice'>;
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        passThreshold: number;
+    };
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/custom';
+};
+
+export type CreateCustomGraderErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type CreateCustomGraderError = CreateCustomGraderErrors[keyof CreateCustomGraderErrors];
+
+export type CreateCustomGraderResponses = {
+    /**
+     * The custom definition and its current-project policy.
+     */
+    201: {
+        definition: {
+            id: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            scopeEditable: boolean;
+            currentDefinitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer';
+                defaultValue: number;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        grader: {
+            id: string;
+            projectId: string;
+            graderDefinitionId: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
+            scopeEditable: boolean;
+            removable: boolean;
+            scope: {
+                simulations: Array<{
+                    kind: 'all';
+                } | {
+                    kind: 'test_suite';
+                    id: string;
+                } | {
+                    kind: 'test';
+                    id: string;
+                }>;
+                production: {
+                    samplePercent: number;
+                } | null;
+            };
+            settings: {
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+    };
+};
+
+export type CreateCustomGraderResponse = CreateCustomGraderResponses[keyof CreateCustomGraderResponses];
 
 export type ListGradersData = {
     body?: never;
@@ -1377,6 +1698,10 @@ export type ListGradersErrors = {
      */
     403: Refusal;
     /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;
@@ -1386,26 +1711,38 @@ export type ListGradersError = ListGradersErrors[keyof ListGradersErrors];
 
 export type ListGradersResponses = {
     /**
-     * Running graders, newest first.
+     * Project graders, ordered by name.
      */
     200: {
         graders: Array<{
             id: string;
-            libraryId: string;
             projectId: string;
+            graderDefinitionId: string;
             name: string;
             description: string | null;
-            type: string;
-            required: boolean;
-            scope: string;
-            productionSampleRate: number;
-            version: number;
-            versionId: string;
-            config: unknown;
-            judgeModel: {
-                provider: string;
-                model: string;
-            } | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
+            scopeEditable: boolean;
+            removable: boolean;
+            scope: {
+                simulations: Array<{
+                    kind: 'all';
+                } | {
+                    kind: 'test_suite';
+                    id: string;
+                } | {
+                    kind: 'test';
+                    id: string;
+                }>;
+                production: {
+                    samplePercent: number;
+                } | null;
+            };
+            settings: {
+                [key: string]: unknown;
+            };
+            passThreshold: number;
             createdAt: string;
             updatedAt: string;
         }>;
@@ -1415,30 +1752,18 @@ export type ListGradersResponses = {
 
 export type ListGradersResponse = ListGradersResponses[keyof ListGradersResponses];
 
-export type CreateGraderData = {
-    body: {
-        libraryId: string;
-        params?: {
-            [key: string]: unknown;
-        };
-        name?: string;
-        description?: string | null;
-        required?: boolean;
-        scope?: string;
-        productionSampleRate?: number;
-        judgeModel?: {
-            provider: string;
-            model: string;
-        } | null;
+export type RemoveGraderData = {
+    body?: never;
+    path: {
+        graderId: string;
     };
-    path?: never;
     query?: {
         projectId?: string;
     };
-    url: '/v1/graders';
+    url: '/v1/graders/{graderId}';
 };
 
-export type CreateGraderErrors = {
+export type RemoveGraderErrors = {
     /**
      * The request was refused.
      */
@@ -1454,6 +1779,10 @@ export type CreateGraderErrors = {
     /**
      * The request was refused.
      */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
     422: Refusal;
     /**
      * The request rate limit was reached.
@@ -1461,95 +1790,37 @@ export type CreateGraderErrors = {
     429: Refusal;
 };
 
-export type CreateGraderError = CreateGraderErrors[keyof CreateGraderErrors];
+export type RemoveGraderError = RemoveGraderErrors[keyof RemoveGraderErrors];
 
-export type CreateGraderResponses = {
+export type RemoveGraderResponses = {
     /**
-     * The new running grader.
+     * The optional project grader was removed.
      */
-    201: {
-        id: string;
-        libraryId: string;
-        projectId: string;
-        name: string;
-        description: string | null;
-        type: string;
-        required: boolean;
-        scope: string;
-        productionSampleRate: number;
-        version: number;
-        versionId: string;
-        config: unknown;
-        judgeModel: {
-            provider: string;
-            model: string;
-        } | null;
-        createdAt: string;
-        updatedAt: string;
-    };
+    204: void;
 };
 
-export type CreateGraderResponse = CreateGraderResponses[keyof CreateGraderResponses];
-
-export type DeleteGraderData = {
-    body?: never;
-    path: {
-        graderId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/graders/{graderId}';
-};
-
-export type DeleteGraderErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type DeleteGraderError = DeleteGraderErrors[keyof DeleteGraderErrors];
-
-export type DeleteGraderResponses = {
-    /**
-     * The grader that was switched off.
-     */
-    200: {
-        id: string;
-        name: string;
-        deletedAt: string;
-    };
-};
-
-export type DeleteGraderResponse = DeleteGraderResponses[keyof DeleteGraderResponses];
+export type RemoveGraderResponse = RemoveGraderResponses[keyof RemoveGraderResponses];
 
 export type UpdateGraderData = {
-    body?: {
-        params?: {
+    body: {
+        scope?: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings?: {
             [key: string]: unknown;
         };
-        name?: string;
-        description?: string | null;
-        required?: boolean;
-        scope?: string;
-        productionSampleRate?: number;
-        judgeModel?: {
-            provider: string;
-            model: string;
-        } | null;
+        passThreshold?: number;
     };
     path: {
         graderId: string;
@@ -1591,25 +1862,37 @@ export type UpdateGraderError = UpdateGraderErrors[keyof UpdateGraderErrors];
 
 export type UpdateGraderResponses = {
     /**
-     * The updated grader.
+     * The updated project grader.
      */
     200: {
         id: string;
-        libraryId: string;
         projectId: string;
+        graderDefinitionId: string;
         name: string;
         description: string | null;
-        type: string;
-        required: boolean;
-        scope: string;
-        productionSampleRate: number;
-        version: number;
-        versionId: string;
-        config: unknown;
-        judgeModel: {
-            provider: string;
-            model: string;
-        } | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        modalities: Array<'chat' | 'voice'>;
+        scopeEditable: boolean;
+        removable: boolean;
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings: {
+            [key: string]: unknown;
+        };
+        passThreshold: number;
         createdAt: string;
         updatedAt: string;
     };
@@ -3929,7 +4212,6 @@ export type ListRunsData = {
         connectionId?: string;
         testId?: string;
         status?: 'pending' | 'running' | 'completed' | 'canceled';
-        verdict?: 'passed' | 'failed' | 'skipped' | 'errored';
         since?: string;
         until?: string;
         pageSize?: number;
@@ -4003,15 +4285,6 @@ export type ListRunsResponses = {
             finishedCount: number;
             gradableCount: number;
             gradedCount: number;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            verdictCounts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
             resultsUrl: string;
             createdAt: string;
             startedAt: string | null;
@@ -4110,15 +4383,6 @@ export type CreateRunResponses = {
         finishedCount: number;
         gradableCount: number;
         gradedCount: number;
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        verdictCounts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        };
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
@@ -4203,26 +4467,10 @@ export type GetRunResponses = {
         finishedCount: number;
         gradableCount: number;
         gradedCount: number;
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        verdictCounts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        };
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
         finishedAt: string | null;
-        counts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        };
         connectionSnapshot: {
             agentPlatform: string | null;
             connectionType: string;
@@ -4305,16 +4553,7 @@ export type ListRunSimulationsResponses = {
             personaName: string;
             personaVersionId: string;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
+            gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
             modality: 'voice' | 'chat';
             hasRecording: boolean;
@@ -4389,7 +4628,6 @@ export type ListRunEventsResponses = {
             testName: string | null;
             personaName: string | null;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
         }>;
         next: number;
@@ -4478,15 +4716,6 @@ export type CancelRunResponses = {
         finishedCount: number;
         gradableCount: number;
         gradedCount: number;
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        verdictCounts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        };
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
@@ -4543,16 +4772,52 @@ export type GetSimulationResponses = {
         runName: string | null;
         position: number;
         status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
-        grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        counts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        } | null;
+        gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
+        grades: Array<{
+            projectGraderId: string;
+            graderDefinitionId: string;
+            graderDefinitionVersion: number;
+            graderName: string;
+            score: number | null;
+            details: {
+                rationale?: string;
+                assertions?: Array<{
+                    key: string;
+                    score?: number;
+                    rationale?: string;
+                    citedSpanIds?: Array<string>;
+                    error?: string;
+                }>;
+                error?: string;
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            result: 'passed' | 'failed' | 'errored';
+            gradedAt: string;
+        }>;
+        gradeHistory: Array<{
+            projectGraderId: string;
+            graderDefinitionId: string;
+            graderDefinitionVersion: number;
+            graderName: string;
+            score: number | null;
+            details: {
+                rationale?: string;
+                assertions?: Array<{
+                    key: string;
+                    score?: number;
+                    rationale?: string;
+                    citedSpanIds?: Array<string>;
+                    error?: string;
+                }>;
+                error?: string;
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            result: 'passed' | 'failed' | 'errored';
+            gradedAt: string;
+        }>;
+        combinedScore: number | null;
         reason: string | null;
         modality: 'voice' | 'chat';
         createdAt: string;
@@ -4652,68 +4917,13 @@ export type GetSimulationResponses = {
             state: 'run_start';
             capturedAt: string;
             items: Array<{
-                kind: 'authored';
-                graderId: string;
-                graderVersionId: string;
-                name: string;
-                libraryId: string;
-                required: boolean;
-                scope: 'simulations' | 'production' | 'both';
+                projectGraderId: string;
+                graderDefinitionId: string;
+                graderDefinitionVersion: number;
+                graderName: string;
+                passThreshold: number;
             }>;
         } | null;
-        gradingJobs: Array<{
-            status: 'pending' | 'claimed' | 'graded' | 'abandoned';
-            regradeGraderId: string | null;
-            attempts: number;
-            lastError: string | null;
-            finishedAt: string | null;
-        }>;
-        verdicts: Array<{
-            graderId: string;
-            assertion: string;
-            assertionText: string | null;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number;
-            rationale: string;
-            citedTurns: Array<string>;
-            judgedAt: string;
-        }>;
-        outcome: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
         transcript: {
             traceId: string;
             startedAt: string;
@@ -4736,9 +4946,7 @@ export type GetSimulationResponses = {
 export type GetSimulationResponse = GetSimulationResponses[keyof GetSimulationResponses];
 
 export type RegradeSimulationData = {
-    body?: {
-        graderId?: string;
-    };
+    body?: never;
     path: {
         simulationId: string;
     };
@@ -4787,7 +4995,6 @@ export type RegradeSimulationResponses = {
      */
     200: {
         simulationId: string;
-        graderId: string | null;
         reopened: number;
         alreadyWaiting: number;
     };
@@ -5778,7 +5985,7 @@ export type GetTraceError = GetTraceErrors[keyof GetTraceErrors];
 
 export type GetTraceResponses = {
     /**
-     * The trace and its judgments.
+     * The trace and its grades.
      */
     200: {
         trace: {
@@ -5821,39 +6028,52 @@ export type GetTraceResponses = {
             partial: boolean;
         }>;
         simulationId: string | null;
-        verdicts: Array<{
-            graderId: string;
-            assertion: string;
-            assertionText: string | null;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number;
-            rationale: string;
-            citedTurns: Array<string>;
-            judgedAt: string;
+        gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error';
+        grades: Array<{
+            projectGraderId: string;
+            graderDefinitionId: string;
+            graderDefinitionVersion: number;
+            graderName: string;
+            score: number | null;
+            details: {
+                rationale?: string;
+                assertions?: Array<{
+                    key: string;
+                    score?: number;
+                    rationale?: string;
+                    citedSpanIds?: Array<string>;
+                    error?: string;
+                }>;
+                error?: string;
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            result: 'passed' | 'failed' | 'errored';
+            gradedAt: string;
         }>;
-        outcome: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
+        gradeHistory: Array<{
+            projectGraderId: string;
+            graderDefinitionId: string;
+            graderDefinitionVersion: number;
+            graderName: string;
             score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
+            details: {
+                rationale?: string;
+                assertions?: Array<{
+                    key: string;
+                    score?: number;
+                    rationale?: string;
+                    citedSpanIds?: Array<string>;
+                    error?: string;
+                }>;
+                error?: string;
+                [key: string]: unknown;
             };
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
+            passThreshold: number;
+            result: 'passed' | 'failed' | 'errored';
+            gradedAt: string;
+        }>;
+        combinedScore: number | null;
     };
 };
 

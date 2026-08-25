@@ -2,11 +2,9 @@ import {
   listTraces,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
-  readAssertionWords,
   readTrace,
-  readVerdicts,
+  readTraceGrading,
   UnreadableTraceQueryError,
-  type AssertionWords,
   type AuthContext,
   type SpanSource,
   type TimeWindow,
@@ -23,13 +21,9 @@ import { simulationIdOfTrace } from "@egma/simulation-contract";
 import { browserProject } from "../http/acting.ts";
 import { describedMetrics } from "../http/metrics.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { describedTraceGrading } from "../http/grades.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
-import {
-  describedOutcome,
-  describedVerdict,
-  onlyReporting,
-} from "../http/verdicts.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 
@@ -412,11 +406,7 @@ export async function traceReadRoutes(
     const project = await readingProject(auth, projectId);
     if ("refusal" in project) return invalid(reply, project.refusal);
 
-    // The context the whole page is read through, project included: the
-    // transcript, the verdicts filed beside it, and the words behind their
-    // assertion keys. One resolution rather than three, so the turns somebody
-    // reads and the judgments printed under them can never come from two
-    // different projects.
+    // One project-scoped context reads both the trace and its grades.
     const acting = project.auth;
 
     const detail = await readTrace(acting, traceId, { window, projectId });
@@ -434,55 +424,27 @@ export async function traceReadRoutes(
           "and the two answers are the same one.",
       });
     }
+    if (detail.source !== "simulation" && detail.source !== "production") {
+      throw new Error(
+        `trace ${traceId} has unsupported source ${JSON.stringify(detail.source)}`,
+      );
+    }
 
-    // What egma made of this exchange, beside the exchange itself. A judgment
-    // cites a turn by its position, and the positions are right here — so this
-    // is the one place a verdict and the words it is about can be read
-    // together. The verdict store is a separate store: if it cannot be reached,
-    // the transcript is still the answer somebody came for, so an unreadable
-    // one degrades to no judgments rather than to no trace.
-    // A simulation's verdicts are filed under its own id, and its spans under
-    // the 128 bits that id carries written as hex. The two are the same number,
-    // so the reader that has one can always derive the other — which is what
-    // lets a transcript show what egma made of it with nothing having stored a
-    // mapping.
-    //
-    // **A production trace's verdicts are filed under the trace id itself**, and
-    // asking `detail.source` is what keeps that true. The derivation is a pure
-    // bit conversion and succeeds for *every* trace id, so a production trace
-    // would otherwise be looked up under a simulation id nothing ever minted —
-    // and the read would answer "skipped, nothing judged" while real verdict
-    // rows sat in the store under the id it was handed. A judgment egma wrote
-    // and then could not find is the exact false trust this product exists to
-    // kill, so the question is asked rather than the answer assumed.
-    const filedUnder =
-      detail.source === "simulation"
-        ? (simulationIdOfTrace(traceId) ?? traceId)
-        : traceId;
-    const judged = await readVerdicts(acting, filedUnder, { projectId }).catch(
-      () => undefined,
-    );
+    // The span row names the exact project. This matters for an organization-
+    // scoped key: it can read several projects, while one trace's grades always
+    // belong to one of them.
+    const gradingAuth =
+      acting.projectId === detail.projectId
+        ? acting
+        : { ...acting, projectId: detail.projectId };
 
-    // The words behind the assertion keys, from the version this conversation
-    // was pinned to. Only a simulation has one — a production trace is in
-    // nobody's scenario — and this is the same resolution a run's results make,
-    // through the same call, so the one judgment card cannot read two ways
-    // depending on which page it is drawn on.
-    const words: AssertionWords | undefined =
-      detail.source === "simulation" && (judged?.verdicts.length ?? 0) > 0
-        ? await readAssertionWords(
-            acting,
-            filedUnder,
-            (judged?.verdicts ?? []).map((its) => its.graderId),
-          ).catch(() => undefined)
-        : undefined;
-
-    // Which of the copies that judged this conversation only report, off the
-    // same per-grader fold the outcome above was split by — so a row's marking
-    // and the header it sits under cannot disagree. This is the other half of
-    // that promise: the fold already left the diagnostics out of `outcome`, and
-    // without this the page would show their failures as if they had counted.
-    const diagnostic = onlyReporting(judged?.byGrader);
+    // Grades use the exact trace id for both sources. The run id is only part of
+    // a simulation grade's immutable identity.
+    const grading = await readTraceGrading(gradingAuth, {
+      source: detail.source,
+      traceId,
+      ...(detail.source === "simulation" ? { runId: detail.runId } : {}),
+    });
 
     return reply.send({
       ...describedDetail(detail),
@@ -507,19 +469,7 @@ export async function traceReadRoutes(
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
-      // The one shape both surfaces that draw a judgment send, decided in
-      // `http/verdicts.ts` rather than here and again there — including
-      // `required`, without which a diagnostic's failure would render on this
-      // page as an unmarked red card under a header folded without it.
-      verdicts: (judged?.verdicts ?? []).map((its) =>
-        describedVerdict(its, words, diagnostic),
-      ),
-      // The required lane, as everywhere: a diagnostic copy reports and never
-      // decides.
-      outcome: describedOutcome(judged?.outcome),
-      // And the lane that only reports, beside it rather than inside it. Null
-      // where nothing diagnostic judged this conversation.
-      diagnostics: describedOutcome(judged?.diagnostics),
+      ...describedTraceGrading(grading),
     });
   });
 

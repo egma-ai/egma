@@ -734,7 +734,7 @@ describe("the suite-first Tests route", () => {
     })[0];
     if (projectSelector === undefined) throw new Error("project selector missing");
     fireEvent.click(projectSelector);
-    fireEvent.click(within(screen.getByRole("dialog")).getByText("Outbound"));
+    fireEvent.click(within(screen.getByRole("menu")).getByText("Outbound"));
 
     expect(routed.push).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog", { name: "Leave without saving?" })).toBeTruthy();

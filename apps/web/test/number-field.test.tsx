@@ -20,7 +20,7 @@ describe("the shared numeric field", () => {
     render(
       <NumberField
         id="sample-rate"
-        label="Share of live traffic judged"
+        label="Share of production traces graded"
         value="20"
         min={0}
         max={100}
@@ -29,7 +29,7 @@ describe("the shared numeric field", () => {
       />,
     );
 
-    const field = screen.getByLabelText("Share of live traffic judged");
+    const field = screen.getByLabelText("Share of production traces graded");
 
     expect(field.getAttribute("type")).toBe("number");
     expect(field.getAttribute("min")).toBe("0");
@@ -60,7 +60,7 @@ describe("the shared numeric field", () => {
     render(
       <NumberField
         id="sample-rate"
-        label="Share of live traffic judged"
+        label="Share of production traces graded"
         value="20"
         unit="%"
         hint="Changes apply only to future live traffic."
@@ -68,7 +68,7 @@ describe("the shared numeric field", () => {
       />,
     );
 
-    const field = screen.getByLabelText("Share of live traffic judged");
+    const field = screen.getByLabelText("Share of production traces graded");
 
     expect(screen.getByText("%")).toBeTruthy();
     expect(describedWords(field)).toBe(
@@ -82,7 +82,7 @@ describe("the shared numeric field", () => {
         <p id="refusal">A whole percentage from 0 to 100.</p>
         <NumberField
           id="sample-rate"
-          label="Share of live traffic judged"
+          label="Share of production traces graded"
           value="900"
           unit="%"
           hint="Changes apply only to future live traffic."
@@ -93,7 +93,7 @@ describe("the shared numeric field", () => {
       </>,
     );
 
-    const field = screen.getByLabelText("Share of live traffic judged");
+    const field = screen.getByLabelText("Share of production traces graded");
 
     expect(field.getAttribute("aria-invalid")).toBe("true");
     // The refusal wins over the hint. It does not silence the unit — a

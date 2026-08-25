@@ -40,16 +40,12 @@ const ADA: Me = {
 /**
  * The six addresses the bar offers, sorted.
  *
- * Five are the ones it offered before the groups existed. Graders is the one
- * that moved, and it moved for the same reason Monitoring's did: its section
- * holds two screens behind one strip, the strip now leads with Running, and a
- * first tab nobody lands on is not a first tab. `/projects/prj_2/graders` is
- * still the library and still opens it — this is where the *bar* points, not
- * which addresses exist.
+ * These values are written out so the test checks the product addresses rather
+ * than repeating the navigation implementation.
  */
 const EVERY_ADDRESS = [
   "/projects/prj_2/agents",
-  "/projects/prj_2/graders/running",
+  "/projects/prj_2/graders",
   "/projects/prj_2/monitoring/transcripts",
   "/projects/prj_2/personas",
   "/projects/prj_2/runs",
@@ -231,7 +227,7 @@ describe("the grouped sidebar", () => {
    */
   it.each([
     ["/projects/prj_2/agents", "Agents"],
-    ["/projects/prj_2/graders/running", "Graders"],
+    ["/projects/prj_2/graders", "Graders"],
     ["/projects/prj_2/personas/prs_3", "Personas"],
     ["/projects/prj_2/runs/run_9", "Runs"],
     ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Transcripts"],
@@ -343,19 +339,8 @@ describe("the grouped sidebar", () => {
     expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
   });
 
-  /**
-   * The wordmark leads the bar, the switcher follows it, and the account
-   * control stays at the bottom. What this asserts is that the groups landed
-   * *between* them rather than around them — which is also the order a
-   * keyboard walks the bar in.
-   *
-   * **The wordmark is first, and that is the 2026-08-23 ruling.** The
-   * developer put the Egma logo back at the top of the signed-in sidebar
-   * — "our logo, not the organization's" — so the first thing a keyboard
-   * reaches in the bar is a link home, and the organization moved into the
-   * eyebrow above the project name where the switcher now stands.
-   */
-  it("leads with the wordmark, then the switcher, and ends with the account", () => {
+  /** Organization, then project, then the navigation and bottom account. */
+  it("leads with organization and project, and ends with the account", () => {
     drawShell();
 
     const bar = sidebarNavigation().closest("aside");
@@ -367,14 +352,15 @@ describe("the grouped sidebar", () => {
     const at = (node: HTMLElement | null) =>
       node === null ? -1 : order.indexOf(node);
 
-    const wordmark = within(bar!).getByRole("link", { name: "Egma home" });
+    const organization = within(bar!).getByRole("button", {
+      name: "Open organization menu for Acme",
+    });
     const switcher = within(bar!).getByRole("button", { name: /^Organization Acme/ });
     const account = within(bar!).getByRole("button", { name: /account menu$/ });
     const agents = within(bar!).getByRole("link", { name: "Agents" });
     const transcripts = within(bar!).getByRole("link", { name: "Transcripts" });
 
-    expect(at(wordmark)).toBe(0);
-    expect(wordmark.getAttribute("href")).toBe("/");
+    expect(at(organization)).toBe(0);
     expect(at(switcher)).toBe(1);
     expect(at(switcher)).toBeLessThan(at(agents));
     expect(at(agents)).toBeLessThan(at(transcripts));

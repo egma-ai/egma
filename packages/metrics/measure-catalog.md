@@ -2,9 +2,9 @@
 
 **Catalog version: 5**
 
-Every measure a conversation produces, named once and defined once, so that a
-grader references a known measure instead of guessing a string — and so that the
-number Egma shows and the number Egma judges are the same arithmetic.
+Every metric a conversation produces, named once and defined once, so that a
+grader references a known metric instead of guessing a string — and so that the
+number Egma shows and the number a grader reads use the same arithmetic.
 
 This is a contract document, not a table. Nothing writes a row to declare a
 measure and nothing queries for the list. It sits beside `schemas/` because it
@@ -19,20 +19,20 @@ than surfacing months later as a grader nobody noticed was silent.
 
 ## Why it exists
 
-A grader names what it reads as a string, and a string that names nothing
-produces a grader that reads nothing, judges nothing, and is `skipped` forever:
-green, silent, and wrong. Nothing downstream can catch it. A missing measure can
-be a legitimate `skipped`, so the grading engine has no way to tell a typo from
-a modality. Only the moment of writing can, which is why the grader factory's
-write door refuses a measure this catalog does not name.
+A grader definition can name what it reads as a string. A string that names
+nothing makes that definition impossible to execute honestly. Only the write
+door can tell a typo from a metric that is legitimately absent on one trace, so
+it refuses a metric this catalog does not name. There is no synthetic `skipped`
+grade: incompatible modality prevents selection, while missing evidence for a
+selected grader produces a grading error and no score.
 
 The same argument, one level down, is why each measure now carries its
 **span-level definition**. A name says what may be asked for; the definition
 beside it says what Egma computes when asked. One shared measure module
 implements exactly the definitions below, the **Use** form offers exactly the
 measures that have one, and the write door accepts exactly the same list — so a
-developer cannot pick a measure nothing can answer, and the number on the metrics
-display cannot come out differently from the number a grader judged.
+developer cannot pick a metric nothing can answer, and the number on the metrics
+display cannot come out differently from the number a grader reads.
 
 ## The measures
 
@@ -46,8 +46,8 @@ the trace store's ingest, one per measurement, named for exactly the name in
 this table, and the span's own duration *is* the number — nothing carries it a
 second time. A **terminal fact** arrives on the status transition that ends the
 simulation, inside its facts, and the control plane records it under the catalog
-name — so a threshold grader reads one vocabulary whether the number was timed
-or counted.
+name — so every display or future grader reads one vocabulary whether the
+number was timed or counted.
 
 | Measure | Unit | Taken | Emitted by | Arrives as | What it is |
 | --- | --- | --- | --- | --- | --- |
@@ -61,16 +61,14 @@ or counted.
 | `tts_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent turning the answer's text into speech, by the platform's own account. |
 | `turn_count` | turns | once | every simulation | terminal fact | How many transcript turns the conversation reached, both speakers counted. |
 
-A voice-only measure on a chat conversation is not a failure and not an error.
-The conversation did not produce the thing the check is about, so the check did
-not apply: the verdict is `skipped` and it leaves the score's denominator. That
-is what stops a chat simulation being marked down for having no audio.
+A metric is an observed fact, not a grade. A chat conversation therefore has no
+voice-only metric; Egma does not invent a zero or create a `skipped` grade. Grader
+definitions separately declare compatible modalities. A voice-only grader is
+not selected for a chat trace, so it creates no plan item and no grade row.
 
-The same is true of a measure no conversation carries yet. This table is the
-contract the shared measure module honors, and it is written down first on
-purpose: a grader written against a measure the module has not started computing
-is `skipped` until it does, which is an honest "not measured here" rather than a
-silent pass.
+This table is the contract the shared measure module honors. A future grader
+that needs one of these metrics must state how absence affects its own score or
+error result. The metric layer does not make that quality decision.
 
 ## How each measure is computed from the spans
 
@@ -78,7 +76,7 @@ One shared measure module reads a trace and computes every measure below. It is
 the **only** computation path for them: the metrics display reads through it and
 so does the grader, for a simulation and for a production trace alike — so
 identical spans produce identical numbers whatever conducted the conversation,
-and the number on the screen and the number that was judged can never disagree.
+and the number on the screen and the number a grader reads cannot disagree.
 
 Each definition names a **rule**, and the rules are a closed list the module
 switches on exhaustively. A rule nothing implements stops the build.
@@ -115,14 +113,14 @@ conversation, not a new measure and not a new word: the same names below are
 timed on a simulation and derived on a stock LiveKit call or a word-bounded
 Retell one, and a grader bounding one never has to know which it got.
 
-Why they exist: a team pointing a stock LiveKit agent at Egma got `skipped` on
-every production conversation, because the framework times its turns in its own
-vocabulary and Egma read only its own. The durations were there the whole time.
-The same was true of Retell twice over: its payloads carry per-word `start` and
-`end` bounds on every spoken turn, which the normalizer has written as real
-turn timestamps since commit `cc7b8c9` — and the derivations then ignored the
-root because it is filed as `conversation` rather than `root`, so
-`first_response_latency` was never computed there either.
+Why they exist: a stock LiveKit agent initially produced no values for these
+metrics because the framework times its turns in its own vocabulary and Egma
+read only its own. The durations were there the whole time. The same was true
+of Retell twice over: its payloads carry per-word `start` and `end` bounds on
+every spoken turn, which the normalizer has written as real turn timestamps
+since commit `cc7b8c9` — and the derivations then ignored the root because it
+is filed as `conversation` rather than `root`, so `first_response_latency` was
+never computed there either.
 
 Three rules hold over all of them.
 
@@ -185,8 +183,8 @@ document its shapes.
 — which is what the `speaking` children above are for. The obvious shortcut, the
 gap between one turn ending and the next beginning, comes out negative on a real
 captured conversation. A number that is wrong is worse than a measure that is
-missing, so a measure the spans do not carry is absent, and a grader asked for
-it answers `skipped`.
+missing, so a metric the spans do not carry is absent. A selected grader that
+requires that evidence must return a grading error and no score.
 
 ## The aggregations
 
@@ -230,10 +228,9 @@ a rule somebody has to remember.
 
 ## What is deliberately not here
 
-- **Verdicts.** A metric measures and a grader judges. Nothing in this catalog
-  decides whether a number is good; a `latency` grader is somebody deciding that,
-  written down, and it is the only thing that turns a measurement into a
-  judgment.
+- **Grades.** A metric records an observed fact and a grader assigns a score.
+  Nothing in this catalog decides whether a number is good. A future grader can
+  compare a metric with its own rule, but that rule belongs to the grader.
 - **Measures a customer defines.** The catalog ships as Egma's own contract. A
   team that wants a number Egma does not measure is asking for a feature, and
   the honest answer today is that the list is this one.
@@ -250,8 +247,8 @@ a rule somebody has to remember.
   Retell's knowledge-base stage stays platform-prefixed
   (`retell/knowledge_base_latency`): retrieval is Retell's own concept, not a
   stage every platform has. A production trace otherwise carries exactly the
-  measures its telemetry carries — and a grader asked for one it lacks
-  answers `skipped`, which is the honest word.
+  metrics its telemetry carries. A selected grader that requires missing
+  evidence returns a grading error and no score.
 
 ## Changing this catalog
 
@@ -259,9 +256,7 @@ Bump the version when a measure joins, leaves, or changes what it means — a
 span-level definition changing is a measure changing what it means — and change
 `MEASURE_CATALOG_VERSION` in `src/measures.ts` in the same commit.
 
-A measure that leaves needs more than a deletion. Graders already stored against
-it keep naming it, and they keep reading: the write door guards new writes and
-never rewrites history, so an old grader whose measure is gone becomes a check
-that is `skipped` forever — exactly the silence this catalog exists to prevent.
-So a removal is a decision about the graders that name it, taken deliberately,
-and not a line struck out of a table.
+A metric that leaves needs more than a deletion. Immutable grader definition
+versions can still name it, and the write door never rewrites history. Removing
+the metric therefore requires a deliberate migration or retirement decision for
+those definitions; it is not only a line struck out of a table.

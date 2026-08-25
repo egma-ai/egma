@@ -21,13 +21,14 @@ export type { DeviceControls } from "./device.ts";
 export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
 export type {
   AdvanceStep,
-  GradeStep,
+  FixtureGrade,
+  GradingState,
+  GradingStep,
   RunControls,
   RunStatus,
   SeededRun,
   SeededSimulation,
   SimulationStatus,
-  Verdict,
 } from "./runs.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedBehavior, SeedTest, SeededTest, TestControls } from "./tests.ts";

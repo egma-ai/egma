@@ -248,20 +248,17 @@ describe("the skill that gets installed", () => {
     expect(content).toContain("egma run");
   });
 
-  /**
-   * The rule that matters most in a file a model reads unsupervised: a test
-   * that could not run is not a test that failed, and an agent that reported
-   * one as the other would send the developer hunting a bug that is not there.
-   */
-  it("names all four verdicts and forbids folding them into three", () => {
+  it("keeps grade results, combined scores, and operational state separate", () => {
     const content = installableSkill();
 
-    for (const verdict of ["passed", "failed", "skipped", "errored"]) {
-      expect(content).toContain(verdict);
+    for (const state of ["not_requested", "pending", "running", "complete", "error"]) {
+      expect(content).toContain(state);
     }
-    expect(content.replace(/\s+/gu, " ")).toContain(
-      "Never report `skipped` or `errored` as `failed`.",
-    );
+    expect(content).toContain("normalized score");
+    expect(content).toContain("pass threshold");
+    expect(content).toContain("combined score");
+    expect(content).toContain("A low score does not make `egma run` fail");
+    expect(content).toContain("Do not call it skipped");
   });
 
   /**
@@ -271,9 +268,12 @@ describe("the skill that gets installed", () => {
    * it in every future task in that repository. A near synonym in here does not
    * teach one developer the wrong word once — it teaches their agent the wrong
    * word for good, and the agent will then use it back at them.
-   */
+  */
   it("uses the words egma uses, because this is the text that stays behind", () => {
-    const content = installableSkill().replaceAll(SCENARIO_HEADING, "");
+    const content = installableSkill()
+      .replaceAll(SCENARIO_HEADING, "")
+      // `call` is an ordinary verb here, not the banned noun for a simulation.
+      .replace("Do not call it skipped.", "");
 
     for (const banned of BANNED) {
       expect({ banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({

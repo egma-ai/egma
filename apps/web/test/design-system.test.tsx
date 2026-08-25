@@ -97,7 +97,7 @@ describe("the development design proof", () => {
         .join(" ");
 
     const percent = screen.getByRole("spinbutton", {
-      name: "Share of live traffic judged",
+      name: "Share of production traces graded",
     });
     expect((percent as HTMLInputElement).value).toBe("20");
     expect(percent.getAttribute("min")).toBe("0");
@@ -154,7 +154,7 @@ describe("the development design proof", () => {
     expect(secondary.className).toContain("bg-transparent");
 
     /*
-     * A chip says a verdict in a word and wears the state colour. It must not
+     * A chip says a result in a word and wears the state colour. It must not
      * wear the brand colour: "Brand orange does not mean passed, failed,
      * skipped, or errored."
      */
@@ -163,7 +163,7 @@ describe("the development design proof", () => {
       .filter((node) => node.getAttribute("data-slot") === "badge");
     /*
      * Three of them and one component: the chip block on the base panel, the
-     * same chip beside a verdict in the project-context panel, and the same
+     * same chip beside a result in the project-context panel, and the same
      * chip again inside the dark-theme frame. The second was the CSS Modules
      * chip until the mop-up and the third is what proves the component carries
      * both themes, so every match is read rather than only the first.
@@ -224,10 +224,10 @@ describe("the development design proof", () => {
   it("opens the base dialog on the slot its motion is keyed to", () => {
     render(<DesignSystemProof />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete grader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete test suite" }));
 
     const dialog = screen.getByRole("dialog", {
-      name: "Delete the Refund policy grader?",
+      name: "Delete the Refund checks test suite?",
     });
     /*
      * Not decoration. `tailwind-theme.css` keys the dialog's entrance and exit
@@ -236,13 +236,13 @@ describe("the development design proof", () => {
      */
     expect(dialog.getAttribute("data-slot")).toBe("dialog-content");
     expect(
-      within(dialog).getByText(/Runs that already used it keep their verdicts/),
+      within(dialog).getByText(/Existing runs keep their frozen test versions/),
     ).toBeTruthy();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Keep it" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep suite" }));
     expect(
       screen.queryByRole("dialog", {
-        name: "Delete the Refund policy grader?",
+        name: "Delete the Refund checks test suite?",
       }),
     ).toBeNull();
   });
@@ -377,20 +377,20 @@ describe("the development design proof", () => {
     render(<DesignSystemProof />);
 
     const running = screen.getByRole("progressbar", {
-      name: "Simulations judged",
+      name: "Simulations graded",
     });
     expect(running.getAttribute("aria-valuenow")).toBe("7");
     expect(running.getAttribute("aria-valuemax")).toBe("10");
     expect(running.getAttribute("aria-valuetext")).toBe(
-      "7 of 10 simulations judged",
+      "7 of 10 simulations graded",
     );
     expect(running.getAttribute("data-state")).toBe("loading");
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Judge one more simulation" }),
+      screen.getByRole("button", { name: "Grade one more simulation" }),
     );
     expect(running.getAttribute("aria-valuenow")).toBe("8");
-    expect(screen.getByText("8 of 10 simulations judged")).toBeTruthy();
+    expect(screen.getByText("8 of 10 simulations graded")).toBeTruthy();
 
     const complete = screen.getByRole("progressbar", { name: "Transcripts collected" });
     expect(complete.getAttribute("data-state")).toBe("complete");
@@ -423,7 +423,7 @@ describe("the development design proof", () => {
     });
     fireEvent.focus(trigger);
     expect(
-      (await screen.findByText(/editing the grader never changes a verdict/u)),
+      (await screen.findByText(/editing the grader never changes a grade/u)),
     ).toBeTruthy();
 
     fireEvent.click(

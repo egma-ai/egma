@@ -1,4 +1,4 @@
-/** Public exit behavior for one followed suite run. */
+/** Public operational exit behavior for one followed suite run. */
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -13,7 +13,7 @@ import {
   serializeSuiteManifest,
 } from "../src/folder/egma-folder.ts";
 import { serializeTestFile } from "../src/folder/test-file.ts";
-import type { Verdict } from "../src/platform/runs.ts";
+import type { GradingState, SimulationStatus } from "../src/platform/runs.ts";
 import { aTestFile, blocking } from "./support/test-file.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -23,6 +23,41 @@ const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
+
+const EXPECTED_BEHAVIORS = [
+  "confirms the new time back before finishing",
+  "checks that an afternoon next week is acceptable",
+  "keeps the existing booking until the new time is confirmed",
+  "states the day of the rescheduled cleaning",
+  "states the time of the rescheduled cleaning",
+  "does not create a second booking",
+  "explains what happens to the Thursday booking",
+] as const;
+
+const EXPECTED_BEHAVIORS_GRADE = {
+  projectGraderId: "pgr_expected_behaviors",
+  graderDefinitionId: "gdf_expected_behaviors",
+  graderDefinitionVersion: 1,
+  graderName: "expected_behaviors",
+  score: 0.86,
+  details: {
+    rationale: "Six of seven expected behaviors were present.",
+    assertions: EXPECTED_BEHAVIORS.map((behavior, at) => ({
+      key: `behavior_${String(at + 1)}`,
+      score: at === EXPECTED_BEHAVIORS.length - 1 ? 0 : 1,
+      rationale:
+        at === EXPECTED_BEHAVIORS.length - 1
+          ? "The transcript did not explain what happened to the Thursday booking."
+          : `The transcript supports: ${behavior}`,
+      ...(at === EXPECTED_BEHAVIORS.length - 1
+        ? {}
+        : { citedSpanIds: [`span_agent_${String(at + 1)}`] }),
+    })),
+  },
+  passThreshold: 0.62,
+  result: "passed",
+  gradedAt: "2026-01-01T00:01:00.000Z",
+} as const;
 
 let workspace: Workspace;
 
@@ -58,7 +93,7 @@ beforeEach(async () => {
       aTestFile({
         name: "Books a visit",
         scenario: "The caller asks for Tuesday.",
-        expectedBehaviors: blocking("The agent books Tuesday."),
+        expectedBehaviors: blocking(...EXPECTED_BEHAVIORS),
         version: VERSION_ID,
         identityRevision: REVISION,
       }),
@@ -76,7 +111,7 @@ function platformTest(): Record<string, unknown> {
     name: "Books a visit",
     description: "",
     scenario: "The caller asks for Tuesday.",
-    expectedBehaviors: ["The agent books Tuesday."],
+    expectedBehaviors: EXPECTED_BEHAVIORS,
     personas: [],
     mockTools: [],
     versionId: VERSION_ID,
@@ -98,7 +133,10 @@ function runHeader(status = "pending"): Record<string, unknown> {
   };
 }
 
-function simulation(verdict: Verdict | null, status = "queued"): Record<string, unknown> {
+function simulation(
+  status: SimulationStatus,
+  gradingState: GradingState | null,
+): Record<string, unknown> {
   return {
     id: "sim_one",
     position: 1,
@@ -106,16 +144,20 @@ function simulation(verdict: Verdict | null, status = "queued"): Record<string, 
     testVersionId: VERSION_ID,
     personaName: "default-persona",
     status,
-    verdict,
-    reason: null,
+    gradingState,
+    reason: status === "failed" ? "the simulator stopped" : null,
   };
 }
 
 async function followedRun(input: {
-  readonly verdict?: Verdict;
+  readonly status?: "completed" | "failed" | "canceled";
+  readonly gradingState?: "complete" | "error" | "not_requested";
   readonly stop?: AbortController;
 }): Promise<{ readonly code: number; readonly lines: readonly string[] }> {
+  const status = input.status ?? "completed";
+  const gradingState = status === "completed" ? (input.gradingState ?? "complete") : null;
   const lines: string[] = [];
+  let moved = false;
   const fetchImpl: typeof fetch = async (request, init) => {
     const url = String(request);
     if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
@@ -124,14 +166,39 @@ async function followedRun(input: {
       );
     }
     if (url.startsWith(`${URL}/v1/tests?`)) {
-      return new JsonResponse(JSON.stringify({ tests: [platformTest()], nextPageToken: null }));
+      return new JsonResponse(
+        JSON.stringify({ tests: [platformTest()], nextPageToken: null }),
+      );
     }
     if (url === `${URL}/v1/runs` && init?.method === "POST") {
       return new JsonResponse(JSON.stringify(runHeader()), { status: 201 });
     }
+    if (url === `${URL}/v1/runs/run_one`) {
+      return new JsonResponse(JSON.stringify(runHeader(moved ? "completed" : "pending")));
+    }
     if (url === `${URL}/v1/runs/run_one/simulations`) {
       return new JsonResponse(
-        JSON.stringify({ simulations: [simulation(null)], nextPageToken: null }),
+        JSON.stringify({
+          simulations: [
+            moved ? simulation(status, gradingState) : simulation("queued", null),
+          ],
+          nextPageToken: null,
+        }),
+      );
+    }
+    if (url === `${URL}/v1/simulations/sim_one`) {
+      return new JsonResponse(
+        JSON.stringify({
+          ...simulation(status, gradingState),
+          projectId: PROJECT_ID,
+          runId: "run_one",
+          runName: null,
+          grades:
+            gradingState === "complete" ? [EXPECTED_BEHAVIORS_GRADE] : [],
+          gradeHistory: [],
+          combinedScore: gradingState === "complete" ? 0.86 : null,
+          test: { expectedBehaviors: EXPECTED_BEHAVIORS },
+        }),
       );
     }
     if (url === `${URL}/v1/runs/run_one/events?after=0`) {
@@ -139,21 +206,26 @@ async function followedRun(input: {
         input.stop.abort("developer stopped following");
         return new JsonResponse(JSON.stringify({ events: [], next: 0, done: false }));
       }
-      const verdict = input.verdict ?? "passed";
+      moved = true;
       return new JsonResponse(
         JSON.stringify({
           events: [
             {
               seq: 1,
+              at: "2026-01-01T00:00:00.000Z",
               kind: "simulation",
               simulationId: "sim_one",
               testName: "Books a visit",
               personaName: "default-persona",
-              status: verdict === "errored" ? "failed" : "completed",
-              verdict,
-              reason: verdict === "errored" ? "the simulator stopped" : null,
+              status,
+              reason: status === "failed" ? "the simulator stopped" : null,
             },
-            { seq: 2, kind: "run", status: "completed" },
+            {
+              seq: 2,
+              at: "2026-01-01T00:00:00.000Z",
+              kind: "run",
+              status: "completed",
+            },
           ],
           next: 2,
           done: true,
@@ -178,28 +250,54 @@ async function followedRun(input: {
   return { code, lines };
 }
 
-describe("runRunCommand public exit behavior", () => {
-  it("returns 0 after a followed suite passes", async () => {
-    const answer = await followedRun({ verdict: "passed" });
+describe("runRunCommand operational exit behavior", () => {
+  it("shows one Expected behaviors grade with seven assertion details and keeps the operational success exit", async () => {
+    const answer = await followedRun({ gradingState: "complete" });
 
     expect(answer.code).toBe(0);
     expect(answer.lines).toContain("status: completed");
-    expect(answer.lines).toContain("passed: 1");
+    expect(answer.lines).toContain("grading-complete: 1");
+    const output = answer.lines.join("\n");
+    expect(output).toContain("combined-score: 0.86");
+    expect(output).toContain(
+      "grade: Expected behaviors score 0.86 pass-threshold 0.62 result passed",
+    );
+    expect(output).toContain(
+      "grade-rationale: Six of seven expected behaviors were present.",
+    );
+    for (const [at, behavior] of EXPECTED_BEHAVIORS.entries()) {
+      expect(output).toContain(`assertion: behavior_${String(at + 1)}`);
+      expect(output).toContain(
+        at === EXPECTED_BEHAVIORS.length - 1
+          ? "The transcript did not explain what happened to the Thursday booking."
+          : `The transcript supports: ${behavior}`,
+      );
+    }
+    expect(output.match(/^assertion: /gmu)).toHaveLength(7);
+    expect(output).not.toMatch(/overall verdict|\bgate\b|\brequired\b|latency/iu);
   });
 
-  it("returns 3 after a followed suite has a failed verdict", async () => {
-    const answer = await followedRun({ verdict: "failed" });
-
-    expect(answer.code).toBe(3);
-    expect(answer.lines).toContain("failed: 1");
-  });
-
-  it("returns 6 when execution errors and no test fails", async () => {
-    const answer = await followedRun({ verdict: "errored" });
+  it("returns 6 after an execution error and does not wait for grading", async () => {
+    const answer = await followedRun({ status: "failed" });
 
     expect(answer.code).toBe(6);
-    expect(answer.lines).toContain("failed: 0");
-    expect(answer.lines).toContain("errored: 1");
+    expect(answer.lines).toContain("execution-failed: 1");
+    expect(answer.lines).toContain("grading-terminal: 0");
+  });
+
+  it("returns 6 for a grader error or terminal grading-job failure", async () => {
+    const answer = await followedRun({ gradingState: "error" });
+
+    expect(answer.code).toBe(6);
+    expect(answer.lines).toContain("grading-errors: 1");
+  });
+
+  it("finishes a canceled simulation without waiting for grading", async () => {
+    const answer = await followedRun({ status: "canceled" });
+
+    expect(answer.code).toBe(0);
+    expect(answer.lines).toContain("execution-canceled: 1");
+    expect(answer.lines).toContain("grading-terminal: 0");
   });
 
   it("returns 130 and leaves the platform run active when following is interrupted", async () => {
@@ -208,6 +306,6 @@ describe("runRunCommand public exit behavior", () => {
 
     expect(answer.code).toBe(130);
     expect(answer.lines).toContain("status: left-running");
-    expect(answer.lines).toContain("pending: 1");
+    expect(answer.lines).toContain("execution-finished: 0");
   });
 });

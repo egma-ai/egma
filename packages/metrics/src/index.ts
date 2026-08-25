@@ -42,6 +42,7 @@ export {
 
 export {
   aggregateOf,
+  arithmeticMeanOf,
   everySpanIn,
   measuresFromSpans,
   worstSampleOf,

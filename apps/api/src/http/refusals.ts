@@ -93,15 +93,6 @@ export const CODES = {
   retry_unavailable: 409,
   /** The selected simulation cannot be used as a source for a new run. */
   simulation_rerun_unavailable: 409,
-  /**
-   * A re-grade of a conversation egma is judging **this moment** under a
-   * narrowing that does not cover what was asked for. Its own code because it
-   * is the one ask this route cannot carry out and cannot queue either: a
-   * claimed job is judged under the instruction it was claimed with, and the
-   * only honest answer is that nothing happened and the ask has to be made
-   * again when those verdicts land.
-   */
-  narrower_grading_in_flight: 409,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
@@ -314,28 +305,6 @@ export function unsignableReference(
 }
 
 /**
- * A re-grade that reached a conversation already being judged, under an
- * instruction narrower than the one just asked for.
- *
- * **A refusal rather than a success with a caveat in it, and that is the whole
- * decision.** Every other outstanding job answers a re-grade by carrying it out
- * — a simulation from its pinned plan, or a production trace from current
- * versions — and a 200 saying "already waiting" is true of those. This one is
- * not: the claimed job judges one grader that is not the one asked about,
- * nothing is queued behind it, and no verdict for the ask will ever land. A 200
- * carrying a new field would leave every client written before that field
- * reassuring somebody about work that is not happening, which is the failure
- * this answer exists to make impossible. An unread refusal is still visibly a
- * refusal.
- */
-export function narrowerGradingInFlight(
-  reply: FastifyReply,
-  message: string,
-): FastifyReply {
-  return refuse(reply, "narrower_grading_in_flight", message);
-}
-
-/**
  * A run over a connection type whose simulator adapter has not shipped.
  *
  * Its own code rather than an `unprocessable`, because the caller's next move
@@ -362,7 +331,7 @@ export function noAdapter(reply: FastifyReply, message: string): FastifyReply {
  * that were accepted here would be queued, claimed, and only then discovered to
  * have nowhere to dial from — a failed simulation on the record that says
  * nothing about the agent under test, which is exactly the confusion between an
- * operational failure and an agent's verdict that this product exists to keep
+ * operational failure and a low grade that this product exists to keep
  * apart.
  */
 export function phoneSetupRequired(

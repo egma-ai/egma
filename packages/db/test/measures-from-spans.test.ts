@@ -287,7 +287,7 @@ describe("one conversation's measures", () => {
     ]);
   });
 
-  it("cites the span each measurement came off, so a judgment can point at one", async () => {
+  it("cites the span each measurement came off, so a grade can point at one", async () => {
     const trace = await stored({ turn_response_latency: [900, 2_400] });
     const measured = measureIn(trace, "turn_response_latency");
     if (measured === undefined) throw new Error("the measure went missing");
@@ -298,7 +298,7 @@ describe("one conversation's measures", () => {
     expect(new Set(measured.samples.map((one) => one.spanId)).size).toBe(2);
 
     // The worst measurement, and the span it happened in — which is what a
-    // bound is held against and what a verdict row cites.
+    // bound is held against and what a grade can cite.
     expect(worstSampleOf(measured)).toEqual(measured.samples[1]);
   });
 

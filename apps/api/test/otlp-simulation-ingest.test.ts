@@ -369,7 +369,7 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
    * as numbers — computed by the one shared measure module, from exactly the
    * spans this trace holds, with nothing stored in between. That is the whole of
    * the claim the module exists for: the figure a page shows and the figure a
-   * `latency` verdict rests on are one arithmetic, so the two can never
+   * future latency grader reads are one arithmetic, so the two can never
    * disagree about how fast the agent answered.
    *
    * Read with an ordinary customer key, at the endpoint the dashboard reads —
@@ -802,7 +802,7 @@ describe.skipIf(!storage.available)("a resource that names no simulation, or one
    * conversation's audio.** The two identifiers are the same 128 bits written
    * two ways, and both directions are read: a reader opening a transcript
    * converts the trace id back into a simulation id to find that conversation's
-   * verdicts and its recording. So spans filed under somebody else's trace put
+   * grades and its recording. So spans filed under somebody else's trace put
    * one conversation's turns on screen beside another's audio — inside one
    * organization, with nothing anywhere saying the two disagree.
    *
@@ -1112,18 +1112,17 @@ describe.skipIf(!storage.available)("the customer-key path, beside it", () => {
   });
 });
 
-describe.skipIf(!storage.available)("what the service path leaves alone", () => {
+describe.skipIf(!storage.available)("the simulation grading handoff", () => {
   /**
-   * A simulation's grading work is minted by the transaction that lands it
-   * terminal, so the door writes no queue row for simulation spans — one had
-   * already been minted when the chat simulation completed, and a second
-   * would be the double-judging the landing guards against.
+   * Completion and evidence readiness can arrive in either order. The drainer
+   * requests grading only after ClickHouse can return the evidence, and the
+   * per-trace request is replay safe across later segments.
    */
-  it("mints no grading work from a simulation's spans", async () => {
+  it("mints exactly one job after the completed simulation is queryable", async () => {
     const jobs = await api.database.sql<{ n: string }>(
       "select count(*) as n from grading_job where trace_id = $1",
       [CHAT_TRACE],
     );
-    expect(Number(jobs.rows[0]?.n)).toBe(0);
+    expect(Number(jobs.rows[0]?.n)).toBe(1);
   });
 });

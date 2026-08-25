@@ -47,10 +47,9 @@ const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "configure_agents": ["member", "admin"],
   "configure_monitoring": ["member", "admin"],
   "start_and_cancel_runs": ["member", "admin"],
-  // Asking for a judgment already made to be made again. A viewer is refused:
-  // a re-grade can turn a red release green by re-spending the judge over
-  // history, and a credential that can do that is not read-only however it is
-  // labelled.
+  // Asking for a grade to be produced again. A viewer is refused because a
+  // regrade appends a new result that becomes current; a credential that can
+  // change current grading evidence is not read-only.
   "regrade": ["member", "admin"],
   // Sending an agent's traces through the ingest door is a write, so a
   // read-only credential does not get to do it. The door is the only route

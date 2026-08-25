@@ -10,18 +10,19 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 import {
+  gradeProjectionProperties,
+  gradeProjectionRequired,
+  gradingStateSchema,
+  normalizedScoreSchema,
+} from "./grades.ts";
+import {
   mockToolCoverageSchema,
   mockToolSchema,
-  outcomeSchema,
-  recordedVerdictSchema,
   simulationStatusSchema,
-  verdictCountsSchema,
-  verdictSchema,
 } from "./runs.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
-const numberSchema = { type: "number" } as const;
 const booleanSchema = { type: "boolean" } as const;
 
 const traceSpanReference = { $ref: "#/$defs/traceSpan" } as const;
@@ -99,25 +100,18 @@ const transcriptSchema = {
 const planItemSchema = {
   type: "object",
   properties: {
-    kind: { type: "string", enum: ["authored"] },
-    graderId: stringIdSchema,
-    graderVersionId: stringIdSchema,
-    name: stringSchema,
-    libraryId: stringIdSchema,
-    required: booleanSchema,
-    scope: {
-      type: "string",
-      enum: ["simulations", "production", "both"],
-    },
+    projectGraderId: stringIdSchema,
+    graderDefinitionId: stringIdSchema,
+    graderDefinitionVersion: { type: "integer", minimum: 1 },
+    graderName: stringSchema,
+    passThreshold: normalizedScoreSchema,
   },
   required: [
-    "kind",
-    "graderId",
-    "graderVersionId",
-    "name",
-    "libraryId",
-    "required",
-    "scope",
+    "projectGraderId",
+    "graderDefinitionId",
+    "graderDefinitionVersion",
+    "graderName",
+    "passThreshold",
   ],
   additionalProperties: false,
 } as const;
@@ -157,13 +151,8 @@ const simulationSchema = {
     runName: nullable(stringSchema),
     position: integerSchema,
     status: simulationStatusSchema,
-    grading: {
-      type: "string",
-      enum: ["not_required", "waiting", "pending", "graded"],
-    },
-    verdict: nullable(verdictSchema),
-    score: nullable(numberSchema),
-    counts: nullable(verdictCountsSchema),
+    gradingState: nullable(gradingStateSchema),
+    ...gradeProjectionProperties,
     reason: nullable(stringSchema),
     modality: { type: "string", enum: ["voice", "chat"] },
     createdAt: dateTimeSchema,
@@ -279,42 +268,6 @@ const simulationSchema = {
       additionalProperties: false,
     },
     gradingPlan: nullable(gradingPlanSchema),
-    gradingJobs: arrayOf({
-      type: "object",
-      properties: {
-        status: {
-          type: "string",
-          enum: ["pending", "claimed", "graded", "abandoned"],
-        },
-        regradeGraderId: nullable(stringIdSchema),
-        attempts: integerSchema,
-        lastError: nullable(stringSchema),
-        finishedAt: nullable(dateTimeSchema),
-      },
-      required: [
-        "status",
-        "regradeGraderId",
-        "attempts",
-        "lastError",
-        "finishedAt",
-      ],
-      additionalProperties: false,
-    }),
-    verdicts: arrayOf(recordedVerdictSchema),
-    outcome: nullable(outcomeSchema),
-    diagnostics: nullable(outcomeSchema),
-    byGrader: arrayOf({
-      type: "object",
-      properties: {
-        graderId: stringIdSchema,
-        required: booleanSchema,
-        verdict: verdictSchema,
-        score: nullable(numberSchema),
-        counts: verdictCountsSchema,
-      },
-      required: ["graderId", "required", "verdict", "score", "counts"],
-      additionalProperties: false,
-    }),
     transcript: nullable(transcriptSchema),
   },
   required: [
@@ -324,10 +277,8 @@ const simulationSchema = {
     "runName",
     "position",
     "status",
-    "grading",
-    "verdict",
-    "score",
-    "counts",
+    "gradingState",
+    ...gradeProjectionRequired,
     "reason",
     "modality",
     "createdAt",
@@ -345,11 +296,6 @@ const simulationSchema = {
     "mockToolCoverage",
     "mockTools",
     "gradingPlan",
-    "gradingJobs",
-    "verdicts",
-    "outcome",
-    "diagnostics",
-    "byGrader",
     "transcript",
   ],
   additionalProperties: false,
@@ -392,13 +338,6 @@ export const simulationOperations = {
     request: {
       params: simulationParams,
       query: projectQuery,
-      body: {
-        type: "object",
-        properties: {
-          graderId: stringIdSchema,
-        },
-        additionalProperties: false,
-      },
     },
     responses: {
       200: {
@@ -407,16 +346,10 @@ export const simulationOperations = {
           type: "object",
           properties: {
             simulationId: stringIdSchema,
-            graderId: nullable(stringIdSchema),
             reopened: integerSchema,
             alreadyWaiting: integerSchema,
           },
-          required: [
-            "simulationId",
-            "graderId",
-            "reopened",
-            "alreadyWaiting",
-          ],
+          required: ["simulationId", "reopened", "alreadyWaiting"],
           additionalProperties: false,
         },
       },

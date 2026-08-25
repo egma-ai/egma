@@ -20,7 +20,7 @@ function simulation(
   id: string,
   position: number,
   status: "queued" | "completed",
-  verdict: "passed" | null,
+  gradingState: "complete" | null,
 ): Record<string, unknown> {
   return {
     id,
@@ -29,15 +29,15 @@ function simulation(
     testVersionId: `tstv_${String(position)}`,
     personaName: "default-persona",
     status,
-    verdict,
+    gradingState,
     reason: null,
   };
 }
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("the first run verdict", () => {
-  it("opens the skill offer when the first simulation page already contains it", async () => {
+describe("the first trace result", () => {
+  it("opens the skill offer when the first page already has terminal grading", async () => {
     const ui = new HeadlessUI({ answers: { "skills-offer": "skip" } });
     const stopped = new AbortController();
     const fetchImpl: typeof fetch = async (request, init) => {
@@ -61,11 +61,34 @@ describe("the first run verdict", () => {
         return new JsonResponse(
           JSON.stringify({
             simulations: [
-              simulation("sim_one", 1, "completed", "passed"),
+              simulation("sim_one", 1, "completed", "complete"),
               simulation("sim_two", 2, "queued", null),
               simulation("sim_three", 3, "queued", null),
             ],
             nextPageToken: null,
+          }),
+        );
+      }
+      if (url === `${URL}/v1/runs/run_one`) {
+        return new JsonResponse(
+          JSON.stringify({
+            id: "run_one",
+            status: "running",
+            agentId: "agt_one",
+            connectionId: "con_one",
+            productLabel: "Fixture",
+            modality: "chat",
+            expectedSimulationCount: 3,
+            resultsUrl: `${URL}/runs/run_one`,
+          }),
+        );
+      }
+      if (url === `${URL}/v1/simulations/sim_one`) {
+        return new JsonResponse(
+          JSON.stringify({
+            grades: [],
+            combinedScore: null,
+            test: { expectedBehaviors: [] },
           }),
         );
       }
@@ -105,6 +128,6 @@ describe("the first run verdict", () => {
 
     expect(offered).toBe(true);
     expect(report.kind).toBe("run-started");
-    expect(ui.record.run?.firstVerdict?.verdict).toBe("passed");
+    expect(ui.record.run?.firstResult?.gradingState).toBe("complete");
   });
 });

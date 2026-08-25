@@ -54,12 +54,12 @@ import { theProject, within } from "./within.ts";
  * its own project, so that write has somewhere to land.
  *
  * **A test is falsifiable from birth.** Its expected behaviors are required
- * non-empty at write time, and judging a simulation against them is part of
+ * non-empty at write time, and grading a simulation against them is part of
  * what running a test means, so there is no window in which a stored test could
  * pass without ever having been able to fail.
  *
- * **A test names no graders.** What judges a simulation is the project's
- * running copies and their scope, decided grader-side and never through test
+ * **A test names no graders.** Which project graders grade a simulation is
+ * resolved from each project grader's scope and never through test
  * content — so a version's content is the scenario, the behaviors and the mock
  * overrides, and there is nothing else in here for a writer to name.
  */
@@ -74,9 +74,9 @@ import { theProject, within } from "./within.ts";
  * collapses back into the plain non-empty rule the falsifiability decision
  * placed on the list.
  *
- * Each sentence is one **assertion** of the expected-behaviors grader, judged in
- * isolation and written one verdict row each, keyed by its position in this
- * list.
+ * Each sentence is one **assertion** of the expected-behaviors grader, graded in
+ * isolation and stored as one nested assertion detail in that grader's single
+ * grade row for the trace. Its key comes from its position in this list.
  */
 export type ExpectedBehavior = string;
 
@@ -520,9 +520,9 @@ function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
  *
  * The comparison a persona list gets, because a behavior is a plain sentence
  * now and there is nothing else on it to compare — but named separately,
- * because the reason order matters here is its own: a verdict row is keyed by a
- * behavior's **position**, so moving a sentence rekeys every row about it, and
- * minting a version is what keeps the old rows readable.
+ * because the reason order matters here is its own: nested assertion details
+ * are keyed by a behavior's **position**, so moving a sentence rekeys the
+ * details, and minting a version is what keeps old grade rows readable.
  */
 function sameBehaviors(
   a: readonly ExpectedBehavior[],
@@ -1405,15 +1405,15 @@ function expectRevision(
 
 /**
  * One frozen version, by its own `tstv_` id — the read a run uses to stay
- * interpretable after the test moves on, and the read a verdict row's assertion
+ * interpretable after the test moves on, and the read a grade row's assertion
  * key is resolved back into words through: the scenario and expected behaviors
  * as they were, and the personas the version named, by identity and in the order
  * they were authored. Which version of each of them a simulation met is the
  * run's to pin, never this row's.
  *
- * **Which graders judged is not here and never was a version's business again.**
- * A running copy's scope decides where it applies, so what judged a conversation
- * is answered from the copies rather than from the frozen content of a test.
+ * **Which graders ran is not here and is not a version's business.** A project
+ * grader's scope decides where it applies, so the grading plan is resolved from
+ * project graders rather than from the frozen content of a test.
  *
  * It also answers the two things about the test itself that whoever holds only a
  * version id cannot get anywhere else: what the test is called, and whether it
@@ -1791,9 +1791,9 @@ export async function liveTestsNamingPersona(
 /*
  * **There is no companion asking which tests name a grader.** There was one, and
  * it refused a grader's delete while a live test's current version pointed at
- * it. A test names no graders now, so nothing here can stand in a delete's way:
- * switching a running copy off is a decision about the project, made once,
- * without hunting for the tests that would quietly stop checking something.
+ * it. A test names no graders now. Which tests a grader covers is a selector in
+ * the project grader's scope, resolved from that side without a test-to-grader
+ * junction.
  *
  * The persona question above stands untouched, because a persona is still named
  * by test content and losing one really would empty a test of somebody who calls

@@ -15,18 +15,9 @@ export type RunSimulationPage = ListRunSimulationsResponse;
 export type RunSimulation = RunSimulationPage["simulations"][number];
 export type RunEventFeed = ListRunEventsResponse;
 export type RunEventRow = RunEventFeed["events"][number];
-export type VerdictWord = NonNullable<RunRow["verdict"]>;
 export type RunStatusWord = RunRow["status"];
 export type SimulationStatusWord = RunSimulation["status"];
-export type GradingWord = RunSimulation["grading"];
-export type VerdictCounts = RunRow["verdictCounts"];
-
-export const VERDICT_WORDS: readonly VerdictWord[] = [
-  "passed",
-  "failed",
-  "skipped",
-  "errored",
-];
+export type GradingWord = NonNullable<RunSimulation["gradingState"]>;
 
 export const RUN_STATUS_WORDS: readonly RunStatusWord[] = [
   "pending",
