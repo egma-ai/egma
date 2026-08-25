@@ -5461,7 +5461,7 @@ describe("the persona catalog ownership cutover (0045)", () => {
     await database.drop();
   });
 
-  it("rewrites Default Persona v1 in place to Terra with reasoning off", async () => {
+  it("rewrites Default Persona v1 in place to Terra", async () => {
     const { rows } = await client.query<{ models: unknown; traits: unknown }>(
       `select models, traits from persona_version
         where id = 'prsv_01M0E4J0BBE1FVDVTZ1BSS5C97'`,
@@ -5471,7 +5471,6 @@ describe("the persona catalog ownership cutover (0045)", () => {
         llm: {
           provider: "openai",
           model: "gpt-5.6-terra",
-          reasoningEffort: "none",
         },
       },
       traits: {
@@ -5528,173 +5527,21 @@ describe("the persona catalog ownership cutover (0045)", () => {
          $2,
          1,
          '{"personality":"Tests a future adapter.","language":"en-US"}'::jsonb,
-         '{"llm":{"provider":"future-provider","model":"future-llm","reasoningEffort":"future-effort"},"stt":{"provider":"future-provider","model":"future-stt"},"tts":{"provider":"future-provider","model":"future-tts","voiceId":"future-voice","speed":1}}'::jsonb
+         '{"llm":{"provider":"future-provider","model":"future-llm"},"stt":{"provider":"future-provider","model":"future-stt"},"tts":{"provider":"future-provider","model":"future-tts","voiceId":"future-voice","speed":1}}'::jsonb
        )`,
       [versionId, personaId],
     );
     await client.query("commit");
   });
 
-  it("restores immutable persona versions after the bounded rewrite", async () => {
-    await expect(
-      client.query(
-        `update persona_version
-            set models = jsonb_set(models, '{llm,model}', '"changed"')
-          where id = $1`,
-        [customVersionId],
-      ),
-    ).rejects.toThrow(/persona version.*authored content cannot change/u);
-  });
-});
-
-describe("the persona reasoning-off cutover (0046)", () => {
-  let database: EmptyDatabase;
-  let before: string;
-  let client: pg.Client;
-  const organizationId = newId("org");
-  const projectId = newId("prj");
-  const personaId = newId("prs");
-  const cases = [
-    { model: "gpt-5.6-terra", reasoningEffort: "low" },
-    { model: "gpt-5.6-sol", reasoningEffort: "none" },
-    { model: "gpt-5.4", reasoningEffort: undefined },
-    { model: "gpt-4o", reasoningEffort: undefined },
-    {
-      provider: "future-provider",
-      model: "future-llm",
-      reasoningEffort: "future-effort",
-    },
-  ].map((entry) => ({
-    provider: "openai",
-    ...entry,
-    versionId: newId("prsv"),
-  }));
-
-  beforeAll(async () => {
-    database = await createEmptyDatabase("persona_reasoning_off");
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0046-"));
-    const migrations = await readMigrations();
-    for (const migration of migrations) {
-      if (migration.name < "0046") {
-        await writeFile(path.join(before, migration.name), migration.sql);
-      }
-    }
-    await runMigrations(database.url, before);
-
-    client = new pg.Client({ connectionString: database.url });
-    await client.connect();
-    await client.query(
-      "insert into organization (id, name, slug) values ($1, 'Acme', $2)",
-      [organizationId, `acme-${organizationId}`],
-    );
-    await client.query(
-      `insert into project (id, organization_id, name, slug, revision)
-       values ($1, $2, 'Default', 'default', $3)`,
-      [projectId, organizationId, newId("rev")],
-    );
-
-    await client.query("begin");
-    await client.query(
-      `insert into persona
-         (id, organization_id, project_id, name, current_version_id, revision)
-       values ($1, $2, $3, 'Reasoning history', $4, $5)`,
-      [
-        personaId,
-        organizationId,
-        projectId,
-        cases[0]?.versionId,
-        newId("rev"),
-      ],
-    );
-    for (const [index, one] of cases.entries()) {
-      const llm = {
-        provider: one.provider,
-        model: one.model,
-        ...(one.reasoningEffort === undefined
-          ? {}
-          : { reasoningEffort: one.reasoningEffort }),
-      };
-      await client.query(
-        `insert into persona_version (id, persona_id, version, traits, models)
-         values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
-        [
-          one.versionId,
-          personaId,
-          index + 1,
-          JSON.stringify({ personality: "Patient.", language: "en-US" }),
-          JSON.stringify({
-            llm,
-            stt: { provider: "deepgram", model: "nova-3-general" },
-            tts: {
-              provider: "cartesia",
-              model: "sonic-3.5",
-              voiceId: "voice-under-test",
-              speed: 1,
-            },
-          }),
-        ],
-      );
-    }
-    await client.query("commit");
-
-    const cutover = migrations.find(
-      (migration) =>
-        migration.name === "0046_normalize_persona_reasoning_off.sql",
-    );
-    if (cutover === undefined) throw new Error("missing migration 0046");
-    await writeFile(path.join(before, cutover.name), cutover.sql);
-    const result = await runMigrations(database.url, before);
-    expect(result.applied).toEqual([
-      "0046_normalize_persona_reasoning_off.sql",
-    ]);
-  });
-
-  afterAll(async () => {
-    await client.end();
-    await rm(before, { recursive: true, force: true });
-    await database.drop();
-  });
-
-  it("removes the old persona field regardless of model", async () => {
-    const { rows } = await client.query<{ id: string; models: unknown }>(
-      `select id, models from persona_version
-        where persona_id = $1
-        order by version`,
-      [personaId],
-    );
-
-    expect(rows).toHaveLength(cases.length);
-    for (const [index, row] of rows.entries()) {
-      const one = cases[index];
-      if (one === undefined) throw new Error("missing reasoning case");
-      const expectedLlm = {
-        provider: one.provider,
-        model: one.model,
-      };
-      expect(row).toEqual({
-        id: one.versionId,
-        models: {
-          llm: expectedLlm,
-          stt: { provider: "deepgram", model: "nova-3-general" },
-          tts: {
-            provider: "cartesia",
-            model: "sonic-3.5",
-            voiceId: "voice-under-test",
-            speed: 1,
-          },
-        },
-      });
-    }
-  });
-
   it("keeps reasoning policy out of the stored persona shape", async () => {
     await expect(
       client.query(
         `insert into persona_version (id, persona_id, version, traits, models)
-         values ($1, $2, 99, $3::jsonb, $4::jsonb)`,
+         values ($1, $2, 2, $3::jsonb, $4::jsonb)`,
         [
           newId("prsv"),
-          personaId,
+          customPersonaId,
           JSON.stringify({ personality: "Patient.", language: "en-US" }),
           JSON.stringify({
             llm: {
@@ -5724,7 +5571,7 @@ describe("the persona reasoning-off cutover (0046)", () => {
         `update persona_version
             set models = jsonb_set(models, '{llm,model}', '"changed"')
           where id = $1`,
-        [cases[0]?.versionId],
+        [customVersionId],
       ),
     ).rejects.toThrow(/persona version.*authored content cannot change/u);
   });

@@ -41,7 +41,7 @@ UPDATE "persona_version"
 SET "models" = jsonb_set(
 	"models",
 	'{llm}',
-	'{"provider":"openai","model":"gpt-5.6-terra","reasoningEffort":"none"}'::jsonb,
+	'{"provider":"openai","model":"gpt-5.6-terra"}'::jsonb,
 	false
 )
 WHERE "id" = 'prsv_01M0E4J0BBE1FVDVTZ1BSS5C97';--> statement-breakpoint
@@ -80,22 +80,12 @@ ALTER TABLE "persona_version" ADD CONSTRAINT "persona_version_models_valid" CHEC
         and ("persona_version"."models" - array['llm', 'stt', 'tts']::text[])
           is not distinct from '{}'::jsonb
         and jsonb_typeof("persona_version"."models"->'llm') is not distinct from 'object'
-        and (("persona_version"."models"->'llm') - array[
-          'provider', 'model', 'reasoningEffort'
-        ]::text[]) is not distinct from '{}'::jsonb
+        and (("persona_version"."models"->'llm') - array['provider', 'model']::text[])
+          is not distinct from '{}'::jsonb
         and jsonb_typeof("persona_version"."models"->'llm'->'provider') is not distinct from 'string'
         and nullif(btrim("persona_version"."models"->'llm'->>'provider'), '') is not null
         and jsonb_typeof("persona_version"."models"->'llm'->'model') is not distinct from 'string'
         and nullif(btrim("persona_version"."models"->'llm'->>'model'), '') is not null
-        and (
-          not ("persona_version"."models"->'llm' ? 'reasoningEffort')
-          or (
-            jsonb_typeof("persona_version"."models"->'llm'->'reasoningEffort')
-              is not distinct from 'string'
-            and nullif(btrim("persona_version"."models"->'llm'->>'reasoningEffort'), '')
-              is not null
-          )
-        )
         and jsonb_typeof("persona_version"."models"->'stt') is not distinct from 'object'
         and (("persona_version"."models"->'stt') - array['provider', 'model']::text[])
           is not distinct from '{}'::jsonb
