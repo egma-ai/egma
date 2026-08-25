@@ -70,6 +70,7 @@ beforeAll(async () => {
   // file reaches grading.
 
   const created = await createAgent(auth, {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: {
       agentPlatform: "retell",

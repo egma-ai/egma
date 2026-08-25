@@ -236,7 +236,7 @@ afterEach(() => {
 describe("an agent named by the link", () => {
   it("opens on that agent, and on its own platform", async () => {
     sentAbout("agt_1");
-    stub({ agents: [agent({ agentPlatform: "livekit_agents" })] });
+    stub({ agents: [agent({ agentPlatform: "livekit" })] });
     render(<StartMonitoringPage />);
 
     const picked = await screen.findByLabelText("Agent");
@@ -750,13 +750,13 @@ describe("a key edited while discovery is in flight", () => {
   });
 });
 
-describe("the LiveKit Agents path", () => {
+describe("the LiveKit path", () => {
   it("shows the instructions and consults no monitoring state at all", async () => {
     const { seen } = stub({});
     render(<StartMonitoringPage />);
 
     fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit_agents" },
+      target: { value: "livekit" },
     });
 
     expect(

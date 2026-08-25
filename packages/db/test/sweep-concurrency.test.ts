@@ -78,6 +78,7 @@ beforeAll(async () => {
   // guarded lifecycle update and run finalization.
 
   const created = await createAgent(auth, {
+    agentPlatform: "retell",
     name: "Front desk",
     connection: {
       agentPlatform: "retell",

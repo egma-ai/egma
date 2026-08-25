@@ -11,7 +11,7 @@ several connections, and each connection links back through `agentId`.
 A connection states its agent platform, connection type, access variant, and
 modality. Egma derives its product label and topology from those facts. The
 agent platform says where the agent runs; the connection type selects the
-simulator adapter. For example, a Retell or LiveKit Agents worker can use the
+simulator adapter. For example, a Retell or LiveKit worker can use the
 same platform-independent `phone_number` connection type.
 
 Registering with an inline connection is retry-safe. The `result` field says
@@ -70,6 +70,10 @@ The `result` field in the response tells you exactly what happened:
   Display name for the agent. Required unless you want Egma to pick a numbered default. Must be unique within the project.
 </ParamField>
 
+<ParamField body="agentPlatform" type="string" required>
+  The platform that runs this agent. Current values are `retell` and `livekit`.
+</ParamField>
+
 <ParamField query="projectId" type="string">
   Project id or name to write this agent into. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
 </ParamField>
@@ -80,14 +84,14 @@ The `result` field in the response tells you exactly what happened:
   <Expandable title="connection fields">
     <ParamField body="agentPlatform" type="string | null" required>
       Which platform this combination is for. Current values are `retell`,
-      `livekit_agents`, or `null`.
+      `livekit`, or `null`.
 
       A connection stores no platform of its own. Some connection types reach
       exactly one platform — `retell_chat_api` reaches Retell, `livekit_room`
-      reaches LiveKit Agents — and for those the type answers and this field
+      reaches LiveKit — and for those the type answers and this field
       only selects the combination to check. `phone_number` reaches any
       platform, so a phone connection belongs to whichever platform its **agent**
-      is bound to, and to none while the agent is unbound.
+      declares.
 
       Send `null` to let the agent answer. Naming a platform that differs from
       the one the agent is bound to is refused with `422`, because Egma would
@@ -146,7 +150,7 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="id" type="string">Unique agent identifier (`agt_…`).</ResponseField>
     <ResponseField name="projectId" type="string">The project this agent belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="agentPlatform" type="string | null">The platform that runs this agent (`retell` or `livekit_agents`), or `null` while it is unbound.</ResponseField>
+    <ResponseField name="agentPlatform" type="string">The platform that runs this agent (`retell` or `livekit`).</ResponseField>
     <ResponseField name="platformAgentId" type="string | null">That platform's own identifier for this agent, or `null`.</ResponseField>
     <ResponseField name="monitoringKeyPresent" type="boolean">Whether a platform key is stored for pulling this agent's production conversations.</ResponseField>
     <ResponseField name="monitoringApiKeyHint" type="string | null">Last four characters of that key, or `null`. Egma never returns the key itself.</ResponseField>
@@ -166,7 +170,7 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="agentId" type="string">The agent this connection belongs to.</ResponseField>
     <ResponseField name="projectId" type="string">The project this connection belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="agentPlatform" type="string | null">The platform this connection reaches. Derived, never stored: the connection type answers where it reaches exactly one platform, otherwise the agent's own platform answers, and it is `null` where neither does.</ResponseField>
+    <ResponseField name="agentPlatform" type="string">The platform this connection reaches. Derived, never stored: the connection type answers where it reaches exactly one platform, otherwise the agent's declared platform answers.</ResponseField>
     <ResponseField name="connectionType" type="string">The path the simulator uses.</ResponseField>
     <ResponseField name="accessVariant" type="string">How Egma gets access to that path.</ResponseField>
     <ResponseField name="modality" type="string">`chat` or `voice`.</ResponseField>
@@ -189,6 +193,7 @@ curl -X POST https://your-egma-host/v1/agents \
   -H "Content-Type: application/json" \
   -d '{
     "name": "front-desk",
+    "agentPlatform": "retell",
     "connection": {
       "agentPlatform": "retell",
       "connectionType": "retell_chat_api",
@@ -208,8 +213,9 @@ curl -X POST https://your-egma-host/v1/agents \
   -H "Content-Type: application/json" \
   -d '{
     "name": "support-bot",
+    "agentPlatform": "livekit",
     "connection": {
-      "agentPlatform": "livekit_agents",
+      "agentPlatform": "livekit",
       "connectionType": "livekit_room",
       "accessVariant": "livekit_room.project_credentials",
       "modality": "voice",

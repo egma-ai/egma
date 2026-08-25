@@ -3941,7 +3941,7 @@ describe("the direct Monitoring cutover (0038)", () => {
         metadata: '{"run":"old"}',
       },
       expected: {
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionKind: "livekit_room",
         accessVariant: "livekit_room.project_credentials",
       },
@@ -3959,7 +3959,7 @@ describe("the direct Monitoring cutover (0038)", () => {
         tokenEndpoint: "https://auth.example.test/livekit-token",
       },
       expected: {
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionKind: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
@@ -5152,7 +5152,7 @@ describe("agents own platform monitoring (0042)", () => {
     expect(rows).toEqual([
       {
         name: "Back office",
-        agent_platform: null,
+        agent_platform: "retell",
         platform_agent_id: null,
         monitoring_api_key: null,
         monitoring_api_key_hint: null,
@@ -5160,15 +5160,15 @@ describe("agents own platform monitoring (0042)", () => {
       },
       {
         name: "Front desk",
-        agent_platform: null,
+        agent_platform: "retell",
         platform_agent_id: null,
         monitoring_api_key: null,
         monitoring_api_key_hint: null,
         pull_production_calls: false,
       },
     ]);
-    // Nothing is carried from the selected-agent rows: an installed agent is
-    // unbound and not pulling until a person pastes a key onto it.
+    // The platform comes from each agent's one existing connection. Nothing
+    // else is carried from the retired monitoring rows.
     const gone = await client.query<{ column_name: string }>(
       `select column_name from information_schema.columns
         where table_schema = 'public' and table_name = 'agent'
@@ -5196,14 +5196,14 @@ describe("agents own platform monitoring (0042)", () => {
   it("refuses a switch on that is not a whole binding", async () => {
     const halfBound = newId("agt");
     await client.query(
-      `insert into agent (id, organization_id, project_id, name)
-       values ($1, $2, $3, 'Half bound')`,
+      `insert into agent (id, organization_id, project_id, name, agent_platform)
+       values ($1, $2, $3, 'Half bound', 'retell')`,
       [halfBound, organizationId, projectId],
     );
     await expect(
       client.query(
-        `update agent set agent_platform = 'retell',
-            platform_agent_id = 'agent_half', pull_production_calls = true
+        `update agent set platform_agent_id = 'agent_half',
+            pull_production_calls = true
           where id = $1`,
         [halfBound],
       ),
@@ -5211,7 +5211,7 @@ describe("agents own platform monitoring (0042)", () => {
     // The key and its hint travel together, whichever way round they are set.
     await expect(
       client.query(
-        `update agent set agent_platform = 'retell', monitoring_api_key = 'sealed'
+        `update agent set monitoring_api_key = 'sealed'
           where id = $1`,
         [halfBound],
       ),

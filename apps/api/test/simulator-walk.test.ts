@@ -688,6 +688,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const registered = await call("POST", "/v1/agents", {
         key,
         body: {
+          agentPlatform: "retell",
           name: "Front desk",
           connection: {
             agentPlatform: "retell",

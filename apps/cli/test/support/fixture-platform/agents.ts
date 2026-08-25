@@ -416,21 +416,21 @@ const CONNECTION_OPTIONS = [
     productLabel: "Retell phone",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     productLabel: "LiveKit project credentials",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
   },
   {
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -503,7 +503,7 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_TYPES.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "projectId", "connection"] as const;
+const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -762,6 +762,7 @@ type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
+  readonly agentPlatform: "retell" | "livekit";
   readonly createdAt: string;
   updatedAt: string;
 };
@@ -772,7 +773,7 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     id: agent.id,
     projectId: agent.projectId,
     name: agent.name,
-    agentPlatform: null,
+    agentPlatform: agent.agentPlatform,
     platformAgentId: null,
     monitoringKeyPresent: false,
     monitoringApiKeyHint: null,
@@ -1052,7 +1053,7 @@ export function agentRoutes(options: {
       agentId: agent.id,
       projectId: agent.projectId,
       name,
-      agentPlatform: input.agentPlatform,
+      agentPlatform: input.agentPlatform ?? agent.agentPlatform,
       connectionType,
       accessVariant: input.accessVariant,
       modality,
@@ -1139,6 +1140,12 @@ export function agentRoutes(options: {
             const projectId = projectNamed(given(named), "writes into");
 
             const name = validName(body["name"], "an agent");
+            const agentPlatform = body["agentPlatform"];
+            if (agentPlatform !== "retell" && agentPlatform !== "livekit") {
+              throw new Refusal(
+                "an agent platform is required and must be retell or livekit",
+              );
+            }
             const inline = envelope === undefined ? undefined : admitConnection(envelope);
 
             if (inline !== undefined) {
@@ -1196,6 +1203,7 @@ export function agentRoutes(options: {
               id: newId("agt"),
               projectId,
               name,
+              agentPlatform,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };

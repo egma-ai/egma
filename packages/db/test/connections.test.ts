@@ -85,7 +85,7 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
 function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
     name: `livekit-${newId("con").slice(-8)}`,
-    agentPlatform: "livekit_agents",
+    agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
@@ -98,8 +98,11 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
   };
 }
 
-async function agentNamed(name: string): Promise<string> {
-  const created = await createAgent(actingAsAcme(), { name });
+async function agentNamed(
+  name: string,
+  agentPlatform: "retell" | "livekit" = "retell",
+): Promise<string> {
+  const created = await createAgent(actingAsAcme(), { agentPlatform, name });
   return created.id;
 }
 
@@ -286,8 +289,8 @@ describe("which platform a connection belongs to", () => {
     expect(restored?.productLabel).toBe("Retell phone");
   });
 
-  it("is nobody's where the type spans platforms and the agent is unbound", async () => {
-    const agentId = await agentNamed("Unbound by phone");
+  it("comes from the agent declaration when the payload names no platform", async () => {
+    const agentId = await agentNamed("Declared Retell by phone");
 
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "hotline",
@@ -297,16 +300,16 @@ describe("which platform a connection belongs to", () => {
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
     });
-    expect(added?.agentPlatform).toBeNull();
-    expect(added?.productLabel).toBe("Phone number");
+    expect(added?.agentPlatform).toBe("retell");
+    expect(added?.productLabel).toBe("Retell phone");
 
     const fetched = await getConnection(
       actingAsAcme(),
       agentId,
       added?.id ?? "",
     );
-    expect(fetched?.agentPlatform).toBeNull();
-    expect(fetched?.productLabel).toBe("Phone number");
+    expect(fetched?.agentPlatform).toBe("retell");
+    expect(fetched?.productLabel).toBe("Retell phone");
   });
 
   it("refuses a payload naming a platform its agent contradicts", async () => {
@@ -314,11 +317,11 @@ describe("which platform a connection belongs to", () => {
 
     // `phone_number` reaches any platform, so this connection would be
     // represented as Retell's whatever the payload says. Saying
-    // `livekit_agents` is therefore a claim egma cannot honour, and it is told
+    // `livekit` is therefore a claim egma cannot honour, and it is told
     // rather than quietly relabelled.
     const refused = await addConnection(actingAsAcme(), agentId, {
       name: "hotline",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
@@ -329,7 +332,7 @@ describe("which platform a connection belongs to", () => {
     const problem = refused as AgentWriteRefusedError;
     expect(problem.reason).toBe("platform_contradicts_agent");
     // Both platforms are named, so the sentence says what to send instead.
-    expect(problem.message).toContain("livekit_agents");
+    expect(problem.message).toContain("livekit");
     expect(problem.message).toContain("retell");
 
     // And nothing was written.
@@ -376,12 +379,9 @@ describe("which platform a connection belongs to", () => {
     expect(added?.productLabel).toBe("Retell phone");
   });
 
-  it("takes either platform on an unbound agent, and stores neither", async () => {
-    // With no agent to contradict, a payload may still name a platform to
-    // choose the tuple it is checked against — and what comes back says what
-    // is actually stored, which is nothing.
-    for (const named of ["retell", "livekit_agents"] as const) {
-      const agentId = await agentNamed(`Unbound for ${named}`);
+  it("takes either platform when it agrees with the agent declaration", async () => {
+    for (const named of ["retell", "livekit"] as const) {
+      const agentId = await agentNamed(`Declared ${named}`, named);
       const added = await addConnection(actingAsAcme(), agentId, {
         name: "hotline",
         agentPlatform: named,
@@ -390,16 +390,14 @@ describe("which platform a connection belongs to", () => {
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       });
-      expect(added?.agentPlatform).toBeNull();
-      expect(added?.productLabel).toBe("Phone number");
+      expect(added?.agentPlatform).toBe(named);
 
       const fetched = await getConnection(
         actingAsAcme(),
         agentId,
         added?.id ?? "",
       );
-      expect(fetched?.agentPlatform).toBeNull();
-      expect(fetched?.productLabel).toBe("Phone number");
+      expect(fetched?.agentPlatform).toBe(named);
     }
   });
 
@@ -554,7 +552,7 @@ describe("a livekit connection", () => {
     const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(fetched).toMatchObject({
       name: "quickstart",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
@@ -649,7 +647,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
   function atEndpoint(overrides: Partial<NewConnection> = {}): NewConnection {
     return {
       name: `livekit-endpoint-${newId("con").slice(-8)}`,
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -668,7 +666,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
 
     const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(fetched).toMatchObject({
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       productLabel: "LiveKit token endpoint",
@@ -1074,6 +1072,7 @@ describe("reaching a connection through the wrong door", () => {
 describe("creating an agent with its first connection inline", () => {
   it("writes both rows in one motion and answers both ids", async () => {
     const created = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
       name: "Wired From Birth",
       connection: retellConnection({ name: "day-one" }),
     });
@@ -1088,6 +1087,7 @@ describe("creating an agent with its first connection inline", () => {
 
   it("defaults the inline connection's name from its type", async () => {
     const created = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
       name: "Wired Namelessly",
       connection: retellConnection({ name: undefined }),
     });
@@ -1098,6 +1098,7 @@ describe("creating an agent with its first connection inline", () => {
   it("leaves no agent behind when the connection payload is bad", async () => {
     await expect(
       createAgent(actingAsAcme(), {
+        agentPlatform: "retell",
         name: "Atomic",
         connection: retellConnection({ config: {} }),
       }),
@@ -1110,6 +1111,7 @@ describe("creating an agent with its first connection inline", () => {
 
     // And the name is genuinely free: the create can be retried, fixed.
     const retried = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
       name: "Atomic",
       connection: retellConnection(),
     });
@@ -1117,7 +1119,7 @@ describe("creating an agent with its first connection inline", () => {
   });
 
   it("still creates an agent with no connection at all", async () => {
-    const created = await createAgent(actingAsAcme(), { name: "Unwired" });
+    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Unwired" });
     expect(created.connection).toBeUndefined();
     expect(await listConnections(actingAsAcme(), created.id)).toEqual([]);
   });

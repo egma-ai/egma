@@ -269,7 +269,7 @@
                                 "type": "string",
                                 "enum": [
                                   "retell",
-                                  "livekit_agents"
+                                  "livekit"
                                 ]
                               },
                               {
@@ -504,6 +504,13 @@
                   "name": {
                     "type": "string"
                   },
+                  "agentPlatform": {
+                    "type": "string",
+                    "enum": [
+                      "retell",
+                      "livekit"
+                    ]
+                  },
                   "connection": {
                     "type": "object",
                     "properties": {
@@ -516,7 +523,7 @@
                             "type": "string",
                             "enum": [
                               "retell",
-                              "livekit_agents"
+                              "livekit"
                             ]
                           },
                           {
@@ -596,7 +603,8 @@
                   }
                 },
                 "required": [
-                  "name"
+                  "name",
+                  "agentPlatform"
                 ],
                 "additionalProperties": false
               }
@@ -632,17 +640,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -741,17 +742,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -903,17 +897,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -1012,17 +999,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -1320,17 +1300,10 @@
                             "type": "string"
                           },
                           "agentPlatform": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "retell",
-                                  "livekit_agents"
-                                ]
-                              },
-                              {
-                                "type": "null"
-                              }
+                            "type": "string",
+                            "enum": [
+                              "retell",
+                              "livekit"
                             ]
                           },
                           "platformAgentId": {
@@ -1413,17 +1386,10 @@
                                   "type": "string"
                                 },
                                 "agentPlatform": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        "retell",
-                                        "livekit_agents"
-                                      ]
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
+                                  "type": "string",
+                                  "enum": [
+                                    "retell",
+                                    "livekit"
                                   ]
                                 },
                                 "connectionType": {
@@ -1705,17 +1671,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -1816,17 +1775,10 @@
                             "type": "string"
                           },
                           "agentPlatform": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "retell",
-                                  "livekit_agents"
-                                ]
-                              },
-                              {
-                                "type": "null"
-                              }
+                            "type": "string",
+                            "enum": [
+                              "retell",
+                              "livekit"
                             ]
                           },
                           "connectionType": {
@@ -2083,17 +2035,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -2325,7 +2270,7 @@
                         "type": "string",
                         "enum": [
                           "retell",
-                          "livekit_agents"
+                          "livekit"
                         ]
                       },
                       {
@@ -2433,17 +2378,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -2726,17 +2664,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -3004,17 +2935,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {
@@ -3266,17 +3190,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -3562,17 +3479,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -3868,17 +3778,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -4216,17 +4119,10 @@
                           "type": "string"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "connectionType": {
@@ -9836,17 +9732,10 @@
                           "type": "boolean"
                         },
                         "agentPlatform": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "enum": [
-                                "retell",
-                                "livekit_agents"
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
+                          "type": "string",
+                          "enum": [
+                            "retell",
+                            "livekit"
                           ]
                         },
                         "platformAgentId": {

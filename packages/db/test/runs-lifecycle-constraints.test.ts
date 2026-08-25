@@ -90,8 +90,8 @@ async function seedAgent(
   connection: string,
 ): Promise<void> {
   await db.sql(
-    `insert into agent (id, organization_id, project_id, name)
-     values ($1, $2, $3, $1)`,
+    `insert into agent (id, organization_id, project_id, name, agent_platform)
+     values ($1, $2, $3, $1, 'retell')`,
     [id, acme.organization, projectId],
   );
   await db.sql(

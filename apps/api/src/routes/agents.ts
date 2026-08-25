@@ -343,7 +343,7 @@ const CONNECTION_EDIT_KEYS = [
 ] as const;
 const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
-const AGENT_KEYS = ["name", "projectId", "connection"] as const;
+const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -355,6 +355,17 @@ const CONNECTION_KEYS = [
   "credentials",
   "agentPlatformSelection",
 ] as const;
+
+function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
+  const named = textWhenGiven(value, "an agent platform");
+  if (isRefusal(named)) return named;
+  if (named !== "retell" && named !== "livekit") {
+    return invalid(
+      "an agent platform is required and must be retell or livekit",
+    );
+  }
+  return named;
+}
 
 type AgentPlatformSelection = {
   readonly platformAgentId: string;
@@ -948,6 +959,8 @@ export async function agentRoutes(
 
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
+    const agentPlatform = agentPlatformIn(body.agentPlatform);
+    if (isRefusal(agentPlatform)) return refused(reply, agentPlatform);
     /*
      * **The query and the body**, with the query winning when both name a
      * project. A door that reads only one of the two ignores the other rather
@@ -997,6 +1010,7 @@ export async function agentRoutes(
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
+      agentPlatform,
       ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
     });
 

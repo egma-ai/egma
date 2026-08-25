@@ -1,12 +1,12 @@
 ---
-title: "Egma Python SDK for LiveKit Agents"
+title: "Egma Python SDK for LiveKit"
 sidebarTitle: "Python SDK"
 description: "Test LiveKit agents with mock tools and send production spans to Egma Monitoring."
 ---
 
 The `egma` Python package has two separate jobs:
 
-- `monitor_livekit(ctx)` sends production LiveKit Agents spans to Egma Monitoring.
+- `monitor_livekit(ctx)` sends production LiveKit spans to Egma Monitoring.
 - `await mockable(agent, ctx, session)` lets Egma answer selected tools during a simulation.
 
 Calling one function never enables or changes the other. `mockable` remains inert in production. `monitor_livekit` remains inert in a job that Egma dispatched for a simulation, so that simulation does not also appear as a production conversation.
@@ -33,7 +33,7 @@ Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
 ## Monitor production LiveKit agents
 
-Open **Monitoring → Start monitoring** and choose **LiveKit Agents**. That page
+Open **Monitoring → Start monitoring** and choose **LiveKit**. That page
 shows the same steps below. It is instructions only: a LiveKit agent pushes its
 own spans, so there is nothing to switch on and nothing to save.
 

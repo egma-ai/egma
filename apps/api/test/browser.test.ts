@@ -1176,7 +1176,7 @@ describe("what a project recorded in production", () => {
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
       );
       expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("LiveKit Agents");
+      expect(shown).toContain("LiveKit");
 
       /*
        * **And no column saying `production`.** Every row on this surface is

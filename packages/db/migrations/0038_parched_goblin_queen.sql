@@ -42,11 +42,11 @@ CREATE TABLE "monitoring_setup" (
 	CONSTRAINT "monitoring_setup_project_platform_unique" UNIQUE("project_id","agent_platform"),
 	CONSTRAINT "monitoring_setup_id_tenant_unique" UNIQUE("id","project_id","organization_id"),
 	CONSTRAINT "monitoring_setup_id_prefix" CHECK ("monitoring_setup"."id" ~ '^mns_[0-9A-HJKMNP-TV-Z]{26}$'),
-	CONSTRAINT "monitoring_setup_platform_allowed" CHECK ("monitoring_setup"."agent_platform" in ('retell', 'livekit_agents')),
+	CONSTRAINT "monitoring_setup_platform_allowed" CHECK ("monitoring_setup"."agent_platform" in ('retell', 'livekit')),
 	CONSTRAINT "monitoring_setup_strategy_allowed" CHECK ("monitoring_setup"."strategy" in ('retell_api_polling', 'livekit_otlp')),
 	CONSTRAINT "monitoring_setup_health_allowed" CHECK ("monitoring_setup"."health_state" in ('healthy', 'invalid_credential', 'rate_limited', 'provider_unavailable')),
 	CONSTRAINT "monitoring_setup_credentials_hint_agrees" CHECK (("monitoring_setup"."credentials" is null) = ("monitoring_setup"."credentials_hint" is null)),
-	CONSTRAINT "monitoring_setup_platform_strategy_agrees" CHECK (("monitoring_setup"."agent_platform" = 'retell' and "monitoring_setup"."strategy" = 'retell_api_polling' and "monitoring_setup"."credentials" is not null) or ("monitoring_setup"."agent_platform" = 'livekit_agents' and "monitoring_setup"."strategy" = 'livekit_otlp' and "monitoring_setup"."credentials" is null))
+	CONSTRAINT "monitoring_setup_platform_strategy_agrees" CHECK (("monitoring_setup"."agent_platform" = 'retell' and "monitoring_setup"."strategy" = 'retell_api_polling' and "monitoring_setup"."credentials" is not null) or ("monitoring_setup"."agent_platform" = 'livekit' and "monitoring_setup"."strategy" = 'livekit_otlp' and "monitoring_setup"."credentials" is null))
 );
 --> statement-breakpoint
 CREATE TABLE "retell_ingestion_failure" (
@@ -126,7 +126,7 @@ UPDATE "connection"
 SET
 	"agent_platform" = CASE
 		WHEN "type" = 'retell' THEN 'retell'
-		WHEN "type" = 'livekit' THEN 'livekit_agents'
+		WHEN "type" = 'livekit' THEN 'livekit'
 		ELSE NULL
 	END,
 	"connection_kind" = CASE
@@ -163,7 +163,7 @@ UPDATE "run"
 SET "connection_snapshot" = jsonb_build_object(
 	'agentPlatform', CASE "connection_snapshot" ->> 'type'
 		WHEN 'retell' THEN 'retell'
-		WHEN 'livekit' THEN 'livekit_agents'
+		WHEN 'livekit' THEN 'livekit'
 		ELSE NULL
 	END,
 	'connectionKind', CASE "connection_snapshot" ->> 'type'
@@ -238,6 +238,6 @@ ALTER TABLE "connection" DROP COLUMN "watch_production";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "production_cursor";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "webhook_registered_at";--> statement-breakpoint
 ALTER TABLE "connection" DROP COLUMN "webhook_delivered_at";--> statement-breakpoint
-ALTER TABLE "connection" ADD CONSTRAINT "connection_agent_platform_allowed" CHECK ("connection"."agent_platform" in ('retell', 'livekit_agents'));--> statement-breakpoint
+ALTER TABLE "connection" ADD CONSTRAINT "connection_agent_platform_allowed" CHECK ("connection"."agent_platform" in ('retell', 'livekit'));--> statement-breakpoint
 ALTER TABLE "connection" ADD CONSTRAINT "connection_kind_allowed" CHECK ("connection"."connection_kind" in ('retell_chat_api', 'phone_number', 'livekit_room'));--> statement-breakpoint
 ALTER TABLE "connection" ADD CONSTRAINT "connection_access_variant_allowed" CHECK ("connection"."access_variant" in ('retell_chat_api.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint'));

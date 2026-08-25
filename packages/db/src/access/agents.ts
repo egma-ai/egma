@@ -102,7 +102,7 @@ export type Connection = {
    * Derived, never stored: the platform the connection type pins, else the
    * agent's own binding, else null. See ADR-0015.
    */
-  readonly agentPlatform: AgentPlatform | null;
+  readonly agentPlatform: AgentPlatform;
   readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
@@ -157,6 +157,8 @@ export type RestoreCredential =
 
 export type NewAgent = {
   readonly name: string;
+  /** Which product or framework runs this agent. */
+  readonly agentPlatform: AgentPlatform;
   /**
    * The optional first connection, written in the same transaction — the
    * happy onboarding path never produces an unreachable agent, and a bad
@@ -169,8 +171,8 @@ export type Agent = {
   readonly id: string;
   readonly projectId: string;
   readonly name: string;
-  /** Which platform runs this agent, or null while nobody has bound it. */
-  readonly agentPlatform: AgentPlatform | null;
+  /** Which platform runs this agent. */
+  readonly agentPlatform: AgentPlatform;
   /** That platform's own id for it, or null. */
   readonly platformAgentId: string | null;
   /** The last characters of the sealed monitoring key, or null. */
@@ -249,7 +251,7 @@ type AgentRow = {
   readonly id: string;
   readonly projectId: string;
   readonly name: string;
-  readonly agentPlatform: string | null;
+  readonly agentPlatform: string;
   readonly platformAgentId: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
@@ -261,7 +263,7 @@ type AgentRow = {
 
 /** The platform column is narrowed by assertion; its CHECK already refuses the rest. */
 function agentFromRow(row: AgentRow): Agent {
-  return { ...row, agentPlatform: row.agentPlatform as AgentPlatform | null };
+  return { ...row, agentPlatform: row.agentPlatform as AgentPlatform };
 }
 
 const notArchived: SQL = isNull(agent.archivedAt);
@@ -423,7 +425,7 @@ async function visibleAgent(
   | {
       id: string;
       projectId: string;
-      agentPlatform: AgentPlatform | null;
+      agentPlatform: AgentPlatform;
       archivedAt: Date | null;
     }
   | undefined
@@ -443,7 +445,7 @@ async function visibleAgent(
     .limit(1);
   return row === undefined
     ? undefined
-    : { ...row, agentPlatform: row.agentPlatform as AgentPlatform | null };
+    : { ...row, agentPlatform: row.agentPlatform as AgentPlatform };
 }
 
 /**
@@ -513,16 +515,16 @@ type ConnectionRow = {
 function connectionFromRow(
   row: ConnectionRow,
   /**
-   * The platform its agent is bound to, or null. **Required, with no default**:
+   * The platform its agent declares. **Required, with no default**:
    * a default would silently drop the second half of the rule and let a
    * `phone_number` connection on a Retell agent read back as belonging to no
    * platform — and read back differently from the way it was written.
    */
-  agentPlatformOfAgent: AgentPlatform | null,
+  agentPlatformOfAgent: AgentPlatform,
 ): Connection {
   const connectionType = row.connectionType as ConnectionType;
-  // The type answers where it pins one platform; otherwise the agent answers,
-  // and where the agent is unbound nobody does. See ADR-0015.
+  // The type answers where it pins one platform; otherwise the agent answers.
+  // See ADR-0015.
   const agentPlatform =
     platformOfConnectionType(connectionType) ?? agentPlatformOfAgent;
   const accessVariant = row.accessVariant as AccessVariant;
@@ -689,7 +691,7 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  * Where the connection type pins a platform, it decides and the agent is not
  * consulted. Where it does not — `phone_number` spans platforms — the agent
  * decides, and a payload naming a different one is refused rather than quietly
- * relabelled: accepting `livekit_agents` and then representing the connection
+ * relabelled: accepting `livekit` and then representing the connection
  * as Retell's is wrong attribution, and the product label a person reads would
  * not be the one they chose.
  *
@@ -698,13 +700,12 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  */
 function representedPlatform(
   admitted: AdmittedConnection,
-  agentPlatformOfAgent: AgentPlatform | null,
-): AgentPlatform | null {
+  agentPlatformOfAgent: AgentPlatform,
+): AgentPlatform {
   const pinned = platformOfConnectionType(admitted.connectionType);
   if (pinned !== null) return pinned;
 
   if (
-    agentPlatformOfAgent !== null &&
     admitted.agentPlatform !== null &&
     admitted.agentPlatform !== agentPlatformOfAgent
   ) {
@@ -740,7 +741,7 @@ async function insertConnection(
      * from the payload's `agentPlatform`, so the product label a create
      * answers is the one the next read answers.
      */
-    readonly agentPlatform: AgentPlatform | null;
+    readonly agentPlatform: AgentPlatform;
   },
   admitted: AdmittedConnection,
 ): Promise<Connection> {
@@ -794,7 +795,7 @@ export async function insertAgentWithin(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
-  identity: { readonly name: string },
+  identity: { readonly name: string; readonly agentPlatform: AgentPlatform },
 ): Promise<Agent> {
   const [inserted] = await on
     .insert(agent)
@@ -803,6 +804,7 @@ export async function insertAgentWithin(
       organizationId: auth.organizationId,
       projectId,
       name: identity.name,
+      agentPlatform: identity.agentPlatform,
       createdBy: auth.userId,
     })
     .returning(COLUMNS)
@@ -827,6 +829,7 @@ async function settled(
 ): Promise<{
   readonly projectId: string;
   readonly name: string;
+  readonly agentPlatform: AgentPlatform;
   readonly inline: AdmittedConnection | undefined;
 }> {
   const { projectId } = auth;
@@ -846,7 +849,7 @@ async function settled(
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  return { projectId, name, inline };
+  return { projectId, name, agentPlatform: input.agentPlatform, inline };
 }
 
 export async function createAgent(
@@ -855,8 +858,8 @@ export async function createAgent(
 ): Promise<CreatedAgent> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, inline } = await settled(auth, input);
-  const identity = { name };
+  const { projectId, name, agentPlatform, inline } = await settled(auth, input);
+  const identity = { name, agentPlatform };
 
   if (inline === undefined) {
     return insertAgentWithin(db(), auth, projectId, identity);
@@ -926,8 +929,8 @@ export async function registerAgent(
 ): Promise<Registration> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, inline } = await settled(auth, input);
-  const identity = { name };
+  const { projectId, name, agentPlatform, inline } = await settled(auth, input);
+  const identity = { name, agentPlatform };
 
   if (inline === undefined) {
     return {
@@ -1019,7 +1022,7 @@ export async function registerAgent(
         agent: agentFromRow(sameModality.identity),
         connection: connectionFromRow(
           rotated,
-          sameModality.identity.agentPlatform as AgentPlatform | null,
+          sameModality.identity.agentPlatform as AgentPlatform,
         ),
       };
     }
@@ -1115,7 +1118,11 @@ async function connectionsOf(
   );
   const held = new Map<string, Connection[]>();
   for (const row of rows) {
-    const one = connectionFromRow(row, platformOf.get(row.agentId) ?? null);
+    const homePlatform = platformOf.get(row.agentId);
+    if (homePlatform === undefined) {
+      throw new Error(`connection ${row.id} has no agent in this page`);
+    }
+    const one = connectionFromRow(row, homePlatform);
     const already = held.get(one.agentId);
     if (already === undefined) held.set(one.agentId, [one]);
     else already.push(one);

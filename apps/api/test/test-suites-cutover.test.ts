@@ -347,6 +347,7 @@ describe("the Test Suites cutover", () => {
     expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
       name: "Front desk",
       connection: RETELL,
     });

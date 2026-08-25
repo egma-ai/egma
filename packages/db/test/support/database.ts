@@ -256,6 +256,7 @@ export function errorCodeOf(error: unknown): string | undefined {
 export const POSTGRES_ERROR = {
   uniqueViolation: "23505",
   foreignKeyViolation: "23503",
+  notNullViolation: "23502",
   /**
    * PostgreSQL 17 reports `on delete restrict` with the ordinary foreign-key
    * code. A caller that must distinguish those cases has to inspect the named

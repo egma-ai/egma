@@ -99,7 +99,7 @@ const TRACE: TraceFacts = {
   // connection. `transcripts.test.ts` reads the same shape off the API.
   connectionType: "",
   providerCallId: "egma-fixture-capture-1",
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   platformAgentId: "agent_7f3c",
   platformAgentName: "kelly",
   platformAgentVersion: "2026.08.02",
@@ -917,7 +917,7 @@ describe("the inspector", () => {
    * own name for it, its identifier there, and the version that answered.
    *
    * The platform is read out in a reader's words rather than in the wire's —
-   * `livekit_agents` is what arrives and **LiveKit Agents** is what is drawn.
+   * `livekit` is what arrives and **LiveKit** is what is drawn.
    */
   it("names the platform, and the agent the platform ran", async () => {
     stub({ status: 200, body: detail() });
@@ -926,7 +926,7 @@ describe("the inspector", () => {
 
     const came = whereItCameFrom();
     for (const [label, value] of [
-      [FACTS.platform, "LiveKit Agents"],
+      [FACTS.platform, "LiveKit"],
       [FACTS.platformAgentName, TRACE.platformAgentName],
       [FACTS.platformAgentId, TRACE.platformAgentId],
       [FACTS.platformAgentVersion, TRACE.platformAgentVersion],

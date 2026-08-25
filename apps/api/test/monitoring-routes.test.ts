@@ -84,7 +84,7 @@ function at(signedUp: {
 /** One agent, bound to Retell with its own key and its pull switch on. */
 async function pulling(signedUp: Parameters<typeof at>[0]): Promise<string> {
   const auth = at(signedUp);
-  const created = await createAgent(auth, { name: "Front desk" });
+  const created = await createAgent(auth, { agentPlatform: "retell", name: "Front desk" });
   await enablePullProductionCalls(auth, {
     agentId: created.id,
     agentPlatform: "retell",
@@ -169,7 +169,7 @@ describe("starting monitoring", () => {
       retellFetch: retell.fetchImpl,
     });
     const ada = await signUp(api.app, "ada-start@acme.example", "Acme");
-    const created = await createAgent(at(ada), { name: "Front desk" });
+    const created = await createAgent(at(ada), { agentPlatform: "retell", name: "Front desk" });
 
     const started = await api.app.inject({
       method: "POST",
@@ -256,7 +256,7 @@ describe("starting monitoring", () => {
     });
     const ada = await signUp(api.app, "ada-contested@acme.example", "Acme");
     await pulling(ada);
-    const second = await createAgent(at(ada), { name: "Second desk" });
+    const second = await createAgent(at(ada), { agentPlatform: "retell", name: "Second desk" });
 
     const answered = await api.app.inject({
       method: "POST",
@@ -304,7 +304,7 @@ describe("starting monitoring", () => {
     });
     const ada = await signUp(api.app, "ada-mixed@acme.example", "Acme");
     await pulling(ada);
-    const second = await createAgent(at(ada), { name: "Second desk" });
+    const second = await createAgent(at(ada), { agentPlatform: "retell", name: "Second desk" });
 
     const answered = await api.app.inject({
       method: "POST",
@@ -461,8 +461,8 @@ describe("starting monitoring", () => {
       retellFetch: retell.fetchImpl,
     });
     const ada = await signUp(api.app, "ada-archived@acme.example", "Acme");
-    const first = await createAgent(at(ada), { name: "Front desk" });
-    const gone = await createAgent(at(ada), { name: "Retired desk" });
+    const first = await createAgent(at(ada), { agentPlatform: "retell", name: "Front desk" });
+    const gone = await createAgent(at(ada), { agentPlatform: "retell", name: "Retired desk" });
     await archiveAgent(at(ada), gone.id);
 
     const answered = await api.app.inject({
@@ -543,7 +543,7 @@ describe("starting monitoring", () => {
       url: `/v1/monitoring/start?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         apiKey: RETELL_KEY,
         watch: [{ platformAgentId: "whatever" }],
       },

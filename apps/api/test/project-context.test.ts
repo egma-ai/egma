@@ -59,6 +59,7 @@ async function listAgentsAs(
 function registration(name: string, project: string): Record<string, unknown> {
   return {
     name,
+    agentPlatform: "retell",
     projectId: project,
     connection: {
       agentPlatform: "retell",
@@ -73,7 +74,7 @@ function registration(name: string, project: string): Record<string, unknown> {
 
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
@@ -327,6 +328,7 @@ describe("a browser working in a project that is not the first", () => {
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
+      agentPlatform: "livekit",
       name: "Outbound desk",
       connection: {
         agentPlatform: "retell",
@@ -445,6 +447,7 @@ describe("a browser working in a project that is not the first", () => {
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
+      agentPlatform: "retell",
       name: "Outbound desk",
       // Voice, because a chat has no audio and would be refused for that
       // reason instead — which is a different sentence and would not say
@@ -538,6 +541,7 @@ describe("a browser working in a project that is not the first", () => {
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
+      agentPlatform: "retell",
       name: "Outbound desk",
       connection: {
         agentPlatform: "retell",
@@ -819,6 +823,7 @@ describe("a key for the whole organization, where the organization holds two pro
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
+      agentPlatform: "retell",
       name: "Outbound desk",
       connection:
         modality === "voice"

@@ -53,7 +53,7 @@ import {
  * The ingest door: `POST /v1/traces`, OTLP/HTTP, protobuf or JSON.
  *
  * It is the standard path a configured OpenTelemetry exporter posts to.
- * LiveKit Agents customers configure that exporter with the explicit Egma
+ * LiveKit customers configure that exporter with the explicit Egma
  * Python SDK helper; other runtimes must configure their own exporter. **One
  * door**, for customer agents and for egma's own simulator — one wire format,
  * one code path, and a simulation and a production trace therefore arrive the

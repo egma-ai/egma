@@ -588,7 +588,7 @@ def livekit_spec(
         simulation_id,
         modality="voice",
         connection={
-            "agent_platform": "livekit_agents",
+            "agent_platform": "livekit",
             "connection_type": "livekit_room",
             "access_variant": "livekit_room.project_credentials",
             "config": config,
@@ -629,7 +629,7 @@ def livekit_endpoint_spec(
         simulation_id,
         modality="voice",
         connection={
-            "agent_platform": "livekit_agents",
+            "agent_platform": "livekit",
             "connection_type": "livekit_room",
             "access_variant": "livekit_room.customer_token_endpoint",
             "config": {"url": url, "tokenEndpoint": token_endpoint},
@@ -1578,7 +1578,7 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
     from conftest import load_fixture_spec
 
     spec = SimulationSpec.from_document(load_fixture_spec("voice-livekit.json"))
-    assert spec.agent_platform == "livekit_agents"
+    assert spec.agent_platform == "livekit"
     assert spec.connection_type == "livekit_room"
     assert spec.access_variant == "livekit_room.project_credentials"
 
@@ -2409,7 +2409,7 @@ async def test_the_golden_token_endpoint_fixture_is_a_connection_the_plug_accept
     spec = SimulationSpec.from_document(
         load_fixture_spec("voice-livekit-token-endpoint.json")
     )
-    assert spec.agent_platform == "livekit_agents"
+    assert spec.agent_platform == "livekit"
     assert spec.connection_type == "livekit_room"
     assert spec.access_variant == "livekit_room.customer_token_endpoint"
 

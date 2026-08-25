@@ -86,7 +86,7 @@ type ConnectionBody = {
 const RETELL_KEY = "retell-secret-A1B2C3D4WXYZ";
 
 async function anAgent(who: Customer, name: string): Promise<AgentBody> {
-  const created = await browser("POST", "/v1/agents", who, { name });
+  const created = await browser("POST", "/v1/agents", who, { agentPlatform: "retell", name });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return held<AgentBody>(created, "agent");
 }
@@ -209,11 +209,11 @@ describe("the Egma-owned half of an agent", () => {
     expect(Object.keys(shape)).not.toContain("revision");
 
     // What it does carry: where the agent lives, whether egma pulls its
-    // production calls, and when one last arrived. Unbound and off until
-    // somebody says otherwise, and nothing has arrived — which is a fact and
+    // production calls, and when one last arrived. The platform was declared
+    // at registration; pulling is off and nothing has arrived — which is a fact and
     // not a condition, so no word beside it says how the agent is doing.
     expect(shape).toMatchObject({
-      agentPlatform: null,
+      agentPlatform: "retell",
       platformAgentId: null,
       monitoringKeyPresent: false,
       pullProductionCalls: false,
@@ -505,7 +505,7 @@ describe("a connection's stored credential", () => {
 
     const livekit = items.filter(
       (one) =>
-        one.agentPlatform === "livekit_agents" &&
+        one.agentPlatform === "livekit" &&
         one.connectionType === "livekit_room",
     );
     expect(livekit.map((one) => one.accessVariant)).toEqual([
@@ -575,7 +575,7 @@ describe("which platform a connection is stored under", () => {
       ada,
       {
         name: "hotline",
-        agentPlatform: "livekit_agents",
+        agentPlatform: "livekit",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -585,7 +585,7 @@ describe("which platform a connection is stored under", () => {
 
     expect(refused.status).toBe(422);
     expect(refused.body.error).toBe("unprocessable");
-    expect(String(refused.body.message)).toContain("livekit_agents");
+    expect(String(refused.body.message)).toContain("livekit");
     expect(String(refused.body.message)).toContain("retell");
 
     // Nothing was written, so the agent is exactly as it was.
@@ -606,7 +606,7 @@ describe("a connection's shape", () => {
 
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, {
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -745,7 +745,7 @@ describe("restoring a connection", () => {
     // A public token endpoint always needs a fresh auth credential on Restore.
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
-      agentPlatform: "livekit_agents",
+      agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -1007,7 +1007,11 @@ describe("what a viewer may do here", () => {
     };
 
     const writes: readonly [string, string, Record<string, unknown>][] = [
-      ["POST", "/v1/agents", { name: "Theirs" }],
+      [
+        "POST",
+        "/v1/agents",
+        { name: "Theirs", agentPlatform: "retell" },
+      ],
       [
         "PATCH",
         `/v1/agents/${agent.id}`,

@@ -56,7 +56,7 @@ const FACTS: Facts = {
   environment: "default",
   connectionType: "",
   providerCallId: "egma-fixture-capture-1",
-  agentPlatform: "livekit_agents",
+  agentPlatform: "livekit",
   platformAgentId: "",
   platformAgentName: "kelly",
   platformAgentVersion: "",
@@ -163,7 +163,7 @@ describe("the window the list asks about", () => {
 describe("agent platform labels", () => {
   it("uses product names for known platforms and keeps an unknown name", () => {
     expect(agentPlatformLabel("retell")).toBe("Retell");
-    expect(agentPlatformLabel("livekit_agents")).toBe("LiveKit Agents");
+    expect(agentPlatformLabel("livekit")).toBe("LiveKit");
     expect(agentPlatformLabel("future_platform")).toBe("Future platform");
   });
 });

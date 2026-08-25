@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import type { Refusal } from "@/lib/api.ts";
 import {
   agentPlatformText,
-  NO_PLATFORM,
   type AgentPage,
   type ListedAgentWithConnections,
 } from "@/lib/agents.ts";
@@ -240,7 +239,7 @@ export function AgentsScreen({
         key: "platform",
         header: "Platform",
         width: "160px",
-        cell: (agent) => agentPlatformText(agent) ?? NO_PLATFORM,
+        cell: agentPlatformText,
       },
       {
         key: "connections",

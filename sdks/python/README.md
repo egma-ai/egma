@@ -6,7 +6,7 @@ The two functions are separate:
 
 - `mockable(...)` lets Egma answer tools in an Egma simulation. It does
   nothing in production.
-- `monitor_livekit(...)` sends production LiveKit Agents spans to the
+- `monitor_livekit(...)` sends production LiveKit spans to the
   Monitoring page. It does nothing in an Egma simulation.
 
 Calling one function never enables or changes the other.
@@ -21,7 +21,7 @@ For a LiveKit agent on Python 3.11 or newer.
 
 ## Production monitoring
 
-Open **Monitoring → Start monitoring** and choose **LiveKit Agents**. That page
+Open **Monitoring → Start monitoring** and choose **LiveKit**. That page
 shows the same SDK, key, and helper steps below. It is instructions only: a
 LiveKit agent pushes its own spans, so there is nothing to switch on in Egma.
 
