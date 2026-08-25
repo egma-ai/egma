@@ -31,6 +31,8 @@
 -- Every agent must name its platform after this cutover. An old agent inherits
 -- it only when its connections agree on one non-null platform. A bare agent or
 -- an agent whose connections name different platforms stops this migration.
+-- Migration 0038 stored LiveKit as `livekit_agents`; normalize that shipped
+-- value before deciding whether the connections agree and before copying it.
 -- This incompatibility is accepted prelaunch; there is no older API or data
 -- contract to preserve.
 
@@ -83,11 +85,19 @@ ALTER TABLE "agent" ADD COLUMN "agent_platform" text;--> statement-breakpoint
 UPDATE "agent"
 SET "agent_platform" = "one_platform"."agent_platform"
 FROM (
-	SELECT "agent_id", min("agent_platform") AS "agent_platform"
+	SELECT
+		"agent_id",
+		min(CASE
+			WHEN "agent_platform" = 'livekit_agents' THEN 'livekit'
+			ELSE "agent_platform"
+		END) AS "agent_platform"
 	FROM "connection"
 	WHERE "agent_platform" IS NOT NULL
 	GROUP BY "agent_id"
-	HAVING count(DISTINCT "agent_platform") = 1
+	HAVING count(DISTINCT CASE
+		WHEN "agent_platform" = 'livekit_agents' THEN 'livekit'
+		ELSE "agent_platform"
+	END) = 1
 ) AS "one_platform"
 WHERE "agent"."id" = "one_platform"."agent_id";--> statement-breakpoint
 ALTER TABLE "agent" ALTER COLUMN "agent_platform" SET NOT NULL;--> statement-breakpoint

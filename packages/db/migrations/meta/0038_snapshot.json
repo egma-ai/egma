@@ -2218,7 +2218,7 @@
         },
         "connection_agent_platform_allowed": {
           "name": "connection_agent_platform_allowed",
-          "value": "\"connection\".\"agent_platform\" in ('retell', 'livekit')"
+          "value": "\"connection\".\"agent_platform\" in ('retell', 'livekit_agents')"
         },
         "connection_kind_allowed": {
           "name": "connection_kind_allowed",
@@ -2454,7 +2454,7 @@
         },
         "monitoring_setup_platform_allowed": {
           "name": "monitoring_setup_platform_allowed",
-          "value": "\"monitoring_setup\".\"agent_platform\" in ('retell', 'livekit')"
+          "value": "\"monitoring_setup\".\"agent_platform\" in ('retell', 'livekit_agents')"
         },
         "monitoring_setup_strategy_allowed": {
           "name": "monitoring_setup_strategy_allowed",
@@ -2470,7 +2470,7 @@
         },
         "monitoring_setup_platform_strategy_agrees": {
           "name": "monitoring_setup_platform_strategy_agrees",
-          "value": "(\"monitoring_setup\".\"agent_platform\" = 'retell' and \"monitoring_setup\".\"strategy\" = 'retell_api_polling' and \"monitoring_setup\".\"credentials\" is not null) or (\"monitoring_setup\".\"agent_platform\" = 'livekit' and \"monitoring_setup\".\"strategy\" = 'livekit_otlp' and \"monitoring_setup\".\"credentials\" is null)"
+          "value": "(\"monitoring_setup\".\"agent_platform\" = 'retell' and \"monitoring_setup\".\"strategy\" = 'retell_api_polling' and \"monitoring_setup\".\"credentials\" is not null) or (\"monitoring_setup\".\"agent_platform\" = 'livekit_agents' and \"monitoring_setup\".\"strategy\" = 'livekit_otlp' and \"monitoring_setup\".\"credentials\" is null)"
         }
       },
       "isRLSEnabled": false

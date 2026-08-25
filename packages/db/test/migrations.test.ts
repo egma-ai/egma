@@ -3941,7 +3941,7 @@ describe("the direct Monitoring cutover (0038)", () => {
         metadata: '{"run":"old"}',
       },
       expected: {
-        agentPlatform: "livekit",
+        agentPlatform: "livekit_agents",
         connectionKind: "livekit_room",
         accessVariant: "livekit_room.project_credentials",
       },
@@ -3959,7 +3959,7 @@ describe("the direct Monitoring cutover (0038)", () => {
         tokenEndpoint: "https://auth.example.test/livekit-token",
       },
       expected: {
-        agentPlatform: "livekit",
+        agentPlatform: "livekit_agents",
         connectionKind: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
@@ -4989,7 +4989,7 @@ describe("agents own platform monitoring (0042)", () => {
   const frontDesk = newId("agt");
   const backOffice = newId("agt");
   const chatConnection = newId("con");
-  const phoneConnection = newId("con");
+  const liveKitConnection = newId("con");
 
   beforeAll(async () => {
     database = await createEmptyDatabase("agents_own_platform_monitoring");
@@ -5027,8 +5027,9 @@ describe("agents own platform monitoring (0042)", () => {
       );
     }
 
-    // Two connection kinds, so the rename has more than one value to carry
-    // and a column of one repeated value cannot pass for a carried one.
+    // Two connection kinds and both old platform values, so the rename has
+    // more than one value to carry and the LiveKit vocabulary cutover is
+    // proved against data written by the immutable 0038 migration.
     await client.query(
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
@@ -5042,10 +5043,10 @@ describe("agents own platform monitoring (0042)", () => {
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
           connection_kind, modality, topology, access_variant, config, revision)
-       values ($1, $2, $3, $4, 'Line', 'retell', 'phone_number', 'voice',
-          'egma-dials-in', 'phone_number.public_e164',
-          '{"e164":"+15550000000"}'::jsonb, $5)`,
-      [phoneConnection, organizationId, projectId, backOffice, newId("rev")],
+       values ($1, $2, $3, $4, 'Room', 'livekit_agents', 'livekit_room', 'voice',
+          'hosted-broker', 'livekit_room.project_credentials',
+          '{"url":"wss://support.livekit.cloud"}'::jsonb, $5)`,
+      [liveKitConnection, organizationId, projectId, backOffice, newId("rev")],
     );
 
     // The whole of what the old build owned: a setup object, one selected
@@ -5116,7 +5117,7 @@ describe("agents own platform monitoring (0042)", () => {
     );
     expect(rows).toEqual([
       { name: "Chat", connection_type: "retell_chat_api" },
-      { name: "Line", connection_type: "phone_number" },
+      { name: "Room", connection_type: "livekit_room" },
     ]);
     // The rename is in place, and the two columns the connection no longer
     // owns went with it: the platform now sits on the agent, and concurrent
@@ -5152,7 +5153,7 @@ describe("agents own platform monitoring (0042)", () => {
     expect(rows).toEqual([
       {
         name: "Back office",
-        agent_platform: "retell",
+        agent_platform: "livekit",
         platform_agent_id: null,
         monitoring_api_key: null,
         monitoring_api_key_hint: null,
