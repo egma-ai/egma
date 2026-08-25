@@ -35,10 +35,12 @@ const EXPECTED_BEHAVIORS =
   GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
   );
+const JUDGE_MODEL = EXPECTED_BEHAVIORS?.judgeModel;
 if (
   EXPECTED_BEHAVIORS?.prompt === null ||
   EXPECTED_BEHAVIORS?.prompt === undefined ||
-  EXPECTED_BEHAVIORS.judgeModel === null
+  JUDGE_MODEL === null ||
+  JUDGE_MODEL === undefined
 ) {
   throw new Error("Expected behaviors has no executable judge definition");
 }
@@ -64,7 +66,7 @@ describe.skipIf(API_KEY === "")(
   "a real OpenAI judge, asked one criterion",
   () => {
     const judge = judgeFor(
-      EXPECTED_BEHAVIORS.judgeModel,
+      JUDGE_MODEL,
       { openai: API_KEY },
     ).ask;
 
