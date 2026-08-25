@@ -522,8 +522,8 @@ function BehaviorLines({
     <div className="flex flex-col gap-0.5">
       {behaviors.map((behavior, at) => (
         <div className="flex items-baseline gap-1.5" key={`behavior-${String(at)}`}>
-          <span className="flex-none text-sm tabular-nums text-faint">
-            {at + 1}
+          <span className="flex-none text-sm tabular-nums text-foreground">
+            {at + 1}.
           </span>
           <input
             className={QUIET_INPUT}
@@ -706,7 +706,7 @@ function CellBody({
       <div className="flex flex-col gap-0.5">
         {draft.expectedBehaviors.map((behavior, at) => (
           <span className={TEXT} key={`behavior-${String(at)}`}>
-            <span className="tabular-nums text-faint">{at + 1}</span> {behavior}
+            <span className="tabular-nums text-foreground">{at + 1}.</span> {behavior}
           </span>
         ))}
       </div>
