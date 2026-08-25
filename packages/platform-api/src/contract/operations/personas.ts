@@ -46,18 +46,6 @@ const modelSelection = {
   additionalProperties: false,
 } as const;
 
-const reasoningEffort = {
-  type: "string",
-} as const;
-
-const llmSelection = {
-  ...modelSelection,
-  properties: {
-    ...modelSelection.properties,
-    reasoningEffort,
-  },
-} as const;
-
 const speechSelection = {
   ...modelSelection,
   properties: {
@@ -71,7 +59,7 @@ const speechSelection = {
 const personaModels = {
   type: "object",
   properties: {
-    llm: llmSelection,
+    llm: modelSelection,
     stt: modelSelection,
     tts: speechSelection,
   },
@@ -158,8 +146,6 @@ const modelCatalogEntry = {
     model: { type: "string" },
     label: { type: "string" },
     modelLabel: { type: "string" },
-    reasoningEfforts: arrayOf(reasoningEffort),
-    recommendedReasoningEffort: reasoningEffort,
     recommendedVoiceId: { type: "string" },
   },
   required: ["provider", "job", "model", "label"],

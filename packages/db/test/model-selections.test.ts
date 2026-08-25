@@ -2,7 +2,6 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   MODEL_ADAPTERS,
-  REASONING_EFFORTS,
   catalogEntry,
   type ModelAdapter,
   type ProviderCatalogEntry,
@@ -11,6 +10,7 @@ import {
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
   personaModelsFromRow,
+  validGraderModel,
   validPersonaModels,
 } from "../src/models/selections.ts";
 
@@ -70,9 +70,12 @@ describe("one complete persona model selection", () => {
       adapter: "openai_realtime",
       label: "OpenAI",
       // @ts-expect-error Reasoning is an LLM catalog primitive only.
-      reasoningEfforts: ["none"],
+      reasoningEffort: "none",
     };
-    expect(invalidSttReasoning).toHaveProperty("reasoningEfforts", ["none"]);
+    expect(invalidSttReasoning).toHaveProperty(
+      "reasoningEffort",
+      "none",
+    );
   });
 
   it("accepts the release selection as one whole value", () => {
@@ -149,81 +152,67 @@ describe("one complete persona model selection", () => {
     ).toThrow(/supported openai llm model/i);
   });
 
-  it("catalogs Terra, its adapter, and every reasoning effort as one capability", () => {
-    expect(REASONING_EFFORTS).toEqual([
-      "none",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ]);
-    expect(catalogEntry("llm", "openai", "gpt-5.6-terra")).toMatchObject({
-      adapter: "openai_chat_completions",
-      reasoningEfforts: REASONING_EFFORTS,
-      recommendedReasoningEffort: "none",
-    });
-  });
-
-  it.each(["gpt-5.6-sol", "gpt-5.6-luna"])(
-    "catalogs %s with the complete GPT-5.6 reasoning range",
+  it.each([
+    "gpt-5.6-terra",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+  ])(
+    "fixes %s at no reasoning",
     (model) => {
       expect(catalogEntry("llm", "openai", model)).toMatchObject({
         adapter: "openai_chat_completions",
-        reasoningEfforts: REASONING_EFFORTS,
-        recommendedReasoningEffort: "none",
-      });
-    },
-  );
-
-  it.each(["gpt-5.5", "gpt-5.4"])(
-    "catalogs %s without an unsupported max effort",
-    (model) => {
-      expect(catalogEntry("llm", "openai", model)).toMatchObject({
-        adapter: "openai_chat_completions",
-        reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
-        recommendedReasoningEffort: "none",
-      });
-    },
-  );
-
-  it("accepts a cataloged reasoning choice as part of the LLM selection", () => {
-    const selected = validPersonaModels({
-      ...RECOMMENDED_PERSONA_MODELS,
-      llm: {
-        provider: "openai",
-        model: "gpt-5.6-terra",
         reasoningEffort: "none",
-      },
-    });
+      });
+    },
+  );
 
-    expect(selected.llm).toEqual({
-      provider: "openai",
-      model: "gpt-5.6-terra",
-      reasoningEffort: "none",
-    });
+  it.each(["gpt-4o-mini", "gpt-4o"])(
+    "keeps reasoning absent for non-reasoning model %s",
+    (model) => {
+      const entry = catalogEntry("llm", "openai", model);
+      expect(entry).toMatchObject({ adapter: "openai_chat_completions" });
+      expect(entry).not.toHaveProperty("reasoningEffort");
+    },
+  );
+
+  it("does not expand the separate grader model policy", () => {
+    expect(
+      validGraderModel({ provider: "openai", model: "gpt-4o-mini" }),
+    ).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+    expect(() =>
+      validGraderModel({ provider: "openai", model: "gpt-4o" }),
+    ).toThrow(/supported grader model/i);
   });
 
-  it("requires a reasoning choice for a model whose catalog entry supports it", () => {
-    expect(() =>
+  it("stores only the model pair when an author selects a GPT-5 model", () => {
+    expect(
       validPersonaModels({
         ...RECOMMENDED_PERSONA_MODELS,
         llm: { provider: "openai", model: "gpt-5.6-terra" },
-      }),
-    ).toThrow(/reasoning effort/i);
+      }).llm,
+    ).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    });
   });
 
-  it("refuses reasoning on a model whose catalog entry does not support it", () => {
-    expect(() =>
-      validPersonaModels({
-        ...RECOMMENDED_PERSONA_MODELS,
-        llm: {
-          ...RECOMMENDED_PERSONA_MODELS.llm,
-          reasoningEffort: "none",
-        },
-      }),
-    ).toThrow(/does not accept a reasoning effort/i);
-  });
+  it.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
+    "refuses the persona reasoning field value %s",
+    (reasoningEffort) => {
+      expect(() =>
+        validPersonaModels({
+          ...RECOMMENDED_PERSONA_MODELS,
+          llm: {
+            provider: "openai",
+            model: "gpt-5.6-terra",
+            reasoningEffort,
+          },
+        }),
+      ).toThrow(/unsupported fields reasoningEffort/i);
+    },
+  );
 
   it("treats a missing stored models value as corrupt data, never as fallback", () => {
     expect(() => personaModelsFromRow(null, "prsv_broken")).toThrow(

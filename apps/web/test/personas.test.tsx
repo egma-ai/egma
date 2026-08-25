@@ -87,29 +87,24 @@ const RECOMMENDED_MODELS: PersonaModels = {
 const PERSONA_FORM: PersonaForm = {
   modelCatalog: [
     { provider: "openai", job: "llm", model: "gpt-4o-mini", label: "OpenAI" },
+    { provider: "openai", job: "llm", model: "gpt-4o", label: "OpenAI" },
     {
       provider: "openai",
       job: "llm",
       model: "gpt-5.6-terra",
       label: "OpenAI",
-      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
-      recommendedReasoningEffort: "none",
     },
     ...["gpt-5.6-sol", "gpt-5.6-luna"].map((model) => ({
       provider: "openai" as const,
       job: "llm" as const,
       model,
       label: "OpenAI",
-      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
-      recommendedReasoningEffort: "none",
     })),
     ...["gpt-5.5", "gpt-5.4"].map((model) => ({
       provider: "openai" as const,
       job: "llm" as const,
       model,
       label: "OpenAI",
-      reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
-      recommendedReasoningEffort: "none",
     })),
     {
       provider: "openai",
@@ -290,7 +285,6 @@ const DEFAULT_PERSONA: Persona = {
     llm: {
       provider: "openai",
       model: "gpt-5.6-terra",
-      reasoningEffort: "none",
     },
   },
   revision: "revision-default-persona",
@@ -876,8 +870,7 @@ describe("one persona's sheet", () => {
       ...RECOMMENDED_MODELS,
       llm: {
         provider: "openai",
-        model: "gpt-5.6-terra",
-        reasoningEffort: "high",
+        model: "gpt-4o",
       },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: {
@@ -931,6 +924,7 @@ describe("one persona's sheet", () => {
       ).map((option) => option.value),
     ).toEqual([
       "gpt-4o-mini",
+      "gpt-4o",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-5.6-luna",
@@ -940,9 +934,10 @@ describe("one persona's sheet", () => {
     fireEvent.change(screen.getByLabelText("Language model"), {
       target: { value: "gpt-5.6-terra" },
     });
-    const reasoning = screen.getByLabelText("Reasoning effort");
-    expect((reasoning as HTMLSelectElement).value).toBe("none");
-    fireEvent.change(reasoning, { target: { value: "high" } });
+    expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Language model"), {
+      target: { value: "gpt-4o" },
+    });
     fireEvent.change(screen.getByLabelText("Speech-to-text provider"), {
       target: { value: "deepgram" },
     });
@@ -978,6 +973,13 @@ describe("one persona's sheet", () => {
       expectedRevision: "revision-one",
       expectedVersionId: "prsv_1",
       models: changedModels,
+    });
+    const body = asked.find((one) => one.method === "PATCH")?.body as {
+      models?: PersonaModels;
+    };
+    expect(body.models?.llm).toEqual({
+      provider: "openai",
+      model: "gpt-4o",
     });
   });
 
@@ -1154,6 +1156,10 @@ describe("one persona's sheet", () => {
    */
   it("writes an older version forward as a new one", async () => {
     const current = { ...RITA, version: 2, versionId: "prsv_2" };
+    const historicalModels: PersonaModels = {
+      ...RITA.models,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    };
     const { asked } = apiAnswers({
       ...reads(current),
       "GET /v1/personas/prs_1/versions": {
@@ -1176,7 +1182,7 @@ describe("one persona's sheet", () => {
                 ...RITA.traits,
                 personality: "Seventy, and out of patience.",
               },
-              models: RITA.models,
+              models: historicalModels,
               createdAt: "2026-08-15T10:00:00.000Z",
             },
           ],
@@ -1206,7 +1212,10 @@ describe("one persona's sheet", () => {
       expectedRevision: "revision-one",
       expectedVersionId: "prsv_2",
       traits: { personality: "Seventy, and out of patience." },
-      models: RITA.models,
+      models: {
+        ...historicalModels,
+        llm: { provider: "openai", model: "gpt-5.6-terra" },
+      },
     });
   });
 
@@ -1492,7 +1501,6 @@ describe("one persona's sheet", () => {
       "Accent",
       "Background noise",
       "Language model",
-      "Reasoning effort",
       "Speech-to-text model",
       "Text-to-speech model",
       "Speech rate",
@@ -1510,7 +1518,6 @@ describe("one persona's sheet", () => {
       "Neutral American English.",
       "None.",
       "OpenAI · gpt-5.6-terra",
-      "none",
       "OpenAI · gpt-live-transcribe",
       "Cartesia · sonic-3.5",
       "1×",

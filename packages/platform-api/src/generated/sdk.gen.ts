@@ -1160,7 +1160,6 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         llm: {
             provider: string;
             model: string;
-            reasoningEffort?: string;
         };
         stt: {
             provider: string;
@@ -1255,7 +1254,6 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         llm: {
             provider: string;
             model: string;
-            reasoningEffort?: string;
         };
         stt: {
             provider: string;

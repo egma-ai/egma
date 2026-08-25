@@ -161,22 +161,12 @@ export const personaVersion = pgTable(
         and (${table.models} - array['llm', 'stt', 'tts']::text[])
           is not distinct from '{}'::jsonb
         and jsonb_typeof(${table.models}->'llm') is not distinct from 'object'
-        and ((${table.models}->'llm') - array[
-          'provider', 'model', 'reasoningEffort'
-        ]::text[]) is not distinct from '{}'::jsonb
+        and ((${table.models}->'llm') - array['provider', 'model']::text[])
+          is not distinct from '{}'::jsonb
         and jsonb_typeof(${table.models}->'llm'->'provider') is not distinct from 'string'
         and nullif(btrim(${table.models}->'llm'->>'provider'), '') is not null
         and jsonb_typeof(${table.models}->'llm'->'model') is not distinct from 'string'
         and nullif(btrim(${table.models}->'llm'->>'model'), '') is not null
-        and (
-          not (${table.models}->'llm' ? 'reasoningEffort')
-          or (
-            jsonb_typeof(${table.models}->'llm'->'reasoningEffort')
-              is not distinct from 'string'
-            and nullif(btrim(${table.models}->'llm'->>'reasoningEffort'), '')
-              is not null
-          )
-        )
         and jsonb_typeof(${table.models}->'stt') is not distinct from 'object'
         and ((${table.models}->'stt') - array['provider', 'model']::text[])
           is not distinct from '{}'::jsonb

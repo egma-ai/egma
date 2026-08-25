@@ -4,6 +4,7 @@ import {
   getSimulation,
   listRunEvents,
   SPEED_RANGE,
+  type PersonaModels,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { ProviderCredentialSourceUnavailableError } from "@egma/provider-credentials";
@@ -125,6 +126,7 @@ async function claim(
 async function aCustomerReadyToRun(
   label: string,
   options: TestApiOptions = {},
+  personaModels?: PersonaModels,
 ): Promise<{
   ada: Customer;
   key: string;
@@ -159,6 +161,7 @@ async function aCustomerReadyToRun(
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
+    ...(personaModels === undefined ? {} : { models: personaModels }),
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
@@ -213,7 +216,6 @@ async function aRealtimeVoiceCustomerReadyToRun(
       llm: {
         provider: "openai",
         model: "gpt-5.6-terra",
-        reasoningEffort: "none",
       },
       stt: { provider: "openai", model: "gpt-live-transcribe" },
       tts: {
@@ -1044,6 +1046,53 @@ describe("a simulation the platform cannot hand over", () => {
 });
 
 describe("one source of execution truth", () => {
+  it.each([
+    ["gpt-4o-mini", undefined],
+    ["gpt-4o", undefined],
+    ["gpt-5.4", "none"],
+    ["gpt-5.5", "none"],
+    ["gpt-5.6-terra", "none"],
+    ["gpt-5.6-sol", "none"],
+    ["gpt-5.6-luna", "none"],
+  ] as const)(
+    "claims persona LLM %s with the platform reasoning policy",
+    async (model, reasoningEffort) => {
+      const { key, connectionId, versionId } = await aCustomerReadyToRun(
+        `claims_llm_${model.replaceAll(".", "_")}`,
+        {},
+        {
+          llm: { provider: "openai", model },
+          stt: { provider: "deepgram", model: "nova-3-general" },
+          tts: {
+            provider: "cartesia",
+            model: "sonic-3.5",
+            voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+            speed: 1,
+          },
+        },
+      );
+      await aQueuedRun(key, connectionId, versionId);
+
+      const answered = await claim(api.config.simulatorServiceToken, {
+        claimant: "sim-under-test",
+        capacity: 1,
+        wait_seconds: 0,
+      });
+      const spec = (answered.body.specs as Record<string, unknown>[])[0];
+      const selected = (spec?.models as Record<string, unknown> | undefined)
+        ?.["llm"];
+      expect(selected).toEqual({
+        provider: "openai",
+        model,
+        adapter: "openai_chat_completions",
+        ...(reasoningEffort === undefined
+          ? {}
+          : { reasoning_effort: reasoningEffort }),
+        key: "openai-key-held-by-this-test-suite",
+      });
+    },
+  );
+
   it("keeps OpenAI realtime STT paired with its model and OpenAI account key", async () => {
     const { key, connectionId, versionId } =
       await aRealtimeVoiceCustomerReadyToRun(

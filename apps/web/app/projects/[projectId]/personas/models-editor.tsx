@@ -41,13 +41,6 @@ export function ModelFields({
   readonly note?: ReactNode;
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
-  const selectedLlm = form.modelCatalog.find(
-    (entry) =>
-      entry.job === "llm" &&
-      entry.provider === draft.llmProvider &&
-      entry.model === draft.llmModel,
-  );
-
   return (
     <>
       <ProviderModelFields
@@ -63,39 +56,9 @@ export function ModelFields({
             ...draft,
             llmProvider: entry.provider,
             llmModel: entry.model,
-            llmReasoningEffort:
-              entry.recommendedReasoningEffort ??
-              entry.reasoningEfforts?.[0] ??
-              "",
           })
         }
       />
-
-      {selectedLlm?.reasoningEfforts === undefined ? null : (
-        <Field
-          label="Reasoning effort"
-          htmlFor="persona-llm-reasoning-effort"
-          hint="How much reasoning the language model uses before it answers. None turns reasoning off."
-        >
-          <Select
-            id="persona-llm-reasoning-effort"
-            value={draft.llmReasoningEffort}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                llmReasoningEffort: event.target.value,
-              })
-            }
-          >
-            {selectedLlm.reasoningEfforts.map((effort) => (
-              <option key={effort} value={effort}>
-                {effort}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      )}
 
       <ProviderModelFields
         job="stt"

@@ -15,6 +15,7 @@ import {
   resolveSimulationConnection,
   type PersonaModels,
   type PlatformSettingValues,
+  type ProviderCatalogEntry,
   type Run,
   type SimulationClaim,
 } from "@egma/db";
@@ -169,10 +170,10 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
 ): Promise<Record<string, unknown>> {
-  const adapterFor = (
-    job: "llm" | "stt" | "tts",
+  const entryFor = <Job extends "llm" | "stt" | "tts">(
+    job: Job,
     selection: { readonly provider: string; readonly model: string },
-  ): string => {
+  ): ProviderCatalogEntry<Job> => {
     const entry = catalogEntry(job, selection.provider, selection.model);
     if (entry === undefined) {
       throw new Error(
@@ -180,12 +181,12 @@ async function modelsBlock(
           `for ${job}, but that entry is absent from the model catalog`,
       );
     }
-    return entry.adapter;
+    return entry;
   };
-  const adapters = {
-    llm: adapterFor("llm", models.llm),
-    stt: adapterFor("stt", models.stt),
-    tts: adapterFor("tts", models.tts),
+  const entries = {
+    llm: entryFor("llm", models.llm),
+    stt: entryFor("stt", models.stt),
+    tts: entryFor("tts", models.tts),
   };
   const credentials = await source.load();
   const keyFor = (
@@ -200,22 +201,22 @@ async function modelsBlock(
     llm: {
       provider: models.llm.provider,
       model: models.llm.model,
-      adapter: adapters.llm,
-      ...(models.llm.reasoningEffort === undefined
+      adapter: entries.llm.adapter,
+      ...(entries.llm.reasoningEffort === undefined
         ? {}
-        : { reasoning_effort: models.llm.reasoningEffort }),
+        : { reasoning_effort: entries.llm.reasoningEffort }),
       key: keyFor(models.llm.provider),
     },
     stt: {
       provider: models.stt.provider,
       model: models.stt.model,
-      adapter: adapters.stt,
+      adapter: entries.stt.adapter,
       ...speechKey(models.stt.provider),
     },
     tts: {
       provider: models.tts.provider,
       model: models.tts.model,
-      adapter: adapters.tts,
+      adapter: entries.tts.adapter,
       voice_id: models.tts.voiceId,
       speed: models.tts.speed,
       ...speechKey(models.tts.provider),

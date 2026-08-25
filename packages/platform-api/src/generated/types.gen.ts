@@ -2810,7 +2810,6 @@ export type ListPersonasResponses = {
                 llm: {
                     provider: string;
                     model: string;
-                    reasoningEffort?: string;
                 };
                 stt: {
                     provider: string;
@@ -2851,7 +2850,6 @@ export type CreatePersonaData = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -2924,7 +2922,6 @@ export type CreatePersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -2997,15 +2994,12 @@ export type GetPersonaFormResponses = {
             model: string;
             label: string;
             modelLabel?: string;
-            reasoningEfforts?: Array<string>;
-            recommendedReasoningEffort?: string;
             recommendedVoiceId?: string;
         }>;
         recommendedModels: {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3088,7 +3082,6 @@ export type GetPersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3127,7 +3120,6 @@ export type UpdatePersonaData = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3204,7 +3196,6 @@ export type UpdatePersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3288,7 +3279,6 @@ export type ListPersonaVersionsResponses = {
                 llm: {
                     provider: string;
                     model: string;
-                    reasoningEffort?: string;
                 };
                 stt: {
                     provider: string;
@@ -3421,7 +3411,6 @@ export type GetPersonaVersionResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3505,7 +3494,6 @@ export type ForkPersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3594,7 +3582,6 @@ export type SetDefaultPersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3685,7 +3672,6 @@ export type ArchivePersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;
@@ -3775,7 +3761,6 @@ export type RestorePersonaResponses = {
             llm: {
                 provider: string;
                 model: string;
-                reasoningEffort?: string;
             };
             stt: {
                 provider: string;

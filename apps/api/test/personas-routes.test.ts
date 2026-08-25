@@ -135,6 +135,7 @@ describe("creating and reading a persona", () => {
       ),
     ).toEqual([
       "llm:openai:gpt-4o-mini",
+      "llm:openai:gpt-4o",
       "llm:openai:gpt-5.6-terra",
       "llm:openai:gpt-5.6-sol",
       "llm:openai:gpt-5.6-luna",
@@ -152,16 +153,11 @@ describe("creating and reading a persona", () => {
       "tts:openai:tts-1",
       "tts:openai:tts-1-hd",
     ]);
-    expect(
-      catalog.find((entry) => entry.model === "gpt-5.6-terra"),
-    ).toMatchObject({
-      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
-      recommendedReasoningEffort: "none",
-    });
-    expect(catalog.find((entry) => entry.model === "gpt-5.5")).toMatchObject({
-      reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
-      recommendedReasoningEffort: "none",
-    });
+    for (const entry of catalog.filter((candidate) => candidate.job === "llm")) {
+      expect(entry).not.toHaveProperty("reasoningEffort");
+      expect(entry).not.toHaveProperty("reasoningEfforts");
+      expect(entry).not.toHaveProperty("recommendedReasoningEffort");
+    }
     expect(
       catalog.find((entry) => entry.model === "sonic-preview"),
     ).toMatchObject({ modelLabel: "Sonic 3.6 (Beta)" });
@@ -351,6 +347,41 @@ describe("creating and reading a persona", () => {
     }
   });
 
+  it("keeps reasoning policy out of persona writes", async () => {
+    api = await createApi("personas_reasoning_off");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const terra = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    };
+
+    const made = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "No-thinking Nina",
+      traits: TRAITS,
+      models: terra,
+    });
+    expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
+    expect(personaIn(made).models.llm).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+    });
+
+    const refused = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Thinking-on Tom",
+      traits: TRAITS,
+      models: {
+        ...terra,
+        llm: { ...terra.llm, reasoningEffort: "high" },
+      },
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(String(refused.body.message)).toMatch(
+      /unsupported fields reasoningEffort/i,
+    );
+  });
+
   /**
    * **A persona says who is calling, never what they are calling about.**
    *
@@ -415,7 +446,6 @@ describe("creating and reading a persona", () => {
         llm: {
           provider: "openai",
           model: "gpt-5.6-terra",
-          reasoningEffort: "none",
         },
       },
     });

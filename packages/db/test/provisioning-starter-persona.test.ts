@@ -35,7 +35,6 @@ const DEFAULT_PERSONA_MODELS: PersonaModels = {
   llm: {
     provider: "openai",
     model: "gpt-5.6-terra",
-    reasoningEffort: "none",
   },
 };
 

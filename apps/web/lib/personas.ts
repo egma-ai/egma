@@ -124,7 +124,6 @@ export function describedTraits(
 export type ModelsDraft = {
   readonly llmProvider: string;
   readonly llmModel: string;
-  readonly llmReasoningEffort: string;
   readonly sttProvider: string;
   readonly sttModel: string;
   readonly ttsProvider: string;
@@ -137,7 +136,6 @@ export function modelsDraftOf(models: PersonaModels): ModelsDraft {
   return {
     llmProvider: models.llm.provider,
     llmModel: models.llm.model,
-    llmReasoningEffort: models.llm.reasoningEffort ?? "",
     sttProvider: models.stt.provider,
     sttModel: models.stt.model,
     ttsProvider: models.tts.provider,
@@ -154,9 +152,6 @@ export function modelsFrom(draft: ModelsDraft): PersonaModels {
     llm: {
       provider: draft.llmProvider,
       model: draft.llmModel,
-      ...(draft.llmReasoningEffort === ""
-        ? {}
-        : { reasoningEffort: draft.llmReasoningEffort }),
     },
     stt: { provider: draft.sttProvider, model: draft.sttModel },
     tts: {

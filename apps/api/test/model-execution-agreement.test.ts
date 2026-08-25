@@ -95,9 +95,6 @@ function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
       llm: {
         provider: entry.provider,
         model: entry.model,
-        ...(entry.recommendedReasoningEffort === undefined
-          ? {}
-          : { reasoningEffort: entry.recommendedReasoningEffort }),
       },
     };
   }
@@ -130,10 +127,10 @@ function contractSpecUsing(entry: ProviderCatalogEntry): Record<string, unknown>
   selected.model = entry.model;
   selected.adapter = entry.adapter;
   if (entry.job === "llm") {
-    if (entry.recommendedReasoningEffort === undefined) {
+    if (entry.reasoningEffort === undefined) {
       delete selected.reasoning_effort;
     } else {
-      selected.reasoning_effort = entry.recommendedReasoningEffort;
+      selected.reasoning_effort = entry.reasoningEffort;
     }
   }
   return candidate;
@@ -178,9 +175,12 @@ describe("one executable model catalog", () => {
       voiceId: RECOMMENDED_ENTRY.tts.recommendedVoiceId,
       speed: RECOMMENDED_ENTRY.tts.recommendedSpeed,
     });
+    const graderEntry = PROVIDER_CATALOG.find(
+      (entry) => entry.job === "llm" && entry.graderEligible === true,
+    );
     expect(RECOMMENDED_GRADER_MODEL).toEqual({
-      provider: RECOMMENDED_ENTRY.llm.provider,
-      model: RECOMMENDED_ENTRY.llm.model,
+      provider: graderEntry?.provider,
+      model: graderEntry?.model,
     });
 
     const terra = PROVIDER_CATALOG.find(
@@ -189,7 +189,7 @@ describe("one executable model catalog", () => {
     expect(terra).toMatchObject({
       provider: "openai",
       adapter: "openai_chat_completions",
-      recommendedReasoningEffort: "none",
+      reasoningEffort: "none",
     });
   });
 

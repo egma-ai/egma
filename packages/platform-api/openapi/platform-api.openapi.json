@@ -10221,9 +10221,6 @@
                                   },
                                   "model": {
                                     "type": "string"
-                                  },
-                                  "reasoningEffort": {
-                                    "type": "string"
                                   }
                                 },
                                 "required": [
@@ -10489,9 +10486,6 @@
                           },
                           "model": {
                             "type": "string"
-                          },
-                          "reasoningEffort": {
-                            "type": "string"
                           }
                         },
                         "required": [
@@ -10635,9 +10629,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },
@@ -10891,15 +10882,6 @@
                           "modelLabel": {
                             "type": "string"
                           },
-                          "reasoningEfforts": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "recommendedReasoningEffort": {
-                            "type": "string"
-                          },
                           "recommendedVoiceId": {
                             "type": "string"
                           }
@@ -10923,9 +10905,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },
@@ -11194,9 +11173,6 @@
                             },
                             "model": {
                               "type": "string"
-                            },
-                            "reasoningEffort": {
-                              "type": "string"
                             }
                           },
                           "required": [
@@ -11461,9 +11437,6 @@
                           },
                           "model": {
                             "type": "string"
-                          },
-                          "reasoningEffort": {
-                            "type": "string"
                           }
                         },
                         "required": [
@@ -11613,9 +11586,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },
@@ -11911,9 +11881,6 @@
                                     "type": "string"
                                   },
                                   "model": {
-                                    "type": "string"
-                                  },
-                                  "reasoningEffort": {
                                     "type": "string"
                                   }
                                 },
@@ -12312,9 +12279,6 @@
                             },
                             "model": {
                               "type": "string"
-                            },
-                            "reasoningEffort": {
-                              "type": "string"
                             }
                           },
                           "required": [
@@ -12580,9 +12544,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },
@@ -12896,9 +12857,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },
@@ -13224,9 +13182,6 @@
                             },
                             "model": {
                               "type": "string"
-                            },
-                            "reasoningEffort": {
-                              "type": "string"
                             }
                           },
                           "required": [
@@ -13546,9 +13501,6 @@
                               "type": "string"
                             },
                             "model": {
-                              "type": "string"
-                            },
-                            "reasoningEffort": {
                               "type": "string"
                             }
                           },

@@ -363,12 +363,6 @@ export async function personaRoutes(
         model: entry.model,
         label: entry.label,
         ...("modelLabel" in entry ? { modelLabel: entry.modelLabel } : {}),
-        ...("reasoningEfforts" in entry
-          ? { reasoningEfforts: entry.reasoningEfforts }
-          : {}),
-        ...("recommendedReasoningEffort" in entry
-          ? { recommendedReasoningEffort: entry.recommendedReasoningEffort }
-          : {}),
         ...("recommendedVoiceId" in entry
           ? { recommendedVoiceId: entry.recommendedVoiceId }
           : {}),
@@ -548,7 +542,9 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", written.refusal);
     }
     const models =
-      "models" in body ? validPersonaModels(body.models) : undefined;
+      "models" in body
+        ? validPersonaModels(body.models)
+        : undefined;
 
     const expectedVersionId = given(text(body.expectedVersionId));
     if (

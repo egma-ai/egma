@@ -38,7 +38,6 @@ export {
   MODEL_PROVIDERS,
   PROVIDER_CATALOG,
   PROVIDERS_BY_JOB,
-  REASONING_EFFORTS,
   RECOMMENDED_ENTRY,
   catalogEntry,
   isModelProvider,

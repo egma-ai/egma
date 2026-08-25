@@ -331,9 +331,31 @@ async def test_a_model_that_never_answers_is_a_model_failure(model_stub):
         await client.close()
 
 
-async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub):
+@pytest.mark.parametrize(
+    ("model_name", "reasoning_effort"),
+    [
+        ("gpt-4o-mini", None),
+        ("gpt-4o", None),
+        ("gpt-5.4", "none"),
+        ("gpt-5.5", "none"),
+        ("gpt-5.6-terra", "none"),
+        ("gpt-5.6-sol", "none"),
+        ("gpt-5.6-luna", "none"),
+    ],
+)
+async def test_runtime_model_forwards_the_claimed_reasoning_policy(
+    model_stub, model_name, reasoning_effort
+):
     """The work order supplies provider, model, and current direct key."""
     model_stub.answer_with("I need the next available appointment.")
+    llm = {
+        "provider": "openai",
+        "model": model_name,
+        "adapter": "openai_chat_completions",
+        "key": "claim-key-under-test",
+    }
+    if reasoning_effort is not None:
+        llm["reasoning_effort"] = reasoning_effort
     document = {
         "contract_version": 4,
         "simulation_id": "sim_direct_model_selection",
@@ -354,13 +376,7 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
         "scenario": {"instructions": "Ask for the next appointment."},
         "limits": {"max_duration_seconds": 300, "max_turns": 20},
         "models": {
-            "llm": {
-                "provider": "openai",
-                "model": "gpt-5.6-terra",
-                "adapter": "openai_chat_completions",
-                "reasoning_effort": "none",
-                "key": "claim-key-under-test",
-            },
+            "llm": llm,
             "stt": {
                 "provider": "deepgram",
                 "model": "nova-3-general",
@@ -382,6 +398,9 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
     finally:
         await client.close()
 
-    assert model_stub.requests[0]["model"] == "gpt-5.6-terra"
-    assert model_stub.requests[0]["reasoning_effort"] == "none"
+    assert model_stub.requests[0]["model"] == model_name
+    if reasoning_effort is None:
+        assert "reasoning_effort" not in model_stub.requests[0]
+    else:
+        assert model_stub.requests[0]["reasoning_effort"] == reasoning_effort
     assert model_stub.headers[0]["Authorization"] == "Bearer claim-key-under-test"

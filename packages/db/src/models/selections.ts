@@ -5,7 +5,6 @@ import {
   catalogEntry,
   type ModelJob,
   type ModelProvider,
-  type ReasoningEffort,
 } from "./catalog.ts";
 
 export type ModelSelection = {
@@ -13,9 +12,7 @@ export type ModelSelection = {
   readonly model: string;
 };
 
-export type LlmSelection = ModelSelection & {
-  readonly reasoningEffort?: ReasoningEffort | undefined;
-};
+export type LlmSelection = ModelSelection;
 
 export type SpeechSelection = ModelSelection & {
   readonly voiceId: string;
@@ -93,40 +90,6 @@ function validSpeech(value: unknown): SpeechSelection {
   return { ...selection, voiceId: voiceId.trim(), speed };
 }
 
-function validLlm(value: unknown): LlmSelection {
-  const selection = validSelection("llm", value, [
-    "provider",
-    "model",
-    "reasoningEffort",
-  ]);
-  const entry = catalogEntry("llm", selection.provider, selection.model);
-  if (entry === undefined) {
-    throw new Error("the validated LLM selection disappeared from the catalog");
-  }
-
-  const { reasoningEffort } = value as Record<string, unknown>;
-  if (entry.reasoningEfforts === undefined) {
-    if (reasoningEffort !== undefined) {
-      throw new UnprocessableInputError(
-        `${selection.model} does not accept a reasoning effort`,
-      );
-    }
-    return selection;
-  }
-  if (
-    typeof reasoningEffort !== "string" ||
-    !entry.reasoningEfforts.some((effort) => effort === reasoningEffort)
-  ) {
-    throw new UnprocessableInputError(
-      `${selection.model} needs a reasoning effort from ${entry.reasoningEfforts.join(", ")}`,
-    );
-  }
-  return {
-    ...selection,
-    reasoningEffort: reasoningEffort as ReasoningEffort,
-  };
-}
-
 export function validPersonaModels(value: unknown): PersonaModels {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new UnprocessableInputError("persona models must be an object");
@@ -141,7 +104,7 @@ export function validPersonaModels(value: unknown): PersonaModels {
     );
   }
   return {
-    llm: validLlm(held.llm),
+    llm: validSelection("llm", held.llm),
     stt: validSelection("stt", held.stt),
     tts: validSpeech(held.tts),
   };
@@ -150,7 +113,7 @@ export function validPersonaModels(value: unknown): PersonaModels {
 export function validGraderModel(value: unknown): GraderModel {
   const selection = validSelection("llm", value);
   const entry = catalogEntry("llm", selection.provider, selection.model);
-  if (entry?.reasoningEfforts !== undefined) {
+  if (entry?.graderEligible !== true) {
     throw new UnprocessableInputError(
       `${selection.model} is not a supported grader model`,
     );
@@ -162,13 +125,9 @@ function sameSelection(a: ModelSelection, b: ModelSelection): boolean {
   return a.provider === b.provider && a.model === b.model;
 }
 
-function sameLlmSelection(a: LlmSelection, b: LlmSelection): boolean {
-  return sameSelection(a, b) && a.reasoningEffort === b.reasoningEffort;
-}
-
 export function samePersonaModels(a: PersonaModels, b: PersonaModels): boolean {
   return (
-    sameLlmSelection(a.llm, b.llm) &&
+    sameSelection(a.llm, b.llm) &&
     sameSelection(a.stt, b.stt) &&
     sameSelection(a.tts, b.tts) &&
     a.tts.voiceId === b.tts.voiceId &&
@@ -238,5 +197,15 @@ export const RECOMMENDED_PERSONA_MODELS: PersonaModels = {
   tts: recommendedSpeech(),
 };
 
+function recommendedGraderModel(): GraderModel {
+  const entry = PROVIDERS_BY_JOB.llm.find(
+    (candidate) => candidate.graderEligible === true,
+  );
+  if (entry === undefined) {
+    throw new Error("the provider catalog ships no grader-eligible LLM");
+  }
+  return { provider: entry.provider, model: entry.model };
+}
+
 export const RECOMMENDED_GRADER_MODEL: GraderModel =
-  recommendedSelection("llm");
+  recommendedGraderModel();

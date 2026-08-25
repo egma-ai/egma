@@ -41,32 +41,17 @@ export type ModelAdapterByJob = {
 export type ModelAdapter<Job extends ModelJob = ModelJob> =
   ModelAdapterByJob[Job];
 
-/** The reasoning primitive shared by every LLM catalog entry. */
-export const REASONING_EFFORTS = [
-  "none",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
-export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export type ReasoningEffort = "none";
 
-/** GPT-5.4 and GPT-5.5 accept every current effort except `max`. */
-const REASONING_EFFORTS_THROUGH_XHIGH = [
-  "none",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const satisfies readonly ReasoningEffort[];
+type LlmPolicy = {
+  /** This release may use the entry for an LLM-as-judge grader. */
+  readonly graderEligible?: true;
+  /** Fixed execution value. Absent when the model has no reasoning mode. */
+  readonly reasoningEffort?: ReasoningEffort;
+};
 
 type CatalogCapabilities<Job extends ModelJob> = Job extends "llm"
-  ? {
-      /** The reasoning choices this LLM accepts. Absent means no choice. */
-      readonly reasoningEfforts?: readonly ReasoningEffort[];
-      readonly recommendedReasoningEffort?: ReasoningEffort;
-    }
+  ? LlmPolicy
   : Job extends "tts"
     ? {
         readonly recommendedVoiceId?: string;
@@ -97,6 +82,14 @@ export const PROVIDER_CATALOG = [
     model: "gpt-4o-mini",
     adapter: "openai_chat_completions",
     label: "OpenAI",
+    graderEligible: true,
+  },
+  {
+    provider: "openai",
+    job: "llm",
+    model: "gpt-4o",
+    adapter: "openai_chat_completions",
+    label: "OpenAI",
   },
   {
     provider: "openai",
@@ -104,8 +97,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.6-terra",
     adapter: "openai_chat_completions",
     label: "OpenAI",
-    reasoningEfforts: REASONING_EFFORTS,
-    recommendedReasoningEffort: "none",
+    reasoningEffort: "none",
   },
   {
     provider: "openai",
@@ -113,8 +105,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.6-sol",
     adapter: "openai_chat_completions",
     label: "OpenAI",
-    reasoningEfforts: REASONING_EFFORTS,
-    recommendedReasoningEffort: "none",
+    reasoningEffort: "none",
   },
   {
     provider: "openai",
@@ -122,8 +113,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.6-luna",
     adapter: "openai_chat_completions",
     label: "OpenAI",
-    reasoningEfforts: REASONING_EFFORTS,
-    recommendedReasoningEffort: "none",
+    reasoningEffort: "none",
   },
   {
     provider: "openai",
@@ -131,8 +121,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.5",
     adapter: "openai_chat_completions",
     label: "OpenAI",
-    reasoningEfforts: REASONING_EFFORTS_THROUGH_XHIGH,
-    recommendedReasoningEffort: "none",
+    reasoningEffort: "none",
   },
   {
     provider: "openai",
@@ -140,8 +129,7 @@ export const PROVIDER_CATALOG = [
     model: "gpt-5.4",
     adapter: "openai_chat_completions",
     label: "OpenAI",
-    reasoningEfforts: REASONING_EFFORTS_THROUGH_XHIGH,
-    recommendedReasoningEffort: "none",
+    reasoningEffort: "none",
   },
   {
     // These models use OpenAI's realtime transcription protocol. They must

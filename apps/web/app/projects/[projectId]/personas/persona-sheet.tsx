@@ -218,15 +218,6 @@ function modelReads(
       label: "Language model",
       value: modelSaid(form?.modelCatalog, "llm", models.llm),
     },
-    ...(models.llm.reasoningEffort === undefined
-      ? []
-      : [
-          {
-            label: "Reasoning effort",
-            value: models.llm.reasoningEffort,
-            mono: true,
-          } satisfies Read,
-        ]),
     {
       label: "Speech-to-text model",
       value: modelSaid(form?.modelCatalog, "stt", models.stt),
@@ -579,7 +570,8 @@ export function PersonaSheet({
           expectedRevision: persona.revision,
           expectedVersionId: persona.versionId,
           traits: version.traits,
-          models: version.models,
+          // Reusing history authors a new version under today's model policy.
+          models: modelsFrom(modelsDraftOf(version.models)),
         },
         { client: platformClient },
       ),
