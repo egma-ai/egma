@@ -27,8 +27,7 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 /**
  * When a run's grading plan was decided, and whether one was decided at all.
  *
- * Every post-cutover run freezes its plan at start. Pre-cutover runs are
- * removed, so there is no migration-only or unrecorded runtime state.
+ * Every run freezes its plan at start. There is no unrecorded runtime state.
  */
 export const GRADING_PLAN_STATES = ["run_start"] as const;
 export type GradingPlanState = (typeof GRADING_PLAN_STATES)[number];

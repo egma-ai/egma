@@ -1,10 +1,9 @@
 /**
  * Prepare the schema ordinary fast tests clone.
  *
- * The template is a test-run concern, not a deployment path. Migration tests
- * deliberately create empty databases and continue to run every migration for
- * themselves. Everything else keeps the same real-Postgres isolation while
- * paying for the empty-to-current transition once per Vitest run.
+ * The template is a test-run concern, not a deployment path. Tests keep real
+ * Postgres isolation while paying for the empty-to-current transition once per
+ * Vitest run.
  */
 
 import { runMigrations } from "../../src/migrate.ts";

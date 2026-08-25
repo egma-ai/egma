@@ -37,9 +37,8 @@ import { startObjectStorage, type ObjectStorage } from "./support/object-storage
  *
  * What is asserted is the landed shape rather than the code's own opinion of
  * it. The read functions over `spans` belong to the next ticket, so the store
- * is queried directly here, the way the migration tests already do — with
- * `final`, because two physical copies of one replayed identity are not two
- * spans.
+ * is queried directly here with `final`, because two physical copies of one
+ * replayed identity are not two spans.
  */
 
 const storage: ObjectStorage = await startObjectStorage("otlp-ingest");

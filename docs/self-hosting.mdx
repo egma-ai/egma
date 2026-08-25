@@ -196,8 +196,25 @@ npx @egma/cli self-host up
 ```
 
 The API applies database migrations during boot. Internal credentials and
-Docker volumes are preserved. Deployment credentials continue to come from the
-current `.env` file.
+Docker volumes are preserved for normal upgrades from this baseline forward.
+Deployment credentials continue to come from the current `.env` file.
+
+<Warning>
+  There is no in-place self-host upgrade from a build before the current
+  database baseline, and Egma has no supported data-preserving upgrade for that
+  cutover. If you need data from the old installation, do not continue with
+  this release. To discard it and start clean, run these commands once from the
+  platform workspace:
+
+  ```bash
+  docker compose down --volumes
+  npx @egma/cli self-host up
+  ```
+
+  `docker compose down --volumes` permanently deletes this installation's
+  Postgres, ClickHouse, object-store, simulator, Redis, and pending-ingestion
+  data. It does not delete `.env` or `.egma-platform/platform.env`.
+</Warning>
 
 ## Troubleshooting
 

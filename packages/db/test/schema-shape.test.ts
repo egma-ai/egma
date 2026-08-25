@@ -271,7 +271,7 @@ describe("the simulation's test pin", () => {
         column.table_name === "simulation" && column.column_name === name,
     );
 
-  it("is two required identifier columns after the clean suite cutover", () => {
+  it("is two required identifier columns", () => {
     for (const name of ["test_id", "test_version_id"]) {
       const live = pinned(name);
       expect(live, `simulation.${name}`).toBeDefined();
@@ -339,8 +339,8 @@ describe("test suite ownership", () => {
 
   it("removes the retired applicability, capability-skip, retry, and archive shapes", () => {
     for (const { table, column } of [
-      // Agents own platform monitoring now. These values moved to the agent or
-      // were retired by the pre-launch cutover in 0042.
+      // Agents own platform monitoring. These old values do not belong on the
+      // agent or connection rows.
       { table: "agent", column: "description" },
       { table: "agent", column: "revision" },
       { table: "connection", column: "revision" },

@@ -35,8 +35,7 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 const SURFACE = [
   "packages/db/src/schema/mock-tools.ts",
   "packages/db/src/schema/runs.ts",
-  "packages/db/migrations/0020_mock_tools.sql",
-  "packages/db/migrations/0021_mock_tool_coverage.sql",
+  "packages/db/migrations/0000_baseline.sql",
   "packages/db/src/access/mock-tools.ts",
   "packages/db/src/access/tests.ts",
   "packages/db/src/access/runs.ts",

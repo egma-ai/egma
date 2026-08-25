@@ -301,7 +301,6 @@ const DATASTORE_DRIVERS = [
 const DELIBERATE_BYPASSES = [
   "packages/db/test/support/database.ts",
   "packages/db/test/support/clickhouse.ts",
-  "packages/db/test/migrations.test.ts",
   // Drops the test databases a timed-out run stranded, before a suite starts.
   // It exists to speak to the two stores as an operator rather than as egma:
   // there is no tenancy in `drop database`, and the thing it drops is not a

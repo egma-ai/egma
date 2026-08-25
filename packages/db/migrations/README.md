@@ -1,5 +1,21 @@
 # The migration rule
 
+## Current baseline
+
+The founder confirmed a full pre-production reset on 2026-08-25. PostgreSQL
+and ClickHouse each start from one `0000_baseline.sql` file. The prior
+migration chains are not a normal upgrade path; recreate a self-hosted database
+or volume that applied them before running this build. New migrations start at
+`0001`.
+
+A verified managed pre-production database may use one exceptional adoption
+path. Before this build starts, its operator must prove that every legacy
+migration name and hash is known and that the logical schema matches this
+baseline, then record this exact baseline name and hash. Legacy ledger rows may
+remain so the old image can still roll back. The runner accepts unknown legacy
+rows only when the exact current baseline hash is already recorded. This is an
+operator cutover procedure, not an in-place self-host upgrade.
+
 One rule keeps every deploy and every rollback safe, and it binds both
 stores — the Postgres files here and the ClickHouse files in
 `../clickhouse-migrations/`:
@@ -18,7 +34,7 @@ In practice:
 - **Test on the hosted compatibility floor.** Local development and CI use the
   oldest Postgres and ClickHouse feature versions the hosted platform still
   runs. Never move a test image ahead of its hosted vendor. The exact public
-  images are pinned in the root `docker-compose.yml`; the real migration and
+  images are pinned in the root `docker-compose.yml`; the real database-backed
   product tests run on those images.
 - **Add freely.** New tables, new nullable columns, new indexes — code that
   does not know them never sees them.
@@ -36,16 +52,20 @@ In practice:
 - **Freeze shipped history, not local state.** Before merge, a migration may be
   rewritten or squashed even if a local development database applied it;
   repair that local ledger. After merge or use outside local development, add
-  a new file instead; the runner refuses a changed recorded file.
+  a new file instead; the runner refuses a changed recorded file. The
+  founder-approved 2026-08-25 baseline reset is the one exception: Egma was
+  still pre-production, the managed stores adopt the exact baseline hash before
+  the new image deploys, and their legacy rows remain for an old-image rollback.
+  Future migration history is immutable again from this baseline forward.
 - **ClickHouse migrations must resume safely.** There is no transaction around
   a file, so every schema statement uses `IF EXISTS`, `IF NOT EXISTS` or
   `CREATE OR REPLACE`, and survives a second run after a partial failure. An
   approved data mutation must be idempotent and may name only a table
   guaranteed by an earlier immutable migration, or one an idempotent `CREATE`
-  earlier in the same file guarantees — and then a test proves that file
-  re-runs safely from every point inside it, because the ledger records a file
-  and never a statement; ClickHouse has no `IF EXISTS` form for
-  `ALTER TABLE ... DELETE`.
+  earlier in the same file guarantees. Pre-merge verification re-runs that
+  file safely from every point inside it, because the ledger records a file and
+  never a statement; ClickHouse has no `IF EXISTS` form for `ALTER TABLE ...
+  DELETE`.
 - **A rebuild is applied by one instance.** There is no advisory lock on this
   side either, so several instances normally boot together and arrive at the
   same schema because every statement is idempotent. A file that replaces a

@@ -107,7 +107,7 @@ export const project = pgTable(
      * import one. The default belongs to the project rather than to any test:
      * it is one answer for the whole product area, changed in one place, and
      * putting it anywhere else would mean each test carrying a copy of a
-     * decision nobody made per test. A migration trigger enforces that the
+     * decision nobody made per test. A database trigger enforces that the
      * target is either Egma-provided or owned by this exact project.
      *
      * **The resulting import cycle is deliberate and safe**, and it is worth
