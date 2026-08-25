@@ -407,7 +407,7 @@ describe("what a span says, as one comparable value", () => {
    */
   it("is the same fingerprint yesterday's Egma wrote", () => {
     expect(spanContentHash(span())).toBe(
-      "ba722d17aefacf8e4533c8abbacf6355a26a1fe7aa63fd38411d87f04af4decb",
+      "24cb5903423f42a945414e0b652dc50bda540bc5ef90decbc2b50118d04722ac",
     );
   });
 

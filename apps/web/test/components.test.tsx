@@ -1987,11 +1987,10 @@ describe("the Agents page", () => {
     id: "agt_1",
     projectId: "prj_1",
     name: "Front desk",
-    description: "Answers the main line.",
     // Every field the contract makes required is here, `agentPlatform`
     // included: the row reads it to say which platform an agent is on, and a
     // fixture that left it out would be a shape the API cannot answer with.
-    agentPlatform: null,
+    agentPlatform: "retell",
     // The list read carries every agent's connections, so a row in this
     // fixture carries the field. An agent with none is one of the states the
     // page draws, and it is drawn from an empty list rather than a missing one.

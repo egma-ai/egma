@@ -262,7 +262,11 @@ describe("a browser working in a project that is not the first", () => {
       method: "POST",
       url: "/v1/agents",
       headers: { cookie: ada.cookie },
-      payload: { name: "Outbound desk", projectId: outbound },
+      payload: {
+        name: "Outbound desk",
+        agentPlatform: "retell",
+        projectId: outbound,
+      },
     });
     expect(registered.statusCode, registered.body).toBe(201);
 
@@ -301,7 +305,7 @@ describe("a browser working in a project that is not the first", () => {
       method: "POST",
       url: `/v1/agents?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
-      payload: { name: "Outbound desk" },
+      payload: { name: "Outbound desk", agentPlatform: "retell" },
     });
     expect(registered.statusCode, registered.body).toBe(201);
 
@@ -625,6 +629,7 @@ describe("a browser working in a project that is not the first", () => {
     /* An agent and a connection to run against, in Outbound. */
     const registered = await asBrowser("POST", `/v1/agents?projectId=${outbound}`, {
       name: "Outbound desk",
+      agentPlatform: "retell",
       connection: {
         agentPlatform: "retell",
         connectionType: "retell_chat_api",

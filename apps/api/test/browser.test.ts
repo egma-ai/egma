@@ -2727,13 +2727,12 @@ describe("the complete product, walked in order in a second project", () => {
         .toContain("Retell staging");
       const said = await row.innerText();
       /*
-       * **An em dash under Platform, and that is a fact rather than a gap.**
+       * **Retell under Platform, and that is a fact rather than a gap.**
        * A `phone_number` connection spans platforms, so it answers the platform
-       * question through its agent — and this agent is unbound, because binding
-       * an agent to its platform is Start monitoring's job and never Register
-       * agent's. The two custodies are separate on purpose (ADR-0015).
+       * question through its agent. Register agent now records that required
+       * platform declaration separately from Start monitoring's credentials.
        */
-      expect(said).toContain("—");
+      expect(said).toContain("Retell");
       expect(said.toLowerCase()).not.toContain("not checked");
       expect(said.toLowerCase()).not.toContain("no connections yet");
     },
