@@ -95,17 +95,49 @@ const PERSONA_FORM: PersonaForm = {
       reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
       recommendedReasoningEffort: "none",
     },
+    ...["gpt-5.6-sol", "gpt-5.6-luna"].map((model) => ({
+      provider: "openai" as const,
+      job: "llm" as const,
+      model,
+      label: "OpenAI",
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      recommendedReasoningEffort: "none",
+    })),
+    ...["gpt-5.5", "gpt-5.4"].map((model) => ({
+      provider: "openai" as const,
+      job: "llm" as const,
+      model,
+      label: "OpenAI",
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+      recommendedReasoningEffort: "none",
+    })),
     {
       provider: "openai",
       job: "stt",
       model: "gpt-live-transcribe",
       label: "OpenAI",
     },
+    ...[
+      "gpt-realtime-whisper",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+    ].map((model) => ({
+      provider: "openai" as const,
+      job: "stt" as const,
+      model,
+      label: "OpenAI",
+    })),
     {
       provider: "deepgram",
       job: "stt",
       model: "nova-3-general",
       label: "Deepgram",
+    },
+    {
+      provider: "cartesia",
+      job: "stt",
+      model: "ink-2",
+      label: "Cartesia",
     },
     {
       provider: "cartesia",
@@ -115,12 +147,27 @@ const PERSONA_FORM: PersonaForm = {
       recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
     },
     {
+      provider: "cartesia",
+      job: "tts",
+      model: "sonic-preview",
+      label: "Cartesia",
+      modelLabel: "Sonic 3.6 (Beta)",
+      recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    },
+    {
       provider: "openai",
       job: "tts",
       model: "gpt-4o-mini-tts",
       label: "OpenAI",
       recommendedVoiceId: "alloy",
     },
+    ...["tts-1", "tts-1-hd"].map((model) => ({
+      provider: "openai" as const,
+      job: "tts" as const,
+      model,
+      label: "OpenAI",
+      recommendedVoiceId: "alloy",
+    })),
   ],
   recommendedModels: RECOMMENDED_MODELS,
   speedRange: { slowest: 0.6, fastest: 1.5 },
@@ -824,7 +871,7 @@ describe("one persona's sheet", () => {
     expect(written).not.toHaveProperty("description");
   });
 
-  it("selects exact model pairs and sends one complete models value", async () => {
+  it("filters models by provider and sends one complete models value", async () => {
     const changedModels: PersonaModels = {
       ...RECOMMENDED_MODELS,
       llm: {
@@ -855,19 +902,67 @@ describe("one persona's sheet", () => {
     render(<PersonaPage />);
 
     await openEditor();
+    expect(
+      Array.from(
+        (screen.getByLabelText("Speech-to-text provider") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.text),
+    ).toEqual(["OpenAI", "Deepgram", "Cartesia"]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Speech-to-text model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.value),
+    ).toEqual([
+      "gpt-live-transcribe",
+      "gpt-realtime-whisper",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+    ]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.text),
+    ).toEqual(["sonic-3.5", "Sonic 3.6 (Beta) — sonic-preview"]);
+    expect(
+      Array.from(
+        (screen.getByLabelText("Language model") as HTMLSelectElement).options,
+      ).map((option) => option.value),
+    ).toEqual([
+      "gpt-4o-mini",
+      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.4",
+    ]);
     fireEvent.change(screen.getByLabelText("Language model"), {
-      target: { value: JSON.stringify(["openai", "gpt-5.6-terra"]) },
+      target: { value: "gpt-5.6-terra" },
     });
     const reasoning = screen.getByLabelText("Reasoning effort");
     expect((reasoning as HTMLSelectElement).value).toBe("none");
     fireEvent.change(reasoning, { target: { value: "high" } });
-    const stt = screen.getByLabelText("Speech-to-text model");
-    fireEvent.change(stt, {
-      target: { value: JSON.stringify(["deepgram", "nova-3-general"]) },
+    fireEvent.change(screen.getByLabelText("Speech-to-text provider"), {
+      target: { value: "deepgram" },
     });
-    fireEvent.change(screen.getByLabelText("Text-to-speech model"), {
-      target: { value: JSON.stringify(["openai", "gpt-4o-mini-tts"]) },
+    const stt = screen.getByLabelText("Speech-to-text model") as HTMLSelectElement;
+    expect(stt.value).toBe("nova-3-general");
+    expect(Array.from(stt.options).map((option) => option.value)).toEqual([
+      "nova-3-general",
+    ]);
+    fireEvent.change(screen.getByLabelText("Text-to-speech provider"), {
+      target: { value: "openai" },
     });
+    expect(
+      (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement).value,
+    ).toBe("gpt-4o-mini-tts");
+    expect(
+      Array.from(
+        (screen.getByLabelText("Text-to-speech model") as HTMLSelectElement)
+          .options,
+      ).map((option) => option.value),
+    ).toEqual(["gpt-4o-mini-tts", "tts-1", "tts-1-hd"]);
     expect((screen.getByLabelText("Voice") as HTMLInputElement).value).toBe(
       "alloy",
     );

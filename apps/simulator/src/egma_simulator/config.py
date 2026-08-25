@@ -33,12 +33,14 @@ bare simulator and a container use the same limit unless an operator supplies
 ``EGMA_SIMULATOR_CAPACITY`` explicitly.
 """
 
-STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime")
+STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime", "cartesia_manual")
 """What the persona hears with. ``scripted`` needs no account and no network.
 
 ``openai_realtime`` holds a socket open and transcribes while the agent is
 still talking. The segmented OpenAI adapter was removed: an OpenAI STT
-selection has one meaning and cannot reach ``/audio/transcriptions``."""
+selection has one meaning and cannot reach ``/audio/transcriptions``.
+``cartesia_manual`` streams audio to Cartesia and uses Egma's own VAD frames
+to finalize each turn."""
 
 TTS_PROVIDERS = ("scripted", "openai", "cartesia")
 """What the persona speaks with. ``scripted`` needs no account and no network."""

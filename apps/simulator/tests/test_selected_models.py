@@ -18,6 +18,7 @@ from egma_simulator.spec import (
 from egma_simulator.speech import SpeechProviders, _ears, _mouth, voice_from_models
 
 STT_ADAPTERS = (
+    ("cartesia", "cartesia_manual", "ink-2", "CartesiaSTTService"),
     ("deepgram", "deepgram", "nova-3-general", "DeepgramSTTService"),
     (
         "openai",

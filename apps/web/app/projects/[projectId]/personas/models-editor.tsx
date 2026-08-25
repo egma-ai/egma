@@ -41,96 +41,35 @@ export function ModelFields({
   readonly note?: ReactNode;
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
-  const entries = (job: PersonaModelCatalogEntry["job"]) =>
-    form.modelCatalog.filter((entry) => entry.job === job);
-
-  /*
-   * **One option carries both halves of the choice, encoded together.** A
-   * select whose value was the model alone would let a provider from one
-   * adapter stand beside a model from another, which is the exact combination
-   * this version is meant to make impossible.
-   */
-  const choice = (provider: string, model: string) =>
-    JSON.stringify([provider, model]);
-
-  const options = (job: PersonaModelCatalogEntry["job"]) =>
-    entries(job).map((entry) => ({
-      value: choice(entry.provider, entry.model),
-      label: `${entry.label} — ${entry.model}`,
-    }));
-
-  const selected = (
-    job: PersonaModelCatalogEntry["job"],
-    value: string,
-  ): PersonaModelCatalogEntry | undefined =>
-    entries(job).find((entry) => choice(entry.provider, entry.model) === value);
-
-  const selectedLlm = selected(
-    "llm",
-    choice(draft.llmProvider, draft.llmModel),
+  const selectedLlm = form.modelCatalog.find(
+    (entry) =>
+      entry.job === "llm" &&
+      entry.provider === draft.llmProvider &&
+      entry.model === draft.llmModel,
   );
-
-  /** The options of one job, drawn as the browser's own. */
-  const optionsOf = (job: PersonaModelCatalogEntry["job"]) =>
-    options(job).map((option) => (
-      <option key={option.value} value={option.value}>
-        {option.label}
-      </option>
-    ));
 
   return (
     <>
-      <FormRow>
-        <Field
-          label="Language model"
-          htmlFor="persona-llm-model"
-          hint="What the persona thinks with."
-        >
-          <Select
-            id="persona-llm-model"
-            value={choice(draft.llmProvider, draft.llmModel)}
-            disabled={disabled}
-            onChange={(event) => {
-              const entry = selected("llm", event.target.value);
-              if (entry === undefined) return;
-              onChange({
-                ...draft,
-                llmProvider: entry.provider,
-                llmModel: entry.model,
-                llmReasoningEffort:
-                  entry.recommendedReasoningEffort ??
-                  entry.reasoningEfforts?.[0] ??
-                  "",
-              });
-            }}
-          >
-            {optionsOf("llm")}
-          </Select>
-        </Field>
-
-        <Field
-          label="Speech-to-text model"
-          htmlFor="persona-stt-model"
-          hint="What the persona hears with."
-        >
-          <Select
-            id="persona-stt-model"
-            value={choice(draft.sttProvider, draft.sttModel)}
-            disabled={disabled}
-            onChange={(event) => {
-              const entry = selected("stt", event.target.value);
-              if (entry === undefined) return;
-              onChange({
-                ...draft,
-                sttProvider: entry.provider,
-                sttModel: entry.model,
-              });
-            }}
-          >
-            {optionsOf("stt")}
-          </Select>
-        </Field>
-      </FormRow>
+      <ProviderModelFields
+        job="llm"
+        providerLabel="Language model provider"
+        modelLabel="Language model"
+        provider={draft.llmProvider}
+        model={draft.llmModel}
+        form={form}
+        disabled={disabled}
+        onSelect={(entry) =>
+          onChange({
+            ...draft,
+            llmProvider: entry.provider,
+            llmModel: entry.model,
+            llmReasoningEffort:
+              entry.recommendedReasoningEffort ??
+              entry.reasoningEfforts?.[0] ??
+              "",
+          })
+        }
+      />
 
       {selectedLlm?.reasoningEfforts === undefined ? null : (
         <Field
@@ -158,35 +97,46 @@ export function ModelFields({
         </Field>
       )}
 
-      <Field
-        label="Text-to-speech model"
-        htmlFor="persona-tts-model"
-        hint="What the persona speaks with."
-      >
-        <Select
-          id="persona-tts-model"
-          value={choice(draft.ttsProvider, draft.ttsModel)}
-          disabled={disabled}
-          onChange={(event) => {
-            const entry = selected("tts", event.target.value);
-            if (entry === undefined) return;
-            /*
-             * The voice travels with the model that speaks it. A voice id
-             * belongs to one TTS provider, so keeping the old one after the
-             * provider changed would leave a persona pointing at a voice its
-             * new provider has never heard of.
-             */
-            onChange({
-              ...draft,
-              ttsProvider: entry.provider,
-              ttsModel: entry.model,
-              voiceId: entry.recommendedVoiceId ?? "",
-            });
-          }}
-        >
-          {optionsOf("tts")}
-        </Select>
-      </Field>
+      <ProviderModelFields
+        job="stt"
+        providerLabel="Speech-to-text provider"
+        modelLabel="Speech-to-text model"
+        provider={draft.sttProvider}
+        model={draft.sttModel}
+        form={form}
+        disabled={disabled}
+        onSelect={(entry) =>
+          onChange({
+            ...draft,
+            sttProvider: entry.provider,
+            sttModel: entry.model,
+          })
+        }
+      />
+
+      <ProviderModelFields
+        job="tts"
+        providerLabel="Text-to-speech provider"
+        modelLabel="Text-to-speech model"
+        provider={draft.ttsProvider}
+        model={draft.ttsModel}
+        form={form}
+        disabled={disabled}
+        onSelect={(entry) => {
+          /*
+           * The voice travels with the model that speaks it. A voice id
+           * belongs to one TTS provider, so keeping the old one after the
+           * provider changed would leave a persona pointing at a voice its
+           * new provider has never heard of.
+           */
+          onChange({
+            ...draft,
+            ttsProvider: entry.provider,
+            ttsModel: entry.model,
+            voiceId: entry.recommendedVoiceId ?? "",
+          });
+        }}
+      />
 
       <FormRow>
         <Field
@@ -225,5 +175,93 @@ export function ModelFields({
 
       {note}
     </>
+  );
+}
+
+/**
+ * One provider choice followed by one model choice from that provider.
+ *
+ * The server catalog remains the interface. This browser module derives both
+ * dropdowns from it, so a provider/model pair cannot exist here unless the
+ * server said its adapter can execute that exact pair.
+ */
+function ProviderModelFields({
+  job,
+  providerLabel,
+  modelLabel,
+  provider,
+  model,
+  form,
+  disabled,
+  onSelect,
+}: {
+  readonly job: PersonaModelCatalogEntry["job"];
+  readonly providerLabel: string;
+  readonly modelLabel: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly form: PersonaForm;
+  readonly disabled: boolean;
+  readonly onSelect: (entry: PersonaModelCatalogEntry) => void;
+}) {
+  const entries = form.modelCatalog.filter((entry) => entry.job === job);
+  const providers = [
+    ...new Map(entries.map((entry) => [entry.provider, entry.label])).entries(),
+  ];
+  const models = entries.filter((entry) => entry.provider === provider);
+
+  const firstEntryForProvider = (nextProvider: string) =>
+    entries.find((entry) => entry.provider === nextProvider);
+  const entryForModel = (nextModel: string) =>
+    models.find((entry) => entry.model === nextModel);
+
+  return (
+    <FormRow>
+      <Field
+        label={providerLabel}
+        htmlFor={`persona-${job}-provider`}
+        hint={`Who the persona ${job === "llm" ? "thinks" : job === "stt" ? "hears" : "speaks"} with.`}
+      >
+        <Select
+          id={`persona-${job}-provider`}
+          value={provider}
+          disabled={disabled}
+          onChange={(event) => {
+            const entry = firstEntryForProvider(event.target.value);
+            if (entry !== undefined) onSelect(entry);
+          }}
+        >
+          {providers.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <Field
+        label={modelLabel}
+        htmlFor={`persona-${job}-model`}
+        hint="The exact model Egma will run."
+      >
+        <Select
+          id={`persona-${job}-model`}
+          value={model}
+          disabled={disabled}
+          onChange={(event) => {
+            const entry = entryForModel(event.target.value);
+            if (entry !== undefined) onSelect(entry);
+          }}
+        >
+          {models.map((entry) => (
+            <option key={entry.model} value={entry.model}>
+              {entry.modelLabel === undefined
+                ? entry.model
+                : `${entry.modelLabel} — ${entry.model}`}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </FormRow>
   );
 }

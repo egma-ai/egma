@@ -10888,6 +10888,9 @@
                           "label": {
                             "type": "string"
                           },
+                          "modelLabel": {
+                            "type": "string"
+                          },
                           "reasoningEfforts": {
                             "type": "array",
                             "items": {

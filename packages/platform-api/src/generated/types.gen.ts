@@ -2996,6 +2996,7 @@ export type GetPersonaFormResponses = {
             job: 'llm' | 'stt' | 'tts';
             model: string;
             label: string;
+            modelLabel?: string;
             reasoningEfforts?: Array<string>;
             recommendedReasoningEffort?: string;
             recommendedVoiceId?: string;

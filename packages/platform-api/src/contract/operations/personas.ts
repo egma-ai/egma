@@ -157,6 +157,7 @@ const modelCatalogEntry = {
     job: { type: "string", enum: ["llm", "stt", "tts"] },
     model: { type: "string" },
     label: { type: "string" },
+    modelLabel: { type: "string" },
     reasoningEfforts: arrayOf(reasoningEffort),
     recommendedReasoningEffort: reasoningEffort,
     recommendedVoiceId: { type: "string" },

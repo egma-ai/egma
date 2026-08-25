@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -105,6 +106,86 @@ def test_cartesia_refuses_a_speed_it_cannot_honor(speed: float):
         )
 
 
+def test_cartesia_stt_receives_the_pinned_model(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from pipecat.services.cartesia.stt import CartesiaSTTService
+
+    calls = capture_construction(monkeypatch, CartesiaSTTService)
+    _leg, connected = _ears(
+        SpeechProviders(
+            stt="cartesia_manual",
+            stt_key=A_KEY,
+            stt_model="ink-2",
+        )
+    )
+
+    assert calls[0]["settings"].model == "ink-2"
+    assert connected is not None
+
+
+@pytest.mark.parametrize(
+    ("providers", "reason"),
+    [
+        (SpeechProviders(stt="cartesia_manual", stt_model="ink-2"), "key"),
+        (SpeechProviders(stt="cartesia_manual", stt_key=A_KEY), "model"),
+    ],
+)
+def test_cartesia_stt_refuses_an_incomplete_selection(
+    providers: SpeechProviders, reason: str
+):
+    with pytest.raises(SpeechFault, match=reason):
+        _ears(providers)
+
+
+async def test_cartesia_stt_waits_until_its_socket_is_connected(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from pipecat.processors.frame_processor import FrameProcessor
+    from pipecat.services.cartesia import stt as cartesia_stt
+
+    class PendingCartesiaSTT(FrameProcessor):
+        created: PendingCartesiaSTT | None = None
+
+        class Settings:
+            def __init__(self, *, model: str) -> None:
+                self.model = model
+
+        def __init__(self, **_kwargs: object) -> None:
+            super().__init__()
+            self.handlers: dict[str, Any] = {}
+            PendingCartesiaSTT.created = self
+
+        def event_handler(self, name: str):
+            def register(handler):
+                self.handlers[name] = handler
+                return handler
+
+            return register
+
+        async def announce_connected(self) -> None:
+            await self.handlers["on_connected"](self)
+
+    monkeypatch.setattr(cartesia_stt, "CartesiaSTTService", PendingCartesiaSTT)
+    _leg, connected = _ears(
+        SpeechProviders(
+            stt="cartesia_manual",
+            stt_key=A_KEY,
+            stt_model="ink-2",
+        )
+    )
+    leg = PendingCartesiaSTT.created
+    assert leg is not None
+    assert connected is not None
+
+    waiting = asyncio.create_task(connected())
+    await asyncio.sleep(0)
+    assert not waiting.done()
+
+    await leg.announce_connected()
+    await waiting
+
+
 def test_openai_realtime_receives_the_pinned_model(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -122,6 +203,31 @@ def test_openai_realtime_receives_the_pinned_model(
     assert calls[0]["settings"].model == "gpt-live-transcribe"
     assert calls[0]["turn_detection"] is False
     assert connected is not None
+
+
+async def test_live_transcribe_uses_the_plural_languages_request():
+    leg, _connected = _ears(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_model="gpt-live-transcribe",
+        )
+    )
+    service = leg  # The adapter deliberately returns the real Pipecat service.
+    sent: list[dict[str, Any]] = []
+
+    async def remember(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    service._ws_send = remember
+    await service._send_session_update()
+
+    transcription = sent[0]["session"]["audio"]["input"]["transcription"]
+    assert transcription == {
+        "model": "gpt-live-transcribe",
+        "languages": ["en"],
+    }
+    assert "language" not in transcription
 
 
 @pytest.mark.parametrize(

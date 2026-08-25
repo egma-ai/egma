@@ -20,6 +20,7 @@ describe("one complete persona model selection", () => {
       "openai_chat_completions",
       "openai_realtime",
       "deepgram",
+      "cartesia_manual",
       "cartesia",
       "openai",
     ]);
@@ -28,7 +29,7 @@ describe("one complete persona model selection", () => {
       "openai_chat_completions"
     >();
     expectTypeOf<ModelAdapter<"stt">>().toEqualTypeOf<
-      "openai_realtime" | "deepgram"
+      "openai_realtime" | "deepgram" | "cartesia_manual"
     >();
     expectTypeOf<ModelAdapter<"tts">>().toEqualTypeOf<"cartesia" | "openai">();
 
@@ -106,29 +107,37 @@ describe("one complete persona model selection", () => {
     },
   );
 
-  it("refuses the exact cross-adapter STT pair that failed in production", () => {
-    expect(() =>
-      validPersonaModels({
-        ...RECOMMENDED_PERSONA_MODELS,
-        stt: { provider: "openai", model: "gpt-4o-transcribe" },
-      }),
-    ).toThrow(/supported openai stt model/i);
-  });
-
-  it("accepts OpenAI realtime transcription only as its exact adapter pair", () => {
+  it.each([
+    "gpt-live-transcribe",
+    "gpt-realtime-whisper",
+    "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+  ])("accepts OpenAI realtime transcription model %s", (model) => {
     expect(
       validPersonaModels({
         ...RECOMMENDED_PERSONA_MODELS,
-        stt: { provider: "openai", model: "gpt-live-transcribe" },
+        stt: { provider: "openai", model },
       }).stt,
-    ).toEqual({ provider: "openai", model: "gpt-live-transcribe" });
+    ).toEqual({ provider: "openai", model });
 
     expect(() =>
       validPersonaModels({
         ...RECOMMENDED_PERSONA_MODELS,
-        stt: { provider: "deepgram", model: "gpt-live-transcribe" },
+        stt: { provider: "deepgram", model },
       }),
     ).toThrow(/supported deepgram stt model/i);
+  });
+
+  it.each([
+    ["deepgram", "nova-3-general"],
+    ["cartesia", "ink-2"],
+  ])("accepts the %s STT model %s", (provider, model) => {
+    expect(
+      validPersonaModels({
+        ...RECOMMENDED_PERSONA_MODELS,
+        stt: { provider, model },
+      }).stt,
+    ).toEqual({ provider, model });
   });
 
   it("refuses arbitrary model text even for a known provider", () => {
@@ -155,6 +164,28 @@ describe("one complete persona model selection", () => {
       recommendedReasoningEffort: "none",
     });
   });
+
+  it.each(["gpt-5.6-sol", "gpt-5.6-luna"])(
+    "catalogs %s with the complete GPT-5.6 reasoning range",
+    (model) => {
+      expect(catalogEntry("llm", "openai", model)).toMatchObject({
+        adapter: "openai_chat_completions",
+        reasoningEfforts: REASONING_EFFORTS,
+        recommendedReasoningEffort: "none",
+      });
+    },
+  );
+
+  it.each(["gpt-5.5", "gpt-5.4"])(
+    "catalogs %s without an unsupported max effort",
+    (model) => {
+      expect(catalogEntry("llm", "openai", model)).toMatchObject({
+        adapter: "openai_chat_completions",
+        reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+        recommendedReasoningEffort: "none",
+      });
+    },
+  );
 
   it("accepts a cataloged reasoning choice as part of the LLM selection", () => {
     const selected = validPersonaModels({

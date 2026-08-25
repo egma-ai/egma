@@ -128,27 +128,43 @@ describe("creating and reading a persona", () => {
     expect(form.statusCode).toBe(200);
     expect(form.body.recommendedModels).toEqual(RECOMMENDED_PERSONA_MODELS);
     expect(form.body.speedRange).toEqual(SPEED_RANGE);
-    expect(form.body.modelCatalog).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          job: "stt",
-          provider: "openai",
-          model: "gpt-live-transcribe",
-        }),
-        expect.objectContaining({
-          job: "stt",
-          provider: "deepgram",
-          model: "nova-3-general",
-        }),
-        expect.objectContaining({
-          job: "llm",
-          provider: "openai",
-          model: "gpt-5.6-terra",
-          reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
-          recommendedReasoningEffort: "none",
-        }),
-      ]),
-    );
+    const catalog = form.body.modelCatalog as readonly Record<string, unknown>[];
+    expect(
+      catalog.map(
+        (entry) => `${entry.job}:${entry.provider}:${entry.model}`,
+      ),
+    ).toEqual([
+      "llm:openai:gpt-4o-mini",
+      "llm:openai:gpt-5.6-terra",
+      "llm:openai:gpt-5.6-sol",
+      "llm:openai:gpt-5.6-luna",
+      "llm:openai:gpt-5.5",
+      "llm:openai:gpt-5.4",
+      "stt:openai:gpt-live-transcribe",
+      "stt:openai:gpt-realtime-whisper",
+      "stt:openai:gpt-4o-transcribe",
+      "stt:openai:gpt-4o-mini-transcribe",
+      "stt:deepgram:nova-3-general",
+      "stt:cartesia:ink-2",
+      "tts:cartesia:sonic-3.5",
+      "tts:cartesia:sonic-preview",
+      "tts:openai:gpt-4o-mini-tts",
+      "tts:openai:tts-1",
+      "tts:openai:tts-1-hd",
+    ]);
+    expect(
+      catalog.find((entry) => entry.model === "gpt-5.6-terra"),
+    ).toMatchObject({
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      recommendedReasoningEffort: "none",
+    });
+    expect(catalog.find((entry) => entry.model === "gpt-5.5")).toMatchObject({
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
+      recommendedReasoningEffort: "none",
+    });
+    expect(
+      catalog.find((entry) => entry.model === "sonic-preview"),
+    ).toMatchObject({ modelLabel: "Sonic 3.6 (Beta)" });
   });
 
   it("answers the whole persona, with both expectations a write will name", async () => {

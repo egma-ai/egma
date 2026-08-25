@@ -23,7 +23,7 @@ export type ModelProvider = (typeof MODEL_PROVIDERS)[number];
  */
 const MODEL_ADAPTERS_BY_JOB = {
   llm: ["openai_chat_completions"],
-  stt: ["openai_realtime", "deepgram"],
+  stt: ["openai_realtime", "deepgram", "cartesia_manual"],
   tts: ["cartesia", "openai"],
 } as const satisfies {
   readonly [Job in ModelJob]: readonly string[];
@@ -52,6 +52,15 @@ export const REASONING_EFFORTS = [
 ] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
+/** GPT-5.4 and GPT-5.5 accept every current effort except `max`. */
+const REASONING_EFFORTS_THROUGH_XHIGH = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ReasoningEffort[];
+
 type CatalogCapabilities<Job extends ModelJob> = Job extends "llm"
   ? {
       /** The reasoning choices this LLM accepts. Absent means no choice. */
@@ -74,7 +83,10 @@ export type ProviderCatalogEntry<
       readonly model: string;
       /** The protocol adapter the work order tells the simulator to dispatch. */
       readonly adapter: ModelAdapter<Job>;
+      /** Provider name shown in the provider dropdown. */
       readonly label: string;
+      /** Optional human name; the exact callable id remains `model`. */
+      readonly modelLabel?: string;
     } & CatalogCapabilities<Job>
   : never;
 
@@ -96,11 +108,68 @@ export const PROVIDER_CATALOG = [
     recommendedReasoningEffort: "none",
   },
   {
-    // This is the realtime transcription adapter. It must never be sent to
-    // OpenAI's segmented /v1/audio/transcriptions endpoint.
+    provider: "openai",
+    job: "llm",
+    model: "gpt-5.6-sol",
+    adapter: "openai_chat_completions",
+    label: "OpenAI",
+    reasoningEfforts: REASONING_EFFORTS,
+    recommendedReasoningEffort: "none",
+  },
+  {
+    provider: "openai",
+    job: "llm",
+    model: "gpt-5.6-luna",
+    adapter: "openai_chat_completions",
+    label: "OpenAI",
+    reasoningEfforts: REASONING_EFFORTS,
+    recommendedReasoningEffort: "none",
+  },
+  {
+    provider: "openai",
+    job: "llm",
+    model: "gpt-5.5",
+    adapter: "openai_chat_completions",
+    label: "OpenAI",
+    reasoningEfforts: REASONING_EFFORTS_THROUGH_XHIGH,
+    recommendedReasoningEffort: "none",
+  },
+  {
+    provider: "openai",
+    job: "llm",
+    model: "gpt-5.4",
+    adapter: "openai_chat_completions",
+    label: "OpenAI",
+    reasoningEfforts: REASONING_EFFORTS_THROUGH_XHIGH,
+    recommendedReasoningEffort: "none",
+  },
+  {
+    // These models use OpenAI's realtime transcription protocol. They must
+    // never reach the segmented /v1/audio/transcriptions endpoint.
     provider: "openai",
     job: "stt",
     model: "gpt-live-transcribe",
+    adapter: "openai_realtime",
+    label: "OpenAI",
+  },
+  {
+    provider: "openai",
+    job: "stt",
+    model: "gpt-realtime-whisper",
+    adapter: "openai_realtime",
+    label: "OpenAI",
+  },
+  {
+    provider: "openai",
+    job: "stt",
+    model: "gpt-4o-transcribe",
+    adapter: "openai_realtime",
+    label: "OpenAI",
+  },
+  {
+    provider: "openai",
+    job: "stt",
+    model: "gpt-4o-mini-transcribe",
     adapter: "openai_realtime",
     label: "OpenAI",
   },
@@ -113,6 +182,13 @@ export const PROVIDER_CATALOG = [
   },
   {
     provider: "cartesia",
+    job: "stt",
+    model: "ink-2",
+    adapter: "cartesia_manual",
+    label: "Cartesia",
+  },
+  {
+    provider: "cartesia",
     job: "tts",
     model: "sonic-3.5",
     adapter: "cartesia",
@@ -121,9 +197,37 @@ export const PROVIDER_CATALOG = [
     recommendedSpeed: 1,
   },
   {
+    provider: "cartesia",
+    job: "tts",
+    model: "sonic-preview",
+    adapter: "cartesia",
+    label: "Cartesia",
+    modelLabel: "Sonic 3.6 (Beta)",
+    recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    recommendedSpeed: 1,
+  },
+  {
     provider: "openai",
     job: "tts",
     model: "gpt-4o-mini-tts",
+    adapter: "openai",
+    label: "OpenAI",
+    recommendedVoiceId: "alloy",
+    recommendedSpeed: 1,
+  },
+  {
+    provider: "openai",
+    job: "tts",
+    model: "tts-1",
+    adapter: "openai",
+    label: "OpenAI",
+    recommendedVoiceId: "alloy",
+    recommendedSpeed: 1,
+  },
+  {
+    provider: "openai",
+    job: "tts",
+    model: "tts-1-hd",
     adapter: "openai",
     label: "OpenAI",
     recommendedVoiceId: "alloy",

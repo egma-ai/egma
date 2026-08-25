@@ -362,6 +362,7 @@ export async function personaRoutes(
         job: entry.job,
         model: entry.model,
         label: entry.label,
+        ...("modelLabel" in entry ? { modelLabel: entry.modelLabel } : {}),
         ...("reasoningEfforts" in entry
           ? { reasoningEfforts: entry.reasoningEfforts }
           : {}),
