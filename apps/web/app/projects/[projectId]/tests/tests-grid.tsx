@@ -679,6 +679,20 @@ export function TestsGrid(props: GridProps) {
    */
   const draftNow = useRef<Draft | null>(null);
   /**
+   * What each cell's unfinished save is trying to make true.
+   *
+   * **A wake seeds from the newest intent, not from the row.** The row still
+   * shows the value a save is in the middle of replacing, so a cell woken while
+   * its own save is in flight used to start from the value the person had just
+   * typed over. Blurring it without touching anything then committed that older
+   * value back — against the version their own save had just minted, so it
+   * landed, and their edit was undone by a click that changed nothing.
+   *
+   * Seeded from here instead, that blur commits a value equal to what is
+   * stored, and the unchanged path absorbs it without a request.
+   */
+  const intent = useRef<Map<string, string | readonly string[]>>(new Map());
+  /**
    * The cells with a save in flight, which is a set and not a flag.
    *
    * **A flag made one cell's save stop another cell's.** Blurring cell A starts
@@ -751,6 +765,7 @@ export function TestsGrid(props: GridProps) {
     queued.current = new Map();
     latest.current = new Map();
     inFlight.current = new Set();
+    intent.current = new Map();
   }, [projectId, suiteId]);
 
   /* Every persona a row already names has a name, so a cell can show it. */
@@ -797,10 +812,31 @@ export function TestsGrid(props: GridProps) {
     setCellDraft(next);
   }
 
+  /** The stored row, with any unfinished save of it laid over the top. */
+  function newestIntent(test: ListedTest): Draft {
+    const held = draftOf(test);
+    const pending = (of: Field): string | readonly string[] | undefined =>
+      intent.current.get(`${test.id}:${of}`);
+    const name = pending("name");
+    const scenario = pending("scenario");
+    const behaviors = pending("expectedBehaviors");
+    const personas = pending("personas");
+    return {
+      name: typeof name === "string" ? name : held.name,
+      scenario: typeof scenario === "string" ? scenario : held.scenario,
+      expectedBehaviors: Array.isArray(behaviors)
+        ? [...(behaviors as readonly string[])]
+        : held.expectedBehaviors,
+      personas: Array.isArray(personas)
+        ? [...(personas as readonly string[])]
+        : held.personas,
+    };
+  }
+
   function wake(test: ListedTest, field: Field): void {
     if (!mayAuthor) return;
     woken({ testId: test.id, field });
-    holdDraft(draftOf(test));
+    holdDraft(newestIntent(test));
     setCellRefused(null);
     // Waking a cell closes a picker of its own from a previous wake, and
     // leaves the entry row's alone.
@@ -867,6 +903,8 @@ export function TestsGrid(props: GridProps) {
       return;
     }
     inFlight.current.add(key);
+    // What this save is trying to make true, from now until it answers.
+    intent.current.set(key, value);
     setCellRefused(null);
 
     /*
@@ -899,6 +937,7 @@ export function TestsGrid(props: GridProps) {
         ),
       );
       inFlight.current.delete(key);
+      intent.current.delete(key);
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
         return;

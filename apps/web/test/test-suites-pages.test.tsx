@@ -757,6 +757,79 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("seeds a re-woken cell from its own unfinished save, so a blur reverts nothing", async () => {
+    // B is typed over A and committed; the PATCH is held open. The cell is
+    // left and entered again while that save is still in flight — the row
+    // still shows A, because A is exactly what the save is replacing.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({
+          personas: [PERSONA],
+          scenario: "B, the newer words.",
+          version: 2,
+          versionId: "tstv_2",
+          revision: "rev_2",
+        }),
+        waitFor: held,
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    const row = (await screen.findByText("Books service")).closest("tr");
+    if (row === null) throw new Error("the test's row is not on screen");
+
+    // Type B over A and commit it. The request hangs.
+    fireEvent.click(within(row).getByText("The caller books service."));
+    const first = within(row).getByLabelText("Scenario");
+    fireEvent.change(first, { target: { value: "B, the newer words." } });
+    fireEvent.keyDown(first, { key: "Enter" });
+
+    // Leave the cell and come back into it while the save is still in flight.
+    fireEvent.click(within(row).getByText("Books service"));
+    fireEvent.click(within(row).getByText("The caller books service."));
+
+    // The seed itself: the woken cell holds B — what the person last meant —
+    // and not A, which is only what the row has not caught up with yet.
+    const again = within(row).getByLabelText("Scenario") as HTMLTextAreaElement;
+    expect(again.value).toBe("B, the newer words.");
+
+    // Blur without typing a thing, then let the first save answer.
+    fireEvent.blur(again);
+    release();
+
+    // Nothing second goes out: the blur committed a value already stored, and
+    // the unchanged path absorbed it. A revert would have been a second PATCH.
+    await waitFor(() => {
+      expect(screen.getByText("B, the newer words.")).toBeTruthy();
+    });
+    expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+      {
+        path: "/v1/tests/tst_1",
+        method: "PATCH",
+        body: { scenario: "B, the newer words.", expectedVersionId: "tstv_1" },
+      },
+    ]);
+    expect(screen.queryByText("The caller books service.")).toBeNull();
+  });
+
   it("leaves a re-woken cell alone when the save it started answers late", async () => {
     // Scenario is committed and its PATCH is held open. The cell is left and
     // entered again — a new edit session over the same two coordinates — and
