@@ -44,6 +44,30 @@ import { ConfirmDialog } from "./parts.tsx";
  * says so before the request rather than after it, and repeats the platform's
  * own sentence when a request is refused anyway.
  *
+ * **The save grammar, whole.** Every rule below exists because a version
+ * guard makes two saves of one test contend, and because a request is awaited
+ * while a person keeps typing. Four rules, and together they close the family:
+ *
+ * 1. **Different tests save in parallel; one test saves in order.** Separate
+ *    rows carry separate guards, so they cannot contend. Two cells of one test
+ *    would carry the same version, so they queue, and a queued save reads its
+ *    version or revision when it is sent — from the answer the save in front
+ *    of it received, never from the render that started it.
+ * 2. **A wake seeds from the newest intent.** The stored row, with any
+ *    unfinished save of it laid over the top, because the row still shows what
+ *    that save is replacing.
+ * 3. **An answer closes only its own session, and only over what it sent.**
+ *    Leaving a cell and returning is a new session, so a late answer from the
+ *    old one neither closes it nor speaks into it; and pressing Enter and
+ *    carrying on typing never leaves the session, so the draft itself is what
+ *    says the answer has been overtaken.
+ * 4. **A commit is dropped only when it is an identical resubmit** — the blur
+ *    that follows an Enter. Anything a person actually changed queues.
+ *
+ * What that buys is one sentence: a version conflict can only be a write this
+ * client did not make, so the refusal in the cell means another person moved
+ * the test, and it is never about something the person in front of it did.
+ *
  * The look is `LNC-0`, `LUT-0` and boards 10–14 of Paper page 04B: a Pure Paper
  * panel inside one hairline, hairlines between every cell, a woken cell inside
  * a 2px ink edge, add-affordances only on the woken cell, and a ghost row at
@@ -139,6 +163,15 @@ function draftOf(test: ListedTest): Draft {
 
 function trimmedBehaviors(behaviors: readonly string[]): readonly string[] {
   return behaviors.map((one) => one.trim()).filter((one) => one !== "");
+}
+
+/** Whether two committed values say the same thing, of whichever shape. */
+function sameSent(
+  left: string | readonly string[],
+  right: string | readonly string[],
+): boolean {
+  if (typeof left === "string" || typeof right === "string") return left === right;
+  return sameList(left, right);
 }
 
 /** Whether a draft still says exactly what a finished save carried. */
@@ -693,22 +726,6 @@ export function TestsGrid(props: GridProps) {
    */
   const intent = useRef<Map<string, string | readonly string[]>>(new Map());
   /**
-   * The cells with a save in flight, which is a set and not a flag.
-   *
-   * **A flag made one cell's save stop another cell's.** Blurring cell A starts
-   * its request; committing cell B while that request is still open met a
-   * global "something is saving" and returned early, so B's edit was neither
-   * sent nor kept — and waking the next cell replaced the draft, so what was
-   * typed into B went with it. Silently, which is the one thing this grid
-   * promises never to do.
-   *
-   * Two different cells are independent by construction: each save carries only
-   * its own field and only its own version or revision guard, so they cannot
-   * overwrite one another and there is nothing to serialize. What the set still
-   * refuses is the same cell twice — an Enter followed by the blur it causes.
-   */
-  const inFlight = useRef<Set<string>>(new Set());
-  /**
    * The tail of each test's queue, so one test's saves happen in order.
    *
    * **Two cells of the same test cannot go at once, and the reason is the
@@ -764,7 +781,6 @@ export function TestsGrid(props: GridProps) {
   useEffect(() => {
     queued.current = new Map();
     latest.current = new Map();
-    inFlight.current = new Set();
     intent.current = new Map();
   }, [projectId, suiteId]);
 
@@ -875,7 +891,7 @@ export function TestsGrid(props: GridProps) {
         ? held
         : { testId: test.id, field, at: wakes.current };
     const key = `${mine.testId}:${mine.field}`;
-    if (cellDraft === null || inFlight.current.has(key)) return;
+    if (cellDraft === null) return;
     const stored = draftOf(test);
     const problem = whyFieldRefuses(field, cellDraft);
     if (problem !== null) {
@@ -898,12 +914,22 @@ export function TestsGrid(props: GridProps) {
           : sameList(value as readonly string[], field === "expectedBehaviors"
               ? stored.expectedBehaviors
               : stored.personas);
+    /*
+     * **A cell drops only an identical resubmit.** The guard exists for one
+     * thing: Enter commits, and the blur it causes commits the same value a
+     * moment later. Blanket-blocking every commit while a save was in flight
+     * threw away a real edit instead — words typed after Enter were neither
+     * sent nor queued, and waking the next cell replaced the draft that held
+     * them. A changed value queues behind the save in front of it like any
+     * other, and goes with the version that save mints.
+     */
+    const flying = intent.current.get(key);
+    if (flying !== undefined && sameSent(flying, value)) return;
     if (unchanged) {
       rest(mine);
       return;
     }
-    inFlight.current.add(key);
-    // What this save is trying to make true, from now until it answers.
+    // What this cell is now trying to make true, from here until it answers.
     intent.current.set(key, value);
     setCellRefused(null);
 
@@ -936,8 +962,12 @@ export function TestsGrid(props: GridProps) {
           { client: platformClient },
         ),
       );
-      inFlight.current.delete(key);
-      intent.current.delete(key);
+      // Clear the intent only if it is still this save's. A newer commit on
+      // the same cell has already replaced it and is waiting its turn.
+      const standing = intent.current.get(key);
+      if (standing !== undefined && sameSent(standing, value)) {
+        intent.current.delete(key);
+      }
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
         return;

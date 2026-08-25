@@ -478,6 +478,10 @@ describe("the suite-first Tests route", () => {
       target: { value: "The caller books the next service slot." },
     });
     fireEvent.keyDown(scenario, { key: "Enter" });
+    // Enter causes the blur that follows it, and that blur commits the very
+    // same value. One save, not two — this is the double-fire the same-cell
+    // guard exists for, and the only commit it is allowed to drop.
+    fireEvent.blur(scenario);
 
     await waitFor(() => {
       expect(
@@ -755,6 +759,95 @@ describe("the suite-first Tests route", () => {
         },
       ]);
     });
+  });
+
+  it("queues words typed after Enter when the caret leaves for another cell", async () => {
+    // B is committed by Enter and its PATCH is held open. C is typed into the
+    // same cell, and then the caret leaves for another cell — the blur commits
+    // C, which is a real edit and not the resubmit the guard exists for.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": [
+        {
+          status: 200,
+          body: testBody({
+            personas: [PERSONA],
+            scenario: "B, sent by Enter.",
+            version: 2,
+            versionId: "tstv_2",
+            revision: "rev_2",
+          }),
+          waitFor: held,
+        },
+        {
+          status: 200,
+          body: testBody({
+            personas: [PERSONA],
+            scenario: "C, typed after Enter.",
+            version: 3,
+            versionId: "tstv_3",
+            revision: "rev_3",
+          }),
+        },
+      ],
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    const row = (await screen.findByText("Books service")).closest("tr");
+    if (row === null) throw new Error("the test's row is not on screen");
+
+    fireEvent.click(within(row).getByText("The caller books service."));
+    const cell = within(row).getByLabelText("Scenario");
+    fireEvent.change(cell, { target: { value: "B, sent by Enter." } });
+    fireEvent.keyDown(cell, { key: "Enter" });
+
+    // Keep typing in the same cell, then leave it for another one.
+    fireEvent.change(cell, { target: { value: "C, typed after Enter." } });
+    fireEvent.blur(cell);
+    fireEvent.click(within(row).getByText("Books service"));
+
+    // C is queued rather than dropped, so it waits for B and no more.
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    });
+
+    release();
+
+    // Both land, and C carries the version B minted.
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { scenario: "B, sent by Enter.", expectedVersionId: "tstv_1" },
+        },
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { scenario: "C, typed after Enter.", expectedVersionId: "tstv_2" },
+        },
+      ]);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("C, typed after Enter.")).toBeTruthy();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("seeds a re-woken cell from its own unfinished save, so a blur reverts nothing", async () => {
