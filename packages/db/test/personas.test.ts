@@ -325,7 +325,7 @@ describe("editing a persona's model selection", () => {
       editPersona(actingAsAcme(), created.id, {
         models: {
           ...RECOMMENDED_PERSONA_MODELS,
-          stt: { provider: "openai", model: "gpt-4o-transcribe" },
+          stt: { provider: "openai", model: "gpt-4o-transcribe-unsupported" },
         },
       }),
     ).rejects.toThrow(/supported openai stt model/i);
