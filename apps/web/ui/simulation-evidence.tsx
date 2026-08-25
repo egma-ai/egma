@@ -25,7 +25,14 @@ import {
   type EvidencePlanItem,
   type SimulationEvidence,
 } from "../lib/simulations.ts";
-import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
+import {
+  humanizeIdentifier,
+  metricLine,
+  milliseconds,
+  workedOutMetric,
+  type Measured,
+} from "../lib/transcripts.ts";
+import { MEASURES } from "../lib/transcript-copy.ts";
 import { Dialog } from "./dialog.tsx";
 import { PlanItems } from "./evidence.tsx";
 import {
@@ -108,6 +115,60 @@ const SUMMARY_VALUE =
  * The name of one fact, quiet, beside its value.
  */
 const SUMMARY_LABEL = "text-sm text-muted-foreground";
+
+/**
+ * What this simulation measured — the observed metrics, mean-led, under the
+ * three facts and apart from the verdicts for the transcript page's exact
+ * reason: a metric measures and a grader judges, and a number is not good or
+ * bad until a grader has been asked.
+ *
+ * **Every figure came off the platform's one shared measure module through the
+ * one shared projection**, and the words come off the one shared formatter —
+ * so this strip and the production transcript's can never come to word one
+ * conversation's numbers two ways.
+ *
+ * A simulation whose spans carried no metrics renders nothing here: a measure
+ * the conversation did not produce is absent, not zero, and the three facts
+ * above already say what the machinery recorded.
+ */
+function SimulationMetrics({
+  metrics,
+}: {
+  readonly metrics: readonly Measured[];
+}) {
+  if (metrics.length === 0) return null;
+  return (
+    <div className="@container/metrics min-w-0">
+      <section
+        className="min-w-0 overflow-hidden rounded-card border border-border bg-surface"
+        aria-label={MEASURES.label}
+      >
+        {metrics.map((one, at) => (
+          <div
+            key={one.measure}
+            className={cn(
+              SUMMARY_CELL,
+              "flex-wrap",
+              at > 0 && "border-border border-t",
+            )}
+          >
+            <span className={SUMMARY_LABEL}>
+              {humanizeIdentifier(one.measure)}
+            </span>
+            <span className="min-w-0 text-end font-mono text-sm font-normal text-foreground tabular-nums">
+              {metricLine(one)}
+            </span>
+          </div>
+        ))}
+        {metrics.some(workedOutMetric) ? (
+          <p className="m-0 border-border border-t px-5 py-3 text-sm text-muted-foreground">
+            {MEASURES.derived}
+          </p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
 
 function scoreText(score: number | null): string {
   return score === null ? "Not available" : score.toFixed(2);
@@ -1220,6 +1281,7 @@ export function SimulationEvidenceReview({
       )}
     >
       <SimulationEvidenceSummary evidence={evidence} />
+      <SimulationMetrics metrics={evidence.metrics} />
       <SimulationEvidencePanel
         evidence={evidence}
         recording={recording}

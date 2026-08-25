@@ -1,0 +1,20 @@
+{
+  "name": "@egma/metrics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Egma's observed metrics: the versioned measure catalog naming what is measured about any conversation, and the one shared measure module that computes those numbers from a conversation's spans — for a simulation and a production trace alike.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "measure-catalog.md"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

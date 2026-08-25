@@ -29,10 +29,12 @@ import {
   howLong,
   humanizeIdentifier,
   isHuman,
+  metricLine,
   milliseconds,
   somethingFailed,
   stepsInside,
   transcriptsPath,
+  workedOutMetric,
   type Detail,
   type Facts as TraceFacts,
   type Grade,
@@ -442,7 +444,7 @@ export default function TranscriptPage({
 
         <PageBody>
         <Summary facts={detail.trace} />
-        <Measures measured={detail.measures ?? []} />
+        <Measures measured={detail.metrics ?? []} />
         <GradeSummary
           state={detail.gradingState}
           combinedScore={detail.combinedScore}
@@ -681,11 +683,11 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
             className={SUMMARY_FACT}
             key={one.measure}
             label={humanizeIdentifier(one.measure)}
-            value={measurement(one)}
+            value={metricLine(one)}
           />
         ))
       )}
-      {measured.some(workedOut) ? (
+      {measured.some(workedOutMetric) ? (
         <div className={SUMMARY_FACT}>
           <span className={FACT_LABEL} />
           <strong className={cn(FACT_VALUE, "text-muted-foreground")}>
@@ -695,62 +697,6 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
       ) : null}
     </section>
   );
-}
-
-/**
- * Whether Egma worked this figure out from the framework's own timings — the
- * one origin the page still says anything about.
- *
- * **`derived` alone does not answer it.** A figure an agent platform reported
- * arrives derived as well, because Egma did not time it either; `reportedBy`
- * beside it is what tells the two apart. Without that second half the page would
- * tell a developer their platform's number was "worked out from your framework's
- * own timings", which is a claim about an observation Egma never made. So the
- * platform's field is read here as a gate and nothing else: a figure carrying it
- * is neither marked nor caveated, and reads exactly as a figure Egma timed.
- *
- * The rest of the provenance is on the record rather than on the page, by a
- * product decision this predicate is the whole of on this screen. Any figure's
- * origin is still there to be asked for the day a surface asks.
- */
-function workedOut(one: Measured): boolean {
-  return one.derived === true && one.reportedBy === undefined;
-}
-
-/**
- * One measure as a person reads it: the number the platform reduced to, its
- * unit, and — where there was more than one measurement — that this is the worst
- * of them and how many there were.
- *
- * **Nothing is worked out here.** `worst` arrives on the answer, reduced by the
- * same code a grader can use; this reads it. The series is used for one
- * thing only, which is saying how many measurements there were.
- *
- * **A prefix says so.** A reading over the store's limit holds the first part of
- * a long exchange, and the worst measurement in it is the worst of that part —
- * the worst turn of the call may be past the cut. Showing it unqualified would
- * be the page asserting something about a conversation it has only some of.
- */
-function measurement(one: Measured): string {
-  // Unreachable: a measure with no measurement is absent from the answer
-  // rather than present and empty. Said rather than assumed, because the
-  // alternative is this page printing a figure nobody measured.
-  if (one.worst === null) return DETAIL.notReported;
-
-  const shown = `${String(one.worst.value)} ${one.unit}`;
-  // Said on the figure itself as well as once for the panel, because a page
-  // mixing timed and worked-out numbers must let a reader tell which is which
-  // without counting rows.
-  //
-  // **One predicate decides it, the same one the panel's caveat uses**, so the
-  // mark and the sentence can never come to disagree about a figure — and a
-  // figure a platform reported takes neither, rather than taking the worked-out
-  // wording about an observation Egma never made.
-  const from = workedOut(one) ? ` · ${MEASURES.derivedOne}` : "";
-  if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}${from}`;
-  return one.samples.length === 1
-    ? `${shown}${from}`
-    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}${from}`;
 }
 
 function gradingStateLabel(state: Detail["gradingState"]): string {

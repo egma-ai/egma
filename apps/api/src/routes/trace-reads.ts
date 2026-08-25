@@ -1,7 +1,5 @@
 import {
   listTraces,
-  measuresFromSpans,
-  worstSampleOf,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
   readTrace,
@@ -21,6 +19,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { simulationIdOfTrace } from "@egma/simulation-contract";
 
 import { browserProject } from "../http/acting.ts";
+import { describedMetrics } from "../http/metrics.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedTraceGrading } from "../http/grades.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
@@ -302,103 +301,13 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
   };
 }
 
-/**
- * What this conversation measured — **the metrics display's read path, and it
- * goes through the one shared measure module.**
- *
- * The numbers are not on the rows and are not stored anywhere: they are
- * computed here from the spans this answer already carries, through one shared
- * measure function. A page and any grader that uses the measure therefore read
- * the same fact instead of implementing the arithmetic twice.
- *
- * **`worst` is on the wire because the reduction is part of that arithmetic.**
- * A bound is held against one number, and which number that is — the worst
- * measurement, today; whichever of the catalog's eight aggregations a grader
- * asks for, tomorrow — is a decision the module makes. Sending only the series
- * would leave every reader to reduce it. So it is reduced once, here, by
- * `worstSampleOf`.
- *
- * The series still rides along, because a reader wanting to plot the turns or
- * count them needs it and because the reduced number should be checkable
- * against what it was reduced from.
- *
- * **The same call for a simulation and for a real caller's trace.** Nothing here
- * looks at `source`; a trace whose agent emits no timing spans simply carries no
- * measures, which is a fact about the telemetry rather than a branch taken here.
- *
- * **`partial` says the reading is a prefix.** A trace over the store's span
- * limit comes back as its first spans, so a worst measurement taken over it is
- * the worst of the part egma holds and not of the call — the worst turn of a
- * long conversation is as likely to be past the cut as before it. The grading
- * engine refuses such a trace outright; a display is allowed to show what there
- * is, and is not allowed to show it as though it were the whole call. A measure
- * the platform reported is the exception and is never partial: it is one row's
- * account of the whole conversation rather than a series reduced over spans, so
- * the cap cannot have cut anything off it.
- *
- * The unit rides each measure because the catalog owns it — a client that named
- * one of its own would be a second opinion about something already written
- * down, and wrong the moment a measure is not a duration.
- */
-function describedMeasures(
-  detail: TraceDetail,
-): readonly Record<string, unknown>[] {
-  return measuresFromSpans(detail).map((measured) => {
-    const worst = worstSampleOf(measured);
-    return {
-      measure: measured.measure,
-      unit: measured.unit,
-      // Where the number came from, so a page can say it and a client that
-      // never asked is unaffected. **Added rather than changed**: every field a
-      // consumer integrated against still means exactly what it did, and a
-      // measure timed by egma's own vocabulary carries `false` here as it
-      // always implicitly did.
-      //
-      // **The module now names three sources, and this field stays the boolean
-      // it has always been: false means egma timed it, true means egma did
-      // not.** That is all it has ever been able to say. Which of the two
-      // untimed sources it was — a derivation off the framework's own spans, or
-      // a number the platform handed egma — is `reportedBy` below, present
-      // only on the second. A reader wanting the distinction asks that field;
-      // no existing reader's meaning shifts under them.
-      derived: measured.origin !== "timed",
-      // **Only on a measure a platform reported, and absent everywhere else.**
-      // Simulation traffic is byte-for-byte what it was before this field
-      // existed, which is the criterion this branch exists to hold: a field
-      // present-but-empty on every simulation would be a wire change on traffic
-      // nothing new happened to. Present, it names the platform that measured.
-      ...(measured.origin === "reported"
-        ? { reportedBy: measured.reportedBy }
-        : {}),
-      samples: measured.samples.map((sample) => sample.value),
-      spanIds: measured.samples.map((sample) => sample.spanId),
-      // The one number a bound is held against, and where it happened. Null is
-      // unreachable — a measure with no measurements is absent from this list
-      // rather than present and empty — and it is sent rather than assumed
-      // away, because the alternative is a client inventing a figure.
-      worst:
-        worst === undefined
-          ? null
-          : { value: worst.value, spanId: worst.spanId },
-      // **A reported measure is never partial, however much of the trace was
-      // dropped.** The flag says "this number was reduced over a prefix of the
-      // conversation" — true of a series taken off spans when the read stopped
-      // at the cap, and false of a block, which is one platform's account of
-      // the whole conversation written on one row that either arrived or did
-      // not. Stamping the truncation on it would tell a page the worst
-      // measurement might be past the cut when there is no cut it could be past.
-      partial: measured.origin === "reported" ? false : detail.truncated,
-    };
-  });
-}
-
 function describedDetail(detail: TraceDetail): Record<string, unknown> {
   return {
     trace: describedFacts(detail),
     turns: detail.turns.map(describedSpan),
     spans: detail.spans.map(describedSpan),
     spansTruncated: detail.truncated,
-    measures: describedMeasures(detail),
+    metrics: describedMetrics(detail),
   };
 }
 

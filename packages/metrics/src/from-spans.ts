@@ -1,9 +1,9 @@
 import {
   MEASURE_CATALOG,
   type CatalogedMeasure,
-} from "@egma/simulation-contract";
-
-import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
+  type MeasureAggregation,
+} from "./measures.ts";
+import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
 
 /**
  * The shared measure module: a conversation in, the measure catalog's numbers
@@ -39,7 +39,7 @@ import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
  *
  * **The catalog decides what is computed and how.** Every measure carries its
  * span-level definition beside its name
- * (`packages/simulation-contract/measure-catalog.md`), the rule is one of a
+ * (`packages/metrics/measure-catalog.md`), the rule is one of a
  * closed list, and the switch below is exhaustive — so a measure whose rule
  * nothing implements stops the TypeScript build rather than shipping as a
  * metric that silently disappears forever.
@@ -160,13 +160,28 @@ const TIMING = "timing";
  * called. So a span carrying one of these kinds is a span egma recognised the
  * emitter of, and nothing here has to re-check a name a lookalike framework
  * could have chosen. `speaking` is LiveKit's alone today; the two turn kinds
- * are LiveKit's and egma's own simulator's, and a simulation carries timing
- * spans, which win outright below.
+ * are LiveKit's, egma's own simulator's, and the Retell normalizer's — whose
+ * turns carry real word-bound timings, so the derivations below read them
+ * exactly as they read LiveKit's. A simulation carries timing spans, which win
+ * outright below.
+ *
+ * **The root is not a kind.** A root wears whatever word its platform uses —
+ * `root` on egma's own traces and on LiveKit's, `conversation` on a Retell one
+ * — so the derivations recognise it the way the trace read itself does: by the
+ * empty parent, the one fact about a root no platform spells differently. A
+ * reader that named kinds would have to learn a new word per platform, and
+ * forgetting one costs a measure silently (Retell's `first_response_latency`
+ * was never derived for exactly that reason).
  */
-const ROOT = "root";
 const HUMAN_TURN = "turn:human";
 const AGENT_TURN = "turn:agent";
 const SPEAKING = "speaking";
+// The stage kinds the door assigns to a recognised framework's own steps —
+// LiveKit's llm_node/llm_request family lands as `model`, its tts family as
+// `tts` — read here for the platform-stage measures and vetted the same way
+// the turn kinds are: by the emitting scope, at the door, never by a name.
+const MODEL_STEP = "model";
+const SYNTHESIS_STEP = "tts";
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const NANOSECONDS_PER_MICROSECOND = 1_000n;
@@ -269,12 +284,71 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
 }
 
 /**
- * The arithmetic mean of a measure's samples.
+ * One of the catalog's eight reductions, computed over a measure's samples.
+ *
+ * **The whole list, implemented in one place.** The catalog declares which
+ * reductions a threshold may ask of a measure; this switch is that list made
+ * runnable, exhaustively — a name joining `MEASURE_AGGREGATIONS` without a
+ * case here stops the build instead of shipping as a reduction that answers
+ * nothing. The surfaces choose what to show and the wire carries what a page
+ * needs; the arithmetic never lives anywhere else.
+ *
+ * **Percentiles are nearest-rank**, exactly as the catalog states them: the
+ * p90 of ten measurements is the ninth of them, not an interpolation — a
+ * measurement that actually happened, findable in the transcript. The mean is
+ * rounded to the nearest whole unit here, once, so two surfaces printing one
+ * conversation can never disagree in the last digit; every other reduction
+ * answers a sample (or a sum of samples) verbatim.
+ *
+ * A reduction cites no single span — the samples beside it carry the
+ * citations — so it is a number rather than a `Sample`. `undefined` for a
+ * measure with no samples, which nothing this module builds ever has,
+ * answered rather than assumed for `worstSampleOf`'s exact reason.
+ */
+export function aggregateOf(
+  measured: MeasuredFromSpans,
+  aggregation: MeasureAggregation,
+): number | undefined {
+  const values = measured.samples.map((sample) => sample.value);
+  if (values.length === 0) return undefined;
+  switch (aggregation) {
+    case "mean":
+      return Math.round(values.reduce((sum, one) => sum + one, 0) / values.length);
+    case "sum":
+      return values.reduce((sum, one) => sum + one, 0);
+    case "min":
+      return Math.min(...values);
+    case "max":
+      return Math.max(...values);
+    case "p50":
+      return nearestRank(values, 50);
+    case "p90":
+      return nearestRank(values, 90);
+    case "p95":
+      return nearestRank(values, 95);
+    case "p99":
+      return nearestRank(values, 99);
+  }
+}
+
+/** The nearest-rank percentile: the value at rank ⌈p/100 × n⌉ of the sorted
+ * samples, so the answer is a measurement that actually happened. */
+function nearestRank(values: readonly number[], percentile: number): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const rank = Math.max(1, Math.ceil((percentile / 100) * sorted.length));
+  return sorted[rank - 1] as number;
+}
+
+/**
+ * The arithmetic mean of a measure's samples, exact and unrounded.
  *
  * Response latency is the first grader whose immutable definition asks for a
- * mean rather than the strict worst sample shown by the metric display. The
- * reduction still lives here so the grader does not become a second reader of
- * the measurement series.
+ * mean rather than the strict worst sample, and a grader's arithmetic is not
+ * rounded for reading: the bound is held against the mean itself. The display
+ * family above answers through `aggregateOf`, whose `mean` is this figure
+ * rounded once for a page; the two are one arithmetic at two precisions, and
+ * the reduction still lives here so the grader does not become a second
+ * reader of the measurement series.
  *
  * `undefined` means the series is empty or contains a value that cannot be a
  * measurement. A grader must report that as an error, never turn it into zero.
@@ -356,6 +430,14 @@ function samplesOf(
       // it here a second way would be a second answer about one conversation.
       // A grader may not name such a measure at all; the write door refuses it,
       // so this arm is what a display asks and no current grader uses.
+      return [];
+    }
+    case "platform_telemetry_carries_it": {
+      // Nothing here either, and for the opposite reason: egma's own
+      // vocabulary never times a platform stage, so there is no timing span to
+      // look up. The samples come later in the chain — derived from a
+      // recognised framework's stage spans, or read from the platform's
+      // reported block — through the same precedence every measure obeys.
       return [];
     }
   }
@@ -459,7 +541,7 @@ function reportedSamplesOf(
  * cannot read.
  *
  * Every rule below is written out beside its measure's name in
- * `packages/simulation-contract/measure-catalog.md`, plainly enough that two
+ * `packages/metrics/measure-catalog.md`, plainly enough that two
  * readers compute the same number from the same spans.
  */
 function derivedFromFrameworkSpans(
@@ -479,9 +561,11 @@ function derivedFromFrameworkSpans(
       turns.push(timed(span));
       continue;
     }
-    // The earliest root, so a trace holding more than one — a flush whose
-    // parent never came — is read from where the conversation actually began.
-    if (span.kind === ROOT) {
+    // The earliest parentless span, so a trace holding more than one — a
+    // flush whose parent never came reads as a second root — is read from
+    // where the conversation actually began: the true root starts before
+    // everything that happened inside it.
+    if (span.parentSpanId === "") {
       const candidate = timed(span);
       if (root === undefined || candidate.startedAt < root.startedAt) {
         root = candidate;
@@ -494,7 +578,34 @@ function derivedFromFrameworkSpans(
   put(derived, "turn_response_latency", turnResponseLatency(turns));
   put(derived, "first_response_latency", firstResponseLatency(root, turns));
   put(derived, "agent_speech_duration", agentSpeechDuration(turns));
+  put(derived, "llm_latency", stageLatency(turns, "modelStepsDuration"));
+  put(derived, "tts_latency", stageLatency(turns, "synthesisStepsDuration"));
   return derived;
+}
+
+/**
+ * How long one of the platform's stages ran inside each of the agent's turns —
+ * the sum of the turn's own step children of that stage, so a turn whose model
+ * was asked twice (a retry, a fallback) accounts for both askings.
+ *
+ * One sample per agent turn **that carried the stage at all**. A turn with no
+ * step of this kind did not spend zero milliseconds on it; it has no such
+ * measurement, and a zero would measure something that never happened. The
+ * sample cites the turn, because the number is the turn's and no single child
+ * holds it.
+ */
+function stageLatency(
+  turns: readonly TimedSpan[],
+  stage: "modelStepsDuration" | "synthesisStepsDuration",
+): readonly Sample[] {
+  const samples: Sample[] = [];
+  for (const turn of turns) {
+    if (turn.kind !== AGENT_TURN) continue;
+    const spent = turn[stage];
+    if (spent === 0n) continue;
+    samples.push({ value: milliseconds(spent), spanId: turn.spanId });
+  }
+  return samples;
 }
 
 /** A measure with no samples is absent, exactly as it is for a timed one. */
@@ -517,22 +628,29 @@ function put(
  * reads in.
  *
  * **A measurement that runs backwards is not a slow answer and is not kept.**
- * The agent begins speaking before the human stops on every interruption, and
- * on a real captured call that is five neighbouring turn pairs out of twelve. A
+ * Turn spans overlap on a real captured call — five neighbouring pairs out of
+ * twelve — and the overlap is the framework's turn bookkeeping, not audible
+ * talk-over: the same call's speaking spans carry zero seconds of simultaneous
+ * audio (`research/voice-agent-interruption-metrics.md`, planning root). A
  * negative latency would drag a mean below zero and make a bound pass that
  * should have failed — a number that is wrong is worse than a measurement that
- * is missing, so the overlapping turn contributes nothing and the turns around
+ * is missing, so the overlapping pair contributes nothing and the turns around
  * it still count.
  *
  * **A zero read off a turn that had no width is two placeholders agreeing, and
- * is not kept either.** Retell publishes no per-turn timing, so its normalizer
- * opens every turn at the production trace's own start and closes it in the
- * same instant — placeholders, said plainly in
- * `apps/api/src/retell/normalise.ts`. Subtract one from the next and the answer
- * is zero, every time, for the arithmetic's own reasons and not the agent's: a
- * series a bound cannot fail, so a trace whose worst wait was really 2145 ms
- * holds a two-second bound with "0 milliseconds at its worst" as its rationale,
- * which is the false pass this product exists to kill.
+ * is not kept either.** Retell reports per-word timings on every spoken turn,
+ * and its normalizer has written real turn timestamps from them since commit
+ * `cc7b8c9` — but a turn whose words are missing, and every turn stored before
+ * that commit, keeps the prior honest fallback: opened at the trace's own
+ * start and closed in the same instant, said plainly in
+ * `apps/api/src/retell/normalise.ts`. Subtract one such placeholder from the
+ * next and the answer is zero, every time, for the arithmetic's own reasons
+ * and not the agent's: a series a bound cannot fail, so a trace whose worst
+ * wait was really 2145 ms holds a two-second bound with a zero as its
+ * rationale, which is the false pass this product exists to kill. A
+ * conversation of placeholders therefore derives nothing here and answers
+ * from the platform's reported block instead — which is exactly what those
+ * stored rows carry.
  *
  * **It is the pair that says so, and never the width alone.** A chat simulation
  * writes turns of no width too — a typed message is one instant and there is
@@ -558,11 +676,22 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
  * How long the agent took to say anything at all, from the moment the
  * conversation began.
  *
- * The root span is where a conversation begins — the one span the whole thing
- * happened inside — and the agent's first word is its first turn's first
- * `speaking` child. A first agent turn that never spoke has no first word to
- * have waited for, so nothing is measured rather than a start time standing in
- * for one: this measure is taken once, and one wrong number is the whole of it.
+ * The root span is where a conversation begins — the earliest parentless span,
+ * the one the whole thing happened inside — and the agent's first word is its
+ * first turn's first `speaking` child.
+ *
+ * **Where the framework wrote no `speaking` spans at all**, the first agent
+ * turn's own start stands in: a word-bounded Retell turn begins at its first
+ * word, which is the same fact spelled the other way. The fallback is about
+ * granularity the emitter lacks, never about the turn — a framework that does
+ * write speech makes a speechless first turn honestly unmeasurable, because
+ * there a turn with no speech is a turn that never said anything, not a turn
+ * whose words went unrecorded.
+ *
+ * A first agent turn with **neither speech nor width** has nothing measured —
+ * a zero-width turn is the Retell normalizer's placeholder, opened at the
+ * trace's own start, and reading it would answer a zero nobody waited. This
+ * measure is taken once, and one wrong number is the whole of it.
  */
 function firstResponseLatency(
   root: TimedSpan | undefined,
@@ -571,11 +700,17 @@ function firstResponseLatency(
   if (root === undefined) return [];
   const first = turns.find((turn) => turn.kind === AGENT_TURN);
   if (first === undefined) return [];
+  const speechless = turns.every((turn) => turn.speech.length === 0);
   const spoke = first.speech[0];
-  if (spoke === undefined) return [];
-  const latency = milliseconds(spoke.startedAt - root.startedAt);
+  const from =
+    spoke ??
+    (speechless && first.duration > 0n
+      ? { startedAt: first.startedAt, spanId: first.spanId }
+      : undefined);
+  if (from === undefined) return [];
+  const latency = milliseconds(from.startedAt - root.startedAt);
   if (latency < 0) return [];
-  return [{ value: latency, spanId: spoke.spanId }];
+  return [{ value: latency, spanId: from.spanId }];
 }
 
 /**
@@ -640,6 +775,12 @@ type TimedSpan = {
   readonly startedAt: bigint;
   readonly endedAt: bigint;
   readonly duration: bigint;
+  /** The summed durations of this turn's own model-step children, and of its
+   * synthesis-step children — the framework's own account of the thinking and
+   * the speaking-preparation inside the turn. Zero where the turn carried
+   * none, and a zero is "carried none", never a measurement. */
+  readonly modelStepsDuration: bigint;
+  readonly synthesisStepsDuration: bigint;
   /** This turn's own `speaking` children, earliest first. */
   readonly speech: readonly {
     readonly startedAt: bigint;
@@ -651,12 +792,23 @@ type TimedSpan = {
 function timed(span: TraceSpan): TimedSpan {
   const startedAt = startedAtNanoseconds(span);
   const duration = BigInt(span.durationNanoseconds);
+  let modelStepsDuration = 0n;
+  let synthesisStepsDuration = 0n;
+  for (const child of span.spans) {
+    if (child.kind === MODEL_STEP) {
+      modelStepsDuration += BigInt(child.durationNanoseconds);
+    } else if (child.kind === SYNTHESIS_STEP) {
+      synthesisStepsDuration += BigInt(child.durationNanoseconds);
+    }
+  }
   return {
     spanId: span.spanId,
     kind: span.kind,
     startedAt,
     endedAt: startedAt + duration,
     duration,
+    modelStepsDuration,
+    synthesisStepsDuration,
     speech: span.spans
       .filter((child) => child.kind === SPEAKING)
       .map((child) => ({
@@ -732,15 +884,20 @@ function byWhenItBegan(left: TimedSpan, right: TimedSpan): number {
  * countable on a conversation egma holds only part of.
  *
  * **Exported because the grading engine walks the same tree** for the tool calls
- * and for the span that closes a trace. It used to hold a copy of this,
+ * and for the span that closes a trace — generic over the span shape, because
+ * the walk cares only about the tree and a caller's spans carry more fields
+ * than this arithmetic reads. It used to hold a copy of this,
  * docstring and all, which is two implementations of "every span, once" — and
  * the day one of them learned about a third list, the other would quietly stop
  * seeing part of every conversation.
  */
-export function* everySpanIn(
-  conversation: SpannedConversation,
-): Generator<TraceSpan> {
-  const walk = function* (spans: readonly TraceSpan[]): Generator<TraceSpan> {
+export function* everySpanIn<Span extends { readonly spans: readonly Span[] }>(
+  conversation: {
+    readonly turns: readonly Span[];
+    readonly spans: readonly Span[];
+  },
+): Generator<Span> {
+  const walk = function* (spans: readonly Span[]): Generator<Span> {
     for (const span of spans) {
       yield span;
       yield* walk(span.spans);

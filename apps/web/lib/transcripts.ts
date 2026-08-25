@@ -5,7 +5,12 @@ import type {
 } from "@egma/platform-api/client";
 
 import { projectPath } from "./project-context.ts";
-import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts";
+import {
+  DEFAULT_WINDOW,
+  MEASURES,
+  WINDOWS,
+  type WindowChoice,
+} from "./transcript-copy.ts";
 
 /**
  * What the two v1 read endpoints answer with, and the handful of pure decisions
@@ -36,27 +41,88 @@ export type Grade = GetTraceResponse["grades"][number];
  * One measure this exchange produced, as the read hands it over.
  *
  * **Computed by the platform, never here — the reduction included.** The
- * samples arrive already worked out by egma's one shared measure module, and so
- * does `worst`: one reduced metric value. Both are the
- * platform's arithmetic, so this page renders figures rather than deriving any.
+ * samples arrive already worked out by egma's one shared measure module, and
+ * so do the reductions — `mean`, `p50` and `p90`, each computed once in that
+ * module. All of it is the platform's arithmetic, so this application renders
+ * figures rather than deriving any.
  *
- * The reduction is the part that matters. Taking the maximum here would look
- * harmless and would be a second implementation of the exact metric a grader
- * reads — right up to the day a grader reduces by p90 instead, when the page
- * would go on showing the maximum with nothing failing anywhere. A developer who
- * found this page and a grade disagreeing would be right to stop believing
- * both, so the page is not allowed to be capable of it.
+ * The reduction is the part that matters. Averaging the samples here would look
+ * harmless and would be a second implementation of the exact number the page
+ * leads with — correct until the day the rounding or the samples change under
+ * one of them. A developer who found this page and the platform disagreeing
+ * would be right to stop believing both, so the page is not allowed to be
+ * capable of it.
  *
  * The unit rides each measure because the measure catalog owns it: a page that
  * assumed milliseconds would be wrong the moment somebody bounds a measure
  * counted in something else.
  */
-export type Measured = GetTraceResponse["measures"][number];
+export type Measured = GetTraceResponse["metrics"][number];
+
+/**
+ * Whether Egma worked this figure out from the framework's own timings — the
+ * one origin the pages say anything about.
+ *
+ * **`derived` alone does not answer it.** A figure an agent platform reported
+ * arrives derived as well, because Egma did not time it either; `reportedBy`
+ * beside it is what tells the two apart. Without that second half a page would
+ * tell a developer their platform's number was "worked out from your
+ * framework's own timings", which is a claim about an observation Egma never
+ * made. A platform-reported figure takes no mark and no caveat; the rest of
+ * its provenance stays on the record.
+ */
+export function workedOutMetric(one: Measured): boolean {
+  return one.derived === true && one.reportedBy === undefined;
+}
+
+/**
+ * One metric as a person reads it, the same words on every surface that shows
+ * one: the p90 the platform reduced to, its unit, and — where there was more
+ * than one measurement — how many the figure stands over.
+ *
+ * **The p90 leads because the tail is what a caller feels.** The wire also
+ * carries the median and the mean, computed by the same module; which of the
+ * three a surface shows is a display decision, and today's is the p90. One
+ * measurement is simply the number — every reduction of one sample is that
+ * sample, so naming a statistic over it would be dressing.
+ *
+ * **Nothing is worked out here.** `p90` arrives on the answer, nearest-rank
+ * from the shared measure module; this reads it. The series is used for one
+ * thing only, which is saying how many measurements there were. A prefix says
+ * so instead of the count, because the p90 of the part Egma holds is not the
+ * p90 of the call.
+ *
+ * **The figure is printed to the whole unit.** A derived sample carries
+ * nanosecond truth ("1994.917806"), and a person reads none of it: the page
+ * says 1995, and the exact sample stays on the wire beside it for anything
+ * that needs the last digits. Rounded here, in the one formatter, so no two
+ * surfaces can differ in the last digit.
+ *
+ * Written once and imported by the transcript page and the simulation
+ * evidence, so the two surfaces that show one conversation's metrics cannot
+ * come to word the same figure two ways.
+ */
+export function metricLine(one: Measured): string {
+  const shown = `${String(Math.round(one.p90))} ${one.unit}`;
+  const from = workedOutMetric(one) ? ` · ${MEASURES.derivedOne}` : "";
+  if (one.partial === true) {
+    return `${shown} · ${MEASURES.partialP90}${from}`;
+  }
+  return one.samples.length === 1
+    ? `${shown}${from}`
+    : `${shown} · ${MEASURES.p90} of ${MEASURES.counted(one.samples.length)}${from}`;
+}
 export type Detail = GetTraceResponse;
 
 /** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
-  const words = value.replaceAll(/[_-]+/g, " ").trim();
+  const words = value
+    .replaceAll(/[_-]+/g, " ")
+    .trim()
+    // The stage acronyms read as acronyms — "LLM latency", never "Llm
+    // latency". Spelled here, once, because both pages' labels come through
+    // this one function.
+    .replaceAll(/\b(llm|tts|asr)\b/g, (acronym) => acronym.toUpperCase());
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }
 

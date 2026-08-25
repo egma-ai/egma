@@ -53,8 +53,16 @@
  * **4** removes ``measured_audio_band_hertz``. A recording's WAV header keeps
  * the rate needed to play that file; a second product field cannot describe
  * the connection's acoustic quality and is no longer a measure.
+ *
+ * **5** adds the three stage latencies — `asr_latency`, `llm_latency`,
+ * `tts_latency` — the first measures whose numbers are only ever the agent
+ * platform's own account of itself: reported by Retell per call, derived from
+ * LiveKit's own stage spans, and honestly absent where the platform tells
+ * egma nothing. Egma's own vocabulary never times them, so they carry the new
+ * rule and origin rather than joining the timing list the simulator is held
+ * to.
  */
-export const MEASURE_CATALOG_VERSION = 4;
+export const MEASURE_CATALOG_VERSION = 5;
 
 /**
  * How a metric series can be reduced to one observed number.
@@ -91,8 +99,13 @@ export type MeasureAggregation = (typeof MEASURE_AGGREGATIONS)[number];
  */
 export type MeasureShape = "once" | "per_turn";
 
-/** Which simulations produce a measure at all. */
-export type MeasureSource = "every simulation" | "voice simulations";
+/** Which conversations produce a measure at all. The stage latencies come
+ * from the agent's platform rather than from egma's own conducting, so a
+ * simulation carries them only when the platform's telemetry reaches egma. */
+export type MeasureSource =
+  | "every simulation"
+  | "voice simulations"
+  | "the agent's platform";
 
 /**
  * Where the number comes from on the wire — which is not the same question as
@@ -104,8 +117,15 @@ export type MeasureSource = "every simulation" | "voice simulations";
  * on the status transition that ends the simulation, inside its facts, and the
  * control plane records them under the catalog name — so every consumer reads
  * one vocabulary whether the number was timed or counted.
+ * `platform_telemetry` measures arrive only as the agent platform's own
+ * account of itself — inside a recognised framework's stage spans, or in the
+ * block its platform reported — because what happened inside the agent is a
+ * fact only the agent's machinery holds.
  */
-export type MeasureOrigin = "timing_span" | "terminal_fact";
+export type MeasureOrigin =
+  | "timing_span"
+  | "terminal_fact"
+  | "platform_telemetry";
 
 /**
  * How a measure is computed from a conversation's spans — the rule, as one of a
@@ -127,10 +147,17 @@ export type MeasureOrigin = "timing_span" | "terminal_fact";
  *   measure and still named here; it simply arrives somewhere else, and a
  *   grader may not name it, because a check reading a number that is never
  *   there is a check that can never fire.
+ * - `platform_telemetry_carries_it` — egma's own vocabulary never times this:
+ *   the samples come from a recognised framework's stage spans, or from the
+ *   block the platform reported, through the same derived-then-reported
+ *   precedence every measure obeys. A grader may name it — the trace can
+ *   answer it — and a conversation whose platform told egma nothing simply
+ *   lacks it, which is a `skipped` check and not a failed one.
  */
 export const SPAN_RULES = [
   "timing_spans_named_for_it",
   "no_span_carries_it",
+  "platform_telemetry_carries_it",
 ] as const;
 
 export type SpanRule = (typeof SPAN_RULES)[number];
@@ -249,6 +276,51 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     aggregations: EVERY_AGGREGATION,
   },
   {
+    measure: "asr_latency",
+    unit: "milliseconds",
+    taken: "per_turn",
+    from: "the agent's platform",
+    origin: "platform_telemetry",
+    fromSpans: {
+      rule: "platform_telemetry_carries_it",
+      definition:
+        "how long the platform's speech recognition took, as the platform accounts for it: reported per call by Retell (its `asr` stage); no recognised framework span carries it today, so it is never derived",
+    },
+    means:
+      "how long the agent's platform spent turning the caller's speech into text, by the platform's own account",
+    aggregations: EVERY_AGGREGATION,
+  },
+  {
+    measure: "llm_latency",
+    unit: "milliseconds",
+    taken: "per_turn",
+    from: "the agent's platform",
+    origin: "platform_telemetry",
+    fromSpans: {
+      rule: "platform_telemetry_carries_it",
+      definition:
+        "how long the agent's language model took, as the platform accounts for it: the sum of a `turn:agent` span's own model-step children per turn on a recognised framework, or the platform's reported `llm` stage",
+    },
+    means:
+      "how long the agent's platform spent thinking — the language-model step of an answer, by the platform's own account",
+    aggregations: EVERY_AGGREGATION,
+  },
+  {
+    measure: "tts_latency",
+    unit: "milliseconds",
+    taken: "per_turn",
+    from: "the agent's platform",
+    origin: "platform_telemetry",
+    fromSpans: {
+      rule: "platform_telemetry_carries_it",
+      definition:
+        "how long the platform's speech synthesis took, as the platform accounts for it: the sum of a `turn:agent` span's own synthesis-step children per turn on a recognised framework, or the platform's reported `tts` stage",
+    },
+    means:
+      "how long the agent's platform spent turning the answer's text into speech, by the platform's own account",
+    aggregations: EVERY_AGGREGATION,
+  },
+  {
     measure: "turn_count",
     unit: "turns",
     taken: "once",
@@ -293,6 +365,18 @@ export const SPAN_DERIVED_MEASURE_CATALOG: readonly CatalogedMeasure[] =
 /** The same list as names, for a form's options and a refusal's sentence. */
 export const SPAN_DERIVED_MEASURES: readonly string[] =
   SPAN_DERIVED_MEASURE_CATALOG.map((cataloged) => cataloged.measure);
+
+/**
+ * The measures that arrive as egma's own timing spans — the emitter contract's
+ * half of the catalog, and the only list the ingest door files as `timing` for
+ * the simulator's scope. Narrower than `SPAN_DERIVED_MEASURES` on purpose: a
+ * stage latency is computable from a trace and gradeable, but nothing of
+ * egma's ever emits a timing span named for it, and a door that filed one
+ * would be inventing a vocabulary no emitter speaks.
+ */
+export const TIMING_SPAN_MEASURES: readonly string[] = MEASURE_CATALOG.filter(
+  (cataloged) => cataloged.fromSpans.rule === "timing_spans_named_for_it",
+).map((cataloged) => cataloged.measure);
 
 /**
  * Whether egma can compute this measure from a conversation's spans.
@@ -350,4 +434,4 @@ export function measureAccepts(
 
 /** Where the prose catalog lives, for a refusal that can point somebody at it. */
 export const MEASURE_CATALOG_DOCUMENT =
-  "packages/simulation-contract/measure-catalog.md";
+  "packages/metrics/measure-catalog.md";

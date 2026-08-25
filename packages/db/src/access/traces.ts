@@ -4,7 +4,7 @@ import {
   REPORTED_MEASUREMENTS_PAYLOAD_PATH,
   reportedMeasurementsOf,
   type ReportedMeasurement,
-} from "../measures/reported.ts";
+} from "@egma/metrics";
 import type { AuthContext } from "./context.ts";
 import { UnreadableTraceQueryError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
@@ -246,7 +246,7 @@ export type TraceSpan = {
  * What the agent platform measured about this trace, as the root span carried
  * it.
  *
- * The block itself is `packages/db/src/measures/reported.ts` — one neutral
+ * The block itself is `packages/metrics/src/reported.ts` — one neutral
  * shape every platform's normalizer writes and nothing downstream has to know a
  * vendor to read. What this adds is the one fact a reader of the payload has
  * and a reader of the block does not: **which span it rode in on**.

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The versioned JSON contract between the control plane and the simulator: the spec and report schemas, with golden fixtures beside them, and the measure catalog naming what a simulation measures.",
+  "description": "The versioned JSON contract between the control plane and the simulator: the spec and report schemas, with golden fixtures beside them.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,7 +13,6 @@
   "files": [
     "dist",
     "schemas",
-    "measure-catalog.md",
     "span-vocabulary.md"
   ],
   "scripts": {
@@ -21,6 +20,7 @@
   },
   "dependencies": {
     "@egma/ids": "workspace:*",
+    "@egma/metrics": "workspace:*",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"
   }

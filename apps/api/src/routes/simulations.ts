@@ -24,6 +24,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { describedMetrics } from "../http/metrics.ts";
 import { describedTraceGrading } from "../http/grades.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
@@ -243,6 +244,12 @@ export async function simulationRoutes(
         providerReference: simulation.providerReference,
         hasRecording: simulation.recordingReference !== null,
         measures: describedMeasures(simulation, transcript),
+        // The observed metrics, off the one shared projection the transcript
+        // answers with — so the strip on a simulation's evidence and the strip
+        // on a production transcript can never come to disagree about one
+        // conversation. Empty when no trace was filed: nothing measured is an
+        // ordinary answer, not a missing field.
+        metrics: transcript === undefined ? [] : describedMetrics(transcript),
         test: {
           id: simulation.testId,
           versionId: simulation.testVersionId,

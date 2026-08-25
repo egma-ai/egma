@@ -1,11 +1,13 @@
 import {
-  everySpanIn,
-  measuresFromSpans,
-  type MeasuredFromSpans,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
+import {
+  everySpanIn,
+  measuresFromSpans,
+  type MeasuredFromSpans,
+} from "@egma/metrics";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 /**

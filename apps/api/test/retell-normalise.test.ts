@@ -1,4 +1,7 @@
-import { REPORTED_MEASUREMENTS_VERSION } from "@egma/db";
+
+import {
+  REPORTED_MEASUREMENTS_VERSION,
+} from "@egma/metrics";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -518,21 +521,27 @@ describe("the reported-measurements block", () => {
           values: [517, 820, 1704, 2145],
         },
         {
-          measure: "retell/llm_latency",
+          // The three stage latencies carry the catalog's own names since
+          // catalog version 5 — Retell's account of its stages, in the one
+          // vocabulary the strip shows and a grader may bound.
+          measure: "llm_latency",
           unit: "milliseconds",
           values: [260, 410, 700, 780],
         },
         {
-          measure: "retell/tts_latency",
+          measure: "tts_latency",
           unit: "milliseconds",
           values: [150, 190, 240, 260],
         },
         {
-          measure: "retell/asr_latency",
+          measure: "asr_latency",
           unit: "milliseconds",
           values: [70, 90, 140, 150],
         },
         {
+          // Retrieval is Retell's own concept, not a stage every platform
+          // has, so the knowledge-base series keeps the platform prefix —
+          // captured, and quiet until the catalog ever names it.
           measure: "retell/knowledge_base_latency",
           unit: "milliseconds",
           values: [280, 300, 380],

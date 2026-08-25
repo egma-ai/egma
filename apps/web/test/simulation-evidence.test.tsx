@@ -160,6 +160,19 @@ function evidence(overrides: Record<string, unknown> = {}) {
     providerReference: "call_abc123",
     hasRecording: false,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
+    metrics: [
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        derived: false,
+        samples: [420, 1100],
+        spanIds: ["span_agent_1", "span_agent_2"],
+        mean: 760,
+        p50: 420,
+        p90: 1100,
+        partial: false,
+      },
+    ],
     test: {
       id: "tst_1",
       versionId: "tstv_1",
@@ -270,6 +283,24 @@ describe("one simulation's grades", () => {
     expect(within(summary).getByText("40s")).toBeTruthy();
     expect(within(summary).getByText("Total turns")).toBeTruthy();
     expect(within(summary).queryByText(/overall|verdict/iu)).toBeNull();
+  });
+
+  /**
+   * The observed metrics, under the three facts and apart from the grades:
+   * the same p90 the transcript page leads with, worded by the one shared
+   * formatter, so the two surfaces cannot describe one conversation two ways.
+   */
+  it("shows what was measured, p90-led, apart from the grades", async () => {
+    page();
+    render(<SimulationEvidencePage />);
+
+    const measured = await screen.findByRole("region", {
+      name: "What was measured",
+    });
+    expect(within(measured).getByText("Turn response latency")).toBeTruthy();
+    expect(
+      within(measured).getByText("1100 milliseconds · p90 of 2 measurements"),
+    ).toBeTruthy();
   });
 
   it("keeps assertions inside their grade and keeps earlier grades in history", async () => {

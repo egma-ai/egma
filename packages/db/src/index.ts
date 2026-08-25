@@ -74,38 +74,6 @@ export {
   type SnapshotDefault,
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
-/**
- * The shared measure module: the catalog's numbers, computed from a
- * conversation's spans.
- *
- * Here on the same terms as other pure helpers — it reaches nothing, takes
- * no context, and is handed spans a caller already read. Exported because it is
- * the **one** place a measure is worked out: the metrics display reads through
- * it for simulation and production traces alike. A second implementation in a
- * query or page would be a second answer about one conversation with nothing
- * stored to settle it against. The shared reducers travel with the measures so
- * a display and a grader cannot silently do different arithmetic over the same
- * series.
- */
-export {
-  arithmeticMeanOf,
-  everySpanIn,
-  measuresFromSpans,
-  worstSampleOf,
-  type MeasuredFromSpans,
-  type Sample,
-  type SpannedConversation,
-} from "./measures/from-spans.ts";
-export {
-  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
-  REPORTED_MEASUREMENTS_PAYLOAD_PATH,
-  REPORTED_MEASUREMENTS_VERSION,
-  reportedMeasurementsOf,
-  reportedMeasurementsPayload,
-  type ReportedMeasurement,
-  type ReportedMeasurements,
-} from "./measures/reported.ts";
-
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,

@@ -2,21 +2,23 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
-  measuresFromSpans,
   readTrace,
-  reportedMeasurementsPayload,
-  worstSampleOf,
   type AuthContext,
-  type MeasuredFromSpans,
   type NewSpan,
-  type ReportedMeasurement,
   type TraceDetail,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import {
   MEASURE_CATALOG,
+  TIMING_SPAN_MEASURES,
+  measuresFromSpans,
+  reportedMeasurementsPayload,
   SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
+  worstSampleOf,
+  type MeasuredFromSpans,
+  type ReportedMeasurement,
+} from "@egma/metrics";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -448,9 +450,15 @@ describe("a conversation a measure cannot be computed for", () => {
   for (const cataloged of MEASURE_CATALOG) {
     it(`answers nothing for ${cataloged.measure} when its spans are not there`, async () => {
       // Everything **except** this one, so the case is about this measure and
-      // not about a conversation that measured nothing at all.
+      // not about a conversation that measured nothing at all. Seeded from the
+      // timing list rather than the gradeable list, because that is the only
+      // vocabulary this harness can write: a platform-stage measure never
+      // arrives as an egma timing span — its samples come from a recognised
+      // framework's stage spans or the reported block, proven where those are
+      // built — so seeding one here would write spans the module rightly
+      // ignores.
       const everythingElse: Record<string, readonly number[]> = {};
-      for (const other of SPAN_DERIVED_MEASURES) {
+      for (const other of TIMING_SPAN_MEASURES) {
         if (other !== cataloged.measure) everythingElse[other] = [900];
       }
 

@@ -1,7 +1,5 @@
-import {
-  arithmeticMeanOf,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
-} from "@egma/db";
+import { MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER } from "@egma/db";
+import { arithmeticMeanOf } from "@egma/metrics";
 
 import type { Execution, GraderResult } from "./contract.ts";
 

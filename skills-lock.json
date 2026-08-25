@@ -7,6 +7,12 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "b2e8ef5ffc2f142022c1e1e1bba68073f0821356a8e1cf1b23670f61d13fe50b"
     },
+    "bro": {
+      "source": "luchasarie/bro-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "43e2027c335e35d44763a1b814e84a94e30435348b19e41c1304c6e5e6afc98d"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",

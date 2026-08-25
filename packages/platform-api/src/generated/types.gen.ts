@@ -4834,6 +4834,18 @@ export type GetSimulationResponses = {
             humanTurnCount?: number;
             agentTurnCount?: number;
         };
+        metrics: Array<{
+            measure: string;
+            unit: string;
+            derived: boolean;
+            reportedBy?: string;
+            samples: Array<number>;
+            spanIds: Array<string>;
+            mean: number;
+            p50: number;
+            p90: number;
+            partial: boolean;
+        }>;
         test: {
             id: string;
             versionId: string;
@@ -6004,17 +6016,16 @@ export type GetTraceResponses = {
         turns: Array<TraceSpan>;
         spans: Array<TraceSpan>;
         spansTruncated: boolean;
-        measures: Array<{
+        metrics: Array<{
             measure: string;
             unit: string;
             derived: boolean;
             reportedBy?: string;
             samples: Array<number>;
             spanIds: Array<string>;
-            worst: {
-                value: number;
-                spanId: string;
-            } | null;
+            mean: number;
+            p50: number;
+            p90: number;
             partial: boolean;
         }>;
         simulationId: string | null;

@@ -2,6 +2,7 @@ import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
   dateTimeSchema,
+  metricSchema,
   nullable,
   parameters,
   rateLimitResponse,
@@ -115,35 +116,6 @@ const traceSpanSchema = {
   additionalProperties: false,
 } as const;
 
-const measureSchema = {
-  type: "object",
-  properties: {
-    measure: stringSchema,
-    unit: stringSchema,
-    derived: booleanSchema,
-    reportedBy: stringSchema,
-    samples: arrayOf(numberSchema),
-    spanIds: arrayOf(stringSchema),
-    worst: nullable({
-      type: "object",
-      properties: { value: numberSchema, spanId: stringSchema },
-      required: ["value", "spanId"],
-      additionalProperties: false,
-    }),
-    partial: booleanSchema,
-  },
-  required: [
-    "measure",
-    "unit",
-    "derived",
-    "samples",
-    "spanIds",
-    "worst",
-    "partial",
-  ],
-  additionalProperties: false,
-} as const;
-
 const traceDetailSchema = {
   $defs: { traceSpan: traceSpanSchema },
   type: "object",
@@ -152,7 +124,7 @@ const traceDetailSchema = {
     turns: arrayOf(traceSpanReference),
     spans: arrayOf(traceSpanReference),
     spansTruncated: booleanSchema,
-    measures: arrayOf(measureSchema),
+    metrics: arrayOf(metricSchema),
     simulationId: nullable(stringIdSchema),
     gradingState: gradingStateSchema,
     ...gradeProjectionProperties,
@@ -162,7 +134,7 @@ const traceDetailSchema = {
     "turns",
     "spans",
     "spansTruncated",
-    "measures",
+    "metrics",
     "simulationId",
     "gradingState",
     ...gradeProjectionRequired,

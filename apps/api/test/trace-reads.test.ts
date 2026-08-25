@@ -1,10 +1,12 @@
 import {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
+} from "@egma/metrics";
+import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
   readProductionGradingPlan,
-  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
-  reportedMeasurementsPayload,
   type NewSpan,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -181,7 +183,7 @@ describe.skipIf(!storage.available)(
       expect(
         everySpan(detail.turns).map((span) => span.text).filter((text) => text !== ""),
       ).toContain("Can you still hear me?");
-      expect(detail.measures.length).toBeGreaterThan(0);
+      expect(detail.metrics.length).toBeGreaterThan(0);
 
       // The supported end froze the empty production selection before the
       // object was deleted. Expected behaviors grades simulations only, so no
@@ -601,14 +603,16 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
   it("answers what the exchange measured, derived from the framework's own timings", async () => {
     const detail = await transcript();
 
-    expect(detail.measures?.map((one) => one.measure)).toEqual([
+    expect(detail.metrics?.map((one) => one.measure)).toEqual([
       "first_response_latency",
       "turn_response_latency",
       "agent_speech_duration",
+      "llm_latency",
+      "tts_latency",
     ]);
     // Present rather than absent, so a client can tell "nothing was measured"
     // from "this response is an older shape that never said".
-    expect(Array.isArray(detail.measures)).toBe(true);
+    expect(Array.isArray(detail.metrics)).toBe(true);
   });
 });
 
@@ -682,7 +686,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     );
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json() as TraceDetailBody;
-    const only = body.measures[0];
+    const only = body.metrics[0];
     if (only === undefined) throw new Error("the read measured nothing");
     return only;
   }
@@ -755,12 +759,14 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     // precisely the fields it always saw.
     expect(Object.keys(only).sort()).toEqual([
       "derived",
+      "mean",
       "measure",
+      "p50",
+      "p90",
       "partial",
       "samples",
       "spanIds",
       "unit",
-      "worst",
     ]);
     expect(only.derived).toBe(false);
     // Absent, not empty and not null — there is nothing on the wire to have to
@@ -773,20 +779,26 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
 
     expect(Object.keys(only).sort()).toEqual([
       "derived",
+      "mean",
       "measure",
+      "p50",
+      "p90",
       "partial",
       "reportedBy",
       "samples",
       "spanIds",
       "unit",
-      "worst",
     ]);
     // `derived` says what it has always said — egma did not time this — and the
     // new field says which of the two untimed sources it was.
     expect(only.derived).toBe(true);
     expect(only.reportedBy).toBe("retell");
     expect(only.samples).toEqual([517, 2145]);
-    expect(only.worst).toEqual({ value: 2145, spanId: "5200000000000001" });
+    // The mean of the two reported waits, rounded once in the module.
+    expect(only.mean).toBe(1331);
+    // Nearest-rank over [517, 2145]: the median is the first, the p90 the second.
+    expect(only.p50).toBe(517);
+    expect(only.p90).toBe(2145);
   });
 
   /**

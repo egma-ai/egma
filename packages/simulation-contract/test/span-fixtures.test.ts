@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { MEASURE_CATALOG } from "../src/measures.ts";
+import { MEASURE_CATALOG } from "@egma/metrics";
 
 /**
  * The span fixtures, held to the vocabulary document beside them.

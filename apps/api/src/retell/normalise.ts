@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { type NewSpan } from "@egma/db";
 import {
+  catalogedMeasure,
+  isSpanDerivedMeasure,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   reportedMeasurementsPayload,
-  type NewSpan,
   type ReportedMeasurement,
-} from "@egma/db";
+} from "@egma/metrics";
 import { safeRetellProviderData } from "@egma/retell";
-import { catalogedMeasure, isSpanDerivedMeasure } from "@egma/simulation-contract";
 
 /**
  * One Retell call object, as spans. The single place that reading happens.
@@ -510,9 +511,16 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
   measure: string,
 ])[] = [
   ["e2e", catalogNamed("turn_response_latency")],
-  ["llm", `${RETELL}/llm_latency`],
-  ["tts", `${RETELL}/tts_latency`],
-  ["asr", `${RETELL}/asr_latency`],
+  // The three stage latencies carry the catalog's own names since catalog
+  // version 5, so the graders and the strip read Retell's stages in the one
+  // vocabulary. The knowledge-base stage keeps the platform prefix: retrieval
+  // is Retell's own concept, not a stage every platform has, and a
+  // platform-prefixed name is exactly what "captured now, surfaced when the
+  // catalog names it" looks like. Calls stored before this mapping keep their
+  // prefixed stage names and stay quiet — pre-production, deliberately.
+  ["llm", catalogNamed("llm_latency")],
+  ["tts", catalogNamed("tts_latency")],
+  ["asr", catalogNamed("asr_latency")],
   ["knowledge_base", `${RETELL}/knowledge_base_latency`],
 ];
 
