@@ -1,0 +1,20 @@
+{
+  // The tests, type-checked apart from the pages they exercise.
+  //
+  // `tsconfig.json` covers what `next build` compiles, and from Next 16 that
+  // build type-checks the whole project it is given. The tests are not part of
+  // that project: two of them read `apps/api/src` directly, and the web image
+  // is built from `apps/web` and `packages/platform-api` alone — so a build
+  // that swept the tests in would fail on imports the container was never
+  // meant to contain, in a checkout where nothing is actually wrong.
+  //
+  // So `tsconfig.json` excludes `test/`, and the tests keep their full check
+  // here instead, over the same options. `pnpm --filter @egma/web typecheck`
+  // runs both, and neither file loses anything to the other.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./.next/tsconfig.test.tsbuildinfo"
+  },
+  "include": ["next-env.d.ts", "test/**/*.ts", "test/**/*.tsx"],
+  "exclude": ["node_modules"]
+}
