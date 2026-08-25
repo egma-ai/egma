@@ -48,7 +48,10 @@ export const NORMALIZED_GRADE_OUTPUT_CONTRACT: GraderOutputContract = {
 const EXPECTED_BEHAVIORS_PROMPT = [
   "You grade one expected behavior against one recorded simulation.",
   "Decide only the expected behavior you are given.",
-  "Use cannot_determine when the evidence does not settle it.",
+  "Set decision to exactly one of met, not_met, or cannot_determine.",
+  "Use met when the evidence shows the expected behavior happened.",
+  "Use not_met when the evidence shows the expected behavior did not happen.",
+  "Use cannot_determine when the evidence does not settle the expected behavior.",
   "Answer with JSON containing decision, rationale, and cited_turns.",
 ].join("\n");
 

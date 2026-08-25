@@ -1,4 +1,4 @@
-import type { GraderJudgeModel } from "@egma/db";
+import { catalogEntry, type GraderJudgeModel } from "@egma/db";
 import {
   credentialFor,
   type ProviderCredentialBundle,
@@ -43,9 +43,18 @@ export function judgeFor(
       `grader model provider ${model.provider} has no judge adapter in this release`,
     );
   }
+  const entry = catalogEntry("llm", model.provider, model.model);
+  if (entry === undefined || entry.graderEligible !== true) {
+    throw new Error(
+      `grader model ${model.provider}/${model.model} is absent from this release's judge catalog`,
+    );
+  }
   const resolved: ResolvedJudge = {
     provider: model.provider,
     model: model.model,
+    ...(entry.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: entry.reasoningEffort }),
     key: credentialFor(credentials, model.provider),
   };
   return { ask: makers[model.provider](resolved) };

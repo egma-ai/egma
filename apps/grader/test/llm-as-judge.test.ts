@@ -89,6 +89,9 @@ describe("a customer LLM grader", () => {
       },
     });
     expect(scripted.judge.asked).toHaveLength(1);
+    expect(scripted.judge.asked[0]?.prompt).toContain(
+      "met, not_met, or cannot_determine",
+    );
     expect(scripted.judge.asked[0]?.criterion).toBe(INSTRUCTIONS);
   });
 
