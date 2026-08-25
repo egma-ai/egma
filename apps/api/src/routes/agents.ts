@@ -1360,14 +1360,22 @@ export async function agentRoutes(
       );
       if (stopped !== undefined) {
         /*
-         * **A refused save leaves nothing live behind.** The pre-check above
-         * catches the ordinary case before a row exists; this is what happens
-         * when two requests raced it, or when the rule was met by a fact only
-         * the transaction could see. The connection this request wrote is put
-         * back, so pressing again is a fresh attempt rather than a second live
-         * way into an agent nobody was allowed to bind. The agent row stays
-         * when this registration reused one — it was not this request's to
-         * remove.
+         * **A refused save puts back the connection it wrote, and never the
+         * agent.** The pre-check above catches the ordinary case before a row
+         * exists; this is what happens when two requests raced it, or when the
+         * rule was met by a fact only the transaction could see.
+         *
+         * **Archiving the agent here was a way to destroy somebody else's
+         * work.** An agent this request created is unbound the instant it is
+         * written, so its custody step can only be refused if another writer
+         * bound it in the window between the insert and the seal — which means
+         * the agent is *theirs*, and `archiveAgent` cascades over every live
+         * connection on it, including the one they just attached. The branch
+         * fired in exactly the case where firing it was wrong.
+         *
+         * So the cleanup is the connection alone, on this path and on
+         * `addConnection`'s. A refused creator leaves at worst an empty live
+         * agent row, which is a row and not a loss.
          */
         if (registered.connection !== undefined) {
           await archiveConnection(
@@ -1375,9 +1383,6 @@ export async function agentRoutes(
             registered.agent.id,
             registered.connection.id,
           );
-        }
-        if (registered.result === "created") {
-          await archiveAgent(acting, registered.agent.id);
         }
         return refused(reply, stopped);
       }

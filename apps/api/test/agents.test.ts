@@ -1,6 +1,7 @@
 import {
   createAgent,
   createProject,
+  enablePullProductionCalls,
   sealAgentMonitoringKey,
   type AuthContext,
   type Role,
@@ -801,6 +802,94 @@ describe("discovering simulation agents", () => {
     }>("select archived_at from connection where agent_id = $1", [agentId]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.archived_at).not.toBeNull();
+  });
+
+  /**
+   * A registration refused by custody leaves its agent alive.
+   *
+   * **The cleanup archives the connection and never the agent**, and the
+   * reason is sharper than tidiness. An agent a registration just created is
+   * unbound the instant it is written, so the binding rule can only refuse it
+   * if another writer bound it in the window between the insert and the seal —
+   * which means the agent is that writer's, and archiving it would take every
+   * live connection on it, including the one they had just attached. The one
+   * branch that destroyed somebody else's work was the only branch that could
+   * fire.
+   *
+   * The refusal used here is the other one custody can answer with — the
+   * one-switched-on-agent rule — because it is reachable without a race and it
+   * runs the same cleanup. What is asserted is the shape of that cleanup: the
+   * connection put back, the agent still alive, and the agent that already
+   * watches this platform agent untouched.
+   */
+  it("leaves the agent alive when custody refuses the registration", async () => {
+    api = await createApi("retell_register_cleanup_keeps_agent");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const acting = contextFor(ada, "admin");
+
+    // The agent that already watches this Retell agent, and its own way in.
+    const watching = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Night line",
+    });
+    const watchingId = String(agentOf(watching).id);
+    await enablePullProductionCalls(acting, {
+      agentId: watchingId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_voice_1",
+      apiKey: "retell-secret-the-winner-ABCD",
+    });
+
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-the-loser-WXYZ" },
+      },
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "agent_voice_1 is already watched by another agent in this project. " +
+        "One Egma agent watches one Retell agent, so turn that agent's switch " +
+        "off first, or connect without ticking Pull production calls.",
+    });
+
+    /*
+     * The agent this registration made is still here, with no live way in.
+     * Archiving it was what cascaded over connections that were never this
+     * request's to touch.
+     */
+    const { rows } = await api.database.sql<{
+      id: string;
+      archived_at: string | null;
+    }>("select id, archived_at from agent where name = 'Front desk'");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.archived_at, "the refused registration archived its agent").toBeNull();
+
+    const made = await get(
+      `/v1/agents/${String(rows[0]?.id)}`,
+      withKey(ada.secret),
+    );
+    expect(made.body.connections).toEqual([]);
+    expect(agentOf(made).pullProductionCalls).toBe(false);
+
+    // And the agent that was already watching is exactly as it was.
+    const winner = await get(`/v1/agents/${watchingId}`, withKey(ada.secret));
+    expect(agentOf(winner).pullProductionCalls).toBe(true);
+    expect(agentOf(winner).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(winner).monitoringApiKeyHint).toBe("ABCD");
   });
 
   /** The ordinary second connection: the same Retell agent, another way in. */
