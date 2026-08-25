@@ -174,9 +174,9 @@ describe("the media server's credential", () => {
 
   it("mints one pair when two commands prepare the same workspace at once", async () => {
     // Two preparations racing on a workspace with no pair is reachable without
-    // anybody doing anything strange: `up` and `setup` both mint, so the
-    // racers need not even be the same command. Unguarded, each generates its
-    // own pair, each writes the file, and each hands *its* pair to Compose — so
+    // anybody doing anything strange: two `up` commands can start together.
+    // Unguarded, each generates its own pair, each writes the file, and each
+    // hands *its* pair to Compose — so
     // the recorded pair and the running containers' pair differ. That passes
     // every health check and surfaces minutes later as an authentication
     // refusal naming nothing about configuration, which is the exact failure

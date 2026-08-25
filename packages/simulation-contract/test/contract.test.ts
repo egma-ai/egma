@@ -134,9 +134,9 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "agent_id",
   },
-  // Platform settings may carry the carrier only. Model and speech choices
+  // The work-order platform block may carry the carrier only. Model and speech choices
   // belong to the pinned persona version and are refused here.
-  "spec/platform-setting-unknown.json": {
+  "spec/platform-block-unknown.json": {
     at: "/platform",
     keyword: "additionalProperties",
     property: "model",
@@ -400,16 +400,10 @@ describe("the two schemas, as one contract", () => {
       return spec;
     };
 
-    // The fixture proves the four-value credential-authenticated route. The
-    // two-value shape is the complete source-IP-authenticated route.
+    // The fixture proves the only carrier shape: all four values move together.
     expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
       true,
     );
-    const sourceIpRoute = without("trunk_username", "trunk_password");
-    expect(
-      validators.spec(sourceIpRoute),
-      ajv.errorsText(validators.spec.errors),
-    ).toBe(true);
 
     const phoneWithoutCarrier = structuredClone(base);
     delete phoneWithoutCarrier.platform;
@@ -436,17 +430,18 @@ describe("the two schemas, as one contract", () => {
       }),
     );
 
-    for (const [missing, keyword] of [
-      [["trunk_address"], "required"],
-      [["trunk_number"], "required"],
-      [["trunk_username"], "dependentRequired"],
-      [["trunk_password"], "dependentRequired"],
+    for (const missing of [
+      "trunk_address",
+      "trunk_number",
+      "trunk_username",
+      "trunk_password",
     ] as const) {
-      expect(validators.spec(without(...missing))).toBe(false);
+      expect(validators.spec(without(missing))).toBe(false);
       expect(validators.spec.errors).toContainEqual(
         expect.objectContaining({
           instancePath: "/platform/carrier",
-          keyword,
+          keyword: "required",
+          params: { missingProperty: missing },
         }),
       );
     }

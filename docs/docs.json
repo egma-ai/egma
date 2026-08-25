@@ -58,7 +58,6 @@
             "group": "Configuration",
             "pages": [
               "configuration/environment-variables",
-              "configuration/platform-settings",
               "configuration/authentication"
             ]
           }

@@ -302,9 +302,8 @@ def test_no_development_media_credential_is_left_in_the_deployment_description()
 
 REQUIRED_IN_THE_ENVIRONMENT = {
     "EGMA_ENCRYPTION_KEY": (
-        "seals every stored credential and every platform setting. A default "
-        "is a deployment sealed with a key printed in a public repository, "
-        "which is not sealed"
+        "seals every credential stored in Postgres. A default is a deployment "
+        "sealed with a key printed in a public repository, which is not sealed"
     ),
     "EGMA_AUTH_SECRET": (
         "signs browser sessions. A default is every reader of this repository "
@@ -370,12 +369,12 @@ MAY_BE_ABSENT = {
     "EGMA_CARTESIA_API_KEY": "optional direct provider credential",
     "EGMA_PROVIDER_CREDENTIALS_SECRET_ID": "the self-host source uses direct keys",
     "EGMA_PROVIDER_CREDENTIALS_REGION": "the self-host source uses direct keys",
-    # The platform owns only its phone route. A complete credential route has
-    # four fields; source-IP authentication intentionally uses the first two.
-    "EGMA_PHONE_TRUNK_ADDRESS": "seeded",
-    "EGMA_PHONE_SOURCE_NUMBER": "seeded",
-    "EGMA_PHONE_TRUNK_USERNAME": "seeded",
-    "EGMA_PHONE_TRUNK_PASSWORD": "seeded",
+    # Phone simulations are optional. When enabled, all four values form one
+    # deployment credential bundle and the API refuses any partial bundle.
+    "EGMA_PHONE_TRUNK_ADDRESS": "optional carrier credential bundle",
+    "EGMA_PHONE_SOURCE_NUMBER": "optional carrier credential bundle",
+    "EGMA_PHONE_TRUNK_USERNAME": "optional carrier credential bundle",
+    "EGMA_PHONE_TRUNK_PASSWORD": "optional carrier credential bundle",
     # Mail, which is optional and load-bearing in being optional: with none,
     # an invitation hands its link back to whoever sent it.
     "EGMA_SMTP_URL": "optional by design",
@@ -639,7 +638,7 @@ def test_no_variable_in_a_shipped_compose_file_is_hollow_when_it_is_absent():
         "nothing says so — every container starts, every health check passes, "
         "and the platform reports itself ready. Use the required ${VAR:?…} "
         "form and add it to REQUIRED_IN_THE_ENVIRONMENT, or say in "
-        "MAY_BE_ABSENT who answers for it instead: the platform's own store, a "
+        "MAY_BE_ABSENT who answers for it instead: generated configuration, a "
         "project, or the host."
     )
 

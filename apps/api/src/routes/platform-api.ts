@@ -29,6 +29,7 @@ export type PlatformApiRoutesOptions = {
   readonly rateLimit: RateLimit;
   readonly emailSender: EmailSender;
   readonly baseUrl: string;
+  readonly carrierRoute: Config["carrierRoute"];
   readonly blob: Config["blob"];
   readonly retellFetch?: RetellFetch | undefined;
   readonly retellReach?: RetellReach | undefined;
@@ -59,7 +60,7 @@ function validationMessage(request: FastifyRequest, issues: readonly ValidationI
  * The one customer-facing platform API boundary.
  *
  * Every group below is included in the explicit platform contract. Account
- * flows, deployment settings, simulator work, OTLP, and health are registered
+ * flows, simulator work, OTLP, and health are registered
  * beside this plugin in the server and cannot enter the OpenAPI document by
  * sharing a path prefix.
  */
@@ -114,7 +115,11 @@ export async function platformApiRoutes(
   void app.register(graderLibraryRoutes, credentialed);
   void app.register(graderRoutes, credentialed);
   void app.register(mockToolRoutes, credentialed);
-  void app.register(runRoutes, { ...credentialed, baseUrl: options.baseUrl });
+  void app.register(runRoutes, {
+    ...credentialed,
+    baseUrl: options.baseUrl,
+    carrierRoute: options.carrierRoute,
+  });
   void app.register(simulationRoutes, credentialed);
   void app.register(recordingRoutes, { ...credentialed, blob: options.blob });
   void app.register(traceReadRoutes, credentialed);

@@ -1,4 +1,3 @@
-import type { PlatformSettingValues } from "@egma/db";
 import {
   providerCredentialSource,
   type ProviderCredentialSource,
@@ -9,8 +8,44 @@ import type { SmtpSettings } from "./auth/email.ts";
 import type { IngestionStore } from "./ingestion/object-store.ts";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
-/** Which source owns the carrier route after the platform has started. */
-export type CarrierSettingsSource = "platform" | "environment";
+/** The one deployment-owned route used for phone simulations. */
+export type CarrierRoute = {
+  readonly trunkAddress: string;
+  readonly sourceNumber: string;
+  readonly trunkUsername: string;
+  readonly trunkPassword: string;
+};
+
+/** The four environment values which form one complete phone carrier route. */
+export const CARRIER_ROUTE_ENVIRONMENT = [
+  {
+    property: "trunkAddress",
+    variable: "EGMA_PHONE_TRUNK_ADDRESS",
+    label: "the carrier trunk",
+  },
+  {
+    property: "sourceNumber",
+    variable: "EGMA_PHONE_SOURCE_NUMBER",
+    label: "the source number",
+  },
+  {
+    property: "trunkUsername",
+    variable: "EGMA_PHONE_TRUNK_USERNAME",
+    label: "the SIP username",
+  },
+  {
+    property: "trunkPassword",
+    variable: "EGMA_PHONE_TRUNK_PASSWORD",
+    label: "the SIP password",
+  },
+] as const satisfies readonly {
+  readonly property: keyof CarrierRoute;
+  readonly variable: string;
+  readonly label: string;
+}[];
+
+/** E.164: a plus, then no more than fifteen digits and no leading zero. */
+const E164 = /^\+[1-9]\d{1,14}$/u;
 
 /**
  * Which halves of ingestion this process serves.
@@ -79,11 +114,11 @@ export type Config = {
   /** What sessions are signed with. Absent means the service will not start. */
   readonly authSecret: string;
   /**
-   * What carrier and connection credentials are sealed under before they touch a row —
+   * What connection credentials are sealed under before they touch a row —
    * 32 random bytes as 64 hex characters (`openssl rand -hex 32`). Malformed
-   * or absent means the service will not start. Model-provider keys do not use
-   * this path: they stay in the deployment credential source and are read only
-   * when model work starts.
+   * or absent means the service will not start. Deployment credentials do not
+   * use this path: model-provider keys stay in their credential source and the
+   * phone carrier stays in the process environment.
    */
   readonly encryptionKey: string;
   /**
@@ -134,36 +169,13 @@ export type Config = {
    */
   readonly providerCredentials: ProviderCredentialSource;
   /**
-   * Which source owns the carrier route.
+   * The deployment's phone carrier route, read from the process environment.
    *
-   * `platform` is the API default for deployments that do not state an owner.
-   * Environment values seed a missing route, and a complete route already in
-   * the platform store stays unchanged.
-   *
-   * `environment` makes the deployment environment the source of truth.
-   * Startup reconciles a supplied carrier route after seeding on every start.
-   * A changed complete route replaces the stored route. No carrier values
-   * preserve a legacy sealed route because its password cannot be exported.
-   *
-   * This decision is independent of whether the deployment serves one or
-   * several organizations. Tenancy does not say who owns a carrier route.
+   * All four values are one credential bundle. Empty is ordinary and means
+   * phone simulations are unavailable; a partial bundle is refused at startup.
+   * It never enters Postgres and is handed only to claimed phone simulations.
    */
-  readonly carrierSettingsSource: CarrierSettingsSource;
-  /** Explicitly remove a route retained from an older sealed deployment. */
-  readonly carrierSettingsDisabled: boolean;
-  /**
-   * The carrier route this environment offers the platform on start.
-   *
-   * A self-host operator supplies the complete route in the workspace `.env`.
-   * Model, speech, voice, VAD and media choices are not platform settings and
-   * cannot enter through this value.
-   *
-   * Empty is ordinary and means this deployment has no shared phone route.
-   *
-   * See `carrierSettingsSource` for the explicit choice that lets environment
-   * input replace or remove an existing route.
-   */
-  readonly platformSettings: PlatformSettingValues;
+  readonly carrierRoute: CarrierRoute | undefined;
   /**
    * The object store voice simulations' recordings live in, or `undefined` on a
    * deployment that has named none.
@@ -213,17 +225,6 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
-}
-
-function carrierSettingsSource(
-  environment: NodeJS.ProcessEnv,
-): CarrierSettingsSource {
-  const raw = environment.EGMA_CARRIER_SETTINGS_SOURCE?.trim();
-  if (raw === undefined || raw === "") return "platform";
-  if (raw === "platform" || raw === "environment") return raw;
-  throw new Error(
-    "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not " + raw,
-  );
 }
 
 /** Which halves of ingestion this process serves. See `DeploymentRole`. */
@@ -590,33 +591,6 @@ export function loadConfig(
   }
   const baseUrl = parsedBaseUrl.origin;
 
-  const selectedCarrierSettingsSource = carrierSettingsSource(environment);
-  const carrierSettingsDisabled = flag(
-    environment,
-    "EGMA_PHONE_DISABLED",
-    false,
-  );
-  const selectedPlatformSettings = platformSettings(environment);
-  if (
-    carrierSettingsDisabled &&
-    selectedCarrierSettingsSource !== "environment"
-  ) {
-    throw new Error(
-      "EGMA_PHONE_DISABLED is supported only when " +
-        "EGMA_CARRIER_SETTINGS_SOURCE=environment",
-    );
-  }
-  if (
-    carrierSettingsDisabled &&
-    Object.keys(selectedPlatformSettings).length > 0
-  ) {
-    throw new Error(
-      "EGMA_PHONE_DISABLED cannot be true while any EGMA_PHONE_TRUNK_* or " +
-        "EGMA_PHONE_SOURCE_NUMBER value is set. Remove the route values or " +
-        "set EGMA_PHONE_DISABLED=false.",
-    );
-  }
-
   return {
     smtp: smtpSettings(environment, baseUrl),
     databaseUrl,
@@ -627,89 +601,79 @@ export function loadConfig(
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
-    carrierSettingsSource: selectedCarrierSettingsSource,
-    carrierSettingsDisabled,
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
-    platformSettings: selectedPlatformSettings,
+    carrierRoute: carrierRoute(environment),
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: ingestionSettings(environment),
   };
 }
 
 /**
- * The one live platform choice: how a phone call reaches the carrier.
+ * The deployment credential used to reach the phone carrier.
  *
- * Model, speech, voice, VAD and media choices are deliberately absent. Model
- * and voice choices are immutable persona content; provider keys come from the
- * source above; VAD and media are simulator deployment details. Putting any of
- * them back into independent platform rows would recreate the mixed STT state
- * that failed before the first turn in production.
+ * It is ordinary environment configuration, like the provider keys above. Its
+ * supplying any of these four strings requires supplying all of them. The
+ * username and password stay opaque so any SIP carrier can issue them. An
+ * absent bundle keeps chat and room simulations available and leaves phone
+ * simulations disabled.
  */
-function platformSettings(
-  environment: NodeJS.ProcessEnv,
-): PlatformSettingValues {
+function carrierRoute(environment: NodeJS.ProcessEnv): CarrierRoute | undefined {
   const offered = {
-    // The carrier keeps the variable names the old phone setup already wrote,
-    // so an operator upgrading meets the same words they were given before.
-    carrier_trunk_address: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
-    carrier_trunk_number: environment.EGMA_PHONE_SOURCE_NUMBER?.trim(),
-    carrier_trunk_username: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),
-    carrier_trunk_password: environment.EGMA_PHONE_TRUNK_PASSWORD?.trim(),
+    trunkAddress: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
+    sourceNumber: environment.EGMA_PHONE_SOURCE_NUMBER?.trim(),
+    trunkUsername: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),
+    trunkPassword: environment.EGMA_PHONE_TRUNK_PASSWORD?.trim(),
   };
 
-  const carrierVariables = [
-    ["carrier_trunk_address", "EGMA_PHONE_TRUNK_ADDRESS"],
-    ["carrier_trunk_number", "EGMA_PHONE_SOURCE_NUMBER"],
-    ["carrier_trunk_username", "EGMA_PHONE_TRUNK_USERNAME"],
-    ["carrier_trunk_password", "EGMA_PHONE_TRUNK_PASSWORD"],
-  ] as const;
-  const carrierPresent = carrierVariables.filter(
-    ([name]) => (offered[name] ?? "") !== "",
+  const present = CARRIER_ROUTE_ENVIRONMENT.filter(
+    ({ property }) => (offered[property] ?? "") !== "",
   );
-  const ipAuthenticatedCarrier =
-    offered.carrier_trunk_address !== undefined &&
-    offered.carrier_trunk_address !== "" &&
-    offered.carrier_trunk_number !== undefined &&
-    offered.carrier_trunk_number !== "" &&
-    (offered.carrier_trunk_username ?? "") === "" &&
-    (offered.carrier_trunk_password ?? "") === "";
-  const credentialAuthenticatedCarrier =
-    carrierPresent.length === carrierVariables.length;
-  if (
-    carrierPresent.length > 0 &&
-    !ipAuthenticatedCarrier &&
-    !credentialAuthenticatedCarrier
-  ) {
-    const missing = carrierVariables
-      .filter(([name]) => (offered[name] ?? "") === "")
-      .map(([, variable]) => variable);
+  if (present.length === 0) return undefined;
+  if (present.length !== CARRIER_ROUTE_ENVIRONMENT.length) {
+    const missing = CARRIER_ROUTE_ENVIRONMENT.filter(
+      ({ property }) => (offered[property] ?? "") === "",
+    ).map(({ variable }) => variable);
     throw new Error(
-      "the phone carrier environment is either a trunk address and source " +
-        "number for source-IP authentication, or those two plus a SIP " +
-        `username and password. This deployment is missing ${missing.join(" and ")}. ` +
-        "Set EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER together, " +
-        "and if this carrier uses credentials, also set both " +
-        "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD.",
-    );
-  }
-  if (
-    /^AC[0-9a-f]{32}$/iu.test(offered.carrier_trunk_username ?? "")
-  ) {
-    throw new Error(
-      "EGMA_PHONE_TRUNK_USERNAME looks like a Twilio Account SID. Use the " +
-        "username and password from the Credential List attached to the trunk, " +
-        "not the Twilio Account SID and Auth Token.",
+      "the phone carrier environment requires all four values together. This " +
+        `deployment is missing ${missing.join(" and ")}. Set ` +
+        "EGMA_PHONE_TRUNK_ADDRESS, EGMA_PHONE_SOURCE_NUMBER, " +
+        "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD, or remove " +
+        "all four to run Egma without phone simulations.",
     );
   }
 
-  // Compose passes an unset optional through as an empty string rather than
-  // leaving it out, so "" and "never set" have to mean the same thing.
-  return Object.fromEntries(
-    Object.entries(offered).filter(([, value]) => (value ?? "") !== ""),
-  ) as PlatformSettingValues;
+  // Completeness above has narrowed all four values to non-empty strings.
+  const route = offered as CarrierRoute;
+  if (!E164.test(route.sourceNumber)) {
+    throw new Error(
+      "EGMA_PHONE_SOURCE_NUMBER must be an E.164 phone number such as +15551234567",
+    );
+  }
+  let address: URL;
+  try {
+    address = new URL(`sip://${route.trunkAddress}`);
+  } catch {
+    throw new Error(
+      "EGMA_PHONE_TRUNK_ADDRESS must be a SIP hostname such as trunk.example.com",
+    );
+  }
+  if (
+    address.hostname === "" ||
+    address.username !== "" ||
+    address.password !== "" ||
+    address.pathname !== "" ||
+    address.search !== "" ||
+    address.hash !== ""
+  ) {
+    throw new Error(
+      "EGMA_PHONE_TRUNK_ADDRESS must be a SIP hostname such as trunk.example.com, " +
+        "with no scheme, credentials or path",
+    );
+  }
+  return route;
 }
 
 /**

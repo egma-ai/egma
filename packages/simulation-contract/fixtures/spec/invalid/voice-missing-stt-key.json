@@ -32,7 +32,9 @@
   "platform": {
     "carrier": {
       "trunk_address": "fixture.pstn.twilio.com",
-      "trunk_number": "+15550000000"
+      "trunk_number": "+15550000000",
+      "trunk_username": "fixture-trunk-user",
+      "trunk_password": "fixture-not-a-real-secret-trunk"
     }
   }
 }

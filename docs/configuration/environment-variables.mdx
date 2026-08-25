@@ -40,9 +40,9 @@ internal values to `.env`. A new encryption key cannot open credentials sealed
 by the old key.
 
 <ParamField path="EGMA_ENCRYPTION_KEY" type="string" required>
-  A generated 32-byte hex key. It seals connection credentials and the carrier
-  SIP password stored in Postgres. Back up the generated platform file with the
-  database. The sealed values cannot be recovered without this key.
+  A generated 32-byte hex key. It seals connection credentials stored in
+  Postgres. Back up the generated platform file with the database. The sealed
+  values cannot be recovered without this key.
 </ParamField>
 
 <ParamField path="EGMA_AUTH_SECRET" type="string" required>
@@ -451,8 +451,8 @@ Set both or neither:
 </ParamField>
 
 <Note>
-  These credentials are not platform settings and are not stored in Postgres.
-  A simulator receives only the keys required by its claimed work order.
+  These are deployment credentials and are not stored in Postgres. A simulator
+  receives only the keys required by its claimed work order.
 </Note>
 
 ---
@@ -460,8 +460,7 @@ Set both or neither:
 ## Optional phone carrier route
 
 The self-hosted `.env` file is the source for an optional shared phone route.
-Supply either the first two values for source-IP authentication or all four for
-SIP credential authentication.
+Supply all four values or none.
 
 <ParamField path="EGMA_PHONE_TRUNK_ADDRESS" type="string">
   The SIP trunk hostname, with no `sip://` scheme or path. For Twilio, copy the
@@ -473,18 +472,11 @@ SIP credential authentication.
 </ParamField>
 
 <ParamField path="EGMA_PHONE_TRUNK_USERNAME" type="string">
-  The SIP username from the credential list attached to the trunk. Supply it
-  with `EGMA_PHONE_TRUNK_PASSWORD`.
+  The SIP username from the credential list attached to the trunk.
 </ParamField>
 
 <ParamField path="EGMA_PHONE_TRUNK_PASSWORD" type="string">
   The SIP password paired with `EGMA_PHONE_TRUNK_USERNAME`.
-</ParamField>
-
-<ParamField path="EGMA_PHONE_DISABLED" type="boolean" default="false">
-  Set this to `true` only to remove a sealed carrier route retained from an
-  older Egma release. It cannot be combined with any `EGMA_PHONE_*` route
-  value.
 </ParamField>
 
 <Warning>
@@ -492,17 +484,13 @@ SIP credential authentication.
   SID and Auth Token. Do not put the Account SID or Auth Token in these fields.
 </Warning>
 
-On startup, a complete environment route replaces the sealed runtime copy in
-Postgres. When the environment supplies no route, Egma preserves a complete
-route stored by an older version. This makes an upgrade safe because Egma
-cannot export an existing sealed SIP password back into `.env`.
+These are ordinary deployment credentials, like the provider keys. Egma does
+not store them in Postgres. The API reads them from its environment and includes
+them only in phone work orders. No values disable phone simulations. A partial
+bundle is a configuration error.
 
 Wrap a credential containing `$` in single quotes in `.env` so Compose keeps
 it literal.
-
-`EGMA_CARRIER_SETTINGS_SOURCE` is a legacy direct-process control. The bundled
-self-hosted Compose stack fixes this behavior to `environment`; do not add the
-variable to a normal `.env`.
 
 ---
 

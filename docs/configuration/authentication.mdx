@@ -93,7 +93,7 @@ The distinction matters in three places:
 
 - **Trace ingestion** (`POST /v1/traces`): use a project-scoped key. Organization-wide keys are rejected. A key held by a `viewer` is also rejected because sending spans is a write.
 - **Trace reads** (`GET /v1/traces` and `GET /v1/traces/:traceId`): an organization-wide key can read across the organization. A project-scoped key can read only that project.
-- **Management operations** (creating projects and reading members): an organization-wide key works fine. The carrier settings endpoint is separate deployment configuration. It accepts writes only when the deployment uses the older platform-owned carrier mode; bundled self-host reads `EGMA_PHONE_*` from its environment instead.
+- **Management operations** (creating projects and reading members): an organization-wide key works fine. Phone carrier credentials are deployment environment values, not API resources.
 
 ---
 
@@ -140,7 +140,7 @@ Egma has three roles. Every role may create an API key for themselves — the lo
 |---|---|
 | **viewer** | Read traces, transcripts, simulation results, and project configuration. Cannot write, push, or export spans. |
 | **member** | Everything a viewer can do, plus: run simulations, push test suites, export telemetry spans, and manage project resources. |
-| **admin** | Everything a member can do, plus: invite and remove members, change roles, and manage platform settings. |
+| **admin** | Everything a member can do, plus: invite and remove members and change roles. |
 
 <Note>
   An organization always keeps at least one admin. The last admin cannot be demoted, removed, or deactivated.

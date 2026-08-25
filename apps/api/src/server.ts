@@ -37,7 +37,6 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformApiRoutes } from "./routes/platform-api.ts";
-import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
@@ -415,6 +414,7 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
     emailSender,
     baseUrl: config.baseUrl,
+    carrierRoute: config.carrierRoute,
     blob: config.blob,
     ...(options.retellFetch === undefined
       ? {}
@@ -422,22 +422,6 @@ export function buildApi(options: ServerOptions): Api {
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
-  });
-
-  // What this deployment has been configured with, as an owner reads and
-  // changes it. Its own credentialed scope, like every other group, so its one
-  // refusal — the settings of a platform are not everybody's to see — never
-  // reaches another group's error handler. It stays outside the public
-  // platform API because deployment settings are not customer resources.
-  void app.register(platformSettingsRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    // What a deployment holds for itself is an owner's to read and change only
-    // while that owner is the whole deployment. On one serving several
-    // customers the carrier route belongs to none of them, and the question of
-    // whose it is is not answered yet.
-    singleOrganization: config.singleOrganization,
-    carrierSettingsSource: config.carrierSettingsSource,
   });
 
   // The simulator's claim door. Outside the credentialed scope and the
@@ -448,6 +432,7 @@ export function buildApi(options: ServerOptions): Api {
   void app.register(claimRoutes, {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
+    carrierRoute: config.carrierRoute,
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),

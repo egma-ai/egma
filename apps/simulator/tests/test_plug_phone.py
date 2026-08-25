@@ -56,9 +56,11 @@ PLATFORM = {
     "carrier": {
         "trunk_address": "scripted-carrier.example.com",
         "trunk_number": "+15550100100",
+        "trunk_username": "scripted-trunk-user",
+        "trunk_password": "SENTINEL-scripted-trunk-password",
     }
 }
-"""A complete source-IP carrier route for contract-valid phone work."""
+"""A complete credential-authenticated route for contract-valid phone work."""
 
 
 def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:

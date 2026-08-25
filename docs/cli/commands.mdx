@@ -496,10 +496,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     `.egma-platform/platform.env`, then preserves them. Compose supplies safe
     local defaults.
 
-    A complete phone route in `.env` replaces the sealed runtime copy. With no
-    environment route, an existing stored route is preserved for safe upgrades.
-    For Twilio, use the SIP credential-list username and password, never the
-    Account SID and Auth Token.
+    The four phone values are ordinary deployment credentials and are not
+    stored in Postgres. Supply all four or none. For Twilio, use the SIP
+    credential-list username and password, never the Account SID and Auth Token.
 
     After the stack is up, the command prints the address to point your agent
     repository at. Phone readiness is checked when a phone run is created.

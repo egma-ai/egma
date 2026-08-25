@@ -5,7 +5,7 @@
  * readiness was written, documented, and covered by tests —
  * and then a real carrier setup against a real Twilio account
  * finished every carrier step correctly and reported phone setup required anyway,
- * because the compose entry for the API never passed the three variables
+ * because the compose entry for the API never passed the carrier variables
  * through. A variable absent from a service's `environment:` is not merely
  * undocumented: it does not reach the container at all, whatever the operator
  * sets in their shell or their `.env`. Nothing fails, nothing warns, and the
@@ -117,24 +117,17 @@ describe("the API's deployment story", () => {
     expect(ignored).toContain(".egma-platform");
   });
 
-  it("always seeds settings and reconciles only when the environment owns the carrier route", () => {
+  it("keeps the deployment carrier route out of Postgres", () => {
     const entry = readFileSync(path.join(API, "src/index.ts"), "utf8");
-    const seed = entry.indexOf("await seedPlatformSettings(config.platformSettings)");
-    const reconcile = entry.indexOf(
-      "await reconcileDeploymentCarrierSettings(config.platformSettings,",
+    const claims = readFileSync(
+      path.join(API, "src/routes/claims.ts"),
+      "utf8",
     );
 
-    expect(seed, "API startup no longer seeds the platform settings").toBeGreaterThan(
-      -1,
-    );
-    expect(
-      reconcile,
-      "API startup no longer reconciles an environment-owned carrier route",
-    ).toBeGreaterThan(seed);
-    expect(entry.slice(seed, reconcile)).toContain(
-      'config.carrierSettingsSource === "environment"',
-    );
-    expect(entry.slice(seed, reconcile)).not.toContain("singleOrganization");
+    expect(entry).not.toContain("seedPlatformSettings");
+    expect(entry).not.toContain("reconcileDeploymentCarrierSettings");
+    expect(claims).not.toContain("resolvePlatformSettings");
+    expect(claims).toContain("options.carrierRoute");
   });
 
   it("passes every variable the API reads to the api container", () => {
@@ -213,8 +206,8 @@ describe("the API's deployment story", () => {
       expect(grader).toContain(variable);
     }
 
-    // The API seeds and seals the deployment carrier route. Neither worker gets
-    // that route as a deployment credential.
+    // The API keeps the deployment carrier route. Neither worker gets that
+    // route as a process-wide deployment credential.
     expect(api).not.toContain("TWILIO_AUTH_TOKEN");
     expect(api).toContain("EGMA_PHONE_TRUNK_PASSWORD");
     const simulator = serviceBlock("simulator");

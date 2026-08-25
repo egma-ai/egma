@@ -19,8 +19,6 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { PLATFORM_SETTINGS } from "@egma/db";
-
 import { BOOTSTRAP_VARIABLES } from "../../src/self-host/workspace.ts";
 import { CLI_ENTRY } from "./workspace.ts";
 
@@ -31,47 +29,13 @@ export type FakePlatform = {
   readonly url: string;
   /** Every path asked for, so a test can prove what a command did *not* do. */
   readonly asked: readonly string[];
-  /** What it holds now, by setting name, in the clear. */
-  held(): Record<string, string>;
-  /** Every settings write it was sent, in order. */
-  readonly written: readonly Readonly<Record<string, string>>[];
   close(): Promise<void>;
 };
 
-export type FakePlatformOptions = {
-  /**
-   * The settings this platform already holds, by name.
-   *
-   * Readiness is computed from these rather than declared beside them, so this
-   * stand-in cannot report itself ready while holding nothing — which is the
-   * exact failure the whole effort is about, and a fixture that could fake its
-   * way past it would hide it here too.
-   */
-  readonly holds?: Readonly<Record<string, string>>;
-  /** Refuse the settings door, as a platform serving several organizations does. */
-  readonly refuses?: { readonly status: number; readonly message: string };
-};
-
-/** What a person may be shown of a stored value, exactly as the platform does. */
-function hintOf(name: string, value: string): string {
-  const definition = PLATFORM_SETTINGS.find((setting) => setting.name === name);
-  return definition?.secret === true ? value.slice(-4) : value;
-}
-
 /**
- * A stand-in for a running platform, answering what `self-host` reads and
- * accepting what it writes.
- *
- * **The settings door is a real door here, not a recorder.** A write lands, and
- * the next read and the next readiness answer are built from what landed — so a
- * check that setup asks only for what is missing is checked against a platform
- * that really stopped missing it, rather than against a fixture told to say so.
+ * A stand-in for the one platform endpoint `self-host up` reads.
  */
-export async function startPlatform(
-  options: FakePlatformOptions = {},
-): Promise<FakePlatform> {
-  const holds: Record<string, string> = { ...options.holds };
-  const written: Record<string, string>[] = [];
+export async function startPlatform(): Promise<FakePlatform> {
   const asked: string[] = [];
   const server: Server = createServer((request, answer) => {
     asked.push(`${request.method ?? ""} ${request.url ?? ""}`);
@@ -85,49 +49,6 @@ export async function startPlatform(
       return;
     }
 
-    if ((request.url ?? "").startsWith("/api/platform/settings")) {
-      if (request.headers.authorization !== `Bearer ${OWNER_KEY}`) {
-        send(401, { error: "not_authenticated", message: "no key" });
-        return;
-      }
-      if (options.refuses !== undefined) {
-        send(options.refuses.status, {
-          error: "not_permitted",
-          message: options.refuses.message,
-        });
-        return;
-      }
-      const settings = (): unknown => ({
-        settings: PLATFORM_SETTINGS.map((setting) => ({
-          name: setting.name,
-          label: setting.label,
-          secret: setting.secret,
-          hint:
-            holds[setting.name] === undefined
-              ? null
-              : hintOf(setting.name, holds[setting.name] as string),
-          updated_at: holds[setting.name] === undefined ? null : new Date().toISOString(),
-        })),
-      });
-      if (request.method === "GET") {
-        send(200, settings());
-        return;
-      }
-      let body = "";
-      request.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
-      request.on("end", () => {
-        const values = JSON.parse(body === "" ? "{}" : body) as Record<string, string>;
-        if (Object.keys(values).length === 0) {
-          send(422, { error: "unprocessable", message: "a write names at least one setting" });
-          return;
-        }
-        written.push(values);
-        Object.assign(holds, values);
-        send(200, settings());
-      });
-      return;
-    }
-
     send(404, { error: "not_found", message: "not found" });
   });
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
@@ -136,8 +57,6 @@ export async function startPlatform(
   return {
     url,
     asked,
-    written,
-    held: () => ({ ...holds }),
     close: () =>
       new Promise<void>((closed) => {
         server.close(() => closed());
@@ -163,7 +82,6 @@ const RECORDED_VARIABLES = [
   "EGMA_PHONE_SOURCE_NUMBER",
   "EGMA_PHONE_TRUNK_USERNAME",
   "EGMA_PHONE_TRUNK_PASSWORD",
-  "EGMA_PHONE_DISABLED",
 ] as const;
 
 export type PlatformWorkspace = {

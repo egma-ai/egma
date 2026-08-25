@@ -108,21 +108,29 @@ describe("egma self-host up", () => {
     }
   });
 
-  it("passes an explicit phone disable from the workspace .env to Compose", async () => {
+  it("refuses a phone route unless all four deployment values are present", async () => {
     const platform = await startPlatform();
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     await writeFile(
       path.join(workspace.dir, ".env"),
-      "EGMA_PHONE_DISABLED=true\n",
+      [
+        "EGMA_PHONE_TRUNK_ADDRESS=carrier.example.com",
+        "EGMA_PHONE_SOURCE_NUMBER=+15550100100",
+        "",
+      ].join("\n"),
     );
     try {
       const run = await runSelfHost(workspace, ["up"], {
         EGMA_BASE_URL: platform.url,
       });
 
-      expect(run.code, run.stderr).toBe(0);
+      expect(run.code).toBe(4);
+      expect(run.stdout).toContain("phone carrier route in .env is incomplete");
+      expect(run.stdout).toContain("EGMA_PHONE_TRUNK_USERNAME");
+      expect(run.stdout).toContain("EGMA_PHONE_TRUNK_PASSWORD");
       const calls = await workspace.dockerCalls();
-      expect(calls.match(/^EGMA_PHONE_DISABLED=true$/gmu)).toHaveLength(2);
+      expect(calls).not.toContain(COMPOSE_BUILD);
+      expect(calls).not.toContain(COMPOSE_UP);
     } finally {
       await platform.close();
     }

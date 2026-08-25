@@ -76,16 +76,14 @@ EGMA_PHONE_TRUNK_USERNAME=egma-local
 EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-The first two values are enough for source-IP authentication. Supply all four
-for SIP credential authentication. For Twilio, the username and password come
-from the credential list attached to the trunk. They are **not** the Account
-SID and Auth Token. Wrap a credential containing `$` in single quotes.
+All four values are required. For Twilio, the username and password come from
+the SIP credential list attached to the trunk. They are **not** the Account SID
+and Auth Token. Wrap a credential containing `$` in single quotes.
 
-Run `egma self-host up` after changing `.env`. A complete environment route
-replaces the sealed runtime copy in Postgres. When `.env` has no route, Egma
-preserves a complete route stored by an older version. This keeps upgrades from
-destroying a SIP password that Egma cannot export back into `.env`.
-Set `EGMA_PHONE_DISABLED=true` to remove such a retained route deliberately.
+These are ordinary deployment credentials, like the provider keys above. Egma
+does not store them in Postgres. Run `egma self-host up` after changing `.env`
+so the API receives the new values. Remove all four values to disable phone
+simulations.
 
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
@@ -452,17 +450,15 @@ EGMA_PHONE_TRUNK_USERNAME=egma-nischal
 EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-Run `egma self-host up`. The API copies the complete bundle into the platform's
-sealed runtime store. All four values move together, and a partial bundle is
-refused before any write. A fresh database restores the route from the same
-ignored `.env` file.
+Run `egma self-host up`. The API reads the complete bundle from its environment
+and refuses to start with a partial bundle. It adds the route only to claimed
+phone work orders. The values are not stored in Postgres.
 
 Production uses the same trunk address and source number with its own SIP pair
-in the deployment secret. Hosted Egma treats that complete carrier bundle as
-deployment-owned configuration. Each API start reconciles it into the platform
-store, because no customer organization owns the shared production route.
-Egma never asks for the Twilio Account SID or Auth Token. It does not create,
-inspect, or change Twilio resources.
+in deployment configuration. Hosted Egma supplies the same four environment
+values through its deployment configuration and secret manager. Egma never asks
+for the Twilio Account SID or Auth Token. It does not create, inspect, or change
+Twilio resources.
 
 To replace one developer credential safely, a Twilio administrator first adds
 the new credential beside the old one. Replace all four phone values in `.env`,
@@ -472,28 +468,23 @@ then run:
 npx @egma/cli self-host up
 ```
 
-The API replaces all four stored values together. Run one phone simulation
-with the new bundle, then ask the administrator to revoke the old credential.
+The restarted API reads the new bundle. Run one phone simulation with it, then
+ask the administrator to revoke the old credential.
 
-If `.env` supplies no route, Egma preserves a complete route already stored by
-an older version. This keeps an upgrade from deleting a SIP password which the
-platform cannot export back into `.env`.
-
-For hosted production, update the deployment secret with the new production SIP
-pair and deploy. The API replaces the four stored carrier values together on
-startup. Run one production phone simulation before the administrator revokes
-the old credential.
+For hosted production, update `EGMA_PHONE_TRUNK_USERNAME` in the private
+deployment configuration and `sip_password` in the `egma/phone` AWS secret.
+Publish both changes before you deploy. Run one production phone simulation
+before the administrator revokes the old credential.
 
 **The number must already be on your account.** Egma never searches the
 Twilio catalogue and never buys, ports or registers a number. It also cannot
 verify ownership without account access, so the administrator must copy the
 source number from the shared trunk.
 
-**The account token is not a carrier-route input.** What a running deployment keeps is
-one limited SIP credential. It can authenticate SIP requests over the shared
-trunk; it cannot manage the Twilio account. It is sealed in the platform's own
-store with the same key a connection's credentials are sealed with, and it
-reaches a simulator only on the work order that simulator claims.
+**The account token is not a carrier-route input.** The deployment uses one
+limited SIP credential. It can authenticate SIP requests over the shared trunk;
+it cannot manage the Twilio account. The API keeps it in memory and sends it
+only on a phone work order that a simulator claims.
 
 ### Real end-to-end proof
 

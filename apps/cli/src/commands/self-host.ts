@@ -77,7 +77,7 @@ const CARRIER_VARIABLES = [
   "EGMA_PHONE_TRUNK_PASSWORD",
 ] as const;
 
-/** Refuse an incomplete or account-wide Twilio credential before Docker runs. */
+/** Refuse an incomplete carrier route before Docker runs. */
 function carrierEnvironmentProblem(
   environment: Readonly<Record<string, string | undefined>>,
 ): string | null {
@@ -85,53 +85,13 @@ function carrierEnvironmentProblem(
     CARRIER_VARIABLES.map((name) => [name, environment[name]?.trim() ?? ""]),
   ) as Record<(typeof CARRIER_VARIABLES)[number], string>;
   const present = CARRIER_VARIABLES.filter((name) => values[name] !== "");
-  const disabledWord = environment.EGMA_PHONE_DISABLED?.trim().toLowerCase() ?? "";
-  const disabled = ["1", "true", "yes", "on"].includes(disabledWord);
-  if (
-    disabledWord !== "" &&
-    !disabled &&
-    !["0", "false", "no", "off"].includes(disabledWord)
-  ) {
-    return "EGMA_PHONE_DISABLED must be true or false";
-  }
-  if (disabled && present.length > 0) {
-    return (
-      "EGMA_PHONE_DISABLED cannot be true while an EGMA_PHONE_* route is " +
-      "set. Remove every route value or set EGMA_PHONE_DISABLED=false"
-    );
-  }
-  if (disabled || present.length === 0) return null;
+  if (present.length === 0) return null;
 
-  const credentialsPresent =
-    values.EGMA_PHONE_TRUNK_USERNAME !== "" ||
-    values.EGMA_PHONE_TRUNK_PASSWORD !== "";
-  const required = credentialsPresent
-    ? CARRIER_VARIABLES
-    : CARRIER_VARIABLES.slice(0, 2);
-  const missing = required.filter((name) => values[name] === "");
+  const missing = CARRIER_VARIABLES.filter((name) => values[name] === "");
   if (missing.length > 0) {
     return (
       "the phone carrier route in .env is incomplete. Add " +
-      `${missing.join(" and ")}, or remove every EGMA_PHONE_* value. To ` +
-      "remove a route retained from an older release, also set " +
-      "EGMA_PHONE_DISABLED=true"
-    );
-  }
-  if (
-    values.EGMA_PHONE_TRUNK_PASSWORD !== "" &&
-    values.EGMA_PHONE_TRUNK_PASSWORD.length < 8
-  ) {
-    return (
-      "EGMA_PHONE_TRUNK_PASSWORD resolved to fewer than 8 characters. If the " +
-      "credential contains $, wrap its value in single quotes in .env so " +
-      "Docker Compose keeps it literal"
-    );
-  }
-  if (/^AC[0-9a-f]{32}$/iu.test(values.EGMA_PHONE_TRUNK_USERNAME)) {
-    return (
-      "EGMA_PHONE_TRUNK_USERNAME looks like a Twilio Account SID. Use the " +
-      "username and password from the Credential List attached to the trunk, " +
-      "not the Twilio Account SID and Auth Token"
+      `${missing.join(" and ")}, or remove every EGMA_PHONE_* value`
     );
   }
   return null;
@@ -273,18 +233,6 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
 
   try {
     if (verb === "up") return await runUp(options, invocation);
-    if (verb === "setup") {
-      const reason =
-        "egma self-host setup has been removed. Put the carrier route in the " +
-        "workspace .env file, then run egma self-host up. Use " +
-        "EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER, plus " +
-        "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD when the " +
-        "carrier uses SIP credentials.";
-      options.out("status: refused");
-      options.out(`reason: ${reason}`);
-      options.fail(reason);
-      return SELF_HOST_EXIT.refused;
-    }
   } catch (error) {
     // Three ways this command cannot start at all: the directory is not a
     // platform workspace, there is no docker, or the address it was given is

@@ -783,9 +783,8 @@ EGMA_PHONE_TRUNK_USERNAME=egma-local
 EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-Wrap a credential containing `$` in single quotes. To remove a route retained
-from an older version, remove the four route values and set
-`EGMA_PHONE_DISABLED=true`.
+Wrap a credential containing `$` in single quotes. To disable phone
+simulations, remove all four values. A phone route is either absent or complete.
 
 For Twilio, the username and password come from the SIP credential list
 attached to the trunk. They are never the Twilio Account SID and Auth Token.
@@ -797,11 +796,11 @@ preserves internal auth, encryption, simulator, bundled-MinIO, and LiveKit
 credentials in `.egma-platform/platform.env`. Compose supplies safe local
 defaults.
 
-A complete phone route in `.env` replaces the sealed runtime copy in Postgres.
-When `.env` has no route, an existing stored route is preserved so an upgrade
-does not delete a SIP password which Egma cannot export. To rotate a SIP
-credential, replace all four values, run `self-host up`, test one phone
-simulation, and then revoke the old credential in Twilio.
+The four phone values are ordinary deployment credentials. They are not stored
+in Postgres. The API receives them when `self-host up` starts the containers and
+adds them only to phone work orders. To rotate a SIP credential, replace all
+four values, run `self-host up`, test one phone simulation, and then revoke the
+old credential in Twilio.
 
 To run the command from this same checkout rather than from npm, build it:
 

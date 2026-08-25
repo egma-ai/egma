@@ -324,6 +324,8 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                 "carrier": {
                     "trunk_address": "egma-fixture.pstn.twilio.com",
                     "trunk_number": "+15550000000",
+                    "trunk_username": "egma-fixture-trunk",
+                    "trunk_password": "fixture-not-a-real-secret-trunk",
                 }
             },
         )

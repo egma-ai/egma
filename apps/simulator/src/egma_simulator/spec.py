@@ -54,7 +54,8 @@ class PlatformCarrier:
     """The SIP trunk a deployment uses for phone simulations.
 
     The media backend is deployment configuration. It cannot ride this
-    block and cannot be selected by a work order.
+    block and cannot be selected by a work order. A phone work order carries
+    all four values; the optional types let non-phone work omit the block.
     """
 
     trunk_address: str | None = None
@@ -64,14 +65,14 @@ class PlatformCarrier:
 
 
 @dataclass(frozen=True)
-class PlatformSettings:
+class WorkOrderPlatform:
     """The carrier part of deployment configuration on this work order."""
 
     carrier: PlatformCarrier = field(default_factory=PlatformCarrier)
 
     @property
     def secrets(self) -> tuple[str, ...]:
-        """Every secret these settings hold, for redaction.
+        """Every secret this work-order block holds, for redaction.
 
         One place to ask, exactly as the configuration's own secrets have
         one, so a fourth key arriving cannot fall out of the scrubbing.
@@ -80,8 +81,8 @@ class PlatformSettings:
         return () if password is None else (password,)
 
     @classmethod
-    def from_document(cls, written: Any) -> PlatformSettings:
-        """The platform block of a validated spec, or the empty settings.
+    def from_document(cls, written: Any) -> WorkOrderPlatform:
+        """The platform block of a validated spec, or an empty block.
 
         The schema has already refused a field nobody writes, so the reads
         below take what is there at face value — the same bargain the rest
@@ -219,7 +220,7 @@ class SimulationSpec:
     unobserved.
     """
 
-    platform: PlatformSettings = field(default_factory=PlatformSettings)
+    platform: WorkOrderPlatform = field(default_factory=WorkOrderPlatform)
     """The optional SIP carrier block. It owns no model or voice choice."""
 
     @classmethod
@@ -235,7 +236,7 @@ class SimulationSpec:
         limits = document["limits"]
         return cls(
             mock_tools=_mock_tools(document.get("mock_tools") or []),
-            platform=PlatformSettings.from_document(document.get("platform")),
+            platform=WorkOrderPlatform.from_document(document.get("platform")),
             models=SelectedModels.from_document(document["models"]),
             simulation_id=document["simulation_id"],
             modality=document["modality"],

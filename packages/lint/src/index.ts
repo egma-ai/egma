@@ -92,28 +92,9 @@ const CONTEXT_ESTABLISHING = [
  * only the platform fact written beside it. `instanceIsClaimed` returns a
  * boolean. A parameter or a wider return would make it an ordinary read
  * wearing an exemption, so the rule refuses both changes.
- *
- * **The answer is pinned as a reader sees it, alias body and all.** Where the
- * declared type names an alias from the same file, the pin carries that alias's
- * whole declaration — otherwise the pin would hold only the spelling of a name,
- * and a shape behind it could be widened to hand out a secret with this rule
- * still green. That is `asWritten`'s rule for parameters, applied to the answer
- * by `answerAsWritten`.
- *
- * `platformFacts` was added with the platform's own settings, deliberately and
- * on the same two terms. The API uses it to enforce the carrier precondition
- * before it creates a phone run. It takes nothing, and its `PlatformFacts` is a
- * map of non-secret values in which every secret the platform holds is `null`:
- * enough to decide whether a setting exists, and no part of one. The pin holds
- * the value type it may answer, and a hint added to it stops the build.
  */
 const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
   ["instanceIsClaimed", "Promise<boolean>"],
-  [
-    "platformFacts",
-    "Promise<PlatformFacts> export type PlatformFacts = " +
-      "Readonly<Partial<Record<PlatformSettingName, string | null>>>;",
-  ],
 ]);
 
 /**
@@ -194,16 +175,6 @@ const WORK_DISPATCHING = [
  * The exports through which the deployment configures *itself*, before it has
  * served a request and while there is no session anything could be done under.
  *
- * `seedPlatformSettings` installs the deployment's carrier route when the
- * store is empty. Model choices live on persona and grader versions; provider
- * keys never pass through this settings table.
- *
- * `reconcileDeploymentCarrierSettings` is the explicit environment-owned form
- * of that same act. `EGMA_CARRIER_SETTINGS_SOURCE=environment` says the
- * deployment environment owns the shared route; tenancy does not select this
- * authority. The call can name settings, never an organization or project,
- * and replaces only that one deployment-owned route.
- *
  * `reconcileGraderCatalog` writes predefined grader definitions from the
  * product catalog and adds the fixed Expected behaviors project policy where
  * an older project is missing it. It takes no customer identifier. New project
@@ -221,10 +192,8 @@ const WORK_DISPATCHING = [
  * Another name here is a decision somebody has to make on purpose.
  */
 const DEPLOYMENT_CONFIGURING = [
-  "reconcileDeploymentCarrierSettings",
   "reconcileGraderCatalog",
   "seedPersonaLibrary",
-  "seedPlatformSettings",
 ];
 
 /**
@@ -664,59 +633,14 @@ function asWritten(tree: ts.SourceFile, parameter: ts.ParameterDeclaration): str
   return written;
 }
 
-/** The body of a type alias declared in this file, or nothing. */
-function aliasBody(tree: ts.SourceFile, named: string): string | undefined {
-  for (const statement of tree.statements) {
-    if (ts.isTypeAliasDeclaration(statement) && statement.name.text === named) {
-      return statement.getText(tree);
-    }
-  }
-  return undefined;
-}
-
-/**
- * An answer as a reader of the call sees it: what is written after the
- * signature, plus the body of every type alias declared in the same file that
- * the signature names — including one nested inside `Promise<…>`, which is
- * where every answer on this surface lives.
- *
- * **This is `asWritten`'s rule applied to the answer, and it is what makes the
- * instance-scoped pin a pin.** Comparing `Promise<Something>` as text pins only
- * the spelling of a name: the alias behind it could be widened to hand out a
- * secret with the rule still green, which is the one thing that exemption
- * exists to prevent.
- *
- * **One level, and the level is the signature's.** What the *alias body* then
- * names is not followed, and that is the design rather than a gap. Two reasons,
- * and they point the same way. A name from another module is somebody else's
- * vocabulary, and following it would pin a file this one does not own — the
- * parameter rule's reasoning, unchanged. And the one such name in practice is
- * a key type that is *meant* to grow: `PlatformFacts` is keyed by the settings
- * this platform holds, a list that gains an entry with every ticket of the
- * settings effort, and a pin that followed it would stop the build on each one.
- * What may never grow is the value beside the key, and that is written inside
- * the body this does carry — so the widening that would leak a secret is caught
- * and the widening that adds a setting is not.
- */
+/** The return type exactly as the exported function declares it. */
 function answerAsWritten(
   tree: ts.SourceFile,
   declaration: ts.FunctionDeclaration,
 ): string {
   const type = declaration.type;
   if (type === undefined) return "no declared return type";
-
-  const named: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isTypeReferenceNode(node)) named.push(node.typeName.getText(tree));
-    ts.forEachChild(node, visit);
-  };
-  visit(type);
-
-  const bodies = [...new Set(named)]
-    .map((name) => aliasBody(tree, name))
-    .filter((body): body is string => body !== undefined);
-
-  return [type.getText(tree), ...bodies].join(" ");
+  return type.getText(tree);
 }
 
 /**
@@ -807,8 +731,6 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
       }
 
       if (instanceScopedReturn !== undefined) {
-        // The answer *and* the body of any alias it names, so widening the
-        // shape behind a name is as loud as widening the name.
         const declared = answerAsWritten(declaring, declaration);
         if (declared !== instanceScopedReturn) {
           violations.push({

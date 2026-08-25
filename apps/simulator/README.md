@@ -216,11 +216,11 @@ For Twilio, an administrator creates one shared trunk, source number, and
 attached credential list. Each developer and production gets one SIP
 username/password in that list. The operator puts that deployment's trunk
 address, source number, and SIP pair in the platform workspace's `.env`, then
-runs `egma self-host up`. The API copies the complete route into the
-**platform's own store**, sealed. The pair comes from the trunk's SIP
-credential list, never from the Twilio Account SID and Auth Token. Egma never
-changes the Twilio account.
-Every simulator receives the stored carrier route on the work order it claims.
+runs `egma self-host up`. The four values are ordinary deployment credentials
+and are not stored in Postgres. The pair comes from the trunk's SIP credential
+list, never from the Twilio Account SID and Auth Token. Egma never changes the
+Twilio account.
+Every simulator receives the carrier route only on a phone work order it claims.
 There is no simulator trunk environment fallback and no stored LiveKit trunk
 ID. See the root README.
 
@@ -435,9 +435,9 @@ all.
 
 Carrier provisioning is not this app's. A carrier administrator creates the
 trunk and SIP credential. The platform's `.env` holds the four runtime values,
-and `egma self-host up` starts the API which copies the complete route into its
-sealed store. Egma never contacts Twilio. Its tests use a local server shaped
-like the Twilio APIs as a tripwire and require zero requests.
+and `egma self-host up` gives them to the API as ordinary environment variables.
+Egma never contacts Twilio. Its tests use a local server shaped like the Twilio
+APIs as a tripwire and require zero requests.
 
 `tests/test_deployment.py` compares the deployment story against the code that
 reads it. Every operator-controlled simulator variable is documented; the

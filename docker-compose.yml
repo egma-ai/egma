@@ -14,8 +14,8 @@ services:
       # **Published to this machine and no further**, which is the object
       # store's idiom below and the media server's, for the same reason and a
       # blunter version of it. What answers here is every row this platform
-      # holds — organizations, keys, and the sealed settings this effort just
-      # moved into the database — and the user and password it answers to are
+      # holds — organizations, keys, and sealed connection credentials — and
+      # the user and password it answers to are
       # written a few lines above, in a public repository. On 0.0.0.0 that is
       # `docker compose up` on a coffee-shop network offering every customer's
       # data to the room.
@@ -305,13 +305,13 @@ services:
       # Signs session cookies. No public default: `egma self-host up` creates
       # one private value for this workspace.
       EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — egma self-host up generates it in .egma-platform/platform.env}
-      # Seals connection credentials and the carrier route before they reach
-      # the database. No default, and this is the sharpest of the three:
+      # Seals connection credentials before they reach the database. No
+      # default, and this is the sharpest of the three:
       # a deployment sealed with a key printed in a public repository is not
       # sealed, and a database copy carries the credentials needed to reach
-      # customer agents plus the platform's carrier route.
+      # customer agents.
       # `egma self-host up` creates it. Back it up alongside the database;
-      # losing it loses every stored credential and every stored setting.
+      # losing it loses every stored connection credential.
       EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — egma self-host up generates it in .egma-platform/platform.env; back it up with Postgres}
       # What the simulator must show to claim work. Claim answers carry
       # customers' live connection credentials and port 3100 is published on
@@ -397,21 +397,13 @@ services:
       EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
       EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
       EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
-      # The optional shared carrier route. In self-hosted deployments the
-      # operator's environment is the source of truth. The API copies a
-      # complete route into its sealed runtime store so a simulation claim can
-      # receive it without reading this container's environment directly.
+      # The optional shared carrier route. These are ordinary deployment
+      # credentials, read from the operator's environment. Set all four or
+      # none; the API adds a complete route only to phone work orders.
       EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
-      # Empty phone variables preserve a sealed route from an older release,
-      # because its password cannot be exported back into `.env`. This explicit
-      # flag is how an operator intentionally removes that retained route.
-      EGMA_PHONE_DISABLED: ${EGMA_PHONE_DISABLED:-false}
-      # Self-host has one operator interface: the four variables above in
-      # `.env`. A complete route replaces the sealed runtime copy on start.
-      EGMA_CARRIER_SETTINGS_SOURCE: environment
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
       # through the OTLP door is their data in ClickHouse. This process sends
@@ -875,9 +867,9 @@ services:
   #
   # It places the call your trunk carries, and turns the phone leg into a
   # participant in the room above. Its trunk configuration does not live
-  # here — the simulator hands a trunk to LiveKit per call, so a customer's
-  # carrier credentials stay in the simulator's environment and are never
-  # written into a bridge's config file.
+  # here — the API adds a trunk only to a phone work order, and the simulator
+  # hands it to LiveKit per call. Carrier credentials are never written into a
+  # bridge's config file.
   livekit-sip:
     image: livekit/sip:v1.9.0
     # The image's own command names a config file that only exists if you

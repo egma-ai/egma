@@ -55,7 +55,7 @@ containers receive it.
 
 Skip this step when you do not need phone simulations.
 
-For a credential-authenticated carrier route, add all four values to `.env`:
+Add all four values to `.env`:
 
 ```bash
 EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
@@ -67,8 +67,8 @@ EGMA_PHONE_TRUNK_PASSWORD=...
 Wrap a credential containing `$` in single quotes so Docker Compose keeps it
 literal, for example `EGMA_PHONE_TRUNK_PASSWORD='alpha$beta'`.
 
-For source-IP authentication, add only the trunk address and source number.
-Egma refuses a partial route.
+Egma refuses a partial route. Remove all four values when you do not want phone
+simulations.
 
 For Twilio:
 
@@ -106,8 +106,8 @@ The command:
 Internal credentials include the encryption key, session secret, simulator
 service token, bundled-MinIO credentials, and LiveKit credentials. Egma writes
 them to `.egma-platform/platform.env`. Keep that file private and back it up
-with Postgres. The encryption key is required to open credentials stored in the
-database.
+with Postgres. The encryption key is required to open connection credentials
+stored in the database.
 
 Docker Compose supplies safe defaults for local ports, local databases, bundled
 MinIO, and service tuning. Use the [full environment variable
@@ -123,23 +123,16 @@ advanced override such as external S3, SMTP, telemetry, or different ports.
 Open `http://localhost:3101` and sign up. The first person claims the
 single-organization instance and becomes its admin. Open signup then closes.
 
-## How phone settings are applied
+## How phone credentials are applied
 
-On startup, the API copies a complete `EGMA_PHONE_*` route into its sealed
-runtime store. This lets a simulator receive the route on a claimed phone work
-order without reading the API container's environment.
+The four `EGMA_PHONE_*` values are ordinary deployment credentials. The API
+reads them from its environment and does not store them in Postgres. It sends the
+complete route only on a claimed phone work order.
 
-- A complete route in `.env` replaces the stored route on startup.
-- No route in `.env` preserves a complete route already stored by an older
-  Egma version.
-- No route in `.env` and no stored route leaves phone simulations disabled.
-- `EGMA_PHONE_DISABLED=true` removes a route retained from an older version.
-
-The preservation rule makes upgrades safe. An older sealed SIP password cannot
-be read back into `.env`, so an upgrade with no phone variables must not delete
-it. To rotate a SIP credential, replace the four values in `.env`, run
-`self-host up`, test one phone simulation, and then revoke the old credential
-in Twilio.
+No values means phone simulations are disabled. All four values enable them.
+Any partial bundle stops the API with a configuration error. To rotate a SIP
+credential, replace all four values in `.env`, run `self-host up`, test one
+phone simulation, and then revoke the old credential in Twilio.
 
 ## Phone networking
 
@@ -203,8 +196,8 @@ npx @egma/cli self-host up
 ```
 
 The API applies database migrations during boot. Internal credentials and
-Docker volumes are preserved. A stored carrier route is also preserved when
-the upgraded `.env` does not supply one.
+Docker volumes are preserved. Deployment credentials continue to come from the
+current `.env` file.
 
 ## Troubleshooting
 
@@ -214,9 +207,9 @@ the upgraded `.env` does not supply one.
 </Accordion>
 
 <Accordion title="A phone run says the carrier route is missing">
-  Add a complete two-value or four-value `EGMA_PHONE_*` route to `.env`, then
-  run `egma self-host up`. For Twilio credential authentication, use the SIP
-  credential-list username and password, not the Account SID and Auth Token.
+  Add all four `EGMA_PHONE_*` values to `.env`, then run `egma self-host up`.
+  For Twilio, use the SIP credential-list username and password, not the Account
+  SID and Auth Token.
 </Accordion>
 
 <Accordion title="Recordings return SignatureDoesNotMatch">

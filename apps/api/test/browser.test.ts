@@ -82,9 +82,11 @@ async function openPeopleSettings(which: Page): Promise<void> {
 const BROWSER_RETELL_KEY = "retell-browser-fixture-key-WXYZ";
 const BROWSER_RETELL_AGENT = "agent_in_retell_journey";
 const BROWSER_RETELL_NUMBER = "+14155550100";
-const BROWSER_PHONE_SETTINGS = {
-  carrier_trunk_address: "browser-fixture.pstn.twilio.com",
-  carrier_trunk_number: "+14155550101",
+const BROWSER_PHONE_CARRIER = {
+  trunkAddress: "browser-fixture.pstn.twilio.com",
+  sourceNumber: "+14155550101",
+  trunkUsername: "egma-browser-fixture",
+  trunkPassword: "the-carrier-issued-this-one",
 } as const;
 
 /** Retell's read-only setup surface, with no network outside the test. */
@@ -161,7 +163,7 @@ beforeAll(async () => {
   instance = await startInstance("browser", {
     traces: true,
     retellFetch: browserRetellFetch,
-    platformSettings: BROWSER_PHONE_SETTINGS,
+    carrierRoute: BROWSER_PHONE_CARRIER,
     ...(storage.available ? { blob: storage.store } : {}),
     ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
   });

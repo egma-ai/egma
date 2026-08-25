@@ -11,7 +11,6 @@ import {
   disconnectClickHouse,
   reconcileGraderCatalog,
   seedPersonaLibrary,
-  seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -122,8 +121,8 @@ export type InstanceOptions = {
    * `503` and nothing is staged.
    */
   readonly ingestStore?: IngestionStore;
-  /** Deployment settings required by flows that exercise the phone adapter. */
-  readonly platformSettings?: Config["platformSettings"];
+  /** Deployment credential required by flows that exercise the phone adapter. */
+  readonly carrierRoute?: Config["carrierRoute"];
   /**
    * Every raw HTTP request, before Fastify or authentication can refuse it.
    * Test evidence only: this listener changes no production server.
@@ -229,9 +228,6 @@ export async function startInstance(
   // before it serves a request.
   await seedPersonaLibrary();
   await reconcileGraderCatalog();
-  if (options.platformSettings !== undefined) {
-    await seedPlatformSettings(options.platformSettings);
-  }
 
   const withPages = options.web ?? true;
   const apiPort = await freePort();
@@ -263,6 +259,9 @@ export async function startInstance(
       EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
     }),
     ...(options.blob === undefined ? {} : { blob: options.blob }),
+    ...(options.carrierRoute === undefined
+      ? {}
+      : { carrierRoute: options.carrierRoute }),
   };
 
   const { app, drainer } = buildApi({

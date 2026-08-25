@@ -1,22 +1,19 @@
 import {
-  PLATFORM_SETTINGS,
-  type PlatformFacts,
-  type PlatformSettingName,
-} from "@egma/db";
+  CARRIER_ROUTE_ENVIRONMENT,
+  type CarrierRoute,
+} from "./config.ts";
 
 /**
  * Whether this platform can place a phone call, and what is missing when it
  * cannot.
  *
  * **Phone readiness is not platform readiness.** A deployment that has never
- * been given a carrier still runs chat simulations. `self-host up`
- * brings that platform up ready, and this says only whether it can place a
- * phone call.
+ * been given a carrier still runs chat simulations. This says only whether it
+ * can place a phone call.
  *
- * The API reads the sealed runtime copy. On self-host, the operator's `.env`
- * file owns that copy and `egma self-host up` reconciles a complete supplied
- * route when the API starts. This keeps the SIP password out of responses and
- * still gives the operator one configuration surface.
+ * The API reads the deployment environment once at startup. The complete route
+ * stays in process configuration, never enters Postgres, and is handed only to
+ * a simulator which claimed phone work.
  *
  * This is an internal run-start precondition, not a public readiness response.
  * Everything returned here is non-secret: the carrier hostname and the number
@@ -41,72 +38,32 @@ export type PhoneReadiness = {
   readonly sourceNumber: string | null;
 };
 
-/**
- * The two internal facts the phone half stands on, as the platform stores them
- * and as a refusal names them.
- *
- * A trunk with no source number places a call the carrier refuses. The store
- * accepts only a complete two-value source-IP route or a complete four-value
- * credential route, so readiness does not preserve or diagnose older partial
- * SIP shapes.
- *
- * The label is not restated here: the settings catalog already carries the
- * words each setting is named in, and a second copy of them is a second copy to
- * disagree. What this holds is only which settings the phone half needs, and
- * which reported fact each one fills.
- */
-export const PHONE_SETUP_FACTS = {
-  trunkAddress: "carrier_trunk_address",
-  sourceNumber: "carrier_trunk_number",
-} as const satisfies Record<string, PlatformSettingName>;
-
-/** Required route members, derived from the platform catalog that owns them. */
-const REQUIRED_PHONE_SETTINGS = PLATFORM_SETTINGS.filter(
-  (setting) => setting.required,
-);
-
-/**
- * Whether the store holds a setting at all.
- *
- * Presence is the fact because `platformFacts` returns `null` for a secret
- * value. Testing the value would report every secret setting as missing.
- */
-function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
-  return Object.hasOwn(held, name);
-}
-
-export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
-  const fact = (
-    which: keyof typeof PHONE_SETUP_FACTS,
-  ): string | null => held[PHONE_SETUP_FACTS[which]] ?? null;
-
-  // Ask about presence, never the value: `platformFacts` answers `null` for a
-  // secret, so a value test would read a secret setting as absent forever.
-  const missing = REQUIRED_PHONE_SETTINGS.filter(
-    (setting) => !holds(held, setting.name),
-  ).map((setting) => setting.label);
-
+export function phoneReadiness(
+  carrier: CarrierRoute | undefined,
+): PhoneReadiness {
   return {
-    state: missing.length === 0 ? "ready" : "setup_required",
-    missing,
-    trunkAddress: fact("trunkAddress"),
-    sourceNumber: fact("sourceNumber"),
+    state: carrier === undefined ? "setup_required" : "ready",
+    missing:
+      carrier === undefined
+        ? CARRIER_ROUTE_ENVIRONMENT.map(({ label }) => label)
+        : [],
+    trunkAddress: carrier?.trunkAddress ?? null,
+    sourceNumber: carrier?.sourceNumber ?? null,
   };
 }
 
 /**
  * What a developer is told when they ask this platform for a phone run before
- * its phone half exists. It names the operator-owned variables and the normal
- * start command rather than a second setup workflow.
+ * its phone half exists. It names the operator-owned variables without
+ * assuming whether the deployment is self-hosted or hosted.
  */
 export function phoneSetupRequiredMessage(readiness: PhoneReadiness): string {
   return (
     "this Egma instance has not been configured to place phone calls, so nothing was " +
     `dialled and nothing was charged. It is missing ${readiness.missing.join(
       " and ",
-    )}. Add EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER to the ` +
-    "platform workspace's .env file. When the carrier uses SIP credentials, " +
-    "also add EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD. Then run " +
-    "egma self-host up."
+    )}. Add EGMA_PHONE_TRUNK_ADDRESS, EGMA_PHONE_SOURCE_NUMBER, ` +
+    "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD to the deployment " +
+    "environment, then ask the deployment operator to restart the API."
   );
 }
