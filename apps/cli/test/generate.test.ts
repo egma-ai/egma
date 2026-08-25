@@ -56,6 +56,10 @@ function testFile(name: string, behaviors: readonly string[]): string {
     "---",
     "format: 4",
     `name: ${name}`,
+    // What the generate task asks for: every file names at least one persona,
+    // because a test says who calls and Egma refuses one that does not.
+    "personas:",
+    "  - Default Persona",
     "---",
     "## Scenario",
     `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
@@ -178,6 +182,56 @@ describe("generated suite", () => {
         instruction.includes("egma/tests/generated"),
       ),
     ).toBe(true);
+
+    /*
+     * **The task names the personas the project really holds.** The wizard used
+     * to tell the coding agent to leave the line out and let the project's
+     * default apply — which stopped being true on 2026-08-24, when a test
+     * naming no persona became a refusal. The task now reads the project's
+     * personas and requires one, so a generated folder is one that pushes.
+     */
+    const task = agentReport.instructions.find((instruction) =>
+      instruction.includes("## Personas"),
+    );
+    expect(task, "the generate task teaches the personas block").toBeDefined();
+    expect(task).toContain("Every file must name at least one persona");
+    expect(task).toContain("- Default Persona");
+    expect(task).not.toContain("leave the `personas` line out");
+
+    // And the push itself names the caller, rather than leaving the platform
+    // to choose one — which it no longer would.
+    const pushed = platform.records.find(
+      (record) =>
+        record.method === "POST" && record.path === "/v1/repository/change-set",
+    );
+    expect(pushed?.body).toMatchObject({
+      tests: [{ personas: ["Default Persona"] }],
+    });
+    expect(
+      platform.records.filter(
+        (record) => record.method === "GET" && record.path === "/v1/personas",
+      ).length,
+      "the wizard reads who can call before writing a single file",
+    ).toBeGreaterThan(0);
+  });
+
+  it("stops before writing when Egma lists no persona for the project", async () => {
+    // A project holding none is a project the platform cannot make — the
+    // pointer is set at creation and the column cannot be null. The wizard
+    // still refuses to write a folder that could only be refused at push.
+    platform.personas.clear();
+
+    const result = await walk(
+      writes("never-quotes-a-price", ["The agent does not quote a price."]),
+      1,
+    );
+
+    expect(result.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("Every test names at least one persona"),
+    });
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
   });
 
   it("does not push or run a subset when one generated file is invalid", async () => {

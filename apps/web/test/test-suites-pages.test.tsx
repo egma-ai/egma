@@ -757,6 +757,132 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("lands a late cell save on its own cell, never on the one now being typed in", async () => {
+    // A's PATCH is held open. While it hangs, the caret moves to B and types.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: {
+          tests: [
+            testBody({ personas: [PERSONA] }),
+            testBody({
+              id: "tst_2",
+              versionId: "tstv_2",
+              revision: "rev_2",
+              name: "Cancels service",
+              scenario: "The caller cancels.",
+              personas: [PERSONA],
+            }),
+          ],
+          nextPageToken: null,
+        },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({ personas: [PERSONA], scenario: "A saved late." }),
+        waitFor: held,
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    // Commit A — the request hangs.
+    const rowA = (await screen.findByText("Books service")).closest("tr");
+    if (rowA === null) throw new Error("row A is not on screen");
+    fireEvent.click(within(rowA).getByText("The caller books service."));
+    const scenarioA = within(rowA).getByLabelText("Scenario");
+    fireEvent.change(scenarioA, { target: { value: "A saved late." } });
+    fireEvent.keyDown(scenarioA, { key: "Enter" });
+
+    // The caret moves to B and types, while A is still in flight.
+    const rowB = screen.getByText("Cancels service").closest("tr");
+    if (rowB === null) throw new Error("row B is not on screen");
+    fireEvent.click(within(rowB).getByText("The caller cancels."));
+    const scenarioB = within(rowB).getByLabelText("Scenario");
+    fireEvent.change(scenarioB, { target: { value: "B, half typed" } });
+
+    // Now A answers. B must keep both its wake and every word typed into it.
+    release();
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    });
+    const stillB = screen.getByText("Cancels service").closest("tr");
+    if (stillB === null) throw new Error("row B left the grid");
+    expect((within(stillB).getByLabelText("Scenario") as HTMLTextAreaElement).value).toBe(
+      "B, half typed",
+    );
+  });
+
+  it("reads every page of personas, so a later one can be found and picked", async () => {
+    const LATER = { id: "prs_2", name: "Careful Chris", archivedAt: null };
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": [
+        { status: 200, body: { tests: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: testBody({ personas: [LATER], name: "Books service" }),
+        },
+      ],
+      // Two pages, and the wanted persona is on the second one.
+      "/v1/personas": [
+        { status: 200, body: { personas: [PERSONA], nextPageToken: "prs_1" } },
+        { status: 200, body: { personas: [LATER], nextPageToken: null } },
+      ],
+    });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+
+    // A page-two persona is listed, findable by search, and pickable.
+    expect(await screen.findByLabelText("Careful Chris")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Search personas"), {
+      target: { value: "Careful" },
+    });
+    expect(screen.queryByLabelText("Impatient Rita")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Careful Chris"));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Books service" },
+    });
+    fireEvent.change(screen.getByLabelText("Scenario"), {
+      target: { value: "The caller books service." },
+    });
+    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
+      target: { value: "Offers an available time" },
+    });
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save test" }));
+
+    await waitFor(() => {
+      expect(
+        sent.find((request) => request.path === "/v1/tests" && request.method === "POST"),
+      ).toMatchObject({ body: { personas: ["prs_2"] } });
+    });
+  });
+
   it("lands the retired test address on that test's suite grid", async () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     routed.params = { projectId: "prj_1", testId: "tst_1" };

@@ -56,6 +56,9 @@ type Named = { readonly id: string; readonly name: string };
 /** What a cell is, which is also which field one save carries. */
 type Field = "name" | "scenario" | "expectedBehaviors" | "personas";
 
+/** One woken cell: which test's, and which of its four fields. */
+type Woken = { readonly testId: string; readonly field: Field };
+
 /** Content fields mint a version; the name is identity and mints a revision. */
 function isContent(field: Field): boolean {
   return field !== "name";
@@ -223,28 +226,59 @@ function PersonaPicker({
   const [search, setSearch] = useState("");
   const [people, setPeople] = useState<readonly Named[] | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
+  /** Whether egma holds more than this picker read. Said out loud if so. */
+  const [truncated, setTruncated] = useState(false);
 
+  /*
+   * **Every persona the project holds, not the first page of them.**
+   * `listPersonas` answers a page at a time, and the search below runs in the
+   * browser — so reading one page would hide every later persona from a picker
+   * whose whole job is finding one. The pages are followed to the end, bounded,
+   * and if the bound is ever reached the picker says so rather than presenting
+   * a short list as the whole list.
+   */
   useEffect(() => {
     let live = true;
-    void platformAnswer(
-      listPersonas({ projectId }, { client: platformClient }),
-    ).then((answer) => {
+    const PAGES_AT_MOST = 20;
+
+    async function readEveryone(): Promise<void> {
+      const held: Named[] = [];
+      let pageToken: string | undefined;
+      for (let page = 0; page < PAGES_AT_MOST; page += 1) {
+        const answer = await platformAnswer(
+          listPersonas(
+            { projectId, ...(pageToken === undefined ? {} : { pageToken }) },
+            { client: platformClient },
+          ),
+        );
+        if (!live) return;
+        if (answer.status === "signed-out") {
+          window.location.replace("/sign-in");
+          return;
+        }
+        if (answer.status !== "ready") {
+          setRefused(answer.refusal.message);
+          return;
+        }
+        held.push(
+          ...answer.value.personas.map((one) => ({ id: one.id, name: one.name })),
+        );
+        const next = answer.value.nextPageToken;
+        if (next === null) {
+          setPeople(held);
+          return;
+        }
+        pageToken = next;
+        // Show what has arrived while the rest is still coming, so a long list
+        // is usable before it is complete.
+        setPeople([...held]);
+      }
       if (!live) return;
-      if (answer.status === "signed-out") {
-        window.location.replace("/sign-in");
-        return;
-      }
-      if (answer.status !== "ready") {
-        setRefused(answer.refusal.message);
-        return;
-      }
-      setPeople(
-        answer.value.personas.map((one) => ({ id: one.id, name: one.name })),
-      );
-    });
-    return () => {
-      live = false;
-    };
+      setPeople(held);
+      setTruncated(true);
+    }
+
+    void readEveryone();
   }, [projectId]);
 
   const wanted = search.trim().toLocaleLowerCase();
@@ -311,6 +345,14 @@ function PersonaPicker({
           ))
         )}
       </div>
+      {truncated ? (
+        // The search below runs in the browser, so it reaches what was read
+        // and nothing beyond it. The sentence says that rather than promising
+        // a search that would quietly come back empty.
+        <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
+          Egma holds more personas than this list read.
+        </p>
+      ) : null}
       <div className="flex justify-end border-t border-border px-2.5 py-1.5">
         <button className={cn(ADD_LINE, "underline")} type="button" onClick={onDone}>
           Done
@@ -583,10 +625,23 @@ export function TestsGrid(props: GridProps) {
     more,
   } = props;
 
-  const [active, setActive] = useState<{ testId: string; field: Field } | null>(null);
+  const [active, setActive] = useState<Woken | null>(null);
+  /**
+   * The woken cell as it is *now*, not as it was when a commit was created.
+   *
+   * **The state alone cannot answer this question.** A commit is awaited, and
+   * the function that resumes after the await still closes over the `active`
+   * of the render that started it — which, for a late answer, is the cell that
+   * has since been left. Comparing against that closure would let A's answer
+   * decide it is still A and clear the cell somebody is typing into, which is
+   * the exact bug the guard exists to stop. The ref is written in the same
+   * breath as the state, so it is true at every instant rather than at every
+   * render.
+   */
+  const wokenNow = useRef<Woken | null>(null);
+  const savingNow = useRef(false);
   const [cellDraft, setCellDraft] = useState<Draft | null>(null);
   const [cellRefused, setCellRefused] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   /**
    * Which cell's persona picker is open, and there can only be one.
    *
@@ -637,9 +692,15 @@ export function TestsGrid(props: GridProps) {
     openEntry();
   }, [writing, openEntry]);
 
+  /** Wake one cell, in state and in the ref that answers "which one now?". */
+  function woken(next: Woken | null): void {
+    wokenNow.current = next;
+    setActive(next);
+  }
+
   function wake(test: ListedTest, field: Field): void {
     if (!mayAuthor) return;
-    setActive({ testId: test.id, field });
+    woken({ testId: test.id, field });
     setCellDraft(draftOf(test));
     setCellRefused(null);
     // Waking a cell closes a picker of its own from a previous wake, and
@@ -657,21 +718,22 @@ export function TestsGrid(props: GridProps) {
    * throw away what was typed with no refusal and no record — the one thing
    * this grid promises never to do.
    */
-  function rest(mine?: { readonly testId: string; readonly field: Field }): void {
+  function rest(mine?: Woken): void {
+    const now = wokenNow.current;
     if (
       mine !== undefined &&
-      (active?.testId !== mine.testId || active.field !== mine.field)
+      (now?.testId !== mine.testId || now.field !== mine.field)
     ) {
       return;
     }
-    setActive(null);
+    woken(null);
     setCellDraft(null);
     setCellRefused(null);
     setPicking(null);
   }
 
   async function commit(test: ListedTest, field: Field): Promise<void> {
-    if (cellDraft === null || saving) return;
+    if (cellDraft === null || savingNow.current) return;
     // Which cell this commit is of, held across the await so the answer can
     // only ever land back on the cell that asked.
     const mine = { testId: test.id, field };
@@ -701,7 +763,7 @@ export function TestsGrid(props: GridProps) {
       rest(mine);
       return;
     }
-    setSaving(true);
+    savingNow.current = true;
     setCellRefused(null);
     /*
      * One field, and the guard the platform asks that field for. A content
@@ -721,13 +783,13 @@ export function TestsGrid(props: GridProps) {
         { client: platformClient },
       ),
     );
-    setSaving(false);
+    savingNow.current = false;
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
-    const stillMine =
-      active?.testId === mine.testId && active.field === mine.field;
+    const now = wokenNow.current;
+    const stillMine = now?.testId === mine.testId && now.field === mine.field;
     if (answer.status !== "ready") {
       // A refusal belongs beside the cell it is about. If the caret has moved
       // on, the sentence has nowhere truthful to sit, and the save simply did
