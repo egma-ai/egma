@@ -3221,6 +3221,17 @@ describe("the complete product, walked in order in a second project", () => {
      * arriving is proved rather than assumed.
      */
     readonly says: string;
+    /**
+     * Where this address ends up, when that is not itself.
+     *
+     * **Only a retired address carries one.** A page that still exists lands
+     * on its own address, and saying so is half of what this table checks — so
+     * the equality below reads this field rather than being loosened, and a
+     * row that quietly stopped arriving cannot pass by having its expectation
+     * relaxed. A redirect is a promise of its own: the address goes on
+     * working, and it is honest about where it took you.
+     */
+    readonly lands?: string;
   };
 
   /**
@@ -3257,13 +3268,20 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Its name in Egma",
       },
       /*
-       * **A retired address, kept in the table on purpose.** It redirects to
-       * the agents list, so what settles is the list — and the phrase is the
-       * agent's name, which the list says on its row. It stays listed because
-       * a copied link to it must keep arriving somewhere, and this table is
-       * where that promise is checked.
+       * **A retired address, kept in the table on purpose.** The agent page is
+       * gone and this address redirects to the agents list, so it lands
+       * somewhere other than itself — which is what `lands` is for. The phrase
+       * is the agent's name, which the list says on its row.
+       *
+       * It stays listed because a copied link to it must keep arriving
+       * somewhere, and this table is where that promise is checked.
        */
-      { what: "one agent", address: agentAddress, says: "The Support line" },
+      {
+        what: "one agent",
+        address: agentAddress,
+        lands: at("agents"),
+        says: "The Support line",
+      },
       {
         what: "Add a connection",
         address: `${agentAddress}/connections/new`,
@@ -3551,7 +3569,7 @@ describe("the complete product, walked in order in a second project", () => {
             await opened.setViewportSize({ width: 1280, height: 900 });
             await opened.goto(route.address);
             await landedOn(opened, route);
-            expect(opened.url(), route.what).toBe(route.address);
+            expect(opened.url(), route.what).toBe(route.lands ?? route.address);
 
             if (index === 0) {
               const sidebar = opened.locator("aside");
@@ -4657,10 +4675,19 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
 
-      // Renaming and deleting a suite live in the suite's own ⋮ menu now, and
-      // the rename surface is a side sheet named by the suite it is about.
-      await walk.getByRole("button", { name: "Open the suite menu" }).click();
-      await walk.getByRole("menuitem", { name: "Rename suite" }).click();
+      /*
+       * **Managing a suite lives on the suites list, not inside the suite.**
+       * The suite screen's toolbar ⋮ went with the 2026-08-24 rework: that
+       * screen is the tests grid now, and its toolbar carries only "Write a
+       * test". Rename and Delete are on the row, where the suite is a thing
+       * among other things rather than the page you are standing in.
+       */
+      await walk.goto(at("tests"));
+      await saysWithin(walk, "Support reception");
+      await walk
+        .getByRole("button", { name: "Open the menu for Support reception" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Rename", exact: true }).click();
       const rename = walk.getByRole("dialog", {
         name: "Support reception",
       });
@@ -4675,6 +4702,7 @@ describe("the complete product, walked in order in a second project", () => {
       await rename.getByRole("button", { name: "Save name" }).click();
       const renamed = await renameResponse;
       expect(renamed.status(), await renamed.text()).toBe(200);
+      // The row carries the new name, on the list the rename was made from.
       await saysWithin(walk, "Northside Ford");
 
       // A run reads the suite's current name. Renaming does not create a suite
@@ -4685,9 +4713,12 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await summary.innerText()).not.toContain("Support reception");
       expect(await summary.innerText()).not.toContain("(deleted)");
 
-      await walk.goto(suiteAddress);
+      // And deleting is the same row's menu, under the same hairline.
+      await walk.goto(at("tests"));
       await saysWithin(walk, "Northside Ford");
-      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk
+        .getByRole("button", { name: "Open the menu for Northside Ford" })
+        .click();
       await walk.getByRole("menuitem", { name: "Delete suite" }).click();
       const deletion = walk.getByRole("dialog", {
         name: "Delete Northside Ford?",
