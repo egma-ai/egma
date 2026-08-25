@@ -491,7 +491,19 @@ function AccountMenu({
       label={`Account ${standing}. Open the account menu`}
       triggerClassName={cn(
         "grid w-full min-w-0 items-center gap-3",
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) px-2 py-1",
+        /*
+         * **7px, and the missing pixel is the plate's own hairline.** This
+         * trigger reserves its hover border as a transparent one so hovering
+         * shifts nothing, and `box-sizing: border-box` means that border spends
+         * a pixel of the inset before the padding starts. Written as 8px it put
+         * the avatar on 17 while every nav icon stood on 16 — the one thing
+         * still out of the bar's lane. Written as 8 minus the hairline it lands
+         * on 16 exactly, and the gap from the plate's visible edge to the
+         * avatar is a true 8px, which is what a borderless nav row already
+         * draws between its plate and its icon.
+         */
+        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
+        "px-[calc(var(--space-2)-1px)]",
         "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
         "transition-transform duration-(--duration-press) ease-out",
         "pointer-coarse:min-h-(--tap-target)",
@@ -731,9 +743,21 @@ function ShellFrame({
         </SidebarBrand>
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
-        <SidebarFooter className="px-4">
+        {/*
+         * 8px, the navigation column's inset, so the account plate is the same
+         * 208px block as a nav row and stands 8px off both edges of the bar.
+         * The avatar rides the 16px lane from inside it — see `AccountMenu`,
+         * which pays for its own hairline.
+         */}
+        <SidebarFooter className="px-2">
           {role !== null && !canAuthor(role) ? (
-            <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
+            /*
+             * The chip has no plate to sit inside, so it takes the 8px back as
+             * a margin and starts on the lane with everything else.
+             */
+            <Badge className="mx-2" title="Your role can read, not author">
+              {VIEW_ONLY}
+            </Badge>
           ) : null}
           <AccountMenu
             me={me}
