@@ -595,7 +595,14 @@ describe("the two kinds of audio a transcript can offer", () => {
  * something a person is shown. `session` is the one carve-out and it is not a
  * loophole — it names a signed-in browser session and never an exchange —
  * so it is checked for separately below.
+ *
+ * **The screen's own name is the second carve-out**, and it is one word wide.
+ * The developer renamed the surface to Traces on 2026-08-25, so `LIST.title`
+ * says it and the detail page's breadcrumb repeats it. `trace` stays banned in
+ * every sentence around them: the artifact a person opens is a **transcript**,
+ * and this rule is what keeps it one.
  */
+const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SAID = [
   "trace",
   "span",
@@ -652,9 +659,10 @@ describe("what the pages say out loud", () => {
    */
   it("uses no storage word and no banned one", () => {
     for (const sentence of everySentence(EVERY_WORD)) {
+      const said = sentence.replaceAll(SURFACE_NAME, "");
       for (const banned of NEVER_SAID) {
         expect(
-          new RegExp(`\\b${banned}`, "iu").test(sentence),
+          new RegExp(`\\b${banned}`, "iu").test(said),
           `"${sentence}" says "${banned}"`,
         ).toBe(false);
       }

@@ -17,7 +17,8 @@
  * The URLs are deliberately not copy. The v1 endpoint's own path is a machine
  * surface — matching it is how somebody reading the network tab finds the
  * request — and no page ever prints it as a word. What a person navigates is
- * **Monitoring**, and what they open there is a **transcript**.
+ * **Traces**, under **OBSERVABILITY**, and what they open there is a
+ * **transcript**.
  */
 
 /** The list page. */
@@ -28,13 +29,17 @@ export const LIST = {
    * decided. Two copies of the word that could disagree would be one too many,
    * and this is the one the page renders.
    *
-   * **It says Transcripts rather than Monitoring** (board `JGS-0`). Monitoring
-   * is the sidebar *group*, and it is no longer a screen: the one monitoring
-   * verb lives here now, on the screen where its results land. A title bar
-   * repeating the group's word said the section's name twice and the page's
-   * name nowhere.
+   * **It says Traces** (developer decision, 2026-08-25). It used to say
+   * Transcripts, under a sidebar group that used to say Monitoring; the group
+   * says OBSERVABILITY now and this screen is named for what lands on it.
+   *
+   * The rename is a *surface* rename and nothing else. The address did not
+   * move, and neither did the artifact's name: what a person opens from this
+   * list is still a **transcript**, and every row, fact and label below still
+   * says so. `trace` is honest here because it is the word a person's own SDK
+   * uses for what it reports — it is not the storage row leaking upward.
    */
-  title: "Transcripts",
+  title: "Traces",
   /** What the table is called where somebody hears it rather than sees it. */
   tableLabel: "Production transcripts in this project",
   loadingWhat: "this project's production transcripts",

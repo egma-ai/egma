@@ -223,11 +223,11 @@ describe("how the picker opens", () => {
    * instead, it would disagree with the address the first time somebody pressed
    * Back — which is exactly the reload the blanket rule exists to prevent.
    */
-  it("stays shut on the plain Transcripts address", async () => {
+  it("stays shut on the plain Traces address", async () => {
     stub({});
     render(<MonitoringTranscriptsPage />);
 
-    await screen.findByRole("heading", { level: 1, name: "Transcripts" });
+    await screen.findByRole("heading", { level: 1, name: "Traces" });
     expect(screen.queryByRole("dialog", { name: "Monitor an agent" })).toBeNull();
     // And the roster is not even read, because nothing is asking about it.
     expect(screen.queryByLabelText("Agent")).toBeNull();
@@ -279,7 +279,7 @@ describe("how the picker opens", () => {
     expect(globalThis.location.pathname).toBe("/projects/prj_2/monitoring/start");
     expect(routed.replace).not.toHaveBeenCalled();
     expect(document.querySelector("main")?.textContent ?? "").toContain(
-      "Transcripts",
+      "Traces",
     );
   });
 
@@ -622,7 +622,12 @@ describe("the LiveKit half", () => {
   /**
    * Push is ungated by design: the door authenticates with the project key,
    * tenancy comes from the key, and the stored evidence is the whole record of
-   * an agent pushing. So this half is three sentences and a way out.
+   * an agent pushing. So this half is three steps and a way out.
+   *
+   * **The steps were restyled on 2026-08-25 and say the same things.** The
+   * shape is Langfuse's first-trace onboarding — a state chip, a heading, then
+   * numbered steps — and every technical name a person has to type is still
+   * here: the SDK, both SDK identifiers, and both environment variables.
    */
   it("shows the three steps, and offers nothing to start", async () => {
     withThePicker();
@@ -635,18 +640,66 @@ describe("the LiveKit half", () => {
 
     await screen.findByLabelText("Agent");
     for (const step of [
-      "Install the Egma SDK.",
-      "Call monitor_livekit(ctx) before AgentSession.start.",
-      "Set EGMA_URL and EGMA_API_KEY in the agent's environment.",
+      "Install the Egma SDK",
+      "Add one line to your agent",
+      "Run your agent",
     ]) {
       expect(screen.getByText(step), step).toBeDefined();
     }
+    // The names a person types are unchanged, wherever the words moved to.
+    for (const name of [
+      "EGMA_URL and EGMA_API_KEY",
+      "monitor_livekit(ctx)",
+      "AgentSession.start",
+    ]) {
+      expect(screen.getByText(name, { exact: false }), name).toBeDefined();
+    }
+    // The steps read as a sequence: three numbers down one spine.
+    expect(
+      [...screen.getAllByRole("listitem")].filter((one) =>
+        /^[123]/u.test(one.textContent ?? ""),
+      ),
+    ).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Start pulling" })).toBeNull();
     expect(screen.queryByLabelText("Retell API key*")).toBeNull();
     // Two ways out and no way in: the ✕ in the head, and the footer's own.
     expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(2);
 
     // And it stores nothing: the roster read is the only ask it made.
+    expect(seen.filter((one) => one.method === "POST")).toEqual([]);
+  });
+
+  /**
+   * **The one line is copyable, and the copy touches nothing but the
+   * clipboard.** A person reading these steps is in their own editor, and a
+   * line they have to retype by eye is a line they retype wrong.
+   */
+  it("copies the one line, and still writes nothing to Egma", async () => {
+    withThePicker();
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+    });
+    const { seen } = stub({
+      agents: [
+        agent({ id: "agt_lk", name: "Livekit agent", agentPlatform: "livekit" }),
+      ],
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const copy = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copy);
+
+    expect(written).toEqual(["monitor_livekit(ctx)"]);
+    expect(
+      await screen.findByRole("button", { name: "Copied" }),
+    ).toBeDefined();
     expect(seen.filter((one) => one.method === "POST")).toEqual([]);
   });
 });
@@ -665,9 +718,15 @@ describe("the LiveKit half", () => {
  * `monitor_livekit(ctx)` and `AgentSession.start` are identifiers somebody
  * types into their own editor — renaming them to suit egma's vocabulary would
  * make the instructions wrong.
+ *
+ * **`trace` came off this list on 2026-08-25**, when the developer named the
+ * screen Traces and asked for this half to be modelled on Langfuse's
+ * first-trace onboarding. It is not the storage row leaking upward: it is the
+ * word the SDK a person is being told to install uses for what it reports, and
+ * this panel is the one surface in the product that talks about that SDK.
+ * `span` stays banned, because nothing here has any business naming one.
  */
 const NEVER_SAID = [
-  "trace",
   "span",
   "call",
   "caller",

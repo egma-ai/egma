@@ -64,7 +64,7 @@ const GROUPS: readonly {
 }[] = [
   { label: null, items: ["Agents", "Graders"] },
   { label: "Simulations", items: ["Tests", "Personas", "Runs"] },
-  { label: "Monitoring", items: ["Transcripts"] },
+  { label: "OBSERVABILITY", items: ["Traces"] },
 ];
 
 /** The clusters as drawn, labelled or not — a named region is only two of them. */
@@ -202,7 +202,7 @@ describe("the grouped sidebar", () => {
     expect([...hrefs].sort()).toEqual(EVERY_ADDRESS);
   });
 
-  it("says Runs and Transcripts, and no longer says Simulation runs", () => {
+  it("says Runs and Traces, and no longer says Simulation runs", () => {
     drawShell();
 
     const navigation = sidebarNavigation();
@@ -211,13 +211,15 @@ describe("the grouped sidebar", () => {
     ).toBe("/projects/prj_2/runs");
     expect(
       within(navigation)
-        .getByRole("link", { name: "Transcripts" })
+        .getByRole("link", { name: "Traces" })
         .getAttribute("href"),
     ).toBe("/projects/prj_2/monitoring/transcripts");
     expect(
       within(navigation).queryByRole("link", { name: "Simulation runs" }),
     ).toBeNull();
-    expect(within(navigation).queryByRole("link", { name: "Monitoring" })).toBeNull();
+    expect(
+      within(navigation).queryByRole("link", { name: "OBSERVABILITY" }),
+    ).toBeNull();
   });
 
   /**
@@ -230,7 +232,7 @@ describe("the grouped sidebar", () => {
     ["/projects/prj_2/graders", "Graders"],
     ["/projects/prj_2/personas/prs_3", "Personas"],
     ["/projects/prj_2/runs/run_9", "Runs"],
-    ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Transcripts"],
+    ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Traces"],
   ])("lights one row on %s, and says which", (pathname, lit) => {
     drawShell(pathname);
 
@@ -358,7 +360,7 @@ describe("the grouped sidebar", () => {
     const switcher = within(bar!).getByRole("button", { name: /^Organization Acme/ });
     const account = within(bar!).getByRole("button", { name: /account menu$/ });
     const agents = within(bar!).getByRole("link", { name: "Agents" });
-    const transcripts = within(bar!).getByRole("link", { name: "Transcripts" });
+    const transcripts = within(bar!).getByRole("link", { name: "Traces" });
 
     expect(at(organization)).toBe(0);
     expect(at(switcher)).toBe(1);
