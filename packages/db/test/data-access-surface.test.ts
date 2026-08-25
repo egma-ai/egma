@@ -323,8 +323,8 @@ const CONTEXT_REQUIRING = [
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
-  // What a run froze at start. Pre-cutover run history is reset, so every run
-  // this surface can read has one recorded plan.
+  // What a run froze at start. Every run this surface can read has one
+  // recorded plan.
   "getGradingPlan",
   // The exact definition versions one simulation froze. The grading worker
   // uses these instead of following today's current-version pointers.

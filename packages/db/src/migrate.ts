@@ -32,22 +32,11 @@ const BOOKKEEPING_SCHEMA = "egma_meta";
 const BOOKKEEPING_TABLE = `${BOOKKEEPING_SCHEMA}.migration`;
 
 /**
- * One migration reached public main with a PostgreSQL 18-only call before its
- * first hosted application. Production was still at 0039, so 0040 had to be
- * corrected in place for Supabase PostgreSQL 17.6. A developer or self-hoster
- * may still have applied the original file on PostgreSQL 18 during that short
- * window. Accept exactly that recorded hash and promote it to exactly the
- * corrected hash; every other changed migration remains a hard refusal.
+ * A managed pre-production store may adopt this exact baseline out of band
+ * after an operator verifies its old ledger and logical schema. Its recorded
+ * hash is the deliberate adoption marker; the filename alone is not proof.
  */
-export const MIGRATION_HASH_CORRECTIONS = [
-  {
-    name: "0040_test_suites.sql",
-    previouslyRecordedHash:
-      "a9f4f6dc7dee1c24d1390d8d28e52af0aaf34e00d434db05cdeb899a5b063945",
-    correctedHash:
-      "8f4d60aebecda8ca1c6894ab9d8ee09adff1a5d86a111a42488d6390c33313b6",
-  },
-] as const;
+const CURRENT_BASELINE_MIGRATION = "0000_baseline.sql";
 
 export type Migration = {
   readonly name: string;
@@ -94,6 +83,10 @@ export function pendingMigrations(
   migrations: readonly Migration[],
   alreadyApplied: ReadonlyMap<string, string>,
 ): Migration[] {
+  const knownNames = new Set(migrations.map((migration) => migration.name));
+  const unsupported = [...alreadyApplied.keys()]
+    .filter((name) => !knownNames.has(name))
+    .sort();
   const pending: Migration[] = [];
 
   for (const migration of migrations) {
@@ -110,6 +103,23 @@ export function pendingMigrations(
           `applied migrations are immutable, add a new file instead`,
       );
     }
+  }
+
+  // A verified database may adopt a squashed baseline out of band while its
+  // old ledger rows remain for rollback. The exact baseline hash is the proof
+  // that this was deliberate. Without it, an old store must stop before fresh
+  // baseline DDL can run against tables that already exist.
+  const baseline = migrations.find(
+    (migration) => migration.name === CURRENT_BASELINE_MIGRATION,
+  );
+  const adoptedBaseline =
+    baseline !== undefined &&
+    alreadyApplied.get(baseline.name) === baseline.hash;
+  if (unsupported.length > 0 && !adoptedBaseline) {
+    throw new Error(
+      `database records migrations that this build does not contain: ${unsupported.join(", ")}; ` +
+        "recreate the database before running this build",
+    );
   }
 
   return pending;
@@ -160,42 +170,9 @@ async function apply(
   const recorded = await client.query<{ name: string; hash: string }>(
     `select name, hash from ${BOOKKEEPING_TABLE}`,
   );
-  const migrationsByName = new Map(
-    migrations.map((migration) => [migration.name, migration] as const),
+  const alreadyApplied = new Map(
+    recorded.rows.map((row) => [row.name, row.hash] as const),
   );
-  const alreadyApplied = new Map<string, string>();
-
-  for (const row of recorded.rows) {
-    let hash = row.hash;
-    const migration = migrationsByName.get(row.name);
-    const correction = MIGRATION_HASH_CORRECTIONS.find(
-      (candidate) =>
-        candidate.name === row.name &&
-        candidate.previouslyRecordedHash === row.hash &&
-        candidate.correctedHash === migration?.hash,
-    );
-
-    if (correction !== undefined) {
-      const promoted = await client.query(
-        `update ${BOOKKEEPING_TABLE}
-            set hash = $1
-          where name = $2 and hash = $3`,
-        [
-          correction.correctedHash,
-          correction.name,
-          correction.previouslyRecordedHash,
-        ],
-      );
-      if (promoted.rowCount !== 1) {
-        throw new Error(
-          `could not reconcile the recorded hash for ${correction.name}`,
-        );
-      }
-      hash = correction.correctedHash;
-    }
-
-    alreadyApplied.set(row.name, hash);
-  }
 
   const applied: string[] = [];
 

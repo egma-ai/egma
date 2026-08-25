@@ -308,9 +308,7 @@ export const simulation = pgTable(
      * keys below pair on: the version is this test's, and the test is this
      * project's.
      *
-     * Required on every row. `startRun` names both pins for every conversation,
-     * and the clean suite cutover removed the older rows that had no stored
-     * test evidence.
+     * Required on every row. `startRun` names both pins for every conversation.
      */
     testId: idText("test_id").notNull(),
     testVersionId: idText("test_version_id").notNull(),
@@ -527,8 +525,8 @@ export const simulation = pgTable(
       columns: [table.personaVersionId, table.personaId],
       foreignColumns: [personaVersion.id, personaVersion.personaId],
     }),
-    // A normal composite key cannot express "this project or Egma". Migration
-    // 0037 installs the database trigger that enforces that availability rule.
+    // A normal composite key cannot express "this project or Egma". The
+    // database trigger enforces that availability rule.
     // And the test pin closes the same way the persona pin does: the version
     // is the named test's, and the test is this project's, so a raw write
     // cannot pin another customer's test. Both pins are required.

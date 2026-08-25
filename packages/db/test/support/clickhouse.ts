@@ -64,12 +64,7 @@ export async function createEmptyTraceStore(
   };
 }
 
-/**
- * Raw rows from a store left empty on purpose, for the migration tests that ask
- * what a run left behind — before it ran, or after it failed. A client is
- * opened and closed per question, because the store under inspection has no
- * settled shape to keep a connection against.
- */
+/** Raw rows from a store without keeping a shared client open. */
 export async function rowsIn<Row>(
   store: EmptyTraceStore,
   query: string,
@@ -80,45 +75,6 @@ export async function rowsIn<Row>(
     // Awaited here, not returned: the finally below closes the client, and an
     // unconsumed body does not survive that.
     return await result.json<Row>();
-  } finally {
-    await client.close();
-  }
-}
-
-/**
- * Rows into a store the migration tests are stepping through by hand, on
- * `rowsIn`'s terms and for its reason: a store part-way through a chain has no
- * settled shape to keep a connection against, and what these tests need is to
- * populate one schema and then watch the next migration meet it.
- */
-export async function appendIn(
-  store: EmptyTraceStore,
-  table: string,
-  values: readonly Record<string, unknown>[],
-): Promise<void> {
-  const client = createClient({ url: store.url });
-  try {
-    await client.insert({ table, values, format: "JSONEachRow" });
-  } finally {
-    await client.close();
-  }
-}
-
-/**
- * Statements into a store the migration tests are stepping through by hand, on
- * `rowsIn`'s terms and for its reason. Taken as a list rather than one at a
- * time, because what a caller has is the front of a migration file and what it
- * wants is the state that front leaves behind.
- */
-export async function commandsIn(
-  store: EmptyTraceStore,
-  queries: readonly string[],
-): Promise<void> {
-  const client = createClient({ url: store.url, max_open_connections: 1 });
-  try {
-    for (const query of queries) {
-      await client.command({ query });
-    }
   } finally {
     await client.close();
   }

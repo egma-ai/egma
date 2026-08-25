@@ -18,8 +18,8 @@ import { MIGRATED_DATABASE_TEMPLATE_ENV } from "./database-template-context.ts";
  * run against a real Postgres and never a substitute.
  *
  * Each test file owns a database of its own, created here and dropped
- * afterwards. Ordinary fast tests clone the prepared schema; migration tests
- * start empty. Both stay isolated from every other file.
+ * afterwards. Fast tests clone the prepared schema and stay isolated from
+ * every other file.
  */
 
 export const MAINTENANCE_DATABASE_URL = MAINTENANCE_URL;
@@ -27,9 +27,8 @@ export const MAINTENANCE_DATABASE_URL = MAINTENANCE_URL;
 /**
  * A migrated database prepared once by Vitest's fast-project setup.
  *
- * Ordinary tests still own a database each. They clone this closed template
- * instead of replaying every migration, while migration tests continue to use
- * `createEmptyDatabase` and prove the real empty-to-current path themselves.
+ * Tests still own a database each. They clone this closed template instead of
+ * replaying the baseline for every file.
  */
 function urlFor(databaseName: string): string {
   const url = new URL(MAINTENANCE_DATABASE_URL);
