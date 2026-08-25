@@ -132,6 +132,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
       "computedHash": "f343ecf46157cb645a5494644418308ad95391e9fc696faa47ae5a412bf5f6e4"
+    },
+    "writing-for-agents": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/writing-for-agents/SKILL.md",
+      "computedHash": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a"
     }
   }
 }
