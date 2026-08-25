@@ -123,6 +123,34 @@ const HAND_COMPUTED = {
   agent_speech_duration: [
     4563.644451, 9228.068086, 9230.032355, 4454.221168,
   ],
+
+  /**
+   * The platform's stage latencies, per agent turn in start order: the sum of
+   * each turn's own `llm_node` children (nothing else of the model family is a
+   * direct child of a turn in this capture, so nothing double-counts), read
+   * straight off the capture's raw span durations in nanoseconds and stated
+   * here in milliseconds. Every one of the eight agent turns carried exactly
+   * one model step.
+   *
+   * 7371512989, 727291266, 729825817, 639814725, 593974430, 645735577,
+   * 989172921, 486650077 ns.
+   */
+  llm_latency: [
+    7371.512989, 727.291266, 729.825817, 639.814725, 593.97443, 645.735577,
+    989.172921, 486.650077,
+  ],
+
+  /**
+   * The same for the `tts_node` children. Two turns — the two that answered
+   * with a tool call and never spoke — carried no synthesis step and
+   * contribute no sample: absence, not zero.
+   *
+   * 2623645092, 393177146, 3121186037, 2590796413, 1724987892, 2051012582 ns.
+   */
+  tts_latency: [
+    2623.645092, 393.177146, 3121.186037, 2590.796413, 1724.987892,
+    2051.012582,
+  ],
 } as const;
 
 type ReadMeasure = {
@@ -178,7 +206,7 @@ afterAll(async () => {
 });
 
 describe.skipIf(!storage.available)("the captured LiveKit conversation, read back through the door", () => {
-  it("carries exactly the three derived measures, and says they were derived", async () => {
+  it("carries exactly the five derived measures, and says they were derived", async () => {
     const measures = await measuresOfTheCapture();
 
     // In the catalog's own order, which is what a page lists them in.
@@ -186,11 +214,13 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
       "first_response_latency",
       "turn_response_latency",
       "agent_speech_duration",
+      "llm_latency",
+      "tts_latency",
     ]);
     // Every one of them worked out from the framework's spans: this agent
     // emitted no timing span of egma's own, which is the whole reason its
     // conversations were `skipped` before.
-    expect(measures.map((one) => one.derived)).toEqual([true, true, true]);
+    expect(measures.map((one) => one.derived)).toEqual([true, true, true, true, true]);
     expect(new Set(measures.map((one) => one.unit))).toEqual(
       new Set(["milliseconds"]),
     );
@@ -243,6 +273,40 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
       "0701cc09e5f3d203",
       "b2444815bd74fb3b",
       "2c8883b32dbc323c",
+      "fe4af349db1e440f",
+    ]);
+  });
+
+  it("sums each turn's model steps at the hand-computed numbers", async () => {
+    const measured = measure(await measuresOfTheCapture(), "llm_latency");
+
+    expect(measured?.samples).toEqual(HAND_COMPUTED.llm_latency);
+    // One sample per agent turn, citing the turn — the sum is the turn's and
+    // no single child holds it.
+    expect(measured?.spanIds).toEqual([
+      "0701cc09e5f3d203",
+      "9ac4333458575745",
+      "00820fa943b873e6",
+      "b2444815bd74fb3b",
+      "674743df7fe60024",
+      "2c8883b32dbc323c",
+      "cfbcc2e51885f0fa",
+      "fe4af349db1e440f",
+    ]);
+  });
+
+  it("sums each speaking turn's synthesis steps, and gives the tool-only turns no sample", async () => {
+    const measured = measure(await measuresOfTheCapture(), "tts_latency");
+
+    expect(measured?.samples).toEqual(HAND_COMPUTED.tts_latency);
+    // The two tool-answering turns carried no synthesis step and are absent —
+    // a zero would measure something that never happened.
+    expect(measured?.spanIds).toEqual([
+      "0701cc09e5f3d203",
+      "9ac4333458575745",
+      "b2444815bd74fb3b",
+      "2c8883b32dbc323c",
+      "cfbcc2e51885f0fa",
       "fe4af349db1e440f",
     ]);
   });

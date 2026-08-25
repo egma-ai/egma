@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 4**
+**Catalog version: 5**
 
 Every measure a conversation produces, named once and defined once, so that a
 grader references a known measure instead of guessing a string — and so that the
@@ -56,6 +56,9 @@ or counted.
 | `time_to_first_word` | milliseconds | per turn | voice simulations | timing span | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
 | `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
 | `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
+| `asr_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent turning the caller's speech into text, by the platform's own account. |
+| `llm_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent thinking — the language-model step of an answer, by the platform's own account. |
+| `tts_latency` | milliseconds | per turn | the agent's platform | the platform's own telemetry | How long the agent's platform spent turning the answer's text into speech, by the platform's own account. |
 | `turn_count` | turns | once | every simulation | terminal fact | How many transcript turns the conversation reached, both speakers counted. |
 
 A voice-only measure on a chat conversation is not a failure and not an error.
@@ -87,6 +90,9 @@ switches on exhaustively. A rule nothing implements stops the build.
 | `time_to_first_word` | `timing_spans_named_for_it` | Every span named `time_to_first_word`; each span's own duration is one sample. |
 | `agent_speech_duration` | `timing_spans_named_for_it` | Every span named `agent_speech_duration`; each span's own duration is one sample. |
 | `persona_speech_duration` | `timing_spans_named_for_it` | Every span named `persona_speech_duration`; each span's own duration is one sample. |
+| `asr_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Reported per call by Retell (its `asr` stage); no recognised framework span carries it today, so it is never derived. |
+| `llm_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Derived as the sum of a `turn:agent` span's own `model` children per turn, or read from the platform's reported `llm` stage. |
+| `tts_latency` | `platform_telemetry_carries_it` | Never egma's own timing span. Derived as the sum of a `turn:agent` span's own `tts` children per turn, or read from the platform's reported `tts` stage. |
 | `turn_count` | `no_span_carries_it` | Nothing. The simulator counts the turns it conducted and reports the total on the terminal transition, where the simulation row keeps it. |
 
 A timing span's duration **is** the measurement — nanoseconds on the wire,
@@ -149,6 +155,8 @@ the store gains these on the next read.
 | `turn_response_latency` | From each `turn:human` span's **end** to the start of the next `turn:agent` span's first `speaking` child — or to that agent turn's own start when it carried no `speaking` child. The next agent turn is the next one by start time, which is the order a transcript reads in. **An agent turn answers only the nearest human turn before it: a human turn followed by another human turn before any agent turn was not answered, and measures nothing.** | One sample per human turn, in conversation order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
 | `first_response_latency` | From the root span's start — the earliest parentless span — to the first `turn:agent` span's first `speaking` child's start. Where the conversation carries no `speaking` spans at all, the first agent turn's own start stands in — a word-bounded Retell turn begins at its first word; a framework that does write speech makes a speechless first turn unmeasurable. A first agent turn with neither speech nor width measures nothing. | Once. |
 | `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
+| `llm_latency` | The sum of a `turn:agent` span's own `model` children's durations — LiveKit's `llm_node`/`llm_request` family, as the door files it — so a turn whose model was asked twice accounts for both askings. | One sample per agent turn that carried a model step. A turn with none has no model latency; a zero would measure something that never happened. |
+| `tts_latency` | The sum of a `turn:agent` span's own `tts` children's durations — LiveKit's `tts_node`/`tts_request` family, as the door files it. | One sample per agent turn that carried a synthesis step. Same absence rule as the model step. |
 
 Each sample cites the span its number came from: the span whose start closed the
 interval for a latency, and the turn itself for a duration summed over its
@@ -233,12 +241,17 @@ a rule somebody has to remember.
   through the same OTLP door carrying the agent's own numbers — LiveKit puts an
   end-to-end turn latency on `lk.e2e_latency`, inside the verbatim payload the
   trace read deliberately does not return. Reading one is a decision for the
-  ingest door, normalised once for every provider into a span this catalog
-  already names; a measure module that parsed provider attributes would be a
-  second normaliser, disagreeing with the first for every framework Egma ever
-  supports. Until then a production trace carries exactly the measures its spans
-  carry, which for an agent emitting no timing spans is none — and a grader
-  asked for one answers `skipped`, which is the honest word.
+  ingest door, normalised once for every provider into a shape this catalog
+  already names — which is exactly how the stage latencies arrived at version
+  5: Retell's `asr`/`llm`/`tts` stages land in the reported block under
+  catalog names, LiveKit's stage spans land as `model`/`tts` kinds the
+  derivations read, and a measure module that parsed provider attributes
+  itself would still be a second normaliser and still does not exist.
+  Retell's knowledge-base stage stays platform-prefixed
+  (`retell/knowledge_base_latency`): retrieval is Retell's own concept, not a
+  stage every platform has. A production trace otherwise carries exactly the
+  measures its telemetry carries — and a grader asked for one it lacks
+  answers `skipped`, which is the honest word.
 
 ## Changing this catalog
 

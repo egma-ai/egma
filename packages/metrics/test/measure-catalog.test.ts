@@ -125,7 +125,14 @@ describe("what the catalog names", () => {
           `${cataloged.measure} is cataloged as a timing span and nothing emits it`,
         ).toBe(true);
       } else {
-        expect(cataloged.origin).toBe("terminal_fact");
+        // The scan cannot see a terminal fact (it arrives on the transition,
+        // not as a span) and cannot see a platform stage (only the agent's
+        // own machinery holds it) — and those are exactly the two origins a
+        // non-timing measure may carry. Anything else is a measure claiming
+        // an arrival nothing implements.
+        expect(["terminal_fact", "platform_telemetry"]).toContain(
+          cataloged.origin,
+        );
       }
     }
   });
@@ -183,18 +190,22 @@ describe("how each measure is computed from the spans", () => {
   });
 
   /**
-   * A timing span is named for the measure it takes and its duration *is* the
-   * number, so "arrives as a timing span" and "computed from the timing spans
-   * named for it" are the same fact said from the two ends of the wire. They are
-   * held to each other here because the ingest door files spans by one of them
-   * and the measure module reads them by the other.
+   * "A grader may read it from the trace" and "the trace can carry it" are the
+   * same fact said from the two ends of the wire, and they are held to each
+   * other here. A timing-span measure arrives as egma's own spans; a
+   * platform-telemetry measure arrives inside a recognised framework's stage
+   * spans or the reported block — both are readable from a conversation. Only
+   * a terminal fact is not, and only it may be refused at the write door.
    */
-  it("computes exactly the measures that arrive as timing spans", () => {
+  it("computes exactly the measures a trace can carry", () => {
     for (const cataloged of MEASURE_CATALOG) {
       expect(
         isSpanDerivedMeasure(cataloged.measure),
         `${cataloged.measure} disagrees with itself about whether a span carries it`,
-      ).toBe(cataloged.origin === "timing_span");
+      ).toBe(
+        cataloged.origin === "timing_span" ||
+          cataloged.origin === "platform_telemetry",
+      );
     }
   });
 

@@ -602,6 +602,8 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
       "first_response_latency",
       "turn_response_latency",
       "agent_speech_duration",
+      "llm_latency",
+      "tts_latency",
     ]);
     // Present rather than absent, so a client can tell "nothing was measured"
     // from "this response is an older shape that never said".

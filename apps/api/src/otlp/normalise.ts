@@ -1,5 +1,5 @@
 import type { NewSpan, SpanEmitter, SpanSource } from "@egma/db";
-import { SPAN_DERIVED_MEASURES } from "@egma/metrics";
+import { TIMING_SPAN_MEASURES } from "@egma/metrics";
 
 import type {
   OtlpAttribute,
@@ -194,7 +194,7 @@ const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
   // said as a measurement, and a transcript would quietly lose its turns. The
   // structural shapes are this vocabulary's own and are not a measure's to take.
   ...Object.fromEntries(
-    SPAN_DERIVED_MEASURES.map((measure) => [measure, "timing"]),
+    TIMING_SPAN_MEASURES.map((measure) => [measure, "timing"]),
   ),
   // The one span the whole conversation happened inside, emitted last: when it
   // arrives, the conversation is over.

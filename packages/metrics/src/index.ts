@@ -30,6 +30,7 @@ export {
   SPAN_DERIVED_MEASURE_CATALOG,
   SPAN_DERIVED_MEASURES,
   SPAN_RULES,
+  TIMING_SPAN_MEASURES,
   type CatalogedMeasure,
   type MeasureAggregation,
   type MeasureFromSpans,

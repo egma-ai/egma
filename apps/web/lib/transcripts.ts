@@ -130,7 +130,13 @@ export function turnsCited(one: Judgment): readonly number[] {
 
 /** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
-  const words = value.replaceAll(/[_-]+/g, " ").trim();
+  const words = value
+    .replaceAll(/[_-]+/g, " ")
+    .trim()
+    // The stage acronyms read as acronyms — "LLM latency", never "Llm
+    // latency". Spelled here, once, because both pages' labels come through
+    // this one function.
+    .replaceAll(/\b(llm|tts|asr)\b/g, (acronym) => acronym.toUpperCase());
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }
 

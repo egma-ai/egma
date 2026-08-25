@@ -175,6 +175,12 @@ const TIMING = "timing";
 const HUMAN_TURN = "turn:human";
 const AGENT_TURN = "turn:agent";
 const SPEAKING = "speaking";
+// The stage kinds the door assigns to a recognised framework's own steps —
+// LiveKit's llm_node/llm_request family lands as `model`, its tts family as
+// `tts` — read here for the platform-stage measures and vetted the same way
+// the turn kinds are: by the emitting scope, at the door, never by a name.
+const MODEL_STEP = "model";
+const SYNTHESIS_STEP = "tts";
 
 const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 const NANOSECONDS_PER_MICROSECOND = 1_000n;
@@ -398,6 +404,14 @@ function samplesOf(
       // so this arm is what a display asks and never what a verdict rests on.
       return [];
     }
+    case "platform_telemetry_carries_it": {
+      // Nothing here either, and for the opposite reason: egma's own
+      // vocabulary never times a platform stage, so there is no timing span to
+      // look up. The samples come later in the chain — derived from a
+      // recognised framework's stage spans, or read from the platform's
+      // reported block — through the same precedence every measure obeys.
+      return [];
+    }
   }
 }
 
@@ -537,7 +551,34 @@ function derivedFromFrameworkSpans(
   put(derived, "turn_response_latency", turnResponseLatency(turns));
   put(derived, "first_response_latency", firstResponseLatency(root, turns));
   put(derived, "agent_speech_duration", agentSpeechDuration(turns));
+  put(derived, "llm_latency", stageLatency(turns, "modelStepsDuration"));
+  put(derived, "tts_latency", stageLatency(turns, "synthesisStepsDuration"));
   return derived;
+}
+
+/**
+ * How long one of the platform's stages ran inside each of the agent's turns —
+ * the sum of the turn's own step children of that stage, so a turn whose model
+ * was asked twice (a retry, a fallback) accounts for both askings.
+ *
+ * One sample per agent turn **that carried the stage at all**. A turn with no
+ * step of this kind did not spend zero milliseconds on it; it has no such
+ * measurement, and a zero would measure something that never happened. The
+ * sample cites the turn, because the number is the turn's and no single child
+ * holds it.
+ */
+function stageLatency(
+  turns: readonly TimedSpan[],
+  stage: "modelStepsDuration" | "synthesisStepsDuration",
+): readonly Sample[] {
+  const samples: Sample[] = [];
+  for (const turn of turns) {
+    if (turn.kind !== AGENT_TURN) continue;
+    const spent = turn[stage];
+    if (spent === 0n) continue;
+    samples.push({ value: milliseconds(spent), spanId: turn.spanId });
+  }
+  return samples;
 }
 
 /** A measure with no samples is absent, exactly as it is for a timed one. */
@@ -707,6 +748,12 @@ type TimedSpan = {
   readonly startedAt: bigint;
   readonly endedAt: bigint;
   readonly duration: bigint;
+  /** The summed durations of this turn's own model-step children, and of its
+   * synthesis-step children — the framework's own account of the thinking and
+   * the speaking-preparation inside the turn. Zero where the turn carried
+   * none, and a zero is "carried none", never a measurement. */
+  readonly modelStepsDuration: bigint;
+  readonly synthesisStepsDuration: bigint;
   /** This turn's own `speaking` children, earliest first. */
   readonly speech: readonly {
     readonly startedAt: bigint;
@@ -718,12 +765,23 @@ type TimedSpan = {
 function timed(span: TraceSpan): TimedSpan {
   const startedAt = startedAtNanoseconds(span);
   const duration = BigInt(span.durationNanoseconds);
+  let modelStepsDuration = 0n;
+  let synthesisStepsDuration = 0n;
+  for (const child of span.spans) {
+    if (child.kind === MODEL_STEP) {
+      modelStepsDuration += BigInt(child.durationNanoseconds);
+    } else if (child.kind === SYNTHESIS_STEP) {
+      synthesisStepsDuration += BigInt(child.durationNanoseconds);
+    }
+  }
   return {
     spanId: span.spanId,
     kind: span.kind,
     startedAt,
     endedAt: startedAt + duration,
     duration,
+    modelStepsDuration,
+    synthesisStepsDuration,
     speech: span.spans
       .filter((child) => child.kind === SPEAKING)
       .map((child) => ({
