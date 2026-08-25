@@ -1450,6 +1450,124 @@ describe("adding a connection", () => {
   });
 
   /**
+   * A hand-picked agent survives a trip through a modality that cannot reach
+   * it.
+   *
+   * **The pick is a statement about which provider agent this is**, not about
+   * which entry of a filtered list is highlighted. An account's voice agents
+   * and its chat agents are different sets, so switching to Chat has to show a
+   * chat agent — and switching back has to come home. It did not: the
+   * availability correction overwrote the pick itself, so the return trip
+   * found nothing to restore and settled on the account's *first* voice agent.
+   * Nothing said so, and the save connected the wrong provider agent.
+   */
+  it("returns to a hand-picked agent after a modality it cannot reach", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: MEASURED_CONNECTION },
+      },
+      "/v1/agents:discover": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              platformAgentId: "agent_voice_1",
+              name: "Appointment line",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550100" },
+                },
+              ],
+            },
+            {
+              // The hand-pick, and deliberately not first — and it has no chat
+              // counterpart, which is what makes the round trip a real one.
+              platformAgentId: "agent_voice_2",
+              name: "Out of hours",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550199" },
+                },
+              ],
+            },
+            {
+              platformAgentId: "agent_chat_9",
+              name: "Web chat",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "retell_chat_api",
+                  accessVariant: "retell_chat_api.api_key",
+                  modality: "chat",
+                  productLabel: "Retell chat",
+                  config: { retellAgentId: "agent_chat_9" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Voice" }));
+    fireEvent.change(await screen.findByLabelText("Retell API key*"), {
+      target: { value: "retell-secret-A1B2C3D4WXYZ" },
+    });
+
+    // The person picks the second voice agent, by name.
+    const voice = (await screen.findByLabelText(
+      "Retell voice agent*",
+    )) as HTMLSelectElement;
+    fireEvent.change(voice, { target: { value: "agent_voice_2" } });
+    expect(voice.value).toBe("agent_voice_2");
+
+    /*
+     * Chat cannot reach it, so Chat shows the agent it can reach. The
+     * correction is right here — what it must not do is forget the choice.
+     */
+    fireEvent.click(screen.getByRole("radio", { name: "Chat" }));
+    const chat = (await screen.findByLabelText(
+      "Retell chat agent*",
+    )) as HTMLSelectElement;
+    expect(chat.value).toBe("agent_chat_9");
+
+    // And back: the agent they chose, not the account's first one.
+    fireEvent.click(screen.getByRole("radio", { name: "Voice" }));
+    const back = (await screen.findByLabelText(
+      "Retell voice agent*",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(back.value).toBe("agent_voice_2"));
+    expect(back.selectedOptions[0]?.textContent).toBe("Out of hours");
+
+    // The save carries the agent they picked, which is the point of all of it.
+    fireEvent.change(screen.getByLabelText("Phone number*"), {
+      target: { value: "+14155550199" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]?.body).toMatchObject({ platformAgentId: "agent_voice_2" });
+  });
+
+  /**
    * **One egma agent binds to one platform agent**, so the picker opens on the
    * one this agent is already bound to rather than on whichever the account
    * listed first. Picking another is still allowed to be attempted — the

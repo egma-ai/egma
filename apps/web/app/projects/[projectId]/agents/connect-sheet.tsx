@@ -178,8 +178,16 @@ export function ConnectAgentSheet({
   const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
   /** Whether this save also starts pulling the agent's production calls. */
   const [pullCalls, setPullCalls] = useState(false);
-  /** Whether the person chose the Retell agent themselves. */
-  const [pickedByHand, setPickedByHand] = useState(false);
+  /**
+   * The Retell agent the person chose themselves, if they have chosen one.
+   *
+   * **It is the id, not a flag.** The picker's *value* is what the current
+   * modality can show, and a modality that cannot reach the chosen agent has
+   * to show something else — so the value is not a record of what was chosen.
+   * Kept apart, the choice survives the trip through a modality that does not
+   * have it, and the way back restores it.
+   */
+  const [handPicked, setHandPicked] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -354,7 +362,7 @@ export function ConnectAgentSheet({
   function forgetDiscoveredAccount(): void {
     setDiscoveredAgents(null);
     setDiscoveredAgentId("");
-    setPickedByHand(false);
+    setHandPicked(null);
   }
 
   function choosePlatform(next: string): void {
@@ -473,9 +481,11 @@ export function ConnectAgentSheet({
    * place, and a control that refused locally would be a second opinion able
    * to disagree with it.
    *
-   * Changing modality changes which of the account's agents can be reached at
-   * all, so a pick that is no longer in the list is dropped rather than
-   * carried into a save that would be refused.
+   * **Changing modality changes what can be reached, not what was chosen.**
+   * An account's chat agents and its voice agents are different sets, so a
+   * modality that cannot reach the chosen agent shows something else — and the
+   * choice is remembered beside the value rather than replacing it, so coming
+   * back restores it. A pick is only forgotten when the account itself is.
    */
   useEffect(() => {
     if (matchingAgents.length === 0) {
@@ -489,30 +499,40 @@ export function ConnectAgentSheet({
      * agent and then swap it for another under the person's eyes.
      */
     if (chosenAgent !== NEW_AGENT && known === null) return;
-    const bound = matchingAgents.find(
-      (one) => one.platformAgentId === boundPlatformAgentId,
-    );
+
+    const reachable = (id: string | null): boolean =>
+      id !== null && matchingAgents.some((one) => one.platformAgentId === id);
+
     /*
-     * **The binding wins until somebody chooses.** The account listing and the
-     * agent read land in either order, so a list that arrived first would
-     * otherwise settle on its own first entry and keep it — the pre-selection
-     * would be right or wrong depending on which request was quicker. Once a
-     * person has picked, nothing moves under them.
+     * What this modality should show, in the order the answers outrank one
+     * another:
+     *
+     * 1. **The choice, whenever this modality can reach it.** A person who
+     *    picked an agent has said which agent this is about, and a switch to
+     *    Chat and back is not them changing their mind. The correction below
+     *    used to overwrite the pick itself, so the round trip quietly landed
+     *    them on the account's first agent — the wrong provider agent, saved
+     *    without anything having said so.
+     * 2. **The binding, while nobody has chosen.** One egma agent binds to one
+     *    platform agent, so the ordinary second connection is right without
+     *    anybody choosing again.
+     * 3. **What is already showing**, when this modality can still reach it.
+     * 4. **The first agent it can reach**, which is the only answer left.
      */
-    if (!pickedByHand && bound !== undefined) {
-      if (discoveredAgentId !== bound.platformAgentId) {
-        setDiscoveredAgentId(bound.platformAgentId);
-      }
-      return;
-    }
-    if (!matchingAgents.some((one) => one.platformAgentId === discoveredAgentId)) {
-      setDiscoveredAgentId(matchingAgents[0]?.platformAgentId ?? "");
-    }
+    const wanted = reachable(handPicked)
+      ? (handPicked ?? "")
+      : handPicked === null && reachable(boundPlatformAgentId)
+        ? (boundPlatformAgentId ?? "")
+        : reachable(discoveredAgentId)
+          ? discoveredAgentId
+          : (matchingAgents[0]?.platformAgentId ?? "");
+
+    if (discoveredAgentId !== wanted) setDiscoveredAgentId(wanted);
   }, [
     matchingAgents,
     discoveredAgentId,
     boundPlatformAgentId,
-    pickedByHand,
+    handPicked,
     chosenAgent,
     known,
   ]);
@@ -859,7 +879,7 @@ export function ConnectAgentSheet({
                 setDiscoverRefused(null);
               }}
               onAgentChange={(next) => {
-                setPickedByHand(true);
+                setHandPicked(next);
                 setDiscoveredAgentId(next);
               }}
               onPhoneNumberChange={(phoneNumber) =>
