@@ -1,6 +1,6 @@
 {
-  "id": "82cf2aa3-91c2-484b-8a36-ca896c34098e",
-  "prevId": "5c97cfca-9954-4a6e-bcbb-c482935af621",
+  "id": "d6f7a510-ff39-4a54-bfd3-7db025fa5b98",
+  "prevId": "82cf2aa3-91c2-484b-8a36-ca896c34098e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1738,7 +1738,7 @@
           "name": "agent_platform",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "platform_agent_id": {
           "name": "platform_agent_id",
@@ -1928,7 +1928,7 @@
         },
         "agent_platform_allowed": {
           "name": "agent_platform_allowed",
-          "value": "\"agent\".\"agent_platform\" in ('retell', 'livekit_agents')"
+          "value": "\"agent\".\"agent_platform\" in ('retell', 'livekit')"
         },
         "agent_monitoring_key_hint_agrees": {
           "name": "agent_monitoring_key_hint_agrees",
