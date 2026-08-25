@@ -770,7 +770,9 @@ export type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
-  readonly agentPlatform: BoundPlatform;
+  // Written at registration, and by start-monitoring exactly as the real
+  // access layer writes it: binding an agent Egma is told to watch.
+  agentPlatform: BoundPlatform;
   platformAgentId: string | null;
   /** Sealed. Only its hint ever leaves this file through a route. */
   monitoringApiKey: string | null;
