@@ -58,6 +58,17 @@ export type MenuProps = {
   readonly trigger: ReactNode;
   readonly triggerClassName?: string;
   readonly openClassName?: string;
+  /**
+   * The button's own id, for a `<label for>` that has to point at it.
+   *
+   * A panel standing in for a form control is still a field with a name drawn
+   * above it, and a label that points at nothing is a label a person cannot
+   * click and assistive technology cannot follow. A button is a labelable
+   * element, so the id is all that is missing.
+   */
+  readonly triggerId?: string;
+  /** A control that cannot be used yet — while the form it sits in is saving. */
+  readonly disabled?: boolean;
   /** Which edge of the trigger anchors the panel. */
   readonly placement?:
     | "below-start"
@@ -136,6 +147,8 @@ export function Menu({
   trigger,
   triggerClassName,
   openClassName,
+  triggerId,
+  disabled,
   placement = "below-start",
   panelRole = "menu",
   panelClassName,
@@ -223,6 +236,8 @@ export function Menu({
           ref={holdTrigger}
           aria-haspopup={panelRole}
           aria-label={label}
+          {...(triggerId === undefined ? {} : { id: triggerId })}
+          {...(disabled === undefined ? {} : { disabled })}
         >
           {trigger}
         </PopoverTrigger>

@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   addConnection,
@@ -36,6 +37,7 @@ import {
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { agentPlatformLabel } from "@/lib/transcripts.ts";
 import { Field, Help, Problem } from "@/ui/form.tsx";
+import { Menu, MenuItem } from "@/ui/menu.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
@@ -708,23 +710,25 @@ export function ConnectAgentSheet({
    * link into an agent on the fourth page of the list still shows its own name
    * rather than falling back to "Create a new agent".
    */
-  const choices: readonly { readonly id: string; readonly label: string }[] = [
+  const choices: readonly AgentChoice[] = [
     ...agents.map((one) => ({
       id: one.id,
-      label: labelFor(one.name, agentPlatformText(one)),
+      name: one.name,
+      platform: agentPlatformText(one),
     })),
     ...(chosenAgent !== NEW_AGENT && !agents.some((one) => one.id === chosenAgent)
       ? [
-          {
-            id: chosenAgent,
-            label:
-              known === null
-                ? "This agent"
-                : labelFor(known.name, agentPlatformLabel(known.agentPlatform)),
-          },
+          known === null
+            ? { id: chosenAgent, name: "This agent", platform: null }
+            : {
+                id: chosenAgent,
+                name: known.name,
+                platform: agentPlatformLabel(known.agentPlatform),
+              },
         ]
       : []),
   ];
+  const chosen = choices.find((one) => one.id === chosenAgent);
 
   function body(): ReactNode {
     /*
@@ -768,20 +772,59 @@ export function ConnectAgentSheet({
           * registered twice.
           */}
         <Field label="Agent*" htmlFor="agent-choice">
-          <Select
-            aria-required="true"
-            id="agent-choice"
-            value={chosenAgent}
+          <Menu
+            label="Agent*"
+            triggerId="agent-choice"
             disabled={saving}
-            onChange={(event) => chooseAgent(event.target.value)}
+            placement="below-start"
+            panelClassName="w-(--radix-popover-trigger-width) max-w-none"
+            triggerClassName={cn(
+              "flex min-h-(--control-lg) w-full min-w-0 cursor-pointer items-center gap-2 px-3",
+              "rounded-input border border-input bg-surface text-left text-base text-foreground",
+              "pointer-coarse:min-h-(--tap-target)",
+              "disabled:cursor-not-allowed disabled:opacity-60",
+            )}
+            trigger={
+              <>
+                {chosen === undefined ? (
+                  <span className="min-w-0 flex-1">Create a new agent</span>
+                ) : (
+                  <AgentChoiceLabel name={chosen.name} platform={chosen.platform} />
+                )}
+                <ChevronDownIcon
+                  className="size-4 flex-none text-faint"
+                  aria-hidden="true"
+                  strokeWidth={1.75}
+                />
+              </>
+            }
           >
-            {choices.map((one) => (
-              <option key={one.id} value={one.id}>
-                {one.label}
-              </option>
-            ))}
-            <option value={NEW_AGENT}>Create a new agent</option>
-          </Select>
+            {(close) => (
+              <>
+                {choices.map((one) => (
+                  <MenuItem
+                    key={one.id}
+                    selected={one.id === chosenAgent}
+                    onClick={() => {
+                      chooseAgent(one.id);
+                      close();
+                    }}
+                  >
+                    <AgentChoiceLabel name={one.name} platform={one.platform} />
+                  </MenuItem>
+                ))}
+                <MenuItem
+                  selected={chosenAgent === NEW_AGENT}
+                  onClick={() => {
+                    chooseAgent(NEW_AGENT);
+                    close();
+                  }}
+                >
+                  Create a new agent
+                </MenuItem>
+              </>
+            )}
+          </Menu>
         </Field>
 
         {creating ? (
@@ -1002,15 +1045,46 @@ export function ConnectAgentSheet({
   );
 }
 
+/** One agent the picker offers: its name, and where it already lives. */
+type AgentChoice = {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string | null;
+};
+
 /**
- * "remedy phase 1 · Retell", the way the board writes an agent in the picker.
+ * "remedy phase 1" in the product's text colour, then "Retell" faint beside it.
+ *
+ * The name is the answer to "which agent is this" and the platform is context
+ * for it, so they are not drawn at the same weight. The row used to read
+ * "remedy phase 1 · Retell" in one colour, where the platform argued with the
+ * name for the first read of every option.
+ *
+ * **The name truncates and the platform does not.** A long name that pushed the
+ * platform off the end would leave two agents of the same family looking
+ * identical, which is the one thing the platform is there to prevent.
  *
  * The platform arrives already in a person's words, because an agent on two
  * platforms is named with both of them and the list column and this picker
  * must not word that answer differently.
  */
-function labelFor(name: string, platforms: string | null): string {
-  return platforms === null ? name : `${name} · ${platforms}`;
+function AgentChoiceLabel({
+  name,
+  platform,
+}: {
+  readonly name: string;
+  readonly platform: string | null;
+}) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+        {name}
+      </span>
+      {platform === null ? null : (
+        <span className="flex-none text-faint">{platform}</span>
+      )}
+    </span>
+  );
 }
 
 /**

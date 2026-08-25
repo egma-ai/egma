@@ -370,6 +370,18 @@ describe("which agents the picker lists", () => {
       }),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Start pulling" })).toBeNull();
+
+    /*
+     * **The sentence promises "add another agent", so the panel carries the
+     * move that does it.** Close alone was a dead end. Connecting belongs to
+     * the agents screen, so this is a real navigation, and it lands with that
+     * screen's connect sheet already open.
+     */
+    expect(
+      screen.getByRole("link", { name: "Connect an agent" }).getAttribute("href"),
+    ).toBe("/projects/prj_2/agents?sheet=connect");
+    // The way out stays: the head's own ✕ and the footer's Close.
+    expect(screen.getAllByRole("button", { name: "Close" }).length).toBeGreaterThan(0);
   });
 
   /**

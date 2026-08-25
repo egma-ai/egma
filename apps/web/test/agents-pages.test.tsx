@@ -1133,14 +1133,26 @@ describe("adding a connection", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect an agent" }),
     ).toBeTruthy();
-    const picker = (await screen.findByLabelText("Agent*")) as HTMLSelectElement;
-    expect(picker.value).toBe("agt_1");
-    expect(picker.selectedOptions[0]?.textContent).toBe("Front desk · Retell");
+    const picker = await screen.findByLabelText("Agent*");
+    /*
+     * **The name and the platform are two spans, not one string.** The picker
+     * draws the agent's name in the product's text colour and the platform
+     * faint beside it, which a native `<option>` cannot do — so the closed
+     * control says both, and the platform is the one wearing `text-faint`.
+     */
+    expect(picker.textContent).toContain("Front desk");
+    expect(picker.textContent).toContain("Retell");
+    expect(within(picker).getByText("Retell").className).toContain("text-faint");
+
     /*
      * **Making a new agent is still an option, and it is the last one.** Reuse
      * is the ordinary case; creation is the fallback under it (`I79-0`).
      */
-    const options = [...picker.options].map((one) => one.textContent);
+    fireEvent.click(picker);
+    const options = within(screen.getByRole("menu", { name: "Agent*" }))
+      .getAllByRole("menuitem")
+      .map((one) => one.textContent);
+    expect(options[0]).toContain("Front desk");
     expect(options.at(-1)).toBe("Create a new agent");
     expect(
       screen.getByText("The label shown for this connection in Egma."),

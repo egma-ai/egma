@@ -297,27 +297,21 @@ function Navigation({
   );
 }
 
-/*
- * Billing is not part of `/api/me` yet. Every organization in this release is
- * on the same plan, so this stays explicit UI copy instead of pretending the
- * session contains subscription data. Do not show it without a real
- * organization; a loading or failed session has made no plan claim.
- */
-const CURRENT_PLAN = { badge: "Free", name: "Free Plan" } as const;
-
-const ROLE_LABEL: Record<Role, string> = {
-  admin: "Admin",
-  member: "Member",
-  viewer: "Viewer",
-};
-
 /**
  * The organization identity at the top of the signed-in sidebar.
  *
  * There is one organization per session today, so this panel gives context and
- * does not offer a false switcher. The paired arrows still open a useful
- * surface: organization name, current plan and the person's real membership
- * role. Organization settings stay out until that product level exists.
+ * does not offer a false switcher. The paired arrows still open a small
+ * surface: the organization's mark and its name. Organization settings stay out
+ * until that product level exists.
+ *
+ * **The bar and the panel say the organization's name, and nothing else.**
+ * Both used to carry a "Free" chip and a "Free Plan · Admin" line under the
+ * name. Billing is not part of `/api/me`, so that plan was hard-written copy
+ * standing where a fact belongs, and the role it sat beside is already said by
+ * the account control at the foot of the same sidebar. Two claims, one of them
+ * invented and one of them repeated, above the name they were meant to
+ * describe.
  *
  * **The mark is identity, not a control.** It sits beside the menu trigger
  * rather than inside it, so the hover plate, focus indicator and press feedback
@@ -326,11 +320,9 @@ const ROLE_LABEL: Record<Role, string> = {
  */
 function OrganizationMenu({
   organization,
-  role,
   settled,
 }: {
   readonly organization: Organization | undefined;
-  readonly role: Role | null;
   readonly settled: boolean;
 }) {
   const mark = (
@@ -388,9 +380,6 @@ function OrganizationMenu({
             >
               {organization.name}
             </span>
-            <Badge className="px-1 text-xs" shape="count" data-slot="organization-plan">
-              {CURRENT_PLAN.badge}
-            </Badge>
             <ChevronsUpDownIcon
               className="size-3 flex-none text-faint"
               aria-hidden="true"
@@ -407,19 +396,8 @@ function OrganizationMenu({
             >
               {initial}
             </span>
-            <span className="min-w-0">
-              <span className="block overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
-                {organization.name}
-              </span>
-              <span className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                <span>{CURRENT_PLAN.name}</span>
-                {role === null ? null : (
-                  <>
-                    <span className="h-3 w-px bg-border" aria-hidden="true" />
-                    <span>{ROLE_LABEL[role]}</span>
-                  </>
-                )}
-              </span>
+            <span className="min-w-0 overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
+              {organization.name}
             </span>
           </div>
         )}
@@ -735,11 +713,7 @@ function ShellFrame({
       >
         {/* Organization context owns the top bar; project context stays below. */}
         <SidebarBrand className="gap-2 [&>[data-slot=menu]]:min-w-0 [&>[data-slot=menu]]:flex-1">
-          <OrganizationMenu
-            organization={organization}
-            role={role}
-            settled={session.settled}
-          />
+          <OrganizationMenu organization={organization} settled={session.settled} />
         </SidebarBrand>
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}

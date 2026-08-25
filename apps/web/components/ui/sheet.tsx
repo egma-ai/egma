@@ -201,10 +201,20 @@ function SheetContent({
 function SheetHeader({
   className,
   children,
+  actions,
   closeLabel = "Close",
   showCloseButton = true,
   ...props
 }: ComponentProps<"div"> & {
+  /**
+   * The panel's own controls, drawn on the title's line beside the close.
+   *
+   * A sheet that manages a record carries a ⋮ for it, and the boards draw that
+   * ⋮ in the head next to the ✕ rather than under the name. Passed here instead
+   * of as a child because the children are the title column: anything put there
+   * lands on a line of its own below the name, which is what it looked like.
+   */
+  readonly actions?: ReactNode;
   readonly closeLabel?: string;
   readonly showCloseButton?: boolean;
 }) {
@@ -219,21 +229,26 @@ function SheetHeader({
       {...props}
     >
       <div className="flex min-w-0 flex-col gap-1">{children}</div>
-      {showCloseButton ? (
-        <SheetClose
-          className={cn(
-            "-mt-1 -mr-1 inline-flex size-(--control-lg) flex-none cursor-pointer",
-            "items-center justify-center rounded-button border border-transparent",
-            "text-muted-foreground",
-            /* Named, so the focus ring is not among them. See `button.tsx`. */
-            "transition-[color,background-color] duration-(--duration-hover) ease-out",
-            "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
-          )}
-        >
-          <XIcon className="size-4" />
-          <span className="sr-only">{closeLabel}</span>
-        </SheetClose>
-      ) : null}
+      {actions === undefined && !showCloseButton ? null : (
+        <div className="-mt-1 -mr-1 flex flex-none items-center gap-1">
+          {actions}
+          {showCloseButton ? (
+            <SheetClose
+              className={cn(
+                "inline-flex size-(--control-lg) flex-none cursor-pointer",
+                "items-center justify-center rounded-button border border-transparent",
+                "text-muted-foreground",
+                /* Named, so the focus ring is not among them. See `button.tsx`. */
+                "transition-[color,background-color] duration-(--duration-hover) ease-out",
+                "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
+              )}
+            >
+              <XIcon className="size-4" />
+              <span className="sr-only">{closeLabel}</span>
+            </SheetClose>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

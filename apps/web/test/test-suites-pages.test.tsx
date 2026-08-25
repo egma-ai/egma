@@ -271,7 +271,7 @@ describe("the suite-first Tests route", () => {
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/tests/suites/ste_1");
   });
 
-  it("teaches the first test in the grid and carries only Write a test", async () => {
+  it("teaches the first test in the grid and keeps every verb inside it", async () => {
     routed.pathname = "/projects/prj_1/tests/suites/ste_1";
     routed.params = { projectId: "prj_1", suiteId: "ste_1" };
     answers({
@@ -283,7 +283,14 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
 
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
-    for (const header of ["Name", "Scenario", "Expected behaviors", "Personas"]) {
+    // The trailing ⋮ lane is named out loud, like every other column.
+    for (const header of [
+      "Name",
+      "Scenario",
+      "Expected behaviors",
+      "Personas",
+      "Actions",
+    ]) {
       expect(screen.getByRole("columnheader", { name: header }), header).toBeTruthy();
     }
     // An empty suite is the grid and one teaching row, not an empty-state card.
@@ -292,8 +299,10 @@ describe("the suite-first Tests route", () => {
     expect(screen.getByRole("button", { name: "+ Write a test" })).toBeTruthy();
 
     // Suite management moved to the suites list. Nothing here runs, renames or
-    // deletes a suite, and there is no toolbar ⋮ left to hold them.
-    expect(screen.getByRole("button", { name: "Write a test" })).toBeTruthy();
+    // deletes a suite, and there is no toolbar ⋮ left to hold them. Writing is
+    // the grid's ghost row alone: the toolbar button said the same word twice
+    // and went on 2026-08-25.
+    expect(screen.queryByRole("button", { name: "Write a test" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Run suite" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Open the suite menu" })).toBeNull();
   });
@@ -313,13 +322,12 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
 
     expect(await screen.findByText("Books service")).toBeTruthy();
-    const write = screen.getByRole("button", { name: "Write a test" });
-    expect((write as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(write);
 
-    // A viewer's grid never wakes: no ghost row to write into, and a click on a
-    // cell leaves the cell as it was.
+    // A viewer's grid never wakes: no ghost row to write into, no toolbar
+    // button standing in for it, and a click on a cell leaves the cell as it
+    // was.
     expect(screen.queryByRole("button", { name: "+ Write a test" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a test" })).toBeNull();
     fireEvent.click(screen.getByText("The caller books service."));
     expect(screen.queryByLabelText("Scenario")).toBeNull();
     expect(sent.some((request) => ["POST", "PATCH", "DELETE"].includes(request.method))).toBe(
@@ -648,14 +656,14 @@ describe("the suite-first Tests route", () => {
     });
   });
 
-  it("focuses the entry row from the toolbar and from the retired write address", async () => {
+  it("focuses the entry row from the ghost row and from the retired write address", async () => {
     gridAnswers({ tests: [] });
 
     render(<TestSuitePage />);
 
-    // The toolbar's own button: the entry row opens with the caret in Name,
-    // and the address does not move.
-    fireEvent.click(await screen.findByRole("button", { name: "Write a test" }));
+    // The grid's own ghost row, which is the only way in now: the entry row
+    // opens with the caret in Name, and the address does not move.
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByLabelText("Name"));
     });
