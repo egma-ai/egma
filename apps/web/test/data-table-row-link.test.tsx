@@ -96,6 +96,70 @@ describe("DataTable row links", () => {
   });
 });
 
+const ALIGNED_COLUMNS: readonly Column<Row>[] = [
+  {
+    key: "name",
+    header: "Grader",
+    primary: true,
+    cell: (row) => row.name,
+  },
+  {
+    key: "threshold",
+    header: "Pass threshold",
+    align: "end",
+    cell: () => "0.80",
+  },
+  {
+    key: "registered",
+    header: "Registered",
+    cell: (row) => row.registered,
+  },
+];
+
+/** The one class token, read off the element rather than out of a string. */
+function alignsRight(element: HTMLElement): boolean {
+  return element.classList.contains("text-right");
+}
+
+function valueOf(cell: HTMLElement): HTMLElement {
+  return cell.querySelector("[data-slot=cell]") as HTMLElement;
+}
+
+describe("DataTable numeric columns", () => {
+  it("keeps an aligned column's header on the edge its values read from", () => {
+    render(
+      <DataTable
+        label="Graders"
+        columns={ALIGNED_COLUMNS}
+        rows={[ROW]}
+        keyOf={(row) => row.id}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "Graders" });
+
+    expect(
+      alignsRight(
+        within(table).getByRole("columnheader", { name: "Pass threshold" }),
+      ),
+    ).toBe(true);
+    expect(
+      alignsRight(valueOf(within(table).getByRole("cell", { name: "0.80" }))),
+    ).toBe(true);
+
+    /* A column that asked for nothing keeps the table's own left edge. */
+    expect(
+      alignsRight(
+        within(table).getByRole("columnheader", { name: "Registered" }),
+      ),
+    ).toBe(false);
+    expect(
+      alignsRight(
+        valueOf(within(table).getByRole("cell", { name: "2026-08-15" })),
+      ),
+    ).toBe(false);
+  });
+});
+
 /** A row control whose open panel lives in `body`, the way the ⋮ menu does. */
 function PortalMenu() {
   const [open, setOpen] = useState(false);

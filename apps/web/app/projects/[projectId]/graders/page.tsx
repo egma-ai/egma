@@ -173,11 +173,12 @@ function RowOpener({
   );
 }
 
-/** The score a simulation has to reach, as a measure: two places, tabular. */
+/**
+ * The score a simulation has to reach, as a measure: two places, tabular. The
+ * column says which edge it reads from, so the header stays with the figures.
+ */
 function PassThreshold({ value }: { readonly value: number }) {
-  return (
-    <span className="block text-right tabular-nums">{value.toFixed(2)}</span>
-  );
+  return <span className="tabular-nums">{value.toFixed(2)}</span>;
 }
 
 /**
@@ -253,6 +254,7 @@ function activeColumns(
     {
       key: "threshold",
       header: "Pass threshold",
+      align: "end",
       cell: (grader) => <PassThreshold value={grader.passThreshold} />,
     },
     {
