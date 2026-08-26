@@ -794,7 +794,7 @@ describe("registering an agent", () => {
   /** LiveKit needs no account discovery, so the test can complete one write. */
   async function fillLiveKitRoom(choosePlatform = true): Promise<void> {
     if (choosePlatform) {
-      fireEvent.change(await screen.findByLabelText("Platform"), {
+      fireEvent.change(await screen.findByLabelText("Platform*"), {
         target: { value: "livekit" },
       });
     }
@@ -811,6 +811,45 @@ describe("registering an agent", () => {
       target: { value: "livekit-secret" },
     });
   }
+
+  /**
+   * **The platform is asked, not assumed.** The sheet used to open with the
+   * catalog's first offered platform already chosen, which put a Retell form
+   * in front of every person — a LiveKit owner had to notice a filled-in
+   * answer was wrong before they could give the right one. The select now
+   * opens on "Choose a platform", nothing platform-shaped is drawn until it
+   * is answered, and the answer decides which questions appear.
+   */
+  it("asks for the platform before it draws a platform's questions", async () => {
+    sheetAnswers({ status: 201, body: { result: "created", agent: AGENT } });
+    render(<RegisterAgentPage />);
+
+    const platform = await screen.findByLabelText("Platform*");
+    expect((platform as HTMLSelectElement).value).toBe("");
+    expect(platform.getAttribute("aria-required")).toBe("true");
+    /* No platform's questions yet — not Retell's, not LiveKit's. */
+    expect(screen.queryByLabelText("Retell API key*")).toBeNull();
+    expect(screen.queryByLabelText("LiveKit WebSocket URL*")).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Voice" })).toBeNull();
+    /* The submit says what is missing rather than sitting silently dead. */
+    expect(
+      (screen.getByRole("button", { name: "Connect agent" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      screen.getByText("Choose the platform this agent runs on."),
+    ).toBeDefined();
+
+    /* The answer draws its own questions, and only its own. */
+    fireEvent.change(platform, { target: { value: "retell" } });
+    expect(await screen.findByLabelText("Retell API key*")).toBeDefined();
+    expect(screen.queryByLabelText("LiveKit WebSocket URL*")).toBeNull();
+
+    /* A different answer swaps the questions rather than stacking them. */
+    fireEvent.change(platform, { target: { value: "livekit" } });
+    expect(await screen.findByLabelText("LiveKit WebSocket URL*")).toBeDefined();
+    expect(screen.queryByLabelText("Retell API key*")).toBeNull();
+  });
 
   it("sends the required platform for a first Retell agent", async () => {
     apiAnswers({
@@ -847,6 +886,10 @@ describe("registering an agent", () => {
 
     fireEvent.change(await screen.findByLabelText("Name*"), {
       target: { value: "Front desk" },
+    });
+    /* The platform is asked, not assumed: Retell has to be chosen to exist. */
+    fireEvent.change(await screen.findByLabelText("Platform*"), {
+      target: { value: "retell" },
     });
     fireEvent.click(await screen.findByRole("radio", { name: "Voice" }));
     fireEvent.change(await screen.findByLabelText("Retell API key*"), {

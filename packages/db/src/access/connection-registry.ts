@@ -931,7 +931,7 @@ export const CONNECTION_REGISTRY: Readonly<
     accessVariants: [
       {
         id: "livekit_room.project_credentials",
-        label: "LiveKit project credentials — Recommended",
+        label: "LiveKit project credentials [Recommended]",
         named: "a LiveKit room connection",
         config: {
           // The LiveKit server: a customer's cloud project, or the one they
@@ -1001,7 +1001,7 @@ export const CONNECTION_REGISTRY: Readonly<
       {
         named: "a token-endpoint livekit connection",
         id: "livekit_room.customer_token_endpoint",
-        label: "Customer token endpoint — Advanced",
+        label: "Customer token endpoint [Advanced]",
         config: {
           // Where the join goes, unless the endpoint's answer names another.
           url: livekitServerUrl,
