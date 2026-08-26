@@ -827,6 +827,10 @@ describe("registering an agent", () => {
     const platform = await screen.findByLabelText("Platform*");
     expect((platform as HTMLSelectElement).value).toBe("");
     expect(platform.getAttribute("aria-required")).toBe("true");
+    /* The question leads, then the platforms in the sheet's own order. */
+    expect(
+      within(platform).getAllByRole("option").map((one) => one.textContent),
+    ).toEqual(["Choose a platform", "LiveKit", "Retell"]);
     /* No platform's questions yet — not Retell's, not LiveKit's. */
     expect(screen.queryByLabelText("Retell API key*")).toBeNull();
     expect(screen.queryByLabelText("LiveKit WebSocket URL*")).toBeNull();

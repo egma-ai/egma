@@ -101,8 +101,11 @@ const NEW_AGENT = "";
 const SHORTEST_KEY = 8;
 
 /**
- * The platforms an agent can be connected on: Retell and LiveKit, and no
- * third one (founder ruling, 2026-08-24).
+ * The platforms an agent can be connected on — LiveKit first, then Retell,
+ * and no third one (founder ruling, 2026-08-24; the order is the developer's,
+ * 2026-08-26). This list is the select's order as well as its filter, so the
+ * dropdown reads it top to bottom rather than reading the catalog's own
+ * ordering.
  *
  * **The catalog carries one more.** A phone number belongs to no platform in
  * particular, so the registry lists it under a platform-less option labelled
@@ -111,7 +114,7 @@ const SHORTEST_KEY = 8;
  * register an agent bound to nothing, which nothing downstream can monitor.
  * The catalog is not changed; this sheet chooses what it offers from it.
  */
-const OFFERED_PLATFORMS: readonly string[] = ["retell", "livekit"];
+const OFFERED_PLATFORMS: readonly string[] = ["livekit", "retell"];
 
 /**
  * The connection half of the write, typed from the operation that carries it.
@@ -1052,13 +1055,16 @@ export function ConnectAgentSheet({
           <option value="" disabled>
             Choose a platform
           </option>
-          {agentPlatformChoices(catalog)
-            .filter((one) => OFFERED_PLATFORMS.includes(one.value))
-            .map((one) => (
-              <option key={one.value} value={one.value}>
-                {one.label}
-              </option>
-            ))}
+          {OFFERED_PLATFORMS.flatMap((offered) => {
+            const one = agentPlatformChoices(catalog).find(
+              (choice) => choice.value === offered,
+            );
+            return one === undefined ? [] : [one];
+          }).map((one) => (
+            <option key={one.value} value={one.value}>
+              {one.label}
+            </option>
+          ))}
         </Select>
       </Field>
     );
