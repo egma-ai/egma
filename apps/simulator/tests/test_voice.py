@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 from conftest import (
+    A_NAME,
     A_PERSONALITY,
     assert_one_speaker_to_a_channel,
     loopback_spec,
@@ -48,7 +49,7 @@ from egma_simulator.recording import (
     channels_of,
     dual_channel_wav,
 )
-from egma_simulator.spec import SimulationSpec
+from egma_simulator.spec import AuthoredPersona, SimulationSpec
 from egma_simulator.speech import (
     CONVERSATION_VAD,
     SAMPLES_PER_BYTE,
@@ -149,7 +150,7 @@ async def observe(
 
     conducted = await conductor.conduct(
         persona=Persona(
-            traits=spec.persona_traits,
+            authored=spec.persona,
             scenario_instructions=spec.scenario_instructions,
             model=ScriptedModel(spec.scenario_instructions),
         ),
@@ -199,10 +200,11 @@ def test_the_persona_voice_comes_from_the_pinned_tts_selection():
         0.9,
     )
 
-    assert spec.persona_traits == {
-        "personality": A_PERSONALITY,
-        "language": "en-US",
-    }
+    assert spec.persona == AuthoredPersona(
+        name=A_NAME,
+        personality=A_PERSONALITY,
+        language="en-US",
+    )
 
 
 # -- The voice activity detector ---------------------------------------------

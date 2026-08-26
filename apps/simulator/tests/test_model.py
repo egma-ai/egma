@@ -357,7 +357,7 @@ async def test_runtime_model_forwards_the_claimed_reasoning_policy(
     if reasoning_effort is not None:
         llm["reasoning_effort"] = reasoning_effort
     document = {
-        "contract_version": 4,
+        "contract_version": 5,
         "simulation_id": "sim_direct_model_selection",
         "modality": "chat",
         "connection": {
@@ -368,10 +368,9 @@ async def test_runtime_model_forwards_the_claimed_reasoning_policy(
             "credentials": None,
         },
         "persona": {
-            "traits": {
-                "personality": "Patient and direct.",
-                "language": "en-US",
-            }
+            "name": "Alex",
+            "personality": "Patient and direct.",
+            "language": "en-US",
         },
         "scenario": {"instructions": "Ask for the next appointment."},
         "limits": {"max_duration_seconds": 300, "max_turns": 20},

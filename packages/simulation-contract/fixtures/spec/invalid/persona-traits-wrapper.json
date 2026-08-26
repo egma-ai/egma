@@ -1,6 +1,6 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_fixture_persona_technical_voice",
+  "simulation_id": "sim_fixture_persona_traits_wrapper",
   "modality": "chat",
   "connection": {
     "agent_platform": null,
@@ -10,13 +10,11 @@
     "credentials": null
   },
   "persona": {
-    "name": "Alex",
-    "personality": "Patient and direct.",
-    "language": "en-US",
-    "voice": {
-      "provider": "cartesia",
-      "voiceId": "wrong-owner",
-      "speed": 1
+    "traits": {
+      "personality": "Patient and direct.",
+      "language": "en-US",
+      "accent": "Neutral American English.",
+      "backgroundNoise": "A quiet waiting room."
     }
   },
   "scenario": { "instructions": "Ask for an appointment." },

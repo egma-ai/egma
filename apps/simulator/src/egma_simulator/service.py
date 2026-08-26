@@ -292,7 +292,7 @@ class RunningSimulation:
             )
             self._assembled = assembled
             persona = Persona(
-                traits=self._spec.persona_traits,
+                authored=self._spec.persona,
                 scenario_instructions=self._spec.scenario_instructions,
                 model=model,
             )

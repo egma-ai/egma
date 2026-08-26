@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_fixture_adapter_missing",
   "modality": "voice",
   "connection": {
@@ -10,9 +10,9 @@
     "credentials": null
   },
   "persona": {
-    "traits": {
-      "personality": "Patient and direct.", "language": "en-US"
-    }
+    "name": "Alex",
+    "personality": "Patient and direct.",
+    "language": "en-US"
   },
   "scenario": {
     "instructions": "Ask for the next available appointment."

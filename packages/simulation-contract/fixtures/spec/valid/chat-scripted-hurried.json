@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEU",
   "modality": "chat",
   "connection": {
@@ -19,9 +19,9 @@
     "credentials": null
   },
   "persona": {
-    "traits": {
-      "personality": "Dev, 34, messaging from a train platform. In a hurry, fires off short messages, expects quick answers.", "language": "en-US"
-    }
+    "name": "Dev",
+    "personality": "Dev, 34, messaging from a train platform. In a hurry, fires off short messages, expects quick answers.",
+    "language": "en-US"
   },
   "scenario": {
     "instructions": "My card was charged twice for the same order this morning. I need the duplicate charge reversed and a confirmation number before my train arrives. Please be quick about it."

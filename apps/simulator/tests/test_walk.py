@@ -18,14 +18,17 @@ from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.plugs import AgentReply
 from egma_simulator.plugs.scripted import ScriptedCounterpart
+from egma_simulator.spec import AuthoredPersona
 from egma_simulator.walk import Conducted, WalkControls, conduct
 
-TRAITS = {"personality": "Terse test person.", "language": "en-US"}
+AUTHORED = AuthoredPersona(
+    name="Robin", personality="Terse test person.", language="en-US"
+)
 
 
 def persona_for(scenario: str) -> Persona:
     return Persona(
-        traits=TRAITS,
+        authored=AUTHORED,
         scenario_instructions=scenario,
         model=ScriptedModel(scenario),
     )

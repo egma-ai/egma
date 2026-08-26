@@ -1,6 +1,6 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_fixture_persona_technical_voice",
+  "simulation_id": "sim_fixture_persona_missing_name",
   "modality": "chat",
   "connection": {
     "agent_platform": null,
@@ -10,14 +10,8 @@
     "credentials": null
   },
   "persona": {
-    "name": "Alex",
     "personality": "Patient and direct.",
-    "language": "en-US",
-    "voice": {
-      "provider": "cartesia",
-      "voiceId": "wrong-owner",
-      "speed": 1
-    }
+    "language": "en-US"
   },
   "scenario": { "instructions": "Ask for an appointment." },
   "limits": { "max_duration_seconds": 300, "max_turns": 20 },

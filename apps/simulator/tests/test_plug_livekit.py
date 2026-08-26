@@ -718,7 +718,7 @@ async def room_walk(
     assert assembled.conductor is not None
     conducted = await assembled.conductor.conduct(
         persona=Persona(
-            traits=spec.persona_traits,
+            authored=spec.persona,
             scenario_instructions=spec.scenario_instructions,
             model=ScriptedModel(spec.scenario_instructions),
         ),
@@ -1266,7 +1266,7 @@ async def test_a_real_transport_join_refusal_reaches_the_running_pipeline(
         with pytest.raises(PlugError) as refused:
             await conductor.conduct(
                 persona=Persona(
-                    traits=spec.persona_traits,
+                    authored=spec.persona,
                     scenario_instructions=spec.scenario_instructions,
                     model=ScriptedModel(spec.scenario_instructions),
                 ),
