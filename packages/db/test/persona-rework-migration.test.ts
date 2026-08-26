@@ -370,7 +370,7 @@ describe("the ordinary reads, over migrated rows", () => {
     const names = items.map((one) => one.name);
 
     expect(names).toContain("Impatient Rita");
-    expect(names).toContain("Default Persona");
+    expect(names).toContain("Everyday caller");
     expect(names).not.toContain("Retired Ray");
   });
 

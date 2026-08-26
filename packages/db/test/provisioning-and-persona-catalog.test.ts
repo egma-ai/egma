@@ -362,7 +362,7 @@ describe("catalog integrity", () => {
     const entry = PERSONA_LIBRARY_CATALOG[0];
     const v1 = entry?.versions[0];
     if (entry === undefined || v1 === undefined) {
-      throw new Error("the default persona catalog entry is incomplete");
+      throw new Error("the Predefined persona catalog entry is incomplete");
     }
     const fork = await forkPersona(
       acme.auth,

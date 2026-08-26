@@ -17,7 +17,7 @@ export type EgmaProvidedPersonaVersion = {
    * The human name this persona gives the agent. Catalog content, not a
    * fallback: an agent that asked "who am I speaking to?" used to hear
    * whatever the model invented that morning, and a shelf persona introducing
-   * itself as "Default Persona" would be worse than either.
+   * itself by its catalog name would be worse than either.
    */
   readonly identityName: string;
   readonly personality: string;
@@ -35,7 +35,7 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
-const DEFAULT_PERSONA_MODELS: PersonaModels = {
+const SHELF_PERSONA_MODELS: PersonaModels = {
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
@@ -54,7 +54,18 @@ const DEFAULT_PERSONA_MODELS: PersonaModels = {
 export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
   {
     id: EGMA_PROVIDED_PERSONAS.defaultPersona,
-    name: "Default Persona",
+    /**
+     * The team's word for the persona every project starts with.
+     *
+     * It was "Default Persona" until the default-persona pointer was deleted,
+     * and the name then claimed a role the product no longer has: nothing is a
+     * default any more, so a row saying so would be the last surface still
+     * advertising it. "Everyday caller" is what this persona is — the ordinary
+     * one, for the scenario that needs a person rather than a particular
+     * person. Catalog content, so a later change is a change of copy and not a
+     * change of behavior.
+     */
+    name: "Everyday caller",
     description: "Regular conversationalist persona",
     versions: [
       {
@@ -64,7 +75,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        models: DEFAULT_PERSONA_MODELS,
+        models: SHELF_PERSONA_MODELS,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
       },
     ],
