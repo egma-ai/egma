@@ -139,6 +139,7 @@ const RELISTEN_AFTER_MILLISECONDS = 1_000;
 export async function listen(
   channel: string,
   onNotification: () => void,
+  onFailure: (error: unknown) => void = () => undefined,
 ): Promise<Listening> {
   const url = databaseUrl;
   if (url === undefined) throw new Error("not connected to Postgres");
@@ -152,6 +153,13 @@ export async function listen(
   let closed = false;
   let client: pg.Client | undefined;
   let waking: NodeJS.Timeout | undefined;
+  let failureReported = false;
+
+  const reportFailure = (error: unknown): void => {
+    if (failureReported) return;
+    failureReported = true;
+    onFailure(error);
+  };
 
   const rebuild = (): void => {
     if (closed || waking !== undefined) return;
@@ -159,9 +167,9 @@ export async function listen(
       waking = undefined;
       void establish();
     }, RELISTEN_AFTER_MILLISECONDS);
-    // A pending reconnection must never hold the process open by itself: the
-    // service exits when its work is done, not when its timers are.
-    waking.unref();
+    // This wait is part of the listener's lifetime. If the dropped socket was
+    // the process's last handle, keeping this timer referenced is what lets a
+    // standing worker reconnect instead of exiting. `close` clears it.
   };
 
   const establish = async (): Promise<void> => {
@@ -169,7 +177,9 @@ export async function listen(
     const connecting = new pg.Client({ connectionString: url });
     // Registered before connecting, because a connection that dies has to
     // arrive here rather than at an unhandled rejection.
-    connecting.on("error", () => {
+    connecting.on("error", (error: unknown) => {
+      if (closed) return;
+      reportFailure(error);
       if (client === connecting) client = undefined;
       connecting.end().catch(() => undefined);
       rebuild();
@@ -181,7 +191,8 @@ export async function listen(
     try {
       await connecting.connect();
       await connecting.query(`listen ${channel}`);
-    } catch {
+    } catch (error) {
+      reportFailure(error);
       connecting.end().catch(() => undefined);
       rebuild();
       return;
@@ -192,6 +203,7 @@ export async function listen(
       return;
     }
     client = connecting;
+    failureReported = false;
     onNotification();
   };
 

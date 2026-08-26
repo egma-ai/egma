@@ -824,8 +824,11 @@ export async function claimGradingJobs(
   });
 }
 
-export function watchGradingWork(onWork: () => void): Promise<Listening> {
-  return listen(GRADING_WORK_CHANNEL, onWork);
+export function watchGradingWork(
+  onWork: () => void,
+  onListenerFailure?: (error: unknown) => void,
+): Promise<Listening> {
+  return listen(GRADING_WORK_CHANNEL, onWork, onListenerFailure);
 }
 
 function theJob(auth: AuthContext, id: string): SQL {
