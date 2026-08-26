@@ -16,7 +16,6 @@ const projectQuery = parameters({ projectId: stringIdSchema });
 const personaListQuery = parameters({
   projectId: stringIdSchema,
   pageToken: stringIdSchema,
-  archived: { type: "string" },
   search: { type: "string" },
 });
 const versionListQuery = parameters({
@@ -24,17 +23,22 @@ const versionListQuery = parameters({
   pageToken: stringIdSchema,
 });
 
-const traits = {
-  type: "object",
-  properties: {
-    personality: { type: "string" },
-    language: { type: "string" },
-    accent: { type: "string" },
-    backgroundNoise: { type: "string" },
-  },
-  required: ["personality", "language"],
-  additionalProperties: false,
+/**
+ * The authored person, flat — the same three values the work-order contract
+ * carries and the version row stores in typed columns.
+ *
+ * `identityName` is the human name the persona gives the agent and is spoken on
+ * every call; the identity row's `name` beside it is the team's own label for
+ * the library entry and is never spoken. Technical voice settings are not
+ * authored behavior and live only under `models.tts`.
+ */
+const behavior = {
+  identityName: { type: "string" },
+  personality: { type: "string" },
+  language: { type: "string" },
 } as const;
+
+const behaviorRequired = ["identityName", "personality", "language"] as const;
 
 const modelSelection = {
   type: "object",
@@ -76,12 +80,10 @@ const persona = {
     description: nullable({ type: "string" }),
     version: { type: "integer", minimum: 1 },
     versionId: stringIdSchema,
-    traits,
+    ...behavior,
     models: personaModels,
     owner: { type: "string", enum: ["egma", "organization"] },
-    revision: stringIdSchema,
     archivedAt: nullable(dateTimeSchema),
-    isDefault: { type: "boolean" },
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
   },
@@ -92,12 +94,10 @@ const persona = {
     "description",
     "version",
     "versionId",
-    "traits",
+    ...behaviorRequired,
     "models",
     "owner",
-    "revision",
     "archivedAt",
-    "isDefault",
     "createdAt",
     "updatedAt",
   ],
@@ -110,11 +110,18 @@ const personaVersion = {
     id: stringIdSchema,
     personaId: stringIdSchema,
     version: { type: "integer", minimum: 1 },
-    traits,
+    ...behavior,
     models: personaModels,
     createdAt: dateTimeSchema,
   },
-  required: ["id", "personaId", "version", "traits", "models", "createdAt"],
+  required: [
+    "id",
+    "personaId",
+    "version",
+    ...behaviorRequired,
+    "models",
+    "createdAt",
+  ],
   additionalProperties: false,
 } as const;
 
@@ -194,49 +201,34 @@ const createPersonaBody = {
     projectId: stringIdSchema,
     name: { type: "string" },
     description: { type: "string" },
-    traits,
+    ...behavior,
     models: personaModels,
   },
-  required: ["name", "traits", "models"],
+  required: ["name", ...behaviorRequired, "models"],
   additionalProperties: false,
 } as const;
 
+/**
+ * The same shape with every field optional, and nothing else.
+ *
+ * **No expectation field, on purpose.** A persona write is last-write-wins:
+ * the revision token and the expected version id are gone from this body and
+ * from the door underneath it. What the body leaves out, the persona keeps;
+ * a behavioral field that differs from the current version answers with the
+ * next one.
+ */
 const updatePersonaBody = {
   type: "object",
   properties: {
     ...createPersonaBody.properties,
     description: nullable({ type: "string" }),
-    expectedRevision: stringIdSchema,
-    expectedVersionId: stringIdSchema,
   },
-  required: ["expectedRevision"],
   additionalProperties: false,
 } as const;
 
 const projectBody = {
   type: "object",
   properties: { projectId: stringIdSchema },
-  additionalProperties: false,
-} as const;
-
-const archivePersonaBody = {
-  type: "object",
-  properties: {
-    projectId: stringIdSchema,
-    expectedRevision: stringIdSchema,
-    replacementPersonaId: stringIdSchema,
-  },
-  required: ["expectedRevision"],
-  additionalProperties: false,
-} as const;
-
-const restorePersonaBody = {
-  type: "object",
-  properties: {
-    projectId: stringIdSchema,
-    expectedRevision: stringIdSchema,
-  },
-  required: ["expectedRevision"],
   additionalProperties: false,
 } as const;
 
@@ -381,44 +373,27 @@ export const personaOperations = {
     },
   }),
 
-  setDefaultPersona: defineOperation({
-    operationId: "setDefaultPersona",
-    method: "POST",
-    path: "/v1/personas/{personaId}/default",
-    summary: "Set the project's default persona",
+  /**
+   * One Delete, and no way back.
+   *
+   * The persona leaves every list and picker for good. Underneath, the row is
+   * stamped rather than removed, so every version stays readable and a
+   * simulation that pinned one still reads true — but nothing on this API
+   * offers a restore, a deleted list, or a successor to nominate.
+   */
+  deletePersona: defineOperation({
+    operationId: "deletePersona",
+    method: "DELETE",
+    path: "/v1/personas/{personaId}",
+    summary: "Permanently delete a persona from authoring",
+    description:
+      "The persona leaves every authoring list and picker permanently. " +
+      "Existing run evidence stays readable.",
     tag: "Personas",
     security: "credentialed",
-    request: { params: personaParams, body: projectBody, bodyRequired: false },
+    request: { params: personaParams, query: projectQuery },
     responses: {
-      200: { description: "The selected default persona.", schema: persona },
-      ...writeRefusals,
-    },
-  }),
-
-  archivePersona: defineOperation({
-    operationId: "archivePersona",
-    method: "POST",
-    path: "/v1/personas/{personaId}/archive",
-    summary: "Archive a persona",
-    tag: "Personas",
-    security: "credentialed",
-    request: { params: personaParams, body: archivePersonaBody },
-    responses: {
-      200: { description: "The archived persona.", schema: persona },
-      ...writeRefusals,
-    },
-  }),
-
-  restorePersona: defineOperation({
-    operationId: "restorePersona",
-    method: "POST",
-    path: "/v1/personas/{personaId}/restore",
-    summary: "Restore a persona",
-    tag: "Personas",
-    security: "credentialed",
-    request: { params: personaParams, body: restorePersonaBody },
-    responses: {
-      200: { description: "The restored persona.", schema: persona },
+      204: { description: "The persona was deleted." },
       ...writeRefusals,
     },
   }),

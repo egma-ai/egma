@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWET",
   "modality": "chat",
   "connection": {
@@ -19,9 +19,9 @@
     "credentials": null
   },
   "persona": {
-    "traits": {
-      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.", "language": "en-US"
-    }
+    "name": "Margaret",
+    "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
+    "language": "en-US"
   },
   "scenario": {
     "instructions": "I booked a cleaning for next Tuesday but I need to move it to Thursday that same week. My name is Margaret Hale, sorry to be a bother. The half past two slot would suit me nicely."

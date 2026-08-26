@@ -56,7 +56,7 @@ const RESCHEDULING = {
   expectedBehaviors: ["confirms the new time back before finishing"],
   // A test names at least one persona from birth, and the project's
   // Egma-provided caller is the one every project already has.
-  personas: ["Default Persona"],
+  personas: ["Everyday caller"],
 } as const;
 
 /**
@@ -647,7 +647,7 @@ describe("the longest delay, said in two places", () => {
       await readFile(
         fileURLToPath(
           new URL(
-            "../../../packages/simulation-contract/schemas/simulation-spec.v4.schema.json",
+            "../../../packages/simulation-contract/schemas/simulation-spec.v5.schema.json",
             import.meta.url,
           ),
         ),

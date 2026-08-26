@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_fixture_persona_missing_language",
   "modality": "chat",
   "connection": {
@@ -10,9 +10,8 @@
     "credentials": null
   },
   "persona": {
-    "traits": {
-      "personality": "Patient and direct."
-    }
+    "name": "Alex",
+    "personality": "Patient and direct."
   },
   "scenario": { "instructions": "Ask for an appointment." },
   "limits": { "max_duration_seconds": 300, "max_turns": 20 },

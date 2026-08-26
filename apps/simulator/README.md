@@ -16,9 +16,12 @@ Five seams shape the inside, and each exists to be swapped without
 touching the others:
 
 - **The persona brain** (`persona.py`) — one component for every modality,
-  forever. It composes the spec's persona traits and scenario instructions
-  into a system prompt, takes the `human` side of the transcript turn by
-  turn, and decides when the exchange is concluded.
+  forever. It composes the spec's authored persona — the name they give the
+  agent, how they behave, the language they speak — and the scenario
+  instructions into a system prompt, takes the `human` side of the transcript
+  turn by turn, and decides when the exchange is concluded. The name is stated
+  rather than left to the model, so the same test hears the same person on
+  every run.
 - **The model client** (`model.py`) — where the persona's words come from.
   `scripted` walks the scenario deterministically and is what CI and the
   local story run on; `openai` speaks the OpenAI chat-completions shape to
@@ -192,17 +195,18 @@ configures no media backend to place a call through.
 next heartbeat; `POST /workbench/specs` queues another spec while
 everything runs.
 
-Model and speech choices are not container settings. Every contract-v4 work
+Model and speech choices are not container settings. Every contract-v5 work
 order carries one complete `models` block from the pinned persona version. The
 API resolves each catalog selection to an explicit adapter before it creates
 that work order. Chat requires the direct LLM key. Voice also requires the
-direct STT and TTS keys. The TTS selection owns `voice_id` and `speed`; persona
-traits contain behavior only.
+direct STT and TTS keys. The TTS selection owns `voice_id` and `speed`; the
+`persona` block carries who is calling — `name`, `personality`, `language`, all
+three required — and says nothing about how they are rendered.
 
 The model catalog owns which provider/model pairs the product accepts. The
 simulation contract checks only the work-order shape. The simulator dispatches
 the named adapter and rejects an adapter it does not ship; it does not keep a
-second model allowlist. There is no container or traits fallback. The scripted
+second model allowlist. There is no container or persona fallback. The scripted
 model and speech pair exist only as explicit test injections.
 
 Voice activity detection is still deployment configuration. Real speech uses

@@ -32,7 +32,7 @@ import { organization, user } from "../schema/index.ts";
  *     --scenario "Their cleaning is booked for Thursday and has to move…" \
  *     --behavior "verifies who it is speaking to first" \
  *     --behavior "confirms the new time back before finishing" \
- *     [--persona prs_…]
+ *     --persona prs_…
  *
  *   node packages/db/dist/scripts/test.js get tst_…
  *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
@@ -40,9 +40,9 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js list [--limit 50] [--cursor tst_…]
  *   node packages/db/dist/scripts/test.js delete tst_…
  *
- * Naming no persona takes the project's default, which provisioning
- * seeds when it creates the development organization — so a create can leave
- * the flag out from the very first one.
+ * A test says who calls, so `--persona` is required on a create: name one the
+ * development project can use, which `persona.js create` or `persona.js list`
+ * will give you.
  *
  * On an edit, a flag left out keeps what the test already says, so editing the
  * scenario alone is one flag. A `--behavior` or a `--persona` given at

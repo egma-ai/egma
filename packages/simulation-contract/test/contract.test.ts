@@ -66,7 +66,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v4.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v5.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -146,16 +146,36 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "required",
     property: "platform",
   },
+  // The three authored values move together, so each one's absence is a
+  // fixture of its own rather than a case one clone-and-delete test covers
+  // on one side of the wire.
+  "spec/persona-missing-name.json": {
+    at: "/persona",
+    keyword: "required",
+    property: "name",
+  },
   "spec/persona-missing-language.json": {
-    at: "/persona/traits",
+    at: "/persona",
     keyword: "required",
     property: "language",
   },
   "spec/persona-technical-voice.json": {
-    at: "/persona/traits",
+    at: "/persona",
     keyword: "additionalProperties",
     property: "voice",
   },
+  // The persona block the contract carried until v5: authored behavior in a
+  // `traits` wrapper, with an accent and a background noise nobody ran. The
+  // whole shape is refused at the wrapper, which is what makes the flat block
+  // the only one there is rather than the one the simulator prefers.
+  "spec/persona-traits-wrapper.json": {
+    at: "/persona",
+    keyword: "additionalProperties",
+    property: "traits",
+  },
+  // A work order in the version before this one. There is no tolerance for it
+  // anywhere: the version is a `const`, so the old number is a refusal and not
+  // a branch.
   "spec/wrong-contract-version.json": {
     at: "/contract_version",
     keyword: "const",
@@ -217,12 +237,12 @@ describe("the two schemas, as one contract", () => {
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(4);
+    expect(versionOf(specSchema)).toBe(5);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v4");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v5");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
@@ -318,36 +338,97 @@ describe("the two schemas, as one contract", () => {
     }
   });
 
-  it("keeps only the authored persona traits that still cross the wire", async () => {
+  it("carries the authored person flat, whole, and closed", async () => {
     const base = await readJson(
       "fixtures",
       "spec",
       "valid",
       "voice-loopback.json",
     );
-    const withTrait = (name: string, value: string): Record<string, unknown> => {
-      const spec = structuredClone(base);
-      const persona = spec.persona as Record<string, Record<string, unknown>>;
-      const traits = persona.traits;
-      if (traits === undefined) throw new Error("the fixture has no traits");
-      traits[name] = value;
-      return spec;
+    const personaOf = (spec: Record<string, unknown>): Record<string, unknown> => {
+      const persona = spec.persona as Record<string, unknown> | undefined;
+      if (persona === undefined) throw new Error("the fixture has no persona");
+      return persona;
     };
 
-    for (const retained of ["accent", "backgroundNoise"]) {
+    // Flat: the three authored values sit on the block itself, so there is
+    // one place to read who this is.
+    expect(Object.keys(personaOf(base)).sort()).toEqual([
+      "language",
+      "name",
+      "personality",
+    ]);
+    expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
+      true,
+    );
+
+    // Whole: none of the three is optional, and none may be present in name
+    // only. A simulator handed a persona without one of them would have to
+    // decide what it meant, and deciding that is deciding who the agent
+    // heard — which a name of one space leaves just as undecided, while
+    // reading "Your name is  ." into the prompt. Absent, empty and blank are
+    // one rule with three diagnostics, and it is the rule the persona
+    // version's own columns keep: non-empty after trim.
+    for (const required of ["name", "personality", "language"] as const) {
+      const spec = structuredClone(base);
+      delete personaOf(spec)[required];
+      expect(validators.spec(spec)).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/persona",
+          keyword: "required",
+          params: { missingProperty: required },
+        }),
+      );
+
+      const empty = structuredClone(base);
+      personaOf(empty)[required] = "";
+      expect(validators.spec(empty)).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: `/persona/${required}`,
+          keyword: "minLength",
+        }),
+      );
+
+      for (const blank of [" ", "   ", "\t", "\n", " \t\n "]) {
+        const whitespace = structuredClone(base);
+        personaOf(whitespace)[required] = blank;
+        expect(
+          validators.spec(whitespace),
+          `${required} accepted ${JSON.stringify(blank)}`,
+        ).toBe(false);
+        expect(validators.spec.errors).toContainEqual(
+          expect.objectContaining({
+            instancePath: `/persona/${required}`,
+            keyword: "pattern",
+          }),
+        );
+      }
+
+      // And the rule stops exactly there. Whitespace around real content is
+      // the author's own spacing, not an empty field: the wire refuses what
+      // says nothing, and does not tidy what somebody wrote.
+      const padded = structuredClone(base);
+      personaOf(padded)[required] = ` ${String(personaOf(base)[required])} `;
       expect(
-        validators.spec(withTrait(retained, "authored detail")),
-        `${retained}: ${ajv.errorsText(validators.spec.errors)}`,
+        validators.spec(padded),
+        ajv.errorsText(validators.spec.errors),
       ).toBe(true);
     }
 
-    for (const removed of ["manner", "patience", "underFriction"]) {
-      expect(validators.spec(withTrait(removed, "retired detail"))).toBe(false);
+    // Closed: the wrapper the block used to have, and the two authored
+    // details no run ever read, are refused here rather than ignored — the
+    // form cannot promise again what nothing delivers.
+    for (const retired of ["traits", "accent", "backgroundNoise"] as const) {
+      const spec = structuredClone(base);
+      personaOf(spec)[retired] = "retired detail";
+      expect(validators.spec(spec)).toBe(false);
       expect(validators.spec.errors).toContainEqual(
         expect.objectContaining({
-          instancePath: "/persona/traits",
+          instancePath: "/persona",
           keyword: "additionalProperties",
-          params: { additionalProperty: removed },
+          params: { additionalProperty: retired },
         }),
       );
     }

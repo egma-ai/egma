@@ -66,7 +66,8 @@ function actingAsGlobex(): AuthContext {
   };
 }
 
-const NEUTRAL_TRAITS = {
+const NEUTRAL_BEHAVIOR = {
+  identityName: "Sam Poole",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
 } as const;
@@ -100,7 +101,7 @@ async function oneQueuedSimulation(
   const personaId = (
     await createPersona(auth, {
       name: `Impatient Rita ${label}`,
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_BEHAVIOR,
     })
   ).id;
 

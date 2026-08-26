@@ -20,6 +20,7 @@ from egma_simulator.contract import (
     ContractViolation,
     contract_dir,
     report_validator,
+    spec_contract_version,
     spec_validator,
     validate_report,
     validate_spec,
@@ -72,16 +73,36 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "model",
     ),
     "spec/phone-carrier-missing.json": ("", "required", "platform"),
+    # The three authored values move together, so each one's absence is a
+    # fixture of its own rather than a case only the other side of the wire
+    # exercises in a clone-and-delete test.
+    "spec/persona-missing-name.json": (
+        "/persona",
+        "required",
+        "name",
+    ),
     "spec/persona-missing-language.json": (
-        "/persona/traits",
+        "/persona",
         "required",
         "language",
     ),
     "spec/persona-technical-voice.json": (
-        "/persona/traits",
+        "/persona",
         "additionalProperties",
         "voice",
     ),
+    # The persona block the contract carried until v5: authored behavior in a
+    # `traits` wrapper, with an accent and a background noise nobody ran. The
+    # whole shape is refused at the wrapper, which is what makes the flat
+    # block the only one there is rather than the one this process prefers.
+    "spec/persona-traits-wrapper.json": (
+        "/persona",
+        "additionalProperties",
+        "traits",
+    ),
+    # A work order in the version before this one. There is no tolerance for
+    # it here: the version is a `const`, so the old number is a refusal and
+    # not a branch.
     "spec/wrong-contract-version.json": ("/contract_version", "const", None),
     "spec/voice-missing-stt-key.json": (
         "/models/stt",
@@ -123,10 +144,64 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 4
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 5
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v4"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v5"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
+
+
+def test_this_simulator_reads_one_version_and_refuses_the_one_before_it():
+    """One contract version, and no tolerance for its predecessor.
+
+    The version the claim client advertises is read out of the schema this
+    process validates with, so a claim can never ask for a version the
+    parser does not implement. A work order in the version before it is
+    refused as a document — there is no branch that would read it.
+    """
+    document = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+    )
+    assert document["contract_version"] == spec_contract_version() == 5
+
+    with pytest.raises(ContractViolation) as refusal:
+        SimulationSpec.from_document({**document, "contract_version": 4})
+    assert any(
+        complaint.startswith("/contract_version")
+        for complaint in refusal.value.complaints
+    ), refusal.value.complaints
+
+
+def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
+    """The one keyword whose meaning could differ between the two readers.
+
+    ``pattern`` is checked by Ajv's ECMA-262 engine where the control plane
+    builds a work order, and by Python's ``re`` here. A blank name that one
+    engine refused and the other accepted is exactly the silent drift these
+    shared schemas exist to prevent, so the refusal is asserted on this side
+    as well: such a name is present by the letter and absent by the reading,
+    and it would put "Your name is  ." in the prompt.
+    """
+    document = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+    )
+    persona = document["persona"]
+
+    for field in ("name", "personality", "language"):
+        for blank in (" ", "   ", "\t", "\n", " \t\n "):
+            with pytest.raises(ContractViolation) as refusal:
+                SimulationSpec.from_document(
+                    {**document, "persona": {**persona, field: blank}}
+                )
+            assert any(
+                complaint.startswith(f"/persona/{field}")
+                for complaint in refusal.value.complaints
+            ), (field, blank, refusal.value.complaints)
+
+        # The rule stops exactly there: whitespace around real content is the
+        # author's own spacing, not an empty field. The wire refuses what says
+        # nothing and does not tidy what somebody wrote.
+        padded = f" {persona[field]} "
+        validate_spec({**document, "persona": {**persona, field: padded}})
 
 
 def test_phone_connection_stays_phone_while_models_select_voice_legs():

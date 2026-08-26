@@ -185,11 +185,15 @@ describe("run grading progress", () => {
     });
     const firstPersona = await createPersona(auth, {
       name: "Rita",
-      traits: { personality: "Patient", language: "en-US" },
+      identityName: "Rita Alvarez",
+      personality: "Patient",
+      language: "en-US",
     });
     const secondPersona = await createPersona(auth, {
       name: "Sam",
-      traits: { personality: "Direct", language: "en-US" },
+      identityName: "Sam Poole",
+      personality: "Direct",
+      language: "en-US",
     });
     const suite = await createTestSuite(auth, { name: "Progress" });
     await createTest(auth, {
@@ -283,7 +287,9 @@ describe("run grading progress", () => {
     });
     const persona = await createPersona(auth, {
       name: "Tess",
-      traits: { personality: "Patient", language: "en-US" },
+      identityName: "Tess Okafor",
+      personality: "Patient",
+      language: "en-US",
     });
     const suite = await createTestSuite(auth, { name: "Provider clock skew" });
     await createTest(auth, {

@@ -1,4 +1,5 @@
 import { ID_PREFIXES, idCheckPattern, type IdPrefix } from "@egma/ids";
+import { SPEED_RANGE } from "@egma/db";
 import { is } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -171,17 +172,17 @@ describe("every identifier column", () => {
     }
   });
 
-  it("has no database default except the required shared persona pointer", () => {
+  it("has no database default at all, now that the persona pointer is gone", () => {
+    // The project's default-persona pointer was the one exception, and it was
+    // one because the column was required and had to be fillable by a direct
+    // internal insert. It is gone, so an identifier column is somebody's own
+    // choice again, every time, with nothing filled in on their behalf.
     for (const { table, column } of declaredIdentifierColumns) {
       const live = columns.find(
         (candidate) =>
           candidate.table_name === table && candidate.column_name === column,
       );
-      const isRequiredPersonaPointer =
-        table === "project" && column === "default_persona_id";
-      expect(live?.has_default, `${table}.${column} default`).toBe(
-        isRequiredPersonaPointer,
-      );
+      expect(live?.has_default, `${table}.${column} default`).toBe(false);
     }
   });
 });
@@ -500,31 +501,78 @@ describe("every timestamp", () => {
   });
 });
 
+/**
+ * The version row holds who somebody is and how they run, in typed columns.
+ *
+ * It was two jsonb bags held shut by eighty-odd lines of jsonpath — flexibility
+ * bought and then forbidden. What replaced them is a column per field, so the
+ * assertions here are the plain ones: every authored field is required, none is
+ * filled in on anybody's behalf, and every rule about one is a check a reader
+ * can read.
+ */
 describe("a persona version is executable by itself", () => {
-  it("requires one complete models value and has no database default", () => {
-    const models = columns.find(
-      (column) =>
-        column.table_name === "persona_version" &&
-        column.column_name === "models",
-    );
+  const AUTHORED = [
+    "identity_name",
+    "personality",
+    "language",
+    "llm_provider",
+    "llm_model",
+    "stt_provider",
+    "stt_model",
+    "tts_provider",
+    "tts_model",
+    "tts_voice_id",
+    "tts_speed",
+  ] as const;
 
-    expect(models, "persona_version.models").toBeDefined();
-    expect(models?.type_name).toBe("jsonb");
-    expect(models?.not_null).toBe(true);
-    expect(models?.has_default).toBe(false);
+  it("requires every authored field and defaults none of them", () => {
+    for (const name of AUTHORED) {
+      const column = columns.find(
+        (candidate) =>
+          candidate.table_name === "persona_version" &&
+          candidate.column_name === name,
+      );
+      expect(column, `persona_version.${name}`).toBeDefined();
+      expect(column?.not_null, `persona_version.${name} not null`).toBe(true);
+      expect(column?.has_default, `persona_version.${name} default`).toBe(false);
+    }
   });
 
-  it("holds human traits and model selections to closed database checks", async () => {
+  it("keeps no jsonb bag of behavior behind", () => {
+    const bags = columns.filter(
+      (column) =>
+        column.table_name === "persona_version" && column.type_name === "jsonb",
+    );
+    expect(bags).toEqual([]);
+  });
+
+  it("holds every authored text field to a stated-value check", async () => {
     const { rows } = await database.sql<{ conname: string }>(
       `select conname from pg_constraint
         where conrelid = 'persona_version'::regclass
-          and conname in ('persona_version_traits_valid', 'persona_version_models_valid')
+          and contype = 'c'
+          and conname like '%_stated'
         order by conname`,
     );
-    expect(rows.map((row) => row.conname)).toEqual([
-      "persona_version_models_valid",
-      "persona_version_traits_valid",
-    ]);
+    expect(rows.map((row) => row.conname).sort()).toEqual(
+      AUTHORED.filter((name) => name !== "tts_speed")
+        .map((name) => `persona_version_${name}_stated`)
+        .sort(),
+    );
+  });
+
+  it("holds the speaking speed to the same range the module enforces", async () => {
+    const { rows } = await database.sql<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conrelid = 'persona_version'::regclass
+          and conname = 'persona_version_tts_speed_in_range'`,
+    );
+    expect(rows).toHaveLength(1);
+    // The column and `SPEED_RANGE` are two statements of one release decision,
+    // and this is what stops them drifting apart.
+    expect(rows[0]?.definition).toContain(String(SPEED_RANGE.slowest));
+    expect(rows[0]?.definition).toContain(String(SPEED_RANGE.fastest));
   });
 });
 

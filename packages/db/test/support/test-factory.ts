@@ -93,7 +93,8 @@ export const rescheduling = {
 } as const satisfies NewTest;
 
 /** Somebody plain, because who the persona is is not under test here. */
-export const neutralTraits = {
+export const neutralBehavior = {
+  identityName: "Sam Poole",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
 } as const;
@@ -106,20 +107,9 @@ export async function seedPersona(
 ): Promise<string> {
   const created = await createPersona(auth, {
     name,
-    traits: neutralTraits,
+    ...neutralBehavior,
   });
   return created.id;
-}
-
-/** What provisioning does when it seeds a project's starter persona. */
-export async function pointProjectAt(
-  projectId: string,
-  personaId: string | null,
-): Promise<void> {
-  await database.sql(
-    "update project set default_persona_id = $1 where id = $2",
-    [personaId, projectId],
-  );
 }
 
 /**
@@ -152,7 +142,7 @@ export async function rowCounts(): Promise<{
 export type SeededWorld = {
   /** The raw handle, for the reads and writes that go around the module. */
   readonly database: MigratedDatabase;
-  /** Acme's starter persona, and the one its project points at. */
+  /** Acme's starter persona, named by the tests these files write. */
   readonly rita: string;
   /** Globex's, so a cross-project reference has something real to name. */
   readonly grace: string;
@@ -195,7 +185,6 @@ export async function seedTestFactory(label: string): Promise<SeededWorld> {
 
   const rita = await seedPersona(actingAsAcme(), STARTER_PERSONA);
   const grace = await seedPersona(actingAsGlobex(), "Careful Grace");
-  await pointProjectAt(acme.project, rita);
 
   const frontDesk = await seedAgent(actingAsAcme(), "Front desk");
   const outboundDialler = await seedAgent(

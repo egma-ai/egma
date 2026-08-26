@@ -276,7 +276,7 @@ describe("the files arriving", () => {
       "5 tests generated",
       'suite "order-line tests"',
       IN_ORDER[0] as string,
-      "default persona",
+      "no persona named",
       "more (↑↓ browse · e opens in $EDITOR)",
       "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
       ...GATE_HINTS,

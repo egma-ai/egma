@@ -161,10 +161,14 @@ describe("creating a project", () => {
 
   /**
    * The whole factory, proven from outside: the project the route made is
-   * usable, which means it has a default persona and its protected Expected
-   * behaviors project grader for the first simulation.
+   * usable, which means it can already name a persona and holds its protected
+   * Expected behaviors project grader for the first simulation.
+   *
+   * The persona it can name is Egma's Predefined one, shared into every
+   * project rather than written for this one. Nothing points at it: the
+   * project default persona is gone, and a test that names nobody is refused.
    */
-  it("makes a project with its default persona and protected grader", async () => {
+  it("makes a project that can name a persona and holds its protected grader", async () => {
     api = await createApi("projects_create_whole");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 

@@ -25,7 +25,7 @@ from egma_simulator.client import ClaimFailure
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import SimulatorService
-from egma_simulator.spec import SimulationSpec
+from egma_simulator.spec import AuthoredPersona, SimulationSpec
 
 
 class RecordingExecutor:
@@ -234,10 +234,11 @@ def test_the_typed_spec_reads_what_the_document_says():
     assert spec.scenario_instructions == "Hello there."
     assert spec.limits.max_turns == 7
     assert spec.connection_type == "scripted"
-    assert spec.persona_traits == {
-        "personality": "Terse test person; sticks to the script.",
-        "language": "en-US",
-    }
+    assert spec.persona == AuthoredPersona(
+        name="Robin",
+        personality="Terse test person; sticks to the script.",
+        language="en-US",
+    )
     assert spec.models.llm.model == "gpt-4o-mini"
 
 

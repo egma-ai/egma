@@ -228,10 +228,10 @@ describe("a browser working in a project that is not the first", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Made the way the New project page makes one, rather than by calling the
-    // factory: what that page creates is the whole thing — the project, the
-    // default persona a first test gets when it names none, and the protected
-    // Expected behaviors project grader. A project made through this door is
-    // ready for its first run.
+    // factory: what that page creates is the whole thing — the project and its
+    // protected Expected behaviors project grader. Egma's Predefined persona is
+    // shared into it rather than written for it, so a project made through this
+    // door is ready for its first run.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -353,7 +353,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Default Persona"],
+      personas: ["Everyday caller"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -471,7 +471,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Default Persona"],
+      personas: ["Everyday caller"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
@@ -564,7 +564,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Default Persona"],
+      personas: ["Everyday caller"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
@@ -670,7 +670,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Default Persona"],
+      personas: ["Everyday caller"],
     });
     expect(authored.statusCode, authored.body).toBe(201);
     const testId = (authored.json() as { id: string }).id;
@@ -809,8 +809,8 @@ describe("a key for the whole organization, where the organization holds two pro
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Through the product's own door, so the second project is the whole thing
-    // — default persona and protected project grader included — rather than a
-    // bare row.
+    // — protected project grader included, and Egma's Predefined persona
+    // reachable from it — rather than a bare row.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -856,7 +856,7 @@ describe("a key for the whole organization, where the organization holds two pro
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Default Persona"],
+      personas: ["Everyday caller"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 

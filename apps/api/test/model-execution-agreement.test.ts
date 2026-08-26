@@ -24,7 +24,7 @@ type JsonObject = Readonly<Record<string, unknown>>;
 const schema = JSON.parse(
   await readFile(
     new URL(
-      "../../../packages/simulation-contract/schemas/simulation-spec.v4.schema.json",
+      "../../../packages/simulation-contract/schemas/simulation-spec.v5.schema.json",
       import.meta.url,
     ),
     "utf8",

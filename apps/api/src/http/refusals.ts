@@ -40,13 +40,15 @@ export const CODES = {
   identity_conflict: 409,
   version_conflict: 409,
   parent_agent_archived: 409,
-  // A persona an active test still names, and the persona a project points at
-  // by default. Two rules that refuse one Archive, and two sentences, because
-  // the fix for each is somewhere else.
-  persona_in_use: 409,
-  default_persona_required: 409,
-  // Egma owns this shared persona definition. A project can use it as-is or
-  // fork it, but cannot change its definition or lifecycle for every customer.
+  /**
+   * Egma owns this shared persona definition — **Predefined**, in the word
+   * every screen and sentence uses. A project can use it as-is or fork it, but
+   * cannot change or delete it for every customer.
+   *
+   * The code keeps the older spelling deliberately: a code is a promise a
+   * client branches on, and the rename was a rename of the product word rather
+   * than of the tenancy rule underneath it.
+   */
   egma_provided_persona: 422,
   // The store rolled a write back because another one got in its way. Its own
   // code because it is the one refusal that is about nothing the caller did:
@@ -158,12 +160,13 @@ export function projectOutsideOrganization(projectId: string): string {
  * resource has moved since.
  *
  * **The sentence is composed here, by the layer that answers, rather than
- * carried on the error.** Two route groups answer this refusal now — agents
- * and connections in one, personas in the other — and each names its own
- * resource word, lower case where the API spells the resource that way and
- * capitalised where it does not. An error that baked one sentence in would
- * make the other group either relay the wrong word or paraphrase, and the
- * wording is contract: a coding agent reads it off a terminal.
+ * carried on the error.** More than one route group can answer this refusal,
+ * and each names its own resource word — lower case where the API spells the
+ * resource that way and capitalised where it does not. An error that baked one
+ * sentence in would make the other groups either relay the wrong word or
+ * paraphrase, and the wording is contract: a coding agent reads it off a
+ * terminal. Personas are deliberately not among the groups that answer it:
+ * a persona write names no revision at all.
  *
  * What the error carries is the data — which resource, which one, and the two
  * revisions — which is what a caller needs to read the thing again and send

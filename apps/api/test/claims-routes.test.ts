@@ -1,9 +1,11 @@
 import { newId } from "@egma/ids";
 import {
   createPersona,
+  editPersona,
   getSimulation,
   listRunEvents,
   SPEED_RANGE,
+  type Persona,
   type PersonaModels,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
@@ -23,7 +25,7 @@ import {
 } from "./support/api.ts";
 import {
   contextFor,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request as ask,
   signUp,
@@ -114,7 +116,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [4], ...body },
+    payload: { contract_versions: [5], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -133,6 +135,8 @@ async function aCustomerReadyToRun(
   agentId: string;
   connectionId: string;
   versionId: string;
+  /** Version 1 of her, whole — the version every simulation below pins. */
+  persona: Persona;
 }> {
   api = await createApi(label, {
     ...options,
@@ -156,11 +160,14 @@ async function aCustomerReadyToRun(
   expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
   const suiteId = String(suite.body.id);
 
-  // The persona is authored at the seam — no route ships for one — and the
-  // test then names her, which is what the claimed spec's traits come from.
-  await createPersona(contextFor(ada, "member"), {
+  // Authored at the seam rather than over the route, because the seam hands
+  // back the version's own `prsv_` id — which is what the pinning test below
+  // needs to prove that a claim reads the version a simulation froze rather
+  // than the persona as they stand now. The test then names her, and that is
+  // where the claimed spec's persona block comes from.
+  const persona = await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
     ...(personaModels === undefined ? {} : { models: personaModels }),
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
@@ -176,6 +183,7 @@ async function aCustomerReadyToRun(
     agentId,
     connectionId,
     versionId: String(pushed.body.versionId),
+    persona,
   };
 }
 
@@ -211,7 +219,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Realtime Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
     models: {
       llm: {
         provider: "openai",
@@ -358,7 +366,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(4);
+    expect(spec.contract_version).toBe(5);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -379,8 +387,12 @@ describe("claiming work", () => {
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
+    // Flat and whole, straight off the pinned version. `name` is the name the
+    // agent is told, never the team's label for the library row.
     expect(spec.persona).toEqual({
-      traits: NEUTRAL_TRAITS,
+      name: NEUTRAL_PERSON.identityName,
+      personality: NEUTRAL_PERSON.personality,
+      language: NEUTRAL_PERSON.language,
     });
     expect(spec.models).toEqual({
       llm: {
@@ -423,6 +435,62 @@ describe("claiming work", () => {
     expect(header.body.status).toBe("running");
   });
 
+  /**
+   * **The spec speaks the version the simulation pinned, never the persona as
+   * they stand now — and this is the test that can tell the two apart.**
+   *
+   * Everywhere else in this file the persona is created and never edited, so
+   * the pinned version and the current one are the same row: an assembler that
+   * quietly read `getPersona` instead of `getPersonaVersion` would pass every
+   * one of them. That is the whole guarantee this effort exists for — the same
+   * test hears the same person on every run, and an old result can still say
+   * who the agent actually heard — so it gets a test that fails when it breaks.
+   *
+   * The pin is taken when the run is created, so the edit below lands strictly
+   * after this simulation already names version 1 by its own `prsv_` id. Every
+   * authored field moves at once, because each of the three travels in the work
+   * order and each would be a separate way to leak the current row.
+   */
+  it("speaks the persona version the simulation pinned, not the edit that came after", async () => {
+    const { ada, key, connectionId, versionId, persona } =
+      await aCustomerReadyToRun("claims_pinned_persona");
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const author = contextFor(ada, "member");
+    const pinned = await getSimulation(author, simulationId);
+    expect(pinned?.personaVersionId).toBe(persona.versionId);
+
+    const moved = await editPersona(author, persona.id, {
+      identityName: "Rita Bellweather",
+      personality: "Rita has hung up once already and is out of patience.",
+      language: "en-GB",
+    });
+    // A second version really exists, and it really differs — without this the
+    // assertion below could pass on a persona that never moved.
+    expect(moved?.version).toBe(2);
+    expect(moved?.versionId).not.toBe(persona.versionId);
+    expect(moved?.identityName).toBe("Rita Bellweather");
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    const [spec] = answered.body.specs as Record<string, unknown>[];
+    if (spec === undefined) throw new Error("no spec came back");
+
+    // Version 1, word for word. Nothing of version 2 reaches the simulator.
+    expect(spec.persona).toEqual({
+      name: NEUTRAL_PERSON.identityName,
+      personality: NEUTRAL_PERSON.personality,
+      language: NEUTRAL_PERSON.language,
+    });
+    // And it is still a document the contract accepts, so this cannot be
+    // passing on a spec that is merely stale in the same shape.
+    expect(specComplaints(spec)).toEqual([]);
+  });
+
   it("carries the answers this simulation serves, resolved into one world", async () => {
     api = await createApi("claims_mock_tools", {
       retellFetch: RETELL_CHAT_FETCH,
@@ -439,7 +507,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     });
     const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
       name: "Mock tool branches",
@@ -516,7 +584,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     });
     const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
       name: "Frozen mock tool world",
@@ -1310,7 +1378,7 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
-  it("does not claim work for a worker that cannot read contract version 4", async () => {
+  it("does not claim work for a worker that cannot read contract version 5", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
     );
@@ -1323,7 +1391,7 @@ describe("one source of execution truth", () => {
       contract_versions: [1],
     });
     expect(refused.statusCode).toBe(400);
-    expect(String(refused.body.message)).toContain("version 4");
+    expect(String(refused.body.message)).toContain("version 5");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
   });

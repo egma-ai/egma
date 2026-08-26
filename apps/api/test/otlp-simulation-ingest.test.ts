@@ -35,7 +35,7 @@ import {
   mintKey,
   readTraceOverHttp,
   signUp,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   type Customer,
   type TraceDetailBody,
 } from "./support/traces.ts";
@@ -174,7 +174,7 @@ async function seedSimulationNamed(
   const personaId = (
     await createPersona(auth, {
       name: `Impatient Rita ${label}`,
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     })
   ).id;
   const suiteId = (

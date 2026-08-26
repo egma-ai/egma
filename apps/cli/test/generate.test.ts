@@ -59,7 +59,7 @@ function testFile(name: string, behaviors: readonly string[]): string {
     // What the generate task asks for: every file names at least one persona,
     // because a test says who calls and Egma refuses one that does not.
     "personas:",
-    "  - Default Persona",
+    "  - Everyday caller",
     "---",
     "## Scenario",
     `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
@@ -195,7 +195,7 @@ describe("generated suite", () => {
     );
     expect(task, "the generate task teaches the personas block").toBeDefined();
     expect(task).toContain("Every file must name at least one persona");
-    expect(task).toContain("- Default Persona");
+    expect(task).toContain("- Everyday caller");
     expect(task).not.toContain("leave the `personas` line out");
 
     // And the push itself names the caller, rather than leaving the platform
@@ -205,7 +205,7 @@ describe("generated suite", () => {
         record.method === "POST" && record.path === "/v1/repository/change-set",
     );
     expect(pushed?.body).toMatchObject({
-      tests: [{ personas: ["Default Persona"] }],
+      tests: [{ personas: ["Everyday caller"] }],
     });
     expect(
       platform.records.filter(

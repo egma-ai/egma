@@ -6,8 +6,6 @@ import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 export type SeededPersona = {
   readonly id: string;
   readonly name: string;
-  /** Whether the project points at this one, which every project does at one. */
-  readonly isDefault: boolean;
 };
 
 export type PersonaControls = {
@@ -18,17 +16,22 @@ export type PersonaControls = {
 };
 
 /**
- * Every project starts pointing at Egma's shared default persona.
+ * Every project can name Egma's own Predefined persona.
  *
- * This is provisioning's own rule rather than a convenience for the fixture:
- * `insertProject` sets `default_persona_id` on every project it makes, the
- * column is `not null`, and an Egma-provided persona is readable from every
- * project. So a fixture project that answered with none would be a project the
- * real platform cannot produce — which is exactly the shape a test must not
- * teach. `clear()` exists so a test can ask for the impossible on purpose and
- * prove the wizard stops rather than writes a folder that cannot be pushed.
+ * This is the tenancy rule rather than a convenience for the fixture: a
+ * Predefined persona belongs to no organization and no project, so it is
+ * readable from every one of them. A fixture project that answered with none
+ * would be a project the real platform cannot produce — which is exactly the
+ * shape a test must not teach. `clear()` exists so a test can ask for the
+ * impossible on purpose and prove the wizard stops rather than writes a folder
+ * that cannot be pushed.
+ *
+ * **Nothing here says which persona is the project's default.** There is no
+ * default persona: the pointer and everything that guarded it were removed with
+ * the persona rework, and a test naming no persona is refused rather than given
+ * one.
  */
-const EGMA_DEFAULT = "Default Persona";
+const EGMA_PREDEFINED = "Everyday caller";
 
 function bearer(request: FixtureRequest): string {
   const value = request.headers.authorization ?? "";
@@ -41,7 +44,7 @@ export function personaRoutes(options: {
 }): { readonly group: RouteGroup; readonly controls: PersonaControls } {
   let next = 1;
   const personas: SeededPersona[] = [
-    { id: "prs_egma_default", name: EGMA_DEFAULT, isDefault: true },
+    { id: "prs_egma_default", name: EGMA_PREDEFINED },
   ];
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
     options.holdsKey(bearer(request)) ? action() : { status: 401, body: NOT_AUTHENTICATED };
@@ -56,7 +59,6 @@ export function personaRoutes(options: {
       const made = {
         id: `prs_fixture_${String(next)}`,
         name: name.trim(),
-        isDefault: false,
       };
       personas.push(made);
       return made;
@@ -86,7 +88,6 @@ export function personaRoutes(options: {
                   personas: personas.map((one) => ({
                     id: one.id,
                     name: one.name,
-                    isDefault: one.isDefault,
                   })),
                   nextPageToken: null,
                 },

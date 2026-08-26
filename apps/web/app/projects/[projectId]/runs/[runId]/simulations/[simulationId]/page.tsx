@@ -264,7 +264,13 @@ function EvidenceView({
         ]}
         lead={
           <>
-            <Link href={projectPath(projectId, "personas", read.persona.id)}>
+            {/*
+             * The Personas list, not one persona's own address: a persona is
+             * read in a panel over that list now, and it has no page of its
+             * own to link to. The name is still where somebody looks for it,
+             * and the link still lands where that name is.
+             */}
+            <Link href={projectPath(projectId, "personas")}>
               {read.persona.name ?? "A persona"}
             </Link>{" "}
             calling{" "}

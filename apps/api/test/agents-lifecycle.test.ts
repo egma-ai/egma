@@ -1132,7 +1132,7 @@ describe("archiving a connection that work is queued over", () => {
 
 /**
  * A run with one conversation waiting to be claimed, built the way the product
- * builds one: a project's default persona, a test that names it, and a run over
+ * builds one: Egma's Predefined persona, a test that names it, and a run over
  * one connection.
  */
 async function aQueuedRunFor(who: Customer): Promise<{
@@ -1156,7 +1156,7 @@ async function aQueuedRunFor(who: Customer): Promise<{
     name: "Books an appointment",
     scenario: "The caller wants an appointment next week.",
     expectedBehaviors: ["The agent offers a time"],
-    personas: ["Default Persona"],
+    personas: ["Everyday caller"],
   });
   expect(written.status, JSON.stringify(written.body)).toBe(201);
 

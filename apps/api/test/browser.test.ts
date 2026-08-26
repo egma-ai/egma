@@ -2291,7 +2291,6 @@ describe("the complete product, walked in order in a second project", () => {
   /** What each step leaves for the next one. */
   let agentAddress = "";
   let connectionAddress = "";
-  let personaAddress = "";
   let suiteAddress = "";
   let testAddress = "";
   let runAddress = "";
@@ -2816,34 +2815,138 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "authors a persona for this project",
+    "authors a persona for this project, in the panel over the list",
     async () => {
       await walk.goto(at("agents"));
       await walk.getByRole("link", { name: "Personas", exact: true }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/personas$`));
 
-      await walk.getByRole("link", { name: "New persona" }).first().click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/personas/new$`));
+      // **The address does not move.** A persona is created, read and edited
+      // in a side sheet over the list it will join, so what follows happens at
+      // the list's own URL with the list still on screen behind it.
+      const list = walk.url();
+      await walk.getByRole("button", { name: "New persona" }).first().click();
       await reactHasTakenOver(walk, "form");
 
-      await walk.fill("#persona-name", "Impatient Rita");
+      await walk.fill("#new-persona-name", "Impatient Rita");
       await walk.fill(
-        "#persona-description",
+        "#new-persona-description",
         "Somebody in a hurry, calling from a busy place.",
       );
-      // Who they are, never what they want, which belongs to the test. Human
-      // traits and the separate Models section are saved together in the same
-      // immutable persona version.
+      // Two names, and they are two different things: the team's word for her,
+      // above, and the human name she gives the agent, here. The identity name
+      // is versioned with her personality and spoken in every simulation, so
+      // the same test hears the same person every time it runs.
+      await walk.fill("#new-persona-identity-name", "Rita");
       await walk.fill(
-        "#persona-personality",
+        "#new-persona-personality",
         "Speaks quickly, interrupts, and wants the answer before the greeting is over.",
       );
+      // Language and every model field are already filled with the release
+      // defaults, so authoring a persona is the three things above and nothing
+      // chosen.
       await walk.getByRole("button", { name: "Create persona" }).click();
 
-      await walk.waitForURL(
-        new RegExp(`/projects/${second}/personas/prs_[^/]+$`),
+      // What it made, read back in the same panel: her team name, the kind of
+      // record she is, and the name she will speak.
+      await saysWithin(walk, "Impatient Rita");
+      await saysWithin(walk, "Custom · v1");
+      await saysWithin(walk, "Rita");
+      expect(walk.url()).toBe(list);
+    },
+    SETTLE,
+  );
+
+  it(
+    "mints a version by editing her, then forks and deletes the copy",
+    async () => {
+      await walk.goto(at("personas"));
+      await reactHasTakenOver(walk, "table");
+
+      // **Changing what a persona *is* mints a version.** The record's own
+      // actions are in the panel's ⋮, which is where every sheet in this
+      // product keeps them.
+      await walk.getByRole("button", { name: "Impatient Rita" }).first().click();
+      await walk
+        .getByRole("button", { name: "Actions for Impatient Rita" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Edit" }).click();
+      await reactHasTakenOver(walk, "form");
+      await walk.fill(
+        "#persona-personality",
+        "Speaks quickly, interrupts, and has stopped apologising for it.",
       );
-      personaAddress = walk.url();
+
+      /*
+       * **A click outside the panel asks before it throws the draft away.**
+       * The panel offers three ways out — Escape, the close control, and a
+       * click on the scrim — and all three land on one gate. The first two are
+       * proved in `apps/web/test/personas.test.tsx`; this one is proved here
+       * because the gesture is dispatched from a document listener that
+       * jsdom's synthetic events never reach.
+       */
+      // Well clear of the 440px panel at the right edge, on empty page below
+      // the list. The scrim is what actually takes the press.
+      await walk.mouse.click(600, 600);
+      const keepsIt = walk.getByRole("dialog", {
+        name: "Leave without saving?",
+      });
+      await keepsIt.waitFor();
+      await keepsIt.getByRole("button", { name: "Keep editing" }).click();
+      // Kept: the panel is still open and still holds what was typed into it.
+      expect(await walk.inputValue("#persona-personality")).toContain(
+        "stopped apologising",
+      );
+
+      await walk.getByRole("button", { name: "Save changes" }).click();
+
+      // The new version is current and the one the earlier runs pinned is still
+      // in the list beside it, which is the whole point of versioning her.
+      await saysWithin(walk, "Custom · v2");
+      await saysWithin(walk, "Current");
+      await walk.keyboard.press("Escape");
+
+      // Fork copies the current version into a persona this project owns, and
+      // lands in the editor with the copied name ready to be replaced.
+      await walk
+        .getByRole("button", { name: "Open the menu for Impatient Rita" })
+        .first()
+        .click();
+      await walk.getByRole("menuitem", { name: "Fork" }).click();
+      await reactHasTakenOver(walk, "form");
+      await walk.fill("#persona-name", "Rita, a copy");
+      await walk.getByRole("button", { name: "Save changes" }).click();
+      await saysWithin(walk, "Rita, a copy");
+      await walk.keyboard.press("Escape");
+
+      // **Delete is the product's word, and the confirmation names who it is
+      // about.** Nothing names this copy, so it goes without argument.
+      await walk
+        .getByRole("button", { name: "Open the menu for Rita, a copy" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Delete" }).click();
+      /*
+       * The confirmation is a dialog over the page rather than a part of it,
+       * so it is read as a dialog rather than out of `main`. It names who it
+       * is about, which is the whole of what a destructive confirmation owes
+       * the person answering it.
+       */
+      const confirmed = walk.getByRole("dialog", {
+        name: "Delete Rita, a copy?",
+      });
+      await confirmed.waitFor();
+      await confirmed.getByRole("button", { name: "Delete persona" }).click();
+
+      await expect
+        .poll(
+          async () =>
+            await walk
+              .getByRole("button", { name: "Rita, a copy" })
+              .count(),
+          { timeout: 30_000 },
+        )
+        .toBe(0);
+      // She is still there, because only the copy was deleted.
       await saysWithin(walk, "Impatient Rita");
     },
     SETTLE,
@@ -3345,23 +3448,15 @@ describe("the complete product, walked in order in a second project", () => {
         lands: suiteAddress,
         says: "Reschedules a booked appointment",
       },
+      /*
+       * **One address for the whole Personas surface.** `personas/new` and
+       * `personas/{id}` were addresses until the 2026-08-25 rework; creating,
+       * reading and editing a persona are all panels over this list now, so
+       * there is nothing else here to reach by URL. The panels are walked
+       * where they are opened — in the authoring step above and in the
+       * keyboard proof below.
+       */
       { what: "Personas", address: at("personas"), says: "Impatient Rita" },
-      {
-        what: "New persona",
-        address: at("personas", "new"),
-        /*
-         * The New sheet's own sub-line, which the settled panel draws over the
-         * list. The page's purpose statement moved there with the form when
-         * the record moved into a side sheet, so this is the sentence the
-         * shape now carries.
-         */
-        says: "Starts at v1 and is nobody's default",
-      },
-      {
-        what: "one persona",
-        address: personaAddress,
-        says: "Impatient Rita",
-      },
       {
         what: "Graders",
         address: at("graders"),
@@ -4555,7 +4650,13 @@ describe("the complete product, walked in order in a second project", () => {
     it(
       "fills in and submits a form without a pointer, and labels every field it asks for",
       async () => {
-        await walk.goto(at("personas", "new"));
+        await walk.goto(at("personas"));
+        await reactHasTakenOver(walk, "table");
+
+        // The panel itself opens without a pointer: the page's own action
+        // takes the keyboard, and Enter is what presses it.
+        await walk.getByRole("button", { name: "New persona" }).first().focus();
+        await walk.keyboard.press("Enter");
         await reactHasTakenOver(walk, "form");
 
         // Every control this form asks for has a name a screen reader can say.
@@ -4577,19 +4678,19 @@ describe("the complete product, walked in order in a second project", () => {
           );
         expect(unnamed).toEqual([]);
 
-        // And it is usable with the keyboard alone: reach the name, type, and
+        // And it is usable with the keyboard alone: reach each field, type, and
         // press Enter, which submits rather than doing nothing.
-        await walk.locator("#persona-name").focus();
+        await walk.locator("#new-persona-name").focus();
         await walk.keyboard.type("Deliberate Sam");
-        await walk.locator("#persona-personality").focus();
+        await walk.locator("#new-persona-identity-name").focus();
+        await walk.keyboard.type("Sam");
+        await walk.locator("#new-persona-personality").focus();
         await walk.keyboard.type("Takes their time and repeats things back.");
-        await walk.locator("#persona-name").focus();
+        await walk.locator("#new-persona-name").focus();
         await walk.keyboard.press("Enter");
 
-        await walk.waitForURL(
-          new RegExp(`/projects/${second}/personas/prs_[^/]+$`),
-        );
         await saysWithin(walk, "Deliberate Sam");
+        await saysWithin(walk, "Custom · v1");
       },
       SETTLE,
     );

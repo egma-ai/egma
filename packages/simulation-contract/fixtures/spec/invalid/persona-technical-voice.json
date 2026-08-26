@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_fixture_persona_technical_voice",
   "modality": "chat",
   "connection": {
@@ -10,14 +10,13 @@
     "credentials": null
   },
   "persona": {
-    "traits": {
-      "personality": "Patient and direct.",
-      "language": "en-US",
-      "voice": {
-        "provider": "cartesia",
-        "voiceId": "wrong-owner",
-        "speed": 1
-      }
+    "name": "Alex",
+    "personality": "Patient and direct.",
+    "language": "en-US",
+    "voice": {
+      "provider": "cartesia",
+      "voiceId": "wrong-owner",
+      "speed": 1
     }
   },
   "scenario": { "instructions": "Ask for an appointment." },

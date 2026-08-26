@@ -138,7 +138,7 @@ if (personaShelf.length > 0) {
   // content and provider credentials are not logged.
   app.log.info(
     { personas: personaShelf },
-    "Egma-provided personas were written to the library",
+    "Predefined personas were written to the library",
   );
 }
 if (graderCatalog.definitions.length > 0) {

@@ -1,4 +1,4 @@
-import type { AuthContext, PersonaTraits, Role } from "@egma/db";
+import type { AuthContext, Role } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
@@ -138,11 +138,19 @@ export function projectKeyFor(
   return mintKey(app, person.cookie, "a terminal", person.projectId);
 }
 
-/** Somebody plain, for the tests where who the persona is is not the question. */
-export const NEUTRAL_TRAITS: PersonaTraits = {
+/**
+ * Somebody plain, for the tests where who the persona is is not the question.
+ *
+ * Spread into a `createPersona` beside the team's `name`: the authored person
+ * is flat, so there is no wrapper to nest them in. The identity name is here
+ * because every persona has to have one — it is the name the agent hears, and
+ * the factory refuses a persona without it.
+ */
+export const NEUTRAL_PERSON = {
+  identityName: "Sam Okafor",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-};
+} as const;
 
 /** A status and a parsed body, which is all these suites ever assert on. */
 export type Answer = {

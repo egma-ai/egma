@@ -80,7 +80,8 @@ function actingAsGlobex(): AuthContext {
   };
 }
 
-const neutralTraits = {
+const neutralBehavior = {
+  identityName: "Sam Poole",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
 } as const;
@@ -188,13 +189,13 @@ beforeAll(async () => {
   const rita = (
     await createPersona(actingAsAcme(), {
       name: "Impatient Rita",
-      traits: neutralTraits,
+      ...neutralBehavior,
     })
   ).id;
   const sam = (
     await createPersona(actingAsAcme(), {
       name: "Deliberate Sam",
-      traits: neutralTraits,
+      ...neutralBehavior,
     })
   ).id;
 

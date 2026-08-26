@@ -15,6 +15,9 @@ stores — the Postgres files here and the ClickHouse files in
 
 **By default, a migration may never break the code that is currently running.**
 
+That default is suspended before launch, which is where Egma is today. Read
+**Before launch** at the end of this file before applying the rest.
+
 The platform deploys on every green merge, and the API applies these files
 on boot, before the new code serves — so for a moment the *old* code runs
 against the *new* schema. A rollback is the same moment held open: it
@@ -60,3 +63,25 @@ In practice:
 A change that cannot follow the rule in one step — a type change, a backfill
 that must rewrite — ships as expand, migrate, contract across releases, and
 the contract step waits until nothing supported still reads the old shape.
+
+## Before launch
+
+Egma has not launched. There is no deployed build to keep working and no
+rollback to keep bootable, so until it launches:
+
+- **A migration may be destructive.** Dropping a column, a table, a trigger, a
+  function or a constraint in one step is allowed.
+- **A migration may break the commit before it.** The code that reads the new
+  shape ships in the same change, so the two are never apart.
+- **Prefer the clean cut.** Nothing is deprecated in place, no column is kept
+  "just in case", and no contract accepts two shapes at once. Expand, migrate,
+  contract is what a launched product needs and is more machinery than this one
+  is paying for.
+
+What does **not** change: existing data is still carried across by an explicit
+backfill wherever a backfill can carry it. A development database somebody has
+to rebuild by hand is a real cost before launch as well as after it, and a
+migration that drops data it could have kept is a migration to send back.
+
+A destructive migration says so in its own header and points at this section.
+When Egma launches, this section goes and the rule above stands on its own.

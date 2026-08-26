@@ -38,6 +38,16 @@ export const prefixCheck = (
   prefix: IdPrefix,
 ) => check(name, sql`${column} ~ ${sql.raw(`'${idCheckPattern(prefix)}'`)}`);
 
+/**
+ * A text column that has to actually say something.
+ *
+ * `not null` alone lets the empty string and a column of spaces through, and
+ * both are a field somebody left blank wearing the clothes of a field somebody
+ * filled in. Trimmed, so the check answers the same question a reader would.
+ */
+export const nonEmpty = (name: string, column: AnyPgColumn) =>
+  check(name, sql`btrim(${column}) <> ''`);
+
 /** Enumerated values are text plus a check, never a native Postgres enum. */
 export const oneOf = (name: string, column: AnyPgColumn, values: string[]) =>
   check(

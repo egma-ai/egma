@@ -67,8 +67,8 @@ import {
  * nothing the simulator sees would change.
  *
  * What goes back is the whole work order: for each claimed simulation, a
- * fully assembled spec — the pinned persona traits and model choices, current
- * keys for only those model providers, the pinned test scenario, connection
+ * fully assembled spec — the pinned persona whole and their model choices,
+ * current keys for only those model providers, the pinned test scenario, connection
  * config and credentials, mock answers, the current carrier route, and limits
  * — validated against the contract before a byte is sent. This is the only
  * place runtime credential material travels; reports have no field for it.
@@ -132,7 +132,7 @@ const SIMULATION_LIMITS = {
 } as const;
 
 /** The one clean-cut contract this control plane and simulator speak. */
-const CONTRACT_VERSION = 4;
+const CONTRACT_VERSION = 5;
 
 type Body = Record<string, unknown>;
 
@@ -453,7 +453,16 @@ async function assembledSpec(
       config: connection.config,
       credentials: connection.credentials,
     },
-    persona: { traits: personaVersion.traits },
+    // Flat and whole, straight off the pinned version: the name this person
+    // gives the agent, who they are, and the language the roleplay runs in.
+    // The identity name is the authored one — never the team's label for the
+    // library row — which is what makes the same test hear the same person on
+    // every run.
+    persona: {
+      name: personaVersion.identityName,
+      personality: personaVersion.personality,
+      language: personaVersion.language,
+    },
     models,
     scenario: { instructions: testVersion.scenario },
     limits: SIMULATION_LIMITS[claim.modality],

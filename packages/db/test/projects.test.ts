@@ -75,7 +75,7 @@ afterAll(async () => {
 });
 
 describe("creating a project", () => {
-  it("writes the project and its shared default-persona pointer together", async () => {
+  it("writes the project and its seeded grader together, naming no persona", async () => {
     const made = await createProject(acmeAdmin(), {
       name: "Outbound sales",
     });
@@ -85,12 +85,11 @@ describe("creating a project", () => {
 
     const inside = actingIn(acme.organization, made.id, "admin");
     const personas = await listPersonas(inside, {});
-    expect(personas.items).toHaveLength(1);
 
-    // The pointer, read the way the persona factory reads it: the shared
-    // persona is the project's default, so the first test written here has a
-    // persona when it names none.
-    expect(personas.items[0]?.isDefault).toBe(true);
+    // Egma's shelf, and nothing of the project's own: creating a project
+    // reaches the persona catalog for nothing at all, and pins nobody.
+    expect(personas.items).toHaveLength(1);
+    expect(personas.items[0]?.owner).toBe("egma");
     const graders = await listProjectGraders(inside);
     expect(graders).toHaveLength(1);
     expect(graders[0]?.graderDefinitionId).toBe(
