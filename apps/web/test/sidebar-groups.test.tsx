@@ -230,7 +230,8 @@ describe("the grouped sidebar", () => {
   it.each([
     ["/projects/prj_2/agents", "Agents"],
     ["/projects/prj_2/graders", "Graders"],
-    ["/projects/prj_2/personas/prs_3", "Personas"],
+    /* One address: a persona is a panel over this list, not a page under it. */
+    ["/projects/prj_2/personas", "Personas"],
     ["/projects/prj_2/runs/run_9", "Runs"],
     ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Traces"],
   ])("lights one row on %s, and says which", (pathname, lit) => {

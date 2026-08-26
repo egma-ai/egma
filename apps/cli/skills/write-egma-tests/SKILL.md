@@ -77,8 +77,9 @@ Apply these rules:
 
 ## Handle personas carefully
 
-Omit `personas` for the project's default persona. Name a persona only when the
-test depends on who speaks to the agent. Use a name or id already supplied by
+Name at least one persona under `personas` in every test, because a test says
+who speaks to the agent. Egma refuses a test that names none, so a file without
+the line is a file the push turns away. Use a name or id already supplied by
 Egma or already present in this repository.
 
 Treat ids and sync pins as references, not prose. Inventing an id makes the

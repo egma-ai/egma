@@ -113,7 +113,7 @@ describe("the CLI and API suite contract", () => {
             // empty id, and the CLI sends the name for the platform to
             // resolve. A test names at least one persona from birth, so a push
             // naming none is refused rather than given the project's default.
-            personas: [{ id: "", name: "Default Persona" }],
+            personas: [{ id: "", name: "Everyday caller" }],
             mockTools: [],
           },
           expectedVersionId: null,

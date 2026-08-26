@@ -457,12 +457,12 @@ describe("creating and reading a persona", () => {
     const found = items.find((one) => one.id === PREDEFINED_PERSONA);
 
     expect(found).toMatchObject({
-      name: "Default Persona",
+      name: "Everyday caller",
       description: "Regular conversationalist persona",
       version: 1,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
-      // "Hi, I'm Default Persona."
+      // "Hi, I'm Everyday caller."
       identityName: "Alex Morgan",
       personality:
         "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
@@ -522,9 +522,11 @@ describe("the list", () => {
       `/v1/personas?projectId=${ada.projectId}&search=O`,
       ada,
     );
+    // "Two" was deleted, and the Predefined persona carries no `o` in its
+    // name, so what one letter leaves is the two rows that do hold it.
     expect(
       (searched.body.personas as WirePersona[]).map((one) => one.name),
-    ).toEqual(["Four", "One", "Default Persona"]);
+    ).toEqual(["Four", "One"]);
 
     // The cursor is the last id of the page, so two pages hold the whole set
     // with no row seen twice and none missed.

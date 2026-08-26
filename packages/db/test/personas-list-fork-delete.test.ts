@@ -135,7 +135,7 @@ describe("listing personas", () => {
       "Three",
       "Two",
       "One",
-      "Default Persona",
+      "Everyday caller",
     ]);
     expect(page.nextCursor).toBeUndefined();
   });
@@ -226,7 +226,7 @@ describe("listing personas", () => {
       "Four",
       "Two",
       "One",
-      "Default Persona",
+      "Everyday caller",
     ]);
   });
 });
@@ -275,15 +275,15 @@ describe("forking a persona", () => {
     ).toBeUndefined();
 
     // Neither refused fork created anything. Both lists still contain only
-    // their earlier local rows plus the shared default persona.
+    // their earlier local rows plus the shared Predefined persona.
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual([
       "Stranger",
-      "Default Persona",
+      "Everyday caller",
     ]);
     const archivingPage = await listPersonas(actingIn(acme.deleting));
     expect(archivingPage.items.map((item) => item.name)).toEqual([
-      "Default Persona",
+      "Everyday caller",
     ]);
   });
 
@@ -386,6 +386,6 @@ describe("deleting a persona", () => {
     ).rejects.toThrow(/is Predefined/);
 
     const listed = await listPersonas(actingIn(acme.deleting));
-    expect(listed.items.map((item) => item.name)).toContain("Default Persona");
+    expect(listed.items.map((item) => item.name)).toContain("Everyday caller");
   });
 });

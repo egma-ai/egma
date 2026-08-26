@@ -31,7 +31,7 @@ export type PersonaControls = {
  * the persona rework, and a test naming no persona is refused rather than given
  * one.
  */
-const EGMA_PREDEFINED = "Default Persona";
+const EGMA_PREDEFINED = "Everyday caller";
 
 function bearer(request: FixtureRequest): string {
   const value = request.headers.authorization ?? "";

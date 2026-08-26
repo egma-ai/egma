@@ -23,6 +23,30 @@ import { FieldHintContext } from "./field-hint.ts";
  */
 
 /**
+ * A label's own words, with a mandatory field's star drawn in Ember.
+ *
+ * `DESIGN.md` sets one label grammar for the whole product: a mandatory
+ * field's label ends in `*` and an optional one ends in `[optional]`. The
+ * colour of that star is Ember, and it is decided here rather than by each
+ * screen, so one star cannot be a different colour from the next.
+ *
+ * **The star stays inside the label's own text.** It is a `<span>` for its
+ * colour and its 4px of air, not a separate element beside the label, so the
+ * name a screen reader announces is exactly the name it announced before —
+ * and the star's promise is still kept by `aria-required` on the control,
+ * which is the half no styling can stand in for.
+ */
+export function LabelText({ label }: { readonly label: string }) {
+  if (!label.endsWith("*")) return <>{label}</>;
+  return (
+    <span>
+      {label.slice(0, -1)}
+      <span className="pl-1 text-brand">*</span>
+    </span>
+  );
+}
+
+/**
  * A labelled field, and the hint it lends to whatever control it wraps.
  *
  * The hint's id travels through context rather than through a prop: a caller
@@ -50,7 +74,9 @@ export function Field({
 
   return (
     <div className="flex flex-col gap-2" data-slot="field">
-      <Label htmlFor={htmlFor}>{label}</Label>
+      <Label htmlFor={htmlFor}>
+        <LabelText label={label} />
+      </Label>
       <FieldHintContext.Provider value={hint === undefined ? undefined : said}>
         {children}
       </FieldHintContext.Provider>

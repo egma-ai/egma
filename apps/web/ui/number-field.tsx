@@ -5,6 +5,8 @@ import { useId } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+import { LabelText } from "./form.tsx";
+
 /**
  * A field whose value is a number, with its bounds and its unit on it.
  *
@@ -118,7 +120,7 @@ export function NumberField({
   return (
     <div className="flex flex-col gap-2" data-slot="number-field">
       <label className="text-sm font-medium text-foreground" htmlFor={id}>
-        {label}
+        <LabelText label={label} />
       </label>
       {/*
        * The unit sits beside the field rather than inside it.

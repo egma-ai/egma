@@ -1,7 +1,6 @@
 import type {
   GetPersonaFormResponse,
   GetPersonaResponse,
-  GetPersonaUsageResponse,
   ListPersonasResponse,
   ListPersonaVersionsResponse,
 } from "@egma/platform-api/client";
@@ -10,9 +9,14 @@ import type {
  * The personas of one project, as `/v1/personas` answers them.
  *
  * A **persona** is the synthetic person who speaks with the agent. Egma
- * supplies an Egma-provided persona to every project, and a project can author
- * a Custom persona or fork the shared one. Human traits say how the person
- * behaves; models say how the simulator brings that person to life.
+ * supplies a Predefined persona to every project, and a project can author a
+ * Custom persona or fork the shared one.
+ *
+ * **A persona carries two names, and they are two different things.** `name` is
+ * the team's word for them — shown in lists, pickers and the sheet's head,
+ * rewritten in place, never spoken. `identityName` is the human name they give
+ * the agent, versioned exactly like their personality, so the same test hears
+ * the same person on every run.
  *
  * **Nothing in a persona says what that persona wants.** That is the test's
  * scenario. The whole worth of a persona is that one of them is used in forty
@@ -26,7 +30,6 @@ import type {
  */
 
 export type Persona = GetPersonaResponse;
-export type PersonaTraits = Persona["traits"];
 
 export type PersonaModels = Persona["models"];
 export type ModelSelection = PersonaModels["llm"];
@@ -36,88 +39,47 @@ export type PersonaPage = ListPersonasResponse;
 export type PersonaVersionPage = ListPersonaVersionsResponse;
 export type PersonaVersion = PersonaVersionPage["versions"][number];
 
-/**
- * The active tests that name this persona, as `/v1/personas/{id}/usage`
- * answers them.
- *
- * **It is read once, when a sheet or the archive confirmation opens, and never
- * per row.** A list of forty personas would be forty more requests for a
- * column nobody reads down; the two places it genuinely decides something are
- * the sheet's `USED BY` and the archive confirmation, which has to say which
- * tests would be left naming somebody who is no longer in the list.
- */
-export type PersonaUsage = GetPersonaUsageResponse;
-
 export type PersonaForm = GetPersonaFormResponse;
 export type PersonaModelCatalogEntry = PersonaForm["modelCatalog"][number];
 
-/** The model choices and defaults exported by the server's adapter catalog. */
 /**
- * The versioned field an editor is holding, before anybody decides whether it
- * differs from what is stored.
+ * Who they are, as an editor holds it before anybody decides whether it differs
+ * from what is stored.
+ *
+ * These three are exactly the versioned half of a persona: changing any of them
+ * mints a version, and changing the team name or the description mints nothing.
+ * Keeping them in one shape is what lets one comparison answer "does saving
+ * this make a new version?".
  */
-export type TraitsDraft = {
+export type BehaviorDraft = {
+  readonly identityName: string;
   readonly personality: string;
   readonly language: string;
-  readonly accent: string;
-  readonly backgroundNoise: string;
 };
 
 /** What a persona egma has not been told anything about starts as. */
-export const BLANK_TRAITS: TraitsDraft = {
+export const BLANK_BEHAVIOR: BehaviorDraft = {
+  identityName: "",
   personality: "",
   language: "en-US",
-  accent: "",
-  backgroundNoise: "",
 };
 
-/** The stored traits, as the editor holds them. */
-export function draftOf(traits: PersonaTraits): TraitsDraft {
+/** The stored behavior, as the editor holds it. A version reads the same way. */
+export function behaviorDraftOf(stored: BehaviorDraft): BehaviorDraft {
   return {
-    personality: traits.personality,
-    language: traits.language,
-    accent: traits.accent ?? "",
-    backgroundNoise: traits.backgroundNoise ?? "",
+    identityName: stored.identityName,
+    personality: stored.personality,
+    language: stored.language,
   };
 }
 
-/** The human-traits draft, in the exact shape the API accepts. */
-export function traitsFrom(draft: TraitsDraft): PersonaTraits {
-  return { ...draft };
-}
-
-export function sameTraitsDraft(
-  left: TraitsDraft,
-  right: TraitsDraft,
+export function sameBehaviorDraft(
+  left: BehaviorDraft,
+  right: BehaviorDraft,
 ): boolean {
-  return (Object.keys(left) as (keyof TraitsDraft)[]).every(
+  return (Object.keys(left) as (keyof BehaviorDraft)[]).every(
     (key) => left[key] === right[key],
   );
-}
-
-/** Human traits in the order a read-only persona view shows them. */
-export function describedTraits(
-  traits: PersonaTraits,
-): readonly { readonly label: string; readonly value: string }[] {
-  const required = [
-    { label: "Personality", value: traits.personality },
-    { label: "Language", value: traits.language },
-  ];
-  const optional: readonly {
-    readonly label: string;
-    readonly value: string | undefined;
-  }[] = [
-    { label: "Accent", value: traits.accent },
-    { label: "Background noise", value: traits.backgroundNoise },
-  ];
-  return [
-    ...required,
-    ...optional.flatMap((one) =>
-      one.value === undefined || one.value.trim() === ""
-        ? []
-        : [{ label: one.label, value: one.value }],
-    ),
-  ];
 }
 
 /** What the model editor holds while a speed can still be half typed. */
@@ -180,6 +142,38 @@ export function sameModelsDraft(
 }
 
 /**
+ * One engine choice, as one control.
+ *
+ * **A provider and a model are one decision, and the boards draw one control
+ * for it.** The server's catalog is a list of pairs its adapters can actually
+ * execute, so a single choice over those pairs cannot produce a combination
+ * that does not exist — where two controls, one for the provider and one for
+ * the model, have to be kept in step by hand and can disagree in between.
+ *
+ * The value is the pair, joined by a separator no provider or model id
+ * contains, because an `<option>` carries one string.
+ */
+export const MODEL_PAIR_SEPARATOR = "::";
+
+export function modelPairKey(selection: {
+  readonly provider: string;
+  readonly model: string;
+}): string {
+  return `${selection.provider}${MODEL_PAIR_SEPARATOR}${selection.model}`;
+}
+
+/** The catalog entry a pair key names, when the catalog still offers it. */
+export function modelPairFrom(
+  catalog: readonly PersonaModelCatalogEntry[],
+  job: PersonaModelCatalogEntry["job"],
+  key: string,
+): PersonaModelCatalogEntry | undefined {
+  return catalog.find(
+    (entry) => entry.job === job && modelPairKey(entry) === key,
+  );
+}
+
+/**
  * What a person calls a provider, as against what a persona stores.
  *
  * A persona stores `openai`; the server's catalog is where `OpenAI` is
@@ -203,7 +197,12 @@ export function modelSaid(
   return `${entry?.label ?? selection.provider} · ${selection.model}`;
 }
 
-/** The persona's type, in the two words the product uses for it. */
+/**
+ * The persona's type, in the two words the product uses for it.
+ *
+ * **Predefined**, not "Egma-provided": personas and graders name an Egma-built
+ * thing with one word, and Predefined is the word a customer arrives with.
+ */
 export function ownerSaid(owner: Persona["owner"]): string {
-  return owner === "egma" ? "Egma-provided" : "Custom";
+  return owner === "egma" ? "Predefined" : "Custom";
 }
