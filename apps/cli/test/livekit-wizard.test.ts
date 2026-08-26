@@ -207,7 +207,7 @@ function catalog(): Record<string, unknown> {
         agentPlatformLabel: "LiveKit",
         connectionType: "livekit_room",
         accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
-        accessVariantLabel: "LiveKit project credentials — Recommended",
+        accessVariantLabel: "LiveKit project credentials [Recommended]",
         modality: "voice",
         productLabel: "LiveKit project credentials",
         topology: "agent-dials-out",
@@ -229,7 +229,7 @@ function catalog(): Record<string, unknown> {
         agentPlatformLabel: "LiveKit",
         connectionType: "livekit_room",
         accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-        accessVariantLabel: "Customer token endpoint — Advanced",
+        accessVariantLabel: "Customer token endpoint [Advanced]",
         modality: "voice",
         productLabel: "LiveKit token endpoint",
         topology: "agent-dials-out",
@@ -424,11 +424,11 @@ describe("LiveKit in the wizard", () => {
       choices: [
         {
           value: LIVEKIT_KEY_PAIR_VARIANT,
-          label: "LiveKit project credentials — Recommended",
+          label: "LiveKit project credentials [Recommended]",
         },
         {
           value: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-          label: "Customer token endpoint — Advanced",
+          label: "Customer token endpoint [Advanced]",
         },
       ],
     });

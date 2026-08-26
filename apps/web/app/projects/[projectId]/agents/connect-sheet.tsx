@@ -71,7 +71,7 @@ import { AgentOnboardingProgress } from "./onboarding-progress.tsx";
  * second connection onto the same agent shows no key field at all — the sheet
  * says which key the agent holds and lists the account with it.
  *
- * **"Connect anew agent" is last.** Reuse is the ordinary case and creation is
+ * **"Connect a new agent" is last.** Reuse is the ordinary case and creation is
  * the fallback, so the picker reads as a list of agents with a way to make one
  * under it rather than a create form with a list attached.
  *
@@ -89,7 +89,7 @@ export type ConnectSheetResult = {
   readonly created: boolean;
 };
 
-/** What "Connect anew agent" is, as a value the select can hold. */
+/** What "Connect a new agent" is, as a value the select can hold. */
 const NEW_AGENT = "";
 
 /**
@@ -101,8 +101,11 @@ const NEW_AGENT = "";
 const SHORTEST_KEY = 8;
 
 /**
- * The platforms an agent can be connected on: Retell and LiveKit, and no
- * third one (founder ruling, 2026-08-24).
+ * The platforms an agent can be connected on — LiveKit first, then Retell,
+ * and no third one (founder ruling, 2026-08-24; the order is the developer's,
+ * 2026-08-26). This list is the select's order as well as its filter, so the
+ * dropdown reads it top to bottom rather than reading the catalog's own
+ * ordering.
  *
  * **The catalog carries one more.** A phone number belongs to no platform in
  * particular, so the registry lists it under a platform-less option labelled
@@ -111,7 +114,7 @@ const SHORTEST_KEY = 8;
  * register an agent bound to nothing, which nothing downstream can monitor.
  * The catalog is not changed; this sheet chooses what it offers from it.
  */
-const OFFERED_PLATFORMS: readonly string[] = ["retell", "livekit"];
+const OFFERED_PLATFORMS: readonly string[] = ["livekit", "retell"];
 
 /**
  * The connection half of the write, typed from the operation that carries it.
@@ -244,17 +247,16 @@ export function ConnectAgentSheet({
         if (read.status === "signed-out") {
           window.location.replace("/sign-in");
         } else if (read.status === "ready") {
+          /*
+           * **The catalog arrives and no platform is chosen for anybody.**
+           * The select opens on "Choose a platform" and the connection's own
+           * fields follow the answer (developer decision, 2026-08-26). This
+           * used to pre-choose the catalog's first offered platform, which
+           * put a Retell form in front of every person — a LiveKit owner had
+           * to notice a filled-in answer was wrong before they could give
+           * the right one.
+           */
           setCatalog(read.value);
-          // The first option on a platform this sheet offers — never the
-          // catalog's own first item, which may be the platform-less one.
-          const first = read.value.items.find((one) =>
-            OFFERED_PLATFORMS.includes(one.agentPlatform ?? ""),
-          );
-          if (first !== undefined) {
-            setPlatformValue(first.agentPlatform ?? "");
-            setModality(first.modality);
-            setAccessVariant(first.accessVariant);
-          }
         } else {
           setCatalogRefused(read.refusal);
         }
@@ -279,7 +281,17 @@ export function ConnectAgentSheet({
       ? null
       : platformValue;
 
-  const platformOptions = optionsForPlatform(catalog, selectedPlatform);
+  /*
+   * **An unanswered platform offers no options at all.** `null` is also how
+   * the catalog spells its platform-less entry — the public phone number —
+   * so passing the unanswered state through `optionsForPlatform` would offer
+   * exactly the option this sheet exists to keep out: an agent bound to
+   * nothing, which nothing downstream can monitor.
+   */
+  const platformOptions =
+    selectedPlatform === null
+      ? []
+      : optionsForPlatform(catalog, selectedPlatform);
   const modalities = [...new Set(platformOptions.map((one) => one.modality))];
   const chooseableModality = modalities.length > 1;
   const shownModality = modalities.find((one) => one === modality) ?? modalities[0];
@@ -696,19 +708,27 @@ export function ConnectAgentSheet({
           ? "Type the phone number Egma calls in a simulation."
           : undefined;
   const retellReady = !usesAgentDiscovery || whyNotYet === undefined;
-  const canSubmit = retellReady && liveKitForm.ready;
+  /*
+   * **An unanswered platform is the first missing thing.** Without it there
+   * is no option, and `liveKitForm.ready` is then vacuously true — a submit
+   * gated on readiness alone would sit enabled in front of a form that has
+   * not asked its questions yet, and press into a silent return.
+   */
+  const canSubmit = option !== undefined && retellReady && liveKitForm.ready;
   const submitWhy =
-    whyNotYet ??
-    (liveKitForm.ready
-      ? undefined
-      : "Enter the exact LiveKit agent name, or choose automatic dispatch.");
+    option === undefined
+      ? "Choose the platform this agent runs on."
+      : (whyNotYet ??
+        (liveKitForm.ready
+          ? undefined
+          : "Enter the exact LiveKit agent name, or choose automatic dispatch."));
 
   /**
    * The picker's options: making one, plus every agent this screen has read.
    *
    * The chosen agent is added when the page behind does not hold it, so a deep
    * link into an agent on the fourth page of the list still shows its own name
-   * rather than falling back to "Connect anew agent".
+   * rather than falling back to "Connect a new agent".
    */
   const choices: readonly AgentChoice[] = [
     ...agents.map((one) => ({
@@ -756,7 +776,19 @@ export function ConnectAgentSheet({
         />
       );
     }
-    if (catalog === null || option === undefined || liveKitForm.option === undefined) {
+    if (catalog === null) {
+      return <Loading what="the connection options" />;
+    }
+    /*
+     * A platform that is decided — bound to the agent, or chosen in the
+     * select — names its options. A decided platform whose options have not
+     * arrived is the loading state it always was; an undecided one is a form
+     * waiting on its first answer, and the sheet below draws that.
+     */
+    if (
+      selectedPlatform !== null &&
+      (option === undefined || liveKitForm.option === undefined)
+    ) {
       return <Loading what="the connection options" />;
     }
 
@@ -787,7 +819,7 @@ export function ConnectAgentSheet({
             trigger={
               <>
                 {chosen === undefined ? (
-                  <span className="min-w-0 flex-1">Connect anew agent</span>
+                  <span className="min-w-0 flex-1">Connect a new agent</span>
                 ) : (
                   <AgentChoiceLabel name={chosen.name} platform={chosen.platform} />
                 )}
@@ -820,7 +852,7 @@ export function ConnectAgentSheet({
                     close();
                   }}
                 >
-                  Connect anew agent
+                  Connect a new agent
                 </MenuItem>
               </>
             )}
@@ -855,8 +887,46 @@ export function ConnectAgentSheet({
           </SheetGroup>
         ) : null}
 
-        <SheetGroup eyebrow="Connection">
-          {creating ? null : platformField()}
+        {/*
+          * **The Connection block exists once there is a platform question to
+          * hold.** While a new agent's platform is unanswered, the block would
+          * be an eyebrow over nothing — the select lives in the NEW AGENT
+          * group, and everything else here follows the answer.
+          */}
+        {creating && option === undefined ? null : (
+          <SheetGroup eyebrow="Connection">
+            {creating ? null : platformField()}
+            {configuration()}
+          </SheetGroup>
+        )}
+
+        {refused === null ? null : <Problem>{refused.message}</Problem>}
+        {submitWhy === undefined ? null : <Help id={whySaid}>{submitWhy}</Help>}
+        {onboarding ? (
+          <Help>
+            Without a connection, Egma cannot run a simulation against this
+            agent. You can add one later from Configuration.
+          </Help>
+        ) : null}
+      </>
+    );
+  }
+
+  /**
+   * Everything under the platform question, drawn once it has an answer.
+   *
+   * **The fields follow the platform** (developer decision, 2026-08-26):
+   * choosing Retell draws the key, the account's agents and the number;
+   * choosing LiveKit draws the room, the dispatch contract and the key pair.
+   * Before the answer there is nothing here — not a disabled copy of one
+   * platform's form, which is a set of questions Egma is not asking.
+   */
+  function configuration(): ReactNode {
+    const chosen = option;
+    const shape = liveKitForm.option;
+    if (chosen === undefined || shape === undefined) return null;
+    return (
+      <>
           {chooseableModality ? (
             <ModalityChoice
               value={shownModality}
@@ -875,7 +945,7 @@ export function ConnectAgentSheet({
             <Field label="Access" htmlFor="access-variant">
               <Select
                 id="access-variant"
-                value={option.accessVariant}
+                value={chosen.accessVariant}
                 disabled={saving}
                 onChange={(event) => chooseOption(event.target.value)}
               >
@@ -935,7 +1005,7 @@ export function ConnectAgentSheet({
             />
           ) : (
             <ConnectionFields
-              option={liveKitForm.option}
+              option={shape}
               draft={draft}
               onChange={setDraft}
               credentialsEditable
@@ -956,38 +1026,45 @@ export function ConnectAgentSheet({
               }
             />
           )}
-        </SheetGroup>
-
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
-        {submitWhy === undefined ? null : <Help id={whySaid}>{submitWhy}</Help>}
-        {onboarding ? (
-          <Help>
-            Without a connection, Egma cannot run a simulation against this
-            agent. You can add one later from Configuration.
-          </Help>
-        ) : null}
       </>
     );
   }
 
-  /** The one select, drawn in whichever block owns the platform question. */
+  /**
+   * The one select, drawn in whichever block owns the platform question.
+   *
+   * **Its first item is the question.** The select opens on "Choose a
+   * platform" and the connection's fields follow the answer, so nobody is
+   * shown one platform's questions before saying which platform they are on.
+   * The item is disabled because it is a question rather than an answer:
+   * once a platform is chosen, "none" is not a state a connection can hold.
+   * The label carries the `*` and the control carries `aria-required`, which
+   * is the label grammar every mandatory field in the product uses.
+   */
   function platformField(): ReactNode {
     if (platformFixed) return null;
     return (
-      <Field label="Platform" htmlFor="agent-platform">
+      <Field label="Platform*" htmlFor="agent-platform">
         <Select
+          aria-required="true"
           id="agent-platform"
           value={platformValue}
           disabled={saving}
           onChange={(event) => choosePlatform(event.target.value)}
         >
-          {agentPlatformChoices(catalog)
-            .filter((one) => OFFERED_PLATFORMS.includes(one.value))
-            .map((one) => (
-              <option key={one.value} value={one.value}>
-                {one.label}
-              </option>
-            ))}
+          <option value="" disabled>
+            Choose a platform
+          </option>
+          {OFFERED_PLATFORMS.flatMap((offered) => {
+            const one = agentPlatformChoices(catalog).find(
+              (choice) => choice.value === offered,
+            );
+            return one === undefined ? [] : [one];
+          }).map((one) => (
+            <option key={one.value} value={one.value}>
+              {one.label}
+            </option>
+          ))}
         </Select>
       </Field>
     );
