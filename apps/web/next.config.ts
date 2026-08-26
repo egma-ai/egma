@@ -16,8 +16,26 @@ import type { NextConfig } from "next";
  */
 const api = process.env.EGMA_API_ORIGIN ?? "http://127.0.0.1:3100";
 
+/**
+ * Whether this build has to produce a server somebody else will start.
+ *
+ * `standalone` writes `.next/standalone`: the server plus the one copy of
+ * `node_modules` it actually reached for. That directory is the self-hosted
+ * product — `apps/web/Dockerfile` copies it into the runtime image and Compose
+ * runs `node apps/web/server.js` out of it — and it is the only place the
+ * directory is ever read.
+ *
+ * Vercel is the other place this builds, and it is not that place. It takes
+ * `.next` and makes its own functions from it; it has never opened
+ * `standalone`. So asking for the directory there only ever bought a slower
+ * build and a copy nobody consumed, and from Next 16 it stopped being free:
+ * the deployment that follows a clean build now fails. `VERCEL` is set in
+ * every Vercel build, so the ask goes where the answer is used.
+ */
+const forSelfHosting = !process.env.VERCEL;
+
 const config: NextConfig = {
-  output: "standalone",
+  ...(forSelfHosting ? { output: "standalone" as const } : {}),
   outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
 
   // The one telemetry flag, made visible to the browser bundle. Pages cannot

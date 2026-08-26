@@ -31,5 +31,11 @@
     "skills": "1.5.22",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "js-yaml@4": "^4.3.1",
+      "esbuild@<0.25.0": "^0.25.12"
+    }
   }
 }
