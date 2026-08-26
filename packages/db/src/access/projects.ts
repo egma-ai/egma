@@ -258,11 +258,10 @@ function isSlugCollision(thrown: unknown): boolean {
  * able to drift apart on who may.
  *
  * What it writes is `insertProject`'s business and deliberately not this
- * function's: the project, its pointer to Egma's shared default persona, and its
- * `expected_behaviors` project grader. A project created here is therefore
- * indistinguishable from the one signup makes, which is the point — anything
- * less is a project that refuses the first test written in it, or one whose
- * completed simulations receive no expected-behavior grade.
+ * function's: the project and its `expected_behaviors` project grader. A
+ * project created here is therefore indistinguishable from the one signup
+ * makes, which is the point — anything less is a project whose completed
+ * simulations receive no expected-behavior grade.
  *
  * **The project and its expected-behavior grading are one transaction**, which
  * is the factory's doing rather than this function's: a project that existed

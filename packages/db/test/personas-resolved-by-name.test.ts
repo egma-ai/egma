@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPersona,
-  archivePersona,
+  deletePersona,
   PersonaNameAmbiguousError,
   resolvePersonaNames,
   type AuthContext,
@@ -38,7 +38,8 @@ const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
 const gene = newId("usr");
 
-const neutralTraits = {
+const neutralBehavior = {
+  identityName: "Sam Poole",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
 } as const;
@@ -69,7 +70,7 @@ function actingAsGlobex(): AuthContext {
 async function seedPersona(auth: AuthContext, name: string): Promise<string> {
   const created = await createPersona(auth, {
     name,
-    traits: neutralTraits,
+    ...neutralBehavior,
   });
   return created.id;
 }
@@ -132,7 +133,7 @@ describe("a name this project cannot answer", () => {
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Nobody At All"]),
     ).rejects.toThrow(
-      'Egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and Egma takes the project\'s default.',
+      'Egma has no persona called "Nobody At All" in this project. Name a persona this project already has.',
     );
   });
 
@@ -169,9 +170,9 @@ describe("a name only an archived persona answers to", () => {
    */
   it("is refused in the factory's own words, by name and by identifier alike", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Leaving Soon");
-    await archivePersona(actingIn(acme.project), leaving);
+    await deletePersona(actingIn(acme.project), leaving);
 
-    const gone = `persona ${leaving} is archived, and a test cannot name an archived persona`;
+    const gone = `persona ${leaving} is deleted, and a test cannot name a deleted persona`;
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Leaving Soon"]),
     ).rejects.toThrow(gone);
@@ -182,7 +183,7 @@ describe("a name only an archived persona answers to", () => {
 
   it("is still a persona nobody has, once another customer asks by that name", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Also Leaving");
-    await archivePersona(actingIn(acme.project), leaving);
+    await deletePersona(actingIn(acme.project), leaving);
 
     await expect(
       resolvePersonaNames(actingAsGlobex(), ["Also Leaving"]),
@@ -191,7 +192,7 @@ describe("a name only an archived persona answers to", () => {
 
   it("does not shadow a living persona of the same name", async () => {
     const gone = await seedPersona(actingIn(acme.project), "Two Of Them");
-    await archivePersona(actingIn(acme.project), gone);
+    await deletePersona(actingIn(acme.project), gone);
     const living = await seedPersona(actingIn(acme.project), "Two Of Them");
 
     expect(

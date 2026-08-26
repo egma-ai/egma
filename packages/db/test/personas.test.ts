@@ -12,7 +12,6 @@ import {
   type AuthContext,
   type NewPersona,
   type PersonaChanges,
-  type PersonaTraits,
   type Role,
 } from "@egma/db";
 
@@ -49,23 +48,18 @@ function actingAsAcme(role: Role = "member"): AuthContext {
   };
 }
 
+/**
+ * Two names, and the tests lean on both. "Impatient Rita" is what her team
+ * calls her in a list; "Rita Alvarez" is what the agent hears her say.
+ */
 const rita = {
   name: "Impatient Rita",
   description: "Elderly regular, books by phone only",
-  traits: {
-    personality:
-      "Rita is 70, hard of hearing, answers questions with stories, and gets louder when the agent mishears her.",
-    language: "en-US",
-    accent: "Neutral American English.",
-    backgroundNoise: "A quiet kitchen.",
-  },
+  identityName: "Rita Alvarez",
+  personality:
+    "Rita is 70, hard of hearing, answers questions with stories, and gets louder when the agent mishears her.",
+  language: "en-US",
 } as const satisfies NewPersona;
-
-const ritaTraits: PersonaTraits = rita.traits;
-
-function ritaWith(personality: string): PersonaTraits {
-  return { ...ritaTraits, personality };
-}
 
 beforeAll(async () => {
   database = await createConnectedDatabase("personas");
@@ -107,9 +101,33 @@ describe("creating a persona", () => {
     expect(fetched?.name).toBe(rita.name);
     expect(fetched?.description).toBe(rita.description);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(ritaTraits);
+    expect(fetched?.identityName).toBe(rita.identityName);
+    expect(fetched?.personality).toBe(rita.personality);
+    expect(fetched?.language).toBe(rita.language);
     expect(fetched?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
     expect(fetched?.projectId).toBe(acme.project);
+  });
+
+  it("stores the identity name and the models as plain typed columns", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    const { rows } = await database.sql<{
+      identity_name: string;
+      personality: string;
+      language: string;
+      tts_voice_id: string;
+      tts_speed: string;
+    }>(
+      `select identity_name, personality, language, tts_voice_id, tts_speed
+         from persona_version where id = $1`,
+      [created.versionId],
+    );
+
+    expect(rows[0]?.identity_name).toBe(rita.identityName);
+    expect(rows[0]?.personality).toBe(rita.personality);
+    expect(rows[0]?.language).toBe(rita.language);
+    expect(rows[0]?.tts_voice_id).toBe(RECOMMENDED_PERSONA_MODELS.tts.voiceId);
+    expect(Number(rows[0]?.tts_speed)).toBe(RECOMMENDED_PERSONA_MODELS.tts.speed);
   });
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
@@ -142,8 +160,8 @@ describe("creating a persona", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into persona
-           (id, organization_id, project_id, name, current_version_id, revision)
-         values ($1, $2, $3, 'Halfway', $4, 'a-revision')`,
+           (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Halfway', $4)`,
         [orphan, acme.organization, acme.project, newId("prsv")],
       );
 
@@ -177,7 +195,7 @@ describe("a credential for the whole organization", () => {
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editPersona(wholeCustomer, created.id, {
-      traits: ritaWith("Rita calls from the whole customer context."),
+      personality: "Rita calls from the whole customer context.",
     });
 
     expect(edited?.version).toBe(2);
@@ -194,12 +212,13 @@ describe("editing a persona's personality", () => {
 
     const calmer = "Rita, but rested.";
     const edited = await editPersona(actingAsAcme(), created.id, {
-      traits: ritaWith(calmer),
+      personality: calmer,
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.versionId).not.toBe(created.versionId);
-    expect(edited?.traits).toEqual({ ...ritaTraits, personality: calmer });
+    expect(edited?.personality).toBe(calmer);
+    expect(edited?.identityName).toBe(rita.identityName);
 
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(2);
@@ -208,7 +227,7 @@ describe("editing a persona's personality", () => {
     const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
     expect(frozen?.personaId).toBe(created.id);
-    expect(frozen?.traits).toEqual(ritaTraits);
+    expect(frozen?.personality).toBe(rita.personality);
   });
 
   it("versions each personality change", async () => {
@@ -223,7 +242,7 @@ describe("editing a persona's personality", () => {
     let expected = 1;
     for (const personality of personalities) {
       const edited = await editPersona(actingAsAcme(), created.id, {
-        traits: ritaWith(personality),
+        personality,
       });
       expected += 1;
       expect(edited?.version).toBe(expected);
@@ -231,18 +250,17 @@ describe("editing a persona's personality", () => {
 
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(4);
-    expect(fetched?.traits).toEqual({
-      ...ritaTraits,
-      personality: personalities[2],
-    });
+    expect(fetched?.personality).toBe(personalities[2]);
   });
 
-  it("does nothing for a byte-identical save, and returns the current version", async () => {
+  it("does nothing for an identical save, and returns the current version", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const before = await rowCounts();
 
     const saved = await editPersona(actingAsAcme(), created.id, {
-      traits: ritaTraits,
+      identityName: rita.identityName,
+      personality: rita.personality,
+      language: rita.language,
     });
 
     expect(saved?.version).toBe(1);
@@ -256,37 +274,32 @@ describe("editing a persona's personality", () => {
   it("keeps every old version fetchable by its prsv_ id after later edits", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const second = await editPersona(actingAsAcme(), created.id, {
-      traits: ritaWith("Rita after the first edit."),
+      personality: "Rita after the first edit.",
     });
     await editPersona(actingAsAcme(), created.id, {
-      traits: ritaWith("Rita after the second edit."),
+      personality: "Rita after the second edit.",
     });
 
     const first = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(first?.version).toBe(1);
-    expect(first?.traits).toEqual(ritaTraits);
+    expect(first?.personality).toBe(rita.personality);
 
     if (second?.versionId === undefined) throw new Error("no second version");
     const middle = await getPersonaVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
-    expect(middle?.traits).toEqual({
-      ...ritaTraits,
-      personality: "Rita after the first edit.",
-    });
+    expect(middle?.personality).toBe("Rita after the first edit.");
   });
 
   it("refuses an empty edited personality and versions nothing", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
-      editPersona(actingAsAcme(), created.id, {
-        traits: ritaWith("   "),
-      }),
+      editPersona(actingAsAcme(), created.id, { personality: "   " }),
     ).rejects.toThrow(/personality/);
 
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(ritaTraits);
+    expect(fetched?.personality).toBe(rita.personality);
   });
 
   it("is refused to a viewer, per the permission table", async () => {
@@ -294,9 +307,36 @@ describe("editing a persona's personality", () => {
 
     await expect(
       editPersona(actingAsAcme("viewer"), created.id, {
-        traits: ritaWith("Rita after a viewer's edit."),
+        personality: "Rita after a viewer's edit.",
       }),
     ).rejects.toThrow(NotPermittedError);
+  });
+});
+
+describe("editing a persona's identity name", () => {
+  it("mints a version, because the agent hears the change", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    const edited = await editPersona(actingAsAcme(), created.id, {
+      identityName: "Margarita Alvarez",
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.identityName).toBe("Margarita Alvarez");
+    expect(edited?.name).toBe(rita.name);
+
+    const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
+    expect(frozen?.identityName).toBe(rita.identityName);
+  });
+
+  it("refuses an empty one and versions nothing", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    await expect(
+      editPersona(actingAsAcme(), created.id, { identityName: "  " }),
+    ).rejects.toThrow(/identity name/);
+
+    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
   });
 });
 
@@ -319,6 +359,20 @@ describe("editing a persona's model selection", () => {
     ).toEqual(RECOMMENDED_PERSONA_MODELS);
   });
 
+  it("mints a version for a speaking speed change alone", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    const edited = await editPersona(actingAsAcme(), created.id, {
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 1.25 },
+      },
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.models.tts.speed).toBe(1.25);
+  });
+
   it("refuses an unsupported provider/model pair before writing", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     await expect(
@@ -329,6 +383,19 @@ describe("editing a persona's model selection", () => {
         },
       }),
     ).rejects.toThrow(/supported openai stt model/i);
+    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
+  });
+
+  it("refuses a speaking speed outside the range the column allows", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    await expect(
+      editPersona(actingAsAcme(), created.id, {
+        models: {
+          ...RECOMMENDED_PERSONA_MODELS,
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 2 },
+        },
+      }),
+    ).rejects.toThrow(/speed/i);
     expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
   });
 });
@@ -352,7 +419,18 @@ describe("renaming a persona", () => {
     const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.name).toBe("Patient Rita");
     expect(fetched?.version).toBe(1);
-    expect(fetched?.traits).toEqual(ritaTraits);
+    expect(fetched?.identityName).toBe(rita.identityName);
+  });
+
+  it("leaves the identity name alone, because they are two different names", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    const renamed = await editPersona(actingAsAcme(), created.id, {
+      name: "The loud one",
+    });
+
+    expect(renamed?.name).toBe("The loud one");
+    expect(renamed?.identityName).toBe(rita.identityName);
   });
 
   it("clears the description with null, still without versioning", async () => {
@@ -379,7 +457,7 @@ describe("renaming a persona", () => {
 
     const edited = await editPersona(actingAsAcme(), created.id, {
       name: "Louder Rita",
-      traits: ritaWith("Rita gets louder when the agent mishears her."),
+      personality: "Rita gets louder when the agent mishears her.",
     });
 
     expect(edited?.name).toBe("Louder Rita");
@@ -402,11 +480,18 @@ describe("a persona that fails validation", () => {
     const before = await rowCounts();
 
     await expect(
-      createPersona(actingAsAcme(), {
-        ...rita,
-        traits: ritaWith(""),
-      }),
+      createPersona(actingAsAcme(), { ...rita, personality: "" }),
     ).rejects.toThrow(/personality/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused for a missing identity name", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createPersona(actingAsAcme(), { ...rita, identityName: "  " }),
+    ).rejects.toThrow(/identity name/);
 
     expect(await rowCounts()).toEqual(before);
   });
@@ -423,12 +508,15 @@ describe("a persona that fails validation", () => {
 
   it("refuses missing and non-string create fields without leaking trim errors", async () => {
     const before = await rowCounts();
+    const { name: _name, ...nameless } = rita;
+    const { personality: _personality, ...voiceless } = rita;
+    const { language: _language, ...speechless } = rita;
     const invalid = [
-      [{ traits: ritaTraits }, /name/],
-      [{ name: 42, traits: ritaTraits }, /name/],
-      [{ name: "Rita" }, /traits/],
-      [{ name: "Rita", traits: { ...ritaTraits, personality: 42 } }, /personality/],
-      [{ name: "Rita", traits: { personality: "Ready" } }, /language/],
+      [nameless, /name/],
+      [{ ...rita, name: 42 }, /name/],
+      [voiceless, /personality/],
+      [{ ...rita, personality: 42 }, /personality/],
+      [speechless, /language/],
     ] as const;
 
     for (const [input, message] of invalid) {
@@ -441,28 +529,31 @@ describe("a persona that fails validation", () => {
 
   it("refuses stale create fields clearly and writes nothing", async () => {
     const before = await rowCounts();
-    const staleInput = { ...rita, personality: "Old flat field" } as unknown as NewPersona;
+    const staleInput = {
+      ...rita,
+      traits: { personality: "Old nested bag" },
+    } as unknown as NewPersona;
 
     await expect(
       createPersona(actingAsAcme(), staleInput),
     ).rejects.toThrow(
-      'persona create received unsupported fields "personality"; accepted fields are "name", "description", "traits", "models"',
+      'persona create received unsupported fields "traits"; accepted fields are "name", "description", "identityName", "personality", "language", "models"',
     );
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it.each(["manner", "patience", "underFriction"])(
-    "refuses the removed %s trait and writes nothing",
-    async (removedTrait) => {
+  it.each(["accent", "backgroundNoise", "manner"])(
+    "refuses the removed %s field and writes nothing",
+    async (removed) => {
       const before = await rowCounts();
       const input = {
         ...rita,
-        traits: { ...ritaTraits, [removedTrait]: "Legacy behavior." },
+        [removed]: "Legacy behavior.",
       } as unknown as NewPersona;
 
       await expect(createPersona(actingAsAcme(), input)).rejects.toThrow(
-        `persona traits have unsupported fields ${removedTrait}`,
+        `persona create received unsupported fields "${removed}"`,
       );
       expect(await rowCounts()).toEqual(before);
     },
@@ -471,12 +562,14 @@ describe("a persona that fails validation", () => {
   it("refuses stale edit fields clearly and versions nothing", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const before = await rowCounts();
-    const staleChanges = { personality: "Old flat field" } as unknown as PersonaChanges;
+    const staleChanges = {
+      expectedRevision: "a-revision",
+    } as unknown as PersonaChanges;
 
     await expect(
       editPersona(actingAsAcme(), created.id, staleChanges),
     ).rejects.toThrow(
-      'persona edit received unsupported fields "personality"; accepted fields are "name", "description", "traits", "models", "expectedRevision", "expectedVersionId"',
+      'persona edit received unsupported fields "expectedRevision"; accepted fields are "name", "description", "identityName", "personality", "language", "models"',
     );
 
     expect(await rowCounts()).toEqual(before);
@@ -503,7 +596,7 @@ describe("a persona that fails validation", () => {
     ).rejects.toThrow(/name/);
     await expect(
       editPersona(actingAsAcme(), created.id, {
-        traits: { ...ritaTraits, personality: 42 },
+        personality: 42,
       } as unknown as PersonaChanges),
     ).rejects.toThrow(/personality/);
 
@@ -513,12 +606,12 @@ describe("a persona that fails validation", () => {
 });
 
 describe("an immutable persona version", () => {
-  it("refuses a direct traits rewrite at the database boundary", async () => {
+  it("refuses a direct identity-name rewrite at the database boundary", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
       database.sql(
-        `update persona_version set traits = '{"personality": 12}'::jsonb where id = $1`,
+        `update persona_version set identity_name = 'Somebody Else' where id = $1`,
         [created.versionId],
       ),
     ).rejects.toMatchObject({
@@ -526,19 +619,35 @@ describe("an immutable persona version", () => {
       constraint: "persona_version_semantics_immutable",
     });
 
-    expect((await getPersona(actingAsAcme(), created.id))?.traits).toEqual(
-      ritaTraits,
+    expect((await getPersona(actingAsAcme(), created.id))?.identityName).toBe(
+      rita.identityName,
     );
   });
 
-  it("refuses a direct models rewrite at the database boundary", async () => {
+  it("refuses a direct personality rewrite at the database boundary", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
       database.sql(
-        `update persona_version
-            set models = jsonb_set(models, '{stt,model}', '"gpt-4o-transcribe"')
-          where id = $1`,
+        `update persona_version set personality = 'Rewritten' where id = $1`,
+        [created.versionId],
+      ),
+    ).rejects.toMatchObject({
+      code: POSTGRES_ERROR.checkViolation,
+      constraint: "persona_version_semantics_immutable",
+    });
+
+    expect((await getPersona(actingAsAcme(), created.id))?.personality).toBe(
+      rita.personality,
+    );
+  });
+
+  it("refuses a direct model rewrite at the database boundary", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    await expect(
+      database.sql(
+        `update persona_version set stt_model = 'gpt-4o-transcribe' where id = $1`,
         [created.versionId],
       ),
     ).rejects.toMatchObject({
@@ -549,6 +658,48 @@ describe("an immutable persona version", () => {
     expect((await getPersona(actingAsAcme(), created.id))?.models).toEqual(
       RECOMMENDED_PERSONA_MODELS,
     );
+  });
+});
+
+describe("the columns a version is stored in", () => {
+  it("refuse a blank authored value written around the module", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    await expect(
+      database.sql(
+        `insert into persona_version
+           (id, persona_id, version, identity_name, personality, language,
+            llm_provider, llm_model, stt_provider, stt_model,
+            tts_provider, tts_model, tts_voice_id, tts_speed)
+         values ($1, $2, 99, '   ', 'Patient', 'en-US',
+           'openai', 'gpt-5.6-terra', 'deepgram', 'nova-3-general',
+           'cartesia', 'sonic-3.5', 'a-voice', 1.0)`,
+        [newId("prsv"), created.id],
+      ),
+    ).rejects.toMatchObject({
+      code: POSTGRES_ERROR.checkViolation,
+      constraint: "persona_version_identity_name_stated",
+    });
+  });
+
+  it("refuse a speaking speed outside the release's range", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+
+    await expect(
+      database.sql(
+        `insert into persona_version
+           (id, persona_id, version, identity_name, personality, language,
+            llm_provider, llm_model, stt_provider, stt_model,
+            tts_provider, tts_model, tts_voice_id, tts_speed)
+         values ($1, $2, 98, 'Rita Alvarez', 'Patient', 'en-US',
+           'openai', 'gpt-5.6-terra', 'deepgram', 'nova-3-general',
+           'cartesia', 'sonic-3.5', 'a-voice', 1.9)`,
+        [newId("prsv"), created.id],
+      ),
+    ).rejects.toMatchObject({
+      code: POSTGRES_ERROR.checkViolation,
+      constraint: "persona_version_tts_speed_in_range",
+    });
   });
 });
 
@@ -591,7 +742,7 @@ describe("tenancy", () => {
     };
     const stolen = await editPersona(actingAsGlobex, created.id, {
       name: "Globex Rita",
-      traits: ritaWith("Globex tries to change Rita."),
+      personality: "Globex tries to change Rita.",
     });
     expect(stolen).toBeUndefined();
 
@@ -614,8 +765,8 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into persona
-           (id, organization_id, project_id, name, current_version_id, revision)
-         values ($1, $2, $3, 'Smuggled', $4, 'a-revision')`,
+           (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Smuggled', $4)`,
         [newId("prs"), acme.organization, globex.project, newId("prsv")],
       ),
     ).rejects.toSatisfy(

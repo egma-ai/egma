@@ -67,9 +67,14 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /project_outside_organization/u,
   },
   {
+    // A persona used to carry a revision too, and this line named the file that
+    // proved it. Personas are last-write-wins now, so that half of the concern
+    // has no proof anywhere — it has no subject. The concern itself still
+    // stands for the resources that kept their token, and this points at one of
+    // them rather than being quietly dropped.
     concern: "revisions, and an edit sent against a stale one",
-    file: "packages/db/test/personas-revisions-and-history.test.ts",
-    says: /revision/iu,
+    file: "packages/db/test/projects.test.ts",
+    says: /expectedRevision/u,
   },
   {
     concern: "idempotency keys on a run",

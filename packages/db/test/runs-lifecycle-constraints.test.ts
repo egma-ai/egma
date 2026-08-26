@@ -112,21 +112,28 @@ async function seedPersona(
   // transaction exactly as the application writes it.
   await db.sql("begin");
   await db.sql(
-    `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
-     values ($1, $2, $3, 'Impatient Rita', $4, 'a-revision')`,
+    `insert into persona (id, organization_id, project_id, name, current_version_id)
+     values ($1, $2, $3, 'Impatient Rita', $4)`,
     [persona, organization, project, version],
   );
   await db.sql(
-    `insert into persona_version (id, persona_id, version, traits, models)
-     values ($1, $2, 1, $3::jsonb, $4::jsonb)`,
+    `insert into persona_version
+       (id, persona_id, version, identity_name, personality, language,
+        llm_provider, llm_model, stt_provider, stt_model,
+        tts_provider, tts_model, tts_voice_id, tts_speed)
+     values ($1, $2, 1, 'Rita Alvarez', 'Speaks plainly and stays patient.',
+       'en-US', $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       version,
       persona,
-      JSON.stringify({
-        personality: "Speaks plainly and stays patient.",
-        language: "en-US",
-      }),
-      JSON.stringify(RECOMMENDED_PERSONA_MODELS),
+      RECOMMENDED_PERSONA_MODELS.llm.provider,
+      RECOMMENDED_PERSONA_MODELS.llm.model,
+      RECOMMENDED_PERSONA_MODELS.stt.provider,
+      RECOMMENDED_PERSONA_MODELS.stt.model,
+      RECOMMENDED_PERSONA_MODELS.tts.provider,
+      RECOMMENDED_PERSONA_MODELS.tts.model,
+      RECOMMENDED_PERSONA_MODELS.tts.voiceId,
+      RECOMMENDED_PERSONA_MODELS.tts.speed,
     ],
   );
   await db.sql("commit");

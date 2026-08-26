@@ -2,15 +2,14 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  archivePersona,
   createPersona,
+  deletePersona,
   forkPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
   NotPermittedError,
   EGMA_PROVIDED_PERSONAS,
-  restorePersona,
   type AuthContext,
   type NewPersona,
   type Persona,
@@ -24,8 +23,7 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * List, Fork, Archive and Restore — through the factory functions only, like
- * the create
+ * List, Fork and Delete — through the factory functions only, like the create
  * and fetch tests before them. Raw SQL appears in fixtures and in the one
  * count proving how many version rows a fork carries, which no seam lists
  * yet; every id an assertion needs comes off the seam itself.
@@ -40,7 +38,7 @@ const acme = {
   organization: newId("org"),
   listing: newId("prj"),
   forking: newId("prj"),
-  archiving: newId("prj"),
+  deleting: newId("prj"),
 };
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
@@ -71,21 +69,20 @@ function actingAsGlobex(): AuthContext {
 function personaNamed(name: string): NewPersona {
   return {
     name,
-    description: `${name}, of the list-fork-archive tests`,
-    traits: {
-      personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
-      language: "en-US",
-    },
+    description: `${name}, of the list-fork-delete tests`,
+    identityName: `${name} Alvarez`,
+    personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
+    language: "en-US",
   };
 }
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("personas_list_fork_archive");
+  database = await createConnectedDatabase("personas_list_fork_delete");
 
   await seedOrganization(database, acme.organization, [
     { id: acme.listing, slug: "listing" },
     { id: acme.forking, slug: "forking" },
-    { id: acme.archiving, slug: "archiving" },
+    { id: acme.deleting, slug: "deleting" },
   ]);
   await seedOrganization(database, globex.organization, [
     { id: globex.project, slug: "default" },
@@ -143,11 +140,12 @@ describe("listing personas", () => {
     expect(page.nextCursor).toBeUndefined();
   });
 
-  it("carries the current traits on every row", async () => {
+  it("carries the current behavior on every row", async () => {
     const page = await listPersonas(actingIn(acme.listing));
     const five = page.items[0];
     expect(five?.version).toBe(1);
-    expect(five?.traits.personality).toContain("Five");
+    expect(five?.personality).toContain("Five");
+    expect(five?.identityName).toBe("Five Alvarez");
   });
 
   it("pages across the whole set with no overlap and no missed row", async () => {
@@ -216,11 +214,11 @@ describe("listing personas", () => {
     ]);
   });
 
-  it("drops an archived persona from the active list immediately", async () => {
+  it("drops a deleted persona from the list immediately", async () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 
-    await archivePersona(actingIn(acme.listing), three.id);
+    await deletePersona(actingIn(acme.listing), three.id);
 
     const page = await listPersonas(actingIn(acme.listing));
     expect(page.items.map((item) => item.name)).toEqual([
@@ -240,7 +238,7 @@ describe("forking a persona", () => {
     source = await createPersona(actingIn(acme.forking), personaNamed("Original"));
   });
 
-  it("copies the current traits into a fresh persona at version 1, with its own ids", async () => {
+  it("copies the current behavior into a fresh persona at version 1, with its own ids", async () => {
     const fork = await forkPersona(actingIn(acme.forking), source.id);
 
     expect(fork).toBeDefined();
@@ -251,10 +249,14 @@ describe("forking a persona", () => {
     expect(fork.version).toBe(1);
     expect(fork.name).toBe(source.name);
     expect(fork.description).toBe(source.description);
-    expect(fork.traits).toEqual(source.traits);
+    expect(fork.identityName).toBe(source.identityName);
+    expect(fork.personality).toBe(source.personality);
+    expect(fork.language).toBe(source.language);
+    expect(fork.models).toEqual(source.models);
 
     const fetched = await getPersona(actingIn(acme.forking), fork.id);
-    expect(fetched?.traits).toEqual(source.traits);
+    expect(fetched?.identityName).toBe(source.identityName);
+    expect(fetched?.personality).toBe(source.personality);
 
     // No shared history: one version row each, and not the same row.
     const sourceVersions = await versionIdsOf(source.id);
@@ -269,7 +271,7 @@ describe("forking a persona", () => {
       await forkPersona(actingAsGlobex(), source.id),
     ).toBeUndefined();
     expect(
-      await forkPersona(actingIn(acme.archiving), source.id),
+      await forkPersona(actingIn(acme.deleting), source.id),
     ).toBeUndefined();
 
     // Neither refused fork created anything. Both lists still contain only
@@ -279,7 +281,7 @@ describe("forking a persona", () => {
       "Stranger",
       "Default Persona",
     ]);
-    const archivingPage = await listPersonas(actingIn(acme.archiving));
+    const archivingPage = await listPersonas(actingIn(acme.deleting));
     expect(archivingPage.items.map((item) => item.name)).toEqual([
       "Default Persona",
     ]);
@@ -304,72 +306,49 @@ describe("forking a persona", () => {
   });
 });
 
-describe("archiving and restoring a persona", () => {
+describe("deleting a persona", () => {
   let doomed: Persona;
 
   beforeAll(async () => {
-    doomed = await createPersona(actingIn(acme.archiving), personaNamed("Doomed"));
+    doomed = await createPersona(actingIn(acme.deleting), personaNamed("Doomed"));
   });
 
   it("is refused to a credential acting in no project, like create", async () => {
     await expect(
-      archivePersona(actingIn(undefined), doomed.id),
+      deletePersona(actingIn(undefined), doomed.id),
     ).rejects.toThrow(/project/);
 
-    const stillThere = await getPersona(actingIn(acme.archiving), doomed.id);
+    const stillThere = await getPersona(actingIn(acme.deleting), doomed.id);
     expect(stillThere?.archivedAt).toBeNull();
   });
 
-  it("takes them out of the authoring list and leaves everything else where it was", async () => {
-    const archived = await archivePersona(actingIn(acme.archiving), doomed.id);
-    expect(archived?.id).toBe(doomed.id);
-    expect(archived?.archivedAt).toBeInstanceOf(Date);
+  it("takes them out of every list and leaves the record where it was", async () => {
+    const deleted = await deletePersona(actingIn(acme.deleting), doomed.id);
+    expect(deleted?.id).toBe(doomed.id);
+    expect(deleted?.archivedAt).toBeInstanceOf(Date);
 
-    // Still readable by identifier, because the detail page is where Restore
-    // is and a persona nobody can open is a persona nobody can bring back.
-    const fetched = await getPersona(actingIn(acme.archiving), doomed.id);
+    // Still reachable by identifier, because a run that pinned one of their
+    // versions is still on the record and still has to be interpretable.
+    const fetched = await getPersona(actingIn(acme.deleting), doomed.id);
     expect(fetched?.archivedAt).toBeInstanceOf(Date);
 
-    const active = await listPersonas(actingIn(acme.archiving));
-    expect(active.items.map((item) => item.id)).not.toContain(doomed.id);
-
-    const archive = await listPersonas(actingIn(acme.archiving), {
-      archived: true,
-    });
-    expect(archive.items.map((item) => item.id)).toContain(doomed.id);
+    const listed = await listPersonas(actingIn(acme.deleting));
+    expect(listed.items.map((item) => item.id)).not.toContain(doomed.id);
 
     const version = await getPersonaVersion(
-      actingIn(acme.archiving),
+      actingIn(acme.deleting),
       doomed.versionId,
     );
     expect(version?.personaId).toBe(doomed.id);
     expect(version?.version).toBe(1);
-    expect(version?.traits).toEqual(doomed.traits);
+    expect(version?.identityName).toBe(doomed.identityName);
+    expect(version?.personality).toBe(doomed.personality);
   });
 
-  it("moves the revision, so an edit written before it has to be read again", async () => {
-    const archived = await getPersona(actingIn(acme.archiving), doomed.id);
-    expect(archived?.revision).not.toBe(doomed.revision);
-  });
-
-  it("archives once: a second Archive changes nothing and says so", async () => {
-    const again = await archivePersona(actingIn(acme.archiving), doomed.id);
-    const first = await getPersona(actingIn(acme.archiving), doomed.id);
+  it("deletes once: a second Delete changes nothing and says so", async () => {
+    const again = await deletePersona(actingIn(acme.deleting), doomed.id);
+    const first = await getPersona(actingIn(acme.deleting), doomed.id);
     expect(again?.archivedAt?.getTime()).toBe(first?.archivedAt?.getTime());
-    expect(again?.revision).toBe(first?.revision);
-  });
-
-  it("restores them into the authoring list again", async () => {
-    const restored = await restorePersona(actingIn(acme.archiving), doomed.id);
-    expect(restored?.archivedAt).toBeNull();
-
-    const active = await listPersonas(actingIn(acme.archiving));
-    expect(active.items.map((item) => item.id)).toContain(doomed.id);
-
-    const archive = await listPersonas(actingIn(acme.archiving), {
-      archived: true,
-    });
-    expect(archive.items.map((item) => item.id)).not.toContain(doomed.id);
   });
 
   it("keeps the surviving version invisible to another customer", async () => {
@@ -380,24 +359,33 @@ describe("archiving and restoring a persona", () => {
 
   it("returns nothing for another customer's persona, and leaves it active", async () => {
     const bystander = await createPersona(
-      actingIn(acme.archiving),
+      actingIn(acme.deleting),
       personaNamed("Bystander"),
     );
 
     expect(
-      await archivePersona(actingAsGlobex(), bystander.id),
+      await deletePersona(actingAsGlobex(), bystander.id),
     ).toBeUndefined();
 
-    const fetched = await getPersona(actingIn(acme.archiving), bystander.id);
+    const fetched = await getPersona(actingIn(acme.deleting), bystander.id);
     expect(fetched?.archivedAt).toBeNull();
   });
 
-  it("is refused to a viewer, both ways", async () => {
+  it("is refused to a viewer", async () => {
     await expect(
-      archivePersona(actingIn(acme.archiving, "viewer"), doomed.id),
+      deletePersona(actingIn(acme.deleting, "viewer"), doomed.id),
     ).rejects.toThrow(NotPermittedError);
+  });
+
+  it("is refused for a Predefined persona, which no project may remove", async () => {
     await expect(
-      restorePersona(actingIn(acme.archiving, "viewer"), doomed.id),
-    ).rejects.toThrow(NotPermittedError);
+      deletePersona(
+        actingIn(acme.deleting),
+        EGMA_PROVIDED_PERSONAS.defaultPersona,
+      ),
+    ).rejects.toThrow(/is Predefined/);
+
+    const listed = await listPersonas(actingIn(acme.deleting));
+    expect(listed.items.map((item) => item.name)).toContain("Default Persona");
   });
 });

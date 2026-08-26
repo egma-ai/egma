@@ -1,7 +1,6 @@
 import { newId } from "@egma/ids";
 
 import { db, type Queryable } from "../client.ts";
-import { EGMA_PROVIDED_PERSONAS } from "../persona-library/catalog.ts";
 import { organization, project } from "../schema/tenancy.ts";
 import { insertExpectedBehaviorsProjectGrader } from "./seeded-graders.ts";
 import type { Membership } from "./memberships.ts";
@@ -14,24 +13,27 @@ import { insertMembership } from "./memberships.ts";
  * and the only rows it can touch are the ones it just made.
  *
  * Signup either fully succeeds or fully fails. An account with an organization
- * but no project is a developer with no way forward, a project with no default
- * persona is a first test waiting on one, and a project with no grader is a
- * first run nobody grades. The organization, its first project, the pointer to
- * Egma's shared default persona, its expected-behaviors grader and the owner's
- * membership are therefore one transaction.
+ * but no project is a developer with no way forward, and a project with no
+ * grader is a first run nobody grades. The organization, its first project,
+ * its expected-behaviors grader and the owner's membership are therefore one
+ * transaction.
  */
 
 /**
  * Everything a project needs to be a *usable* project, written in one
- * transaction: the row itself, the pointer to Egma's shared default persona,
- * and its seeded expected-behaviors grader. It creates no local
- * copy of that persona; a customer fork is a separate, explicit authoring
- * action.
+ * transaction: the row itself and its seeded expected-behaviors grader.
+ *
+ * **It reads nothing from the persona catalog.** A project used to be born
+ * pointing at Egma's shared persona, so creating one depended on the catalog
+ * having been seeded and made the tenancy schema import a product table. The
+ * pointer answered one question — who calls when a test names nobody — and
+ * that question stopped existing when tests began refusing an empty persona
+ * list. A project with an empty catalog is now a complete project.
  *
  * **One factory, two callers, and that is the whole reason it is a function.**
  * Signup provisions the first project and an admin creates every one after it.
  * Both paths create the same complete project. There is no smaller project
- * shape without an active default persona or its seeded grader.
+ * shape without its seeded grader.
  *
  * It takes the transaction rather than opening one, because both callers have
  * other rows to write in the same breath — an organization and a membership for
@@ -60,7 +62,6 @@ export async function insertProject(
     slug: input.slug,
     description: input.description,
     revision: input.revision,
-    defaultPersonaId: EGMA_PROVIDED_PERSONAS.defaultPersona,
     createdBy: input.createdBy,
   });
 
@@ -105,10 +106,9 @@ export async function provisionOrganization(
     });
 
     // The one project factory, on the same terms an admin's Settings create
-    // gets: the row, the shared default persona pointer, and seeded grader.
-    // Signing up and creating a second project
-    // are the same act performed by different people, so they are the same
-    // write.
+    // gets: the row and its seeded grader. Signing up and creating a second
+    // project are the same act performed by different people, so they are the
+    // same write.
     await insertProject(tx, {
       projectId,
       organizationId,

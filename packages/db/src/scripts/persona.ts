@@ -5,14 +5,13 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
-  archivePersona,
   createPersona,
+  deletePersona,
   editPersona,
   forkPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
-  restorePersona,
 } from "../access/personas.ts";
 import { seedPersonaLibrary } from "../persona-library/seed.ts";
 import type { AuthContext } from "../access/context.ts";
@@ -30,13 +29,14 @@ import { organization, user } from "../schema/index.ts";
  *
  *   node packages/db/dist/scripts/persona.js create \
  *     --name "Impatient Rita" \
- *     --personality "70, hard of hearing, gets louder when mishears."
+ *     --identity-name "Rita Alvarez" \
+ *     --personality "70, hard of hearing, gets louder when mishears." \
+ *     --language en-US
  *
  *   node packages/db/dist/scripts/persona.js get prs_…
  *   node packages/db/dist/scripts/persona.js list [--limit 50] [--cursor prs_…]
  *   node packages/db/dist/scripts/persona.js fork prs_…
- *   node packages/db/dist/scripts/persona.js archive prs_… [--replacement prs_…]
- *   node packages/db/dist/scripts/persona.js restore prs_…
+ *   node packages/db/dist/scripts/persona.js delete prs_…
  */
 
 const DATABASE_URL =
@@ -91,16 +91,15 @@ function usage(): never {
   console.error(
     [
       "usage:",
-      "  persona.js create --name <name> --personality <text> --language <tag>",
-      "    [--description <text>]",
+      "  persona.js create --name <name> --identity-name <name>",
+      "    --personality <text> --language <tag> [--description <text>]",
       "  persona.js get <prs_id>",
       "  persona.js edit <prs_id> [--name <name>] [--description <text>]",
-      "    [--personality <text>] [--language <tag>]",
+      "    [--identity-name <name>] [--personality <text>] [--language <tag>]",
       "  persona.js get-version <prsv_id>",
       "  persona.js list [--limit <n>] [--cursor <prs_id>]",
       "  persona.js fork <prs_id>",
-      "  persona.js archive <prs_id> [--replacement <prs_id>]",
-      "  persona.js restore <prs_id>",
+      "  persona.js delete <prs_id>",
     ].join("\n"),
   );
   process.exit(1);
@@ -140,12 +139,15 @@ async function main(): Promise<void> {
       options: {
         name: { type: "string" },
         description: { type: "string" },
+        "identity-name": { type: "string" },
         personality: { type: "string" },
         language: { type: "string" },
       },
     });
+    const identityName = values["identity-name"];
     if (
       values.name === undefined ||
+      identityName === undefined ||
       values.personality === undefined ||
       values.language === undefined
     ) {
@@ -155,10 +157,9 @@ async function main(): Promise<void> {
     const created = await createPersona(auth, {
       name: values.name,
       description: values.description,
-      traits: {
-        personality: values.personality,
-        language: values.language,
-      },
+      identityName,
+      personality: values.personality,
+      language: values.language,
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
@@ -172,37 +173,23 @@ async function main(): Promise<void> {
       options: {
         name: { type: "string" },
         description: { type: "string" },
+        "identity-name": { type: "string" },
         personality: { type: "string" },
         language: { type: "string" },
       },
     });
 
-    const current = await getPersona(auth, id);
-    if (current === undefined) {
-      printPersona(id, current);
-      return;
-    }
-    const traitsChanged =
-      values.personality !== undefined || values.language !== undefined;
-
+    const identityName = values["identity-name"];
     const edited = await editPersona(auth, id, {
       ...(values.name === undefined ? {} : { name: values.name }),
       ...(values.description === undefined
         ? {}
         : { description: values.description }),
-      ...(traitsChanged
-        ? {
-            traits: {
-              ...current.traits,
-              ...(values.personality === undefined
-                ? {}
-                : { personality: values.personality }),
-              ...(values.language === undefined
-                ? {}
-                : { language: values.language }),
-            },
-          }
-        : {}),
+      ...(identityName === undefined ? {} : { identityName }),
+      ...(values.personality === undefined
+        ? {}
+        : { personality: values.personality }),
+      ...(values.language === undefined ? {} : { language: values.language }),
     });
     printPersona(id, edited);
   } else if (command === "get-version") {
@@ -229,24 +216,9 @@ async function main(): Promise<void> {
   } else if (command === "fork") {
     const id = requiredId(rest);
     printPersona(id, await forkPersona(auth, id));
-  } else if (command === "archive") {
-    const [id, ...flags] = rest;
-    if (id === undefined) usage();
-    const { values } = parseArgs({
-      args: flags,
-      options: { replacement: { type: "string" } },
-    });
-    printPersona(
-      id,
-      await archivePersona(auth, id, {
-        ...(values.replacement === undefined
-          ? {}
-          : { replacementPersonaId: values.replacement }),
-      }),
-    );
-  } else if (command === "restore") {
+  } else if (command === "delete") {
     const id = requiredId(rest);
-    printPersona(id, await restorePersona(auth, id));
+    printPersona(id, await deletePersona(auth, id));
   } else {
     usage();
   }

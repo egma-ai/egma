@@ -491,34 +491,43 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
   const ids = Array.from({ length: count }, () => ({
     persona: newId("prs"),
     version: newId("prsv"),
-    revision: newId("rev"),
   }));
   try {
     await connection.sql("begin");
     await connection.sql(
       `insert into persona
-         (id, organization_id, project_id, name, current_version_id, revision)
+         (id, organization_id, project_id, name, current_version_id)
        select seeded.persona_id, $1, $2,
          'Paged caller ' || seeded.ordinality,
-         seeded.version_id, seeded.revision
-       from unnest($3::text[], $4::text[], $5::text[])
-         with ordinality as seeded(persona_id, version_id, revision, ordinality)`,
+         seeded.version_id
+       from unnest($3::text[], $4::text[])
+         with ordinality as seeded(persona_id, version_id, ordinality)`,
       [
         actingAsAcme().organizationId,
         actingAsAcme().projectId,
         ids.map((row) => row.persona),
         ids.map((row) => row.version),
-        ids.map((row) => row.revision),
       ],
     );
     await connection.sql(
-      `insert into persona_version (id, persona_id, version, traits, models)
-       select seeded.version_id, seeded.persona_id, 1, $1::jsonb, $2::jsonb
-       from unnest($3::text[], $4::text[])
+      `insert into persona_version
+         (id, persona_id, version, identity_name, personality, language,
+          llm_provider, llm_model, stt_provider, stt_model,
+          tts_provider, tts_model, tts_voice_id, tts_speed)
+       select seeded.version_id, seeded.persona_id, 1,
+         'Paged Caller', 'Patient', 'en-US',
+         $1, $2, $3, $4, $5, $6, $7, $8
+       from unnest($9::text[], $10::text[])
          as seeded(version_id, persona_id)`,
       [
-        JSON.stringify({ personality: "Patient", language: "en-US" }),
-        JSON.stringify(RECOMMENDED_PERSONA_MODELS),
+        RECOMMENDED_PERSONA_MODELS.llm.provider,
+        RECOMMENDED_PERSONA_MODELS.llm.model,
+        RECOMMENDED_PERSONA_MODELS.stt.provider,
+        RECOMMENDED_PERSONA_MODELS.stt.model,
+        RECOMMENDED_PERSONA_MODELS.tts.provider,
+        RECOMMENDED_PERSONA_MODELS.tts.model,
+        RECOMMENDED_PERSONA_MODELS.tts.voiceId,
+        RECOMMENDED_PERSONA_MODELS.tts.speed,
         ids.map((row) => row.version),
         ids.map((row) => row.persona),
       ],
