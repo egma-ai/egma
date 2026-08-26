@@ -71,7 +71,7 @@ import { AgentOnboardingProgress } from "./onboarding-progress.tsx";
  * second connection onto the same agent shows no key field at all — the sheet
  * says which key the agent holds and lists the account with it.
  *
- * **"Connect anew agent" is last.** Reuse is the ordinary case and creation is
+ * **"Connect a new agent" is last.** Reuse is the ordinary case and creation is
  * the fallback, so the picker reads as a list of agents with a way to make one
  * under it rather than a create form with a list attached.
  *
@@ -89,7 +89,7 @@ export type ConnectSheetResult = {
   readonly created: boolean;
 };
 
-/** What "Connect anew agent" is, as a value the select can hold. */
+/** What "Connect a new agent" is, as a value the select can hold. */
 const NEW_AGENT = "";
 
 /**
@@ -728,7 +728,7 @@ export function ConnectAgentSheet({
    *
    * The chosen agent is added when the page behind does not hold it, so a deep
    * link into an agent on the fourth page of the list still shows its own name
-   * rather than falling back to "Connect anew agent".
+   * rather than falling back to "Connect a new agent".
    */
   const choices: readonly AgentChoice[] = [
     ...agents.map((one) => ({
@@ -819,7 +819,7 @@ export function ConnectAgentSheet({
             trigger={
               <>
                 {chosen === undefined ? (
-                  <span className="min-w-0 flex-1">Connect anew agent</span>
+                  <span className="min-w-0 flex-1">Connect a new agent</span>
                 ) : (
                   <AgentChoiceLabel name={chosen.name} platform={chosen.platform} />
                 )}
@@ -852,7 +852,7 @@ export function ConnectAgentSheet({
                     close();
                   }}
                 >
-                  Connect anew agent
+                  Connect a new agent
                 </MenuItem>
               </>
             )}
