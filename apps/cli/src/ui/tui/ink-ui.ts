@@ -7,7 +7,11 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { ConnectionAsk } from "../wizard-ui.ts";
+import type {
+  ConnectionAsk,
+  ConnectionFieldsAnswer,
+  ConnectionFieldsAsk,
+} from "../wizard-ui.ts";
 import type { KeyAsk, Reach } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
@@ -86,10 +90,6 @@ export class InkUI implements WizardUI {
     this.store.setMonitoringAgentChoices(agents);
   }
 
-  setEnvConsent(line: string | null): void {
-    this.store.setEnvConsent(line);
-  }
-
   setReachOffer(offered: readonly Reach[] | null): void {
     this.store.setReachOffer(offered);
   }
@@ -100,6 +100,10 @@ export class InkUI implements WizardUI {
 
   setConnectionAsk(ask: ConnectionAsk | null): void {
     this.store.setConnectionAsk(ask);
+  }
+
+  setConnectionFieldsAsk(ask: ConnectionFieldsAsk | null): void {
+    this.store.setConnectionFieldsAsk(ask);
   }
 
   setGeneration(progress: GenerationProgress | null): void {
@@ -128,6 +132,10 @@ export class InkUI implements WizardUI {
 
   waitForAnswer(ask: AskId): Promise<string | null> {
     return this.store.ask(ask);
+  }
+
+  waitForConnectionFields(): Promise<ConnectionFieldsAnswer | null> {
+    return this.store.getConnectionFields();
   }
 
   taskStarted(): void {

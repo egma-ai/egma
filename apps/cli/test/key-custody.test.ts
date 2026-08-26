@@ -115,13 +115,31 @@ describe("a whole run, swept afterwards", () => {
       // the way: the tests are written, pushed, and swept with everything else.
       stepsByTask: [
         {
-          contains: "Write 12 tests",
+          contains: "Write 4 tests",
           steps: [
             {
               kind: "write-file",
               path: "egma/tests/generated/price-question.md",
               content:
                 "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/opening-hours.md",
+              content:
+                "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/order-status.md",
+              content:
+                "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/refund-policy.md",
+              content:
+                "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
             },
             { kind: "say", text: "egma:wrote price-question\n" },
             { kind: "grumble", text: "still talking to itself\n" },
@@ -196,7 +214,7 @@ describe("a whole run, swept afterwards", () => {
       // the tests — that one carries what the provider is running, which is the
       // one place a key could ride along. A report that had lost it would pass
       // this check by holding nothing at all.
-      expect(sent.instructions.some((task) => task.includes("Write 12 tests"))).toBe(true);
+      expect(sent.instructions.some((task) => task.includes("Write 4 tests"))).toBe(true);
       expect(sent.instructions.join("\n")).not.toContain(KEY);
     } finally {
       await rm(logFile, { force: true });

@@ -69,21 +69,15 @@ function bareWizard(): TerminalRun {
   });
 }
 
-/**
- * The same bare command, in a repository that already has an egma folder.
- *
- * The stand-in for egma's own address is left as the closed port every
- * workspace hands over, so nothing in this run can reach a platform at all —
- * which is the point: the wizard refuses before it starts anything.
- */
+/** The same bare command, in a repository that already has an egma folder. */
 async function wizardInBoundRepository(): Promise<TerminalRun> {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
+      format: 2,
       platform: { origin: platform.url },
       project: null,
-      agent: null,
-      connection: null,
+      agents: [],
     },
   });
 
@@ -100,31 +94,25 @@ async function wizardInBoundRepository(): Promise<TerminalRun> {
 }
 
 describe("the wizard's first screen", () => {
-  it("names the egma it will use, and says how to choose another", async () => {
+  it("asks for CLI authorization before contacting the selected platform", async () => {
     const terminal = bareWizard();
     try {
       const screen = await showingIn(
         terminal,
         asOneLine,
-        platform.url,
-        "--url <address>",
-        "[enter] begin",
+        "Welcome to Egma",
+        "sign in and authorize this CLI",
+        "looks for a coding agent after that",
+        "[enter] continue",
       );
 
-      // The address, and the one way to name a different one. This is the
-      // screen the keystroke of consent is taken on: nothing else stands
-      // between reading it and agreeing to the walk.
+      // The welcome is local. It has not contacted the configured platform or
+      // looked for a coding agent yet.
       const said = asOneLine(screen);
-      expect(said).toContain("--url <address>");
-      // And the seam that stands the address in is not offered as a second way.
       expect(said).not.toContain("EGMA_TEST_DEFAULT_URL");
-
-      // Nothing has been asked of that address. The whole reason the screen is
-      // here rather than after resolution: a developer who reads this and quits
-      // has sent nothing anywhere.
       expect(platform.records).toEqual([]);
 
-      // And the keystroke is what lets egma speak to it.
+      // The keystroke starts CLI authorization.
       terminal.write("\r");
       expect(await terminal.waitFor(() => platform.records.length > 0)).toBe(true);
       expect(
@@ -135,27 +123,16 @@ describe("the wizard's first screen", () => {
     }
   });
 
-  /**
-   * A repository that already has an egma folder never reaches this screen.
-   *
-   * The wizard onboards new repositories in v1. A committed folder is a
-   * repository somebody has already set up, so the refusal comes before the
-   * first screen is drawn rather than after a second setup has half-run into
-   * their files — and it says the one thing that redoes setup on purpose.
-   */
-  it("refuses a repository that already has an egma folder, before drawing anything", async () => {
+  it("lets an existing egma folder start another wizard walk", async () => {
     const terminal = await wizardInBoundRepository();
     try {
-      expect(await terminal.exited).toBe(0);
-
-      // Read as one run of words: it is one line, and a 100-column terminal
-      // wraps it. That it is one line is checked where the line is built.
-      const left = asOneLine(terminal.scrollback());
-      expect(left).toContain("Egma is already set up here: egma/ exists");
-      expect(left).toContain("only works with new repositories");
-      expect(left).toContain("Delete or rename egma/");
-
-      // Nothing was drawn and nothing was asked of any platform.
+      const screen = await showingIn(
+        terminal,
+        asOneLine,
+        "Welcome to Egma",
+        "[enter] continue",
+      );
+      expect(asOneLine(screen)).not.toContain("already set up here");
       expect(platform.records).toEqual([]);
     } finally {
       await terminal.kill();

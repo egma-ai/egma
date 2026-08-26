@@ -11,6 +11,7 @@
  * answers the question and the flow takes the lane.
  */
 
+import { useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 
 import { GOAL_ASK_LINE, GOAL_LINES, type GoalAsk } from "../../wizard-ui.ts";
@@ -23,27 +24,44 @@ export type GoalScreenProps = {
   readonly onQuit: () => void;
 };
 
-const KEYS: Readonly<Record<string, string>> = {
-  testing: "t",
-  monitoring: "m",
-  both: "b",
-};
-
 export function GoalScreen({ ask, onAnswer, onQuit }: GoalScreenProps) {
-  const bindings: KeyBinding[] = ask.goals.map((goal, at) => ({
-    match: KEYS[goal] ?? goal.slice(0, 1),
-    label: KEYS[goal] ?? goal.slice(0, 1),
-    action: goal,
-    priority: at,
-    handler: () => onAnswer(goal),
-  }));
-  bindings.push({
+  const [at, setAt] = useState(0);
+  const atRef = useRef(0);
+  const moveTo = (next: number): void => {
+    if (ask.goals.length === 0) return;
+    atRef.current = next;
+    setAt(next);
+  };
+  const bindings: KeyBinding[] = [
+    {
+      match: "upArrow",
+      label: "↑↓",
+      action: "choose",
+      priority: 0,
+      handler: () => moveTo(atRef.current === 0 ? ask.goals.length - 1 : atRef.current - 1),
+    },
+    {
+      match: "downArrow",
+      label: "↑↓",
+      action: "choose",
+      priority: 0,
+      handler: () => moveTo((atRef.current + 1) % ask.goals.length),
+    },
+    {
+      match: "return",
+      label: "enter",
+      action: "choose this one",
+      priority: 1,
+      handler: () => onAnswer(ask.goals[atRef.current] ?? null),
+    },
+    {
     match: ["q", "escape"],
     label: "q",
     action: "quit",
-    priority: ask.goals.length,
+    priority: 2,
     handler: onQuit,
-  });
+    },
+  ];
 
   useInput((input, key) => {
     dispatchKey(bindings, input, key);
@@ -61,8 +79,8 @@ export function GoalScreen({ ask, onAnswer, onQuit }: GoalScreenProps) {
       <Text>{GOAL_ASK_LINE}</Text>
       <Text dimColor>{`Egma found ${named}.`}</Text>
       <Box height={1} />
-      {ask.goals.map((goal) => (
-        <Text key={goal}>{`[${KEYS[goal] ?? goal.slice(0, 1)}] ${GOAL_LINES[goal]}`}</Text>
+      {ask.goals.map((goal, index) => (
+        <Text key={goal} bold={index === at}>{`${index === at ? "›" : " "} ${GOAL_LINES[goal]}`}</Text>
       ))}
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>

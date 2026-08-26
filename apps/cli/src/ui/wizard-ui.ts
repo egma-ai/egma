@@ -33,7 +33,7 @@ import type {
  * question for the same reason `begin` is: what is being given is agreement,
  * and a developer who does not agree closes the wizard instead of answering.
  */
-export type GateId = "begin" | "run-tests" | "write-env";
+export type GateId = "welcome" | "begin" | "run-tests";
 
 export type ConnectionAskId = `connection:${string}`;
 
@@ -63,6 +63,26 @@ export type ConnectionAsk = {
   readonly choices?: readonly ConnectionChoice[] | undefined;
   /** Where a secret goes. Omitted for non-secret fields. */
   readonly custody?: string | undefined;
+};
+
+/** Several required provider fields collected together without their values. */
+export type ConnectionFieldsAsk = {
+  readonly title: string;
+  /** Why Egma needs these values. */
+  readonly help: string;
+  /** Credential custody, kept outside every field's faint help line. */
+  readonly notice?: string | undefined;
+  readonly fields: readonly ConnectionAsk[];
+};
+
+/**
+ * Values from one grouped provider form.
+ *
+ * This object travels only from the collecting screen through the UI's private
+ * promise to the flow. It is never part of WizardState or a headless record.
+ */
+export type ConnectionFieldsAnswer = {
+  readonly values: Readonly<Partial<Record<ConnectionAskId, string>>>;
 };
 
 /**
@@ -250,16 +270,6 @@ export interface WizardUI {
   setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void;
 
   /**
-   * What Egma is about to write into the repository, while it is waiting to be
-   * allowed to, or `null` when it is not waiting.
-   *
-   * A gate and not a question, because what is being given is agreement: a
-   * developer who does not want a live credential written into their working
-   * tree closes the wizard, and the lines are printed for them either way.
-   */
-  setEnvConsent(line: string | null): void;
-
-  /**
    * The agents found on the provider's account, while a choice among them is
    * open, or `null` when there is no choice to make.
    *
@@ -291,6 +301,9 @@ export interface WizardUI {
   /** The current provider field, without the value the developer types. */
   setConnectionAsk(ask: ConnectionAsk | null): void;
 
+  /** Required provider fields shown together, without any values typed into them. */
+  setConnectionFieldsAsk(ask: ConnectionFieldsAsk | null): void;
+
   /**
    * Park until the developer has let the flow past this point. A gate that the
    * developer never opens never resolves — closing the wizard is how they say
@@ -303,6 +316,9 @@ export interface WizardUI {
    * is a real answer and the flow must handle it.
    */
   waitForAnswer(ask: AskId): Promise<string | null>;
+
+  /** Park on the grouped provider form. The returned values never enter shared UI state. */
+  waitForConnectionFields(): Promise<ConnectionFieldsAnswer | null>;
 
   /** The coding agent has been started and the task is under way. */
   taskStarted(): void;

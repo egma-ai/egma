@@ -28,7 +28,13 @@ import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./suppo
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+  type TerminalRun,
+} from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -62,13 +68,12 @@ const VOICE_AGENT: FakeRetellScript = {
   agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
 };
 
-/** Five, so the list is longer than the screen and browsing is a real thing. */
+/** Four, so the list is longer than the visible rows and browsing is a real thing. */
 const TESTS = [
   "quoted-a-price",
   "lost-the-order-number",
   "open-on-sunday",
   "asked-for-the-binder",
-  "rang-off-halfway",
 ] as const;
 
 /**
@@ -129,7 +134,7 @@ function writes(name: string): FakeStep[] {
   ];
 }
 
-/** The wizard, driven to the gate, with a scripted agent that writes five. */
+/** The wizard, driven to the gate, with a scripted agent that writes four. */
 async function toTheGate(
   env: NodeJS.ProcessEnv = {},
   writing: readonly FakeStep[] = [
@@ -178,6 +183,9 @@ async function toTheGate(
   });
   terminal = run;
 
+  await showing(run, "Welcome to Egma", "[enter] continue");
+  run.write("\r");
+
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
 
@@ -193,8 +201,7 @@ async function toTheGate(
   }
   run.write("\r");
 
-  await showing(run, "Do you already have test cases", "[n] none");
-  run.write("n");
+  await chooseNoExistingTests(run);
 
   return run;
 }
@@ -251,15 +258,15 @@ describe("the files arriving", () => {
       `▶ ${TESTS[1]}`,
       "writing…",
       `◻ ${TESTS[2]}`,
-      // Twelve is what egma asked this coding agent for, so twelve is what the
-      // count is against. What really lands is what the gate shows.
-      "Progress: 1/12",
+      // The agent planned the required first-suite size, so the progress count
+      // and the gate both stay against those same four files.
+      "Progress: 1/4",
     );
-    expect(pane).toContain(`◻ ${TESTS[4]}`);
+    expect(pane).toContain(`◻ ${TESTS[3]}`);
 
     // And it keeps moving until the list is the gate's list.
     await writeFile(path.join(workspace.dir, RELEASE_WRITING), "continue\n", "utf8");
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
     run.write("q");
     expect(await run.exited).toBe(0);
   });
@@ -267,13 +274,13 @@ describe("the files arriving", () => {
   it("shows each generated test once, then uploads exactly that list", async () => {
     // Every file here arrives twice over: as a marker line the agent wrote,
     // and as a file the folder poller finds a moment later. Both are the same
-    // file, so the count is five and never ten — a developer reading "10/12"
-    // off five files would be reading egma's bookkeeping, not their folder.
+    // file, so the count is four and never eight — a developer reading "8/12"
+    // off four files would be reading egma's bookkeeping, not their folder.
     const run = await toTheGate();
 
     const list = await showing(
       run,
-      "5 tests generated",
+      "4 tests generated",
       'suite "order-line tests"',
       IN_ORDER[0] as string,
       "no persona named",
@@ -281,14 +288,14 @@ describe("the files arriving", () => {
       "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
       ...GATE_HINTS,
     );
-    expect(list).toContain("5 tests generated");
+    expect(list).toContain("4 tests generated");
 
-    // Ten rows would be the double count, and the screen holds only five names.
+    // Eight rows would be the double count, and the screen holds only four names.
     for (const name of IN_ORDER.slice(0, 3)) {
       expect(list.split(name).length - 1, name).toBe(1);
     }
-    expect(list).toContain("… 2 more");
-    expect(list).not.toContain(IN_ORDER[4] as string);
+    expect(list).toContain("… 1 more");
+    expect(list).not.toContain(IN_ORDER[3] as string);
     expect(list.indexOf("[enter] run")).toBeLessThan(list.indexOf("[e] edit first"));
     expect(list.indexOf("[e] edit first")).toBeLessThan(list.indexOf("[q] quit"));
     expect(list).not.toContain("Every simulation dials");
@@ -341,6 +348,8 @@ describe("the files arriving", () => {
     });
     terminal = run;
 
+    await showing(run, "Welcome to Egma", "[enter] continue");
+    run.write("\r");
     await showing(run, "[enter] begin", "[q] quit");
     run.write("\r");
     await chooseTesting(run);
@@ -351,7 +360,7 @@ describe("the files arriving", () => {
     // either: egma never picks one of the two for a developer.
     await showing(run, "How should Egma reach this agent?");
     run.write("\r");
-    await showing(run, "Do you already have test cases", "[n] none");
+    await showing(run, "Do you already have test cases", "› No", "[enter] choose this one");
 
     run.write("");
 
@@ -400,7 +409,7 @@ describe("the files arriving", () => {
         content: fileFor(IN_ORDER[0] as string),
       },
       { kind: "wait-for-file", path: RELEASE_FOLDER },
-      ...IN_ORDER.slice(1, 3).map((name) => ({
+      ...IN_ORDER.slice(1).map((name) => ({
         kind: "write-file" as const,
         path: `egma/tests/generated/${name}.md`,
         content: fileFor(name),
@@ -417,7 +426,7 @@ describe("the files arriving", () => {
     );
 
     await writeFile(path.join(workspace.dir, RELEASE_FOLDER), "continue\n", "utf8");
-    await showing(run, "3 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
     run.write("q");
     expect(await run.exited).toBe(0);
   });
@@ -452,7 +461,7 @@ describe("the gate", () => {
 
     await showing(
       run,
-      "5 tests generated",
+      "4 tests generated",
       "Run these against order-line over phone_number-1 (Retell phone, voice)?",
       `Every simulation dials ${DIALLED}.`,
       ...GATE_HINTS,
@@ -470,33 +479,33 @@ describe("the gate", () => {
    */
   it("says where the files are when Ctrl-C lands on the list", async () => {
     const run = await toTheGate();
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
 
     run.write("");
 
     // Still an interruption to a shell, and still an honest line to a person.
     expect(await run.exited).toBe(130);
     expect(run.scrollback().trim()).toBe(
-      "Egma stopped. Your 5 tests are in egma/tests/ — read them, then run egma push.",
+      "Egma stopped. Your 4 tests are in egma/tests/ — read them, then run egma push.",
     );
 
-    expect(await testsInFolder()).toHaveLength(5);
+    expect(await testsInFolder()).toHaveLength(4);
     expect(platform.tests.tests).toHaveLength(0);
   });
 
   it("leaves every file where it is when the developer quits", async () => {
     const run = await toTheGate();
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
 
     run.write("q");
 
     expect(await run.exited).toBe(0);
     // The line says where they are, because that is the only thing left to say.
     expect(run.scrollback().trim()).toBe(
-      "Nothing was uploaded. Your 5 tests are in egma/tests/ — read them, then run egma push.",
+      "Nothing was uploaded. Your 4 tests are in egma/tests/ — read them, then run egma push.",
     );
 
-    expect(await testsInFolder()).toHaveLength(5);
+    expect(await testsInFolder()).toHaveLength(4);
     expect(platform.tests.tests).toHaveLength(0);
     // Nothing was pinned, because nothing was uploaded.
     const held = await readFile(
@@ -518,7 +527,7 @@ describe("the gate", () => {
     );
 
     const run = await toTheGate({ EDITOR: `${editor.command} --wait` });
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
 
     // Down twice, so the file that opens is the third one and not the first.
     run.write("\u001B[B");
@@ -538,7 +547,7 @@ describe("the gate", () => {
     // the editor's alternate screen behind.
     const back = await showing(
       run,
-      "5 tests generated",
+      "4 tests generated",
       'suite "order-line tests"',
       IN_ORDER[0] as string,
       "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
@@ -556,7 +565,7 @@ describe("the gate", () => {
 
   it("says so rather than guessing when there is no editor to open", async () => {
     const run = await toTheGate();
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
 
     run.write("e");
 
@@ -565,12 +574,12 @@ describe("the gate", () => {
     // Nothing was opened and nothing was lost: the list is still waiting.
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
-    expect(platform.tests.tests).toHaveLength(5);
+    expect(platform.tests.tests).toHaveLength(4);
   });
 
   it("says which editor it could not start, and keeps the list waiting", async () => {
     const run = await toTheGate({ EDITOR: "egma-no-such-editor-on-this-machine" });
-    await showing(run, "5 tests generated", ...GATE_HINTS);
+    await showing(run, "4 tests generated", ...GATE_HINTS);
 
     run.write("e");
 
@@ -583,7 +592,7 @@ describe("the gate", () => {
     // The gate is intact: enter still does the one thing it was always for.
     await enterAndLeave(run);
     expect(await run.exited).toBe(0);
-    expect(platform.tests.tests).toHaveLength(5);
+    expect(platform.tests.tests).toHaveLength(4);
   });
 
 });

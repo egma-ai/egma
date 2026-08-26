@@ -66,8 +66,13 @@ beforeEach(async () => {
     config: {
       ...EMPTY_CONFIG,
       project: { id: PROJECT_ID, name: "Northside" },
-      agent: { id: "agt_one", name: "Receptionist" },
-      connection: { id: "con_one", name: "Phone" },
+      agents: [
+        {
+          id: "agt_one",
+          name: "Receptionist",
+          connections: [{ id: "con_one", name: "Phone" }],
+        },
+      ],
     },
   });
 });

@@ -30,6 +30,8 @@ import type { WizardPhase } from "../../wizard/wizard-machine.ts";
 import type {
   AskId,
   CodingAgentChoice,
+  ConnectionFieldsAnswer,
+  ConnectionFieldsAsk,
   DrivenAgent,
   GateId,
   GoalAsk,
@@ -40,12 +42,21 @@ import type { ConnectionAsk } from "../wizard-ui.ts";
 
 /** The wizard screens, in order. */
 export const WIZARD_SCREENS: Sequence = [
-  { id: "coding-agent", show: (state) => state.phase === "coding-agent" },
-  { id: "intro", isComplete: (state) => state.begun },
+  {
+    id: "welcome",
+    show: (state) => state.phase === "welcome",
+    isComplete: (state) => state.welcomed,
+  },
   // Login shows only while there is something to approve, and stops showing the
   // moment there is not — which is the router working the flow out from state
   // rather than the flow navigating anywhere.
   { id: "login", show: (state) => state.phase === "login" && state.login !== null },
+  { id: "coding-agent", show: (state) => state.phase === "coding-agent" },
+  {
+    id: "intro",
+    show: (state) => state.phase === "intro",
+    isComplete: (state) => state.begun,
+  },
   // The one question about what Egma is here to do, asked once discovery knows
   // the agent and its platform.
   { id: "goal", show: (state) => state.phase === "goal" && state.goalAsk !== null },
@@ -65,12 +76,10 @@ export const WIZARD_SCREENS: Sequence = [
     show: (state) =>
       state.phase === "monitoring-setup" && state.asking === "monitoring-agent",
   },
-  // The one keystroke before Egma writes a live credential into the working
-  // tree. A gate rather than a question: what is given is agreement.
   {
-    id: "env-consent",
-    show: (state) => state.phase === "monitoring-setup" && state.envConsent !== null,
-    isComplete: (state) => state.envAgreed,
+    id: "connection-fields",
+    show: (state) =>
+      state.phase === "connection-setup" && state.connectionFieldsAsk !== null,
   },
   {
     id: "connection-field",
@@ -126,9 +135,9 @@ export const WIZARD_SCREENS: Sequence = [
 
 /** The condition each gate waits for. */
 const GATE_CONDITIONS: Readonly<Record<GateId, (state: WizardState) => boolean>> = {
+  welcome: (state) => state.welcomed,
   begin: (state) => state.begun,
   "run-tests": (state) => state.agreedToRun,
-  "write-env": (state) => state.envAgreed,
 };
 
 type Gate = {
@@ -142,6 +151,12 @@ type Gate = {
 type OpenQuestion = {
   readonly promise: Promise<string | null>;
   readonly settle: (answer: string | null) => void;
+};
+
+/** A grouped provider form and its private answer promise. */
+type OpenConnectionFields = {
+  readonly promise: Promise<ConnectionFieldsAnswer | null>;
+  readonly settle: (answer: ConnectionFieldsAnswer | null) => void;
 };
 
 /** The most recent status lines kept in memory, oldest dropped first. */
@@ -160,6 +175,7 @@ export class WizardStore {
   private readonly listeners = new Set<() => void>();
   private readonly gates = new Map<GateId, Gate>();
   private readonly answers = new Map<AskId, OpenQuestion>();
+  private connectionFields: OpenConnectionFields | null = null;
   /** What the login screen has handed over and the flow has not taken yet. */
   private pastedLogin: string | null = null;
 
@@ -233,6 +249,26 @@ export class WizardStore {
     open.settle(value);
   }
 
+  /** Park on the grouped provider form without putting its values in state. */
+  getConnectionFields(): Promise<ConnectionFieldsAnswer | null> {
+    if (this.connectionFields !== null) return this.connectionFields.promise;
+
+    let settle!: (answer: ConnectionFieldsAnswer | null) => void;
+    const promise = new Promise<ConnectionFieldsAnswer | null>((resolve) => {
+      settle = resolve;
+    });
+    this.connectionFields = { promise, settle };
+    return promise;
+  }
+
+  /** Hand grouped values straight to the waiting flow and forget the promise. */
+  answerConnectionFields(answer: ConnectionFieldsAnswer | null): void {
+    const open = this.connectionFields;
+    if (open === null) return;
+    this.connectionFields = null;
+    open.settle(answer);
+  }
+
   // ── The flow's writes ────────────────────────────────────────────────
 
   setPhase(phase: WizardPhase): void {
@@ -285,19 +321,6 @@ export class WizardStore {
     this.change({ monitoringAgentChoices });
   }
 
-  /**
-   * Put the consent line up, or take it down.
-   *
-   * Putting one up forgets the last answer, exactly as the test gate does: a
-   * second ask is about a second thing, and agreement given to the first is not
-   * agreement to it.
-   */
-  setEnvConsent(envConsent: string | null): void {
-    this.change(
-      envConsent === null ? { envConsent } : { envConsent, envAgreed: false },
-    );
-  }
-
   setReachOffer(reachOptions: readonly Reach[] | null): void {
     this.change({ reachOptions });
   }
@@ -308,6 +331,10 @@ export class WizardStore {
 
   setConnectionAsk(connectionAsk: ConnectionAsk | null): void {
     this.change({ connectionAsk });
+  }
+
+  setConnectionFieldsAsk(connectionFieldsAsk: ConnectionFieldsAsk | null): void {
+    this.change({ connectionFieldsAsk });
   }
 
   setGeneration(generation: GenerationProgress | null): void {
@@ -367,6 +394,12 @@ export class WizardStore {
 
   // ── The screens' writes ──────────────────────────────────────────────
 
+  /** The welcome screen has explained why the next choice exists. */
+  welcome(): void {
+    if (this.state.welcomed) return;
+    this.change({ welcomed: true });
+  }
+
   /** The consent keystroke. Opens the `begin` gate. */
   begin(): void {
     if (this.state.begun) return;
@@ -377,12 +410,6 @@ export class WizardStore {
   runTests(): void {
     if (this.state.agreedToRun) return;
     this.change({ agreedToRun: true });
-  }
-
-  /** The keystroke over the consent line. Opens the `write-env` gate. */
-  writeEnv(): void {
-    if (this.state.envAgreed) return;
-    this.change({ envAgreed: true });
   }
 
   /**

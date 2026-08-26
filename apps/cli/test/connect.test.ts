@@ -233,7 +233,7 @@ describe("the key, and the two failures worth a second try", () => {
     // The second ask carries the reason the first answer did not work.
     expect(ui.record.keyAsks[1]?.problem).toBe(INVALID_KEY_LINE);
     expect(CUSTODY_LINE).toBe(
-      "It is sent to Egma and stored encrypted. It never lands in a file here.",
+      "Egma uses this key now to read your Retell agents and confirm the selected setup. For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
     );
   });
 

@@ -13,7 +13,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -21,7 +21,12 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MONITORING_EXIT } from "../src/commands/monitoring.ts";
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import {
+  createEgmaFolder,
+  EMPTY_CONFIG,
+  folderPathsIn,
+  readConfig,
+} from "../src/folder/egma-folder.ts";
 import { ENV_FILE_NAME } from "../src/monitoring/env-file.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -104,10 +109,10 @@ async function onboarded(agent: { id: string; name: string }): Promise<void> {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
+      ...EMPTY_CONFIG,
       platform: { origin: platform.url },
-      project: { name: "Fixture project", id: null },
-      agent: { name: agent.name, id: agent.id },
-      connection: null,
+      project: { name: "Fixture project", id: platform.projectId },
+      agents: [{ name: agent.name, id: agent.id, connections: [] }],
     },
   });
 }
@@ -120,6 +125,25 @@ async function gitRepository(ignoring: readonly string[]): Promise<void> {
     `${ignoring.join("\n")}\n`,
     "utf8",
   );
+}
+
+/** Keep the folder readable while making its final atomic config write fail. */
+async function lockEgmaFolder(): Promise<() => Promise<void>> {
+  await createEgmaFolder({
+    repository: workspace.dir,
+    config: {
+      ...EMPTY_CONFIG,
+      platform: { origin: platform.url },
+    },
+  });
+  const root = path.join(workspace.dir, "egma");
+  const config = path.join(root, "config.yaml");
+  await chmod(config, 0o400);
+  await chmod(root, 0o500);
+  return async () => {
+    await chmod(root, 0o700);
+    await chmod(config, 0o600);
+  };
 }
 
 describe("egma monitoring enable, on Retell", () => {
@@ -154,6 +178,45 @@ describe("egma monitoring enable, on Retell", () => {
     // Nothing the developer or a log could read afterwards holds the key.
     expect(result.stdout).not.toContain(KEY);
     expect(result.stderr).not.toContain(KEY);
+  });
+
+  it("keeps the remote success receipt when the local target record fails", async () => {
+    const unlock = await lockEgmaFolder();
+    let result: Result;
+    try {
+      result = await egma(["monitoring", "enable", "--platform", "retell"], {
+        stdin: `${KEY}\n`,
+      });
+    } finally {
+      await unlock();
+    }
+
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(
+      MONITORING_EXIT.repositoryRecordFailed,
+    );
+    const said = facts(result.stdout);
+    expect(said.agent_id).toBe(platform.registered.agents[0]?.id);
+    expect(said.platform_agent_id).toBe(PLATFORM_AGENT);
+    expect(said.pull_production_calls).toBe("on");
+    expect(said.status).toBe("repository-record-failed");
+    expect(said.reason).toContain("remote monitoring setup");
+    expect(said.reason).toContain(`egma monitoring record --agent ${said.agent_id ?? ""}`);
+    expect(said.reason).toContain(`--url ${platform.url}`);
+    expect(result.stderr).toContain("The remote setup remains active.");
+    expect(result.stdout.indexOf("agent_id:")).toBeLessThan(
+      result.stdout.indexOf("status: repository-record-failed"),
+    );
+    expect(platform.registered.agents[0]).toMatchObject({
+      platformAgentId: PLATFORM_AGENT,
+      pullProductionCalls: true,
+    });
+
+    const recovered = await egma(["monitoring", "record", "--agent", said.agent_id ?? ""]);
+    expect(recovered.code).toBe(MONITORING_EXIT.done);
+    expect(facts(recovered.stdout).status).toBe("recorded");
+    const recoveredConfig = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(recoveredConfig.agents[0]?.id).toBe(said.agent_id);
+    expect(platform.registered.agents).toHaveLength(1);
   });
 
   /**
@@ -295,6 +358,41 @@ describe("egma monitoring enable, on LiveKit", () => {
     ]);
   });
 
+  it("prints the worker configuration when the local target record fails", async () => {
+    const unlock = await lockEgmaFolder();
+    let result: Result;
+    try {
+      result = await egma(["monitoring", "enable", "--platform", "livekit"]);
+    } finally {
+      await unlock();
+    }
+
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(
+      MONITORING_EXIT.repositoryRecordFailed,
+    );
+    const said = facts(result.stdout);
+    const secret = platform.keys.minted[0]?.secret ?? "";
+    expect(said.agent_id).toBe(platform.registered.agents[0]?.id);
+    expect(said.api_key).toBe(`egma_sk_…${secret.slice(-4)}`);
+    expect(every(result.stdout, "env")).toEqual([
+      `export EGMA_URL=${platform.url}`,
+      `export EGMA_API_KEY=${secret}`,
+    ]);
+    expect(said.status).toBe("repository-record-failed");
+    expect(said.reason).toContain(`--url ${platform.url}`);
+    expect(result.stderr).toContain("The remote setup remains active.");
+    expect(result.stdout.indexOf("env: export EGMA_API_KEY=")).toBeLessThan(
+      result.stdout.indexOf("status: repository-record-failed"),
+    );
+    expect(platform.registered.agents).toHaveLength(1);
+
+    const recovered = await egma(["monitoring", "record", "--agent", said.agent_id ?? ""]);
+    expect(recovered.code).toBe(MONITORING_EXIT.done);
+    expect(facts(recovered.stdout).status).toBe("recorded");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(1);
+  });
+
   /**
    * Run twice and the file ends the same shape: a rotation replaces the value
    * in place rather than leaving two answers to one question behind.
@@ -403,6 +501,16 @@ describe("which platform runs this agent", () => {
 });
 
 describe("egma monitoring status and disable", () => {
+  it("requires the stable receipt id before record-only recovery", async () => {
+    const result = await egma(["monitoring", "record"]);
+
+    expect(result.code).toBe(MONITORING_EXIT.unchosen);
+    expect(facts(result.stdout).status).toBe("unchosen-agent");
+    expect(result.stderr).toContain("stable Egma agent id");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
+  });
+
   /**
    * Status is a read and says everything a person would open the browser for:
    * the switch, what it is bound to, which key it spends, and whether anything
@@ -470,7 +578,7 @@ describe("egma monitoring status and disable", () => {
     const result = await egma(["monitoring", "pause"]);
 
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("enable, disable, status");
+    expect(result.stderr).toContain("enable, disable, status, record");
   });
 });
 

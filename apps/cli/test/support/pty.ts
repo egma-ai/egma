@@ -270,6 +270,12 @@ export async function showing(
  * about the question itself asks for the screen by name instead.
  */
 export async function chooseTesting(terminal: TerminalRun): Promise<void> {
-  await showing(terminal, GOAL_ASK_LINE, "[t] Test it");
-  terminal.write("t");
+  await showing(terminal, GOAL_ASK_LINE, "› Test it", "[enter] choose this one");
+  terminal.write("\r");
+}
+
+/** Take the default, explicit No answer at the existing-tests choice. */
+export async function chooseNoExistingTests(terminal: TerminalRun): Promise<void> {
+  await showing(terminal, "Do you already have test cases", "› No", "[enter] choose this one");
+  terminal.write("\r");
 }

@@ -21,20 +21,55 @@ command is needed. Use this skill for the stable workflow around the commands.
 
 ## Read the repository state
 
-Read `egma/config.yaml` before acting. It names the **project**, **agent** under
-test, and **connection** Egma uses to reach it. Suites live below `egma/tests/`.
+Read `egma/config.yaml` before acting. Format 2 names one **project**, its
+**agents**, and the **connections** nested under each agent. Suites belong to
+the project and live below `egma/tests/`; a run selects one suite, agent, and
+connection together.
 
 The folder has this shape:
 
 ```text
 egma/
-  config.yaml     what this folder points at — names and ids
+  config.yaml     format 2 platform, project, agents, and connections
   mock-tools.md   what Egma answers for the agent's tools with
   tests/
     release/      one local directory per suite
       suite.yaml  stable suite id and mutable display name
       *.md        zero or more tests in this suite
+    regression/   another suite in the same project
+      suite.yaml
+      *.md
 ```
+
+The config hierarchy is:
+
+```yaml
+format: 2
+platform:
+  origin: https://app.egma.ai
+project:
+  id: prj_...
+  name: Voice agents
+agents:
+  - id: agt_...
+    name: Front desk
+    connections:
+      - id: con_...
+        name: livekit-1
+  - id: agt_...
+    name: After hours
+    connections: []
+```
+
+Format 2 is strict. The CLI has no reader, migration, or alias for the former
+top-level `agent` and `connection` fields. Report that refusal as written.
+
+When the developer asks to onboard or extend the repository, run the wizard.
+It authorizes the CLI before it discovers installed coding agents. The first
+generated suite has exactly four tests. A later wizard run can add a target or
+suite while keeping existing agents, connections, and suite directories.
+LiveKit monitoring writes safe SDK environment lines automatically; there is no
+separate environment-line approval.
 
 Everything in the folder is safe to commit. Treat fields such as `format`,
 `version`, `identity_revision`, and persona ids as Egma-owned sync state.
@@ -72,13 +107,15 @@ pull restores it. Edit the block when changing its answer.
 ## Start and follow a run
 
 ```sh
-egma run <suite-directory>
+egma run <suite-directory> [--agent <name-or-id>] [--connection <name-or-id>]
 ```
 
 A **run** executes the complete suite in the named direct directory against the
-agent over the selected connection. The local suite must exactly match the
-platform before Egma starts it. Each test produces one **simulation** per
-persona.
+selected agent over the selected connection. When there is one runnable target,
+Egma uses it. When there are several agents or several connections under the
+selected agent, use exact names or stable IDs. The local suite must exactly
+match the platform before Egma starts it. Each test produces one **simulation**
+per persona.
 
 The command prints identifiers, a results address, execution progress, and
 grading progress. It waits until execution and all requested trace grading are

@@ -13,12 +13,18 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createEgmaFolder,
+  EMPTY_CONFIG,
+  folderPathsIn,
+  readConfig,
+} from "../src/folder/egma-folder.ts";
 import { walkExitCode } from "../src/wizard/exit-code.ts";
 import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
 import { MintedSecret } from "../src/platform/api-keys.ts";
@@ -110,6 +116,25 @@ let workspace: Workspace;
 async function gitRepository(dir: string, ignoring: readonly string[]): Promise<void> {
   await run("git", ["init", "--quiet"], { cwd: dir });
   await writeFile(path.join(dir, ".gitignore"), `${ignoring.join("\n")}\n`, "utf8");
+}
+
+/** Keep discovery readable while making the post-success config record fail. */
+async function lockEgmaFolder(): Promise<() => Promise<void>> {
+  await createEgmaFolder({
+    repository: workspace.dir,
+    config: {
+      ...EMPTY_CONFIG,
+      platform: { origin: platform.url },
+    },
+  });
+  const root = folderPathsIn(workspace.dir).root;
+  const config = folderPathsIn(workspace.dir).config;
+  await chmod(config, 0o400);
+  await chmod(root, 0o500);
+  return async () => {
+    await chmod(root, 0o700);
+    await chmod(config, 0o600);
+  };
 }
 
 beforeEach(async () => {
@@ -372,11 +397,23 @@ describe("choosing monitoring on Retell", () => {
     expect(sent).toHaveLength(1);
     expect(sent.some((task) => task.includes(MONITORING_EDIT_TASK))).toBe(false);
 
-    // The committed folder records nothing about monitoring — it records
-    // nothing at all, because monitoring writes no folder.
-    await expect(
-      readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    // The committed catalog names the monitored target. Monitoring alone has
+    // no simulation connection, so its connection list is deliberately empty.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toEqual([]);
+    expect(config).toMatchObject({
+      format: 2,
+      platform: { origin: platform.url },
+      project: { id: platform.registered.agents[0]?.projectId },
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: AGENT_NAME,
+          connections: [],
+        },
+      ],
+    });
 
     expect(buildExitLine(report)).toContain("Monitoring page");
     expect(ui.record.asked).not.toContain("reach");
@@ -396,6 +433,38 @@ describe("choosing monitoring on Retell", () => {
     expect(report).toMatchObject({ kind: "monitoring-started", arrived: false });
     expect(walkExitCode(report)).toBe(0);
     expect(buildExitLine(report)).toContain("Nothing has arrived yet");
+    expect(platform.registered.agents[0]?.pullProductionCalls).toBe(true);
+  });
+
+  it("keeps the remote receipt when the repository catalog cannot be written", async () => {
+    const unlock = await lockEgmaFolder();
+    let walked: Awaited<ReturnType<typeof walk>>;
+    try {
+      walked = await walk({
+        goal: "monitoring",
+        steps: retellDiscovery(),
+        answers: { "retell-key": KEY },
+      });
+    } finally {
+      await unlock();
+    }
+
+    expect(walked.report.kind).toBe("monitoring-record-failed");
+    expect(walkExitCode(walked.report)).toBe(1);
+    const lines = exitLines(walked.report);
+    const printed = lines.join("\n");
+    expect(printed).toContain(`agent_id: ${platform.registered.agents[0]?.id ?? ""}`);
+    expect(printed).toContain(`platform_agent_id: ${PLATFORM_AGENT}`);
+    expect(printed).toContain("pull_production_calls: on");
+    expect(printed).toContain("status: repository-record-failed");
+    expect(printed).toContain(`url: ${platform.url}`);
+    expect(lines.findIndex((line) => line.startsWith("agent_id:"))).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("Egma could not record")),
+    );
+    expect(printed).toContain(
+      `egma monitoring record --agent ${platform.registered.agents[0]?.id ?? ""}`,
+    );
+    expect(printed).toContain(`--url ${platform.url}`);
     expect(platform.registered.agents[0]?.pullProductionCalls).toBe(true);
   });
 
@@ -438,13 +507,13 @@ describe("choosing monitoring on LiveKit", () => {
   });
 
   /**
-   * The gated edit, the minted key, the written file — and no wait, because a
-   * pushing worker has nothing to prove until it runs.
+   * The coding-agent edit, the minted key, and the safe automatic file write —
+   * with no separate approval screen and no wait for production traffic.
    */
   it("wires the worker, mints a project key, and writes exactly two lines", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
 
-    const { report } = await walk({
+    const { report, ui } = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
       stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
@@ -458,6 +527,7 @@ describe("choosing monitoring on LiveKit", () => {
       wired: true,
     });
     expect(walkExitCode(report)).toBe(0);
+    expect(ui.record.gatesOpened).toEqual(["welcome", "begin"]);
 
     // The agent's row: platform-bound, named by the coding agent, and holding
     // nothing about the key — push is observed, never declared.
@@ -492,11 +562,22 @@ describe("choosing monitoring on LiveKit", () => {
     const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
     expect(worker).toContain("monitor_livekit(ctx)");
 
-    // Monitoring wrote no committed folder at all: the platform is the one
-    // place the truth about monitoring lives.
-    await expect(
-      readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    // Monitoring commits the target identity, but no simulation connection.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toEqual([]);
+    expect(config).toMatchObject({
+      format: 2,
+      platform: { origin: platform.url },
+      project: { id: platform.registered.agents[0]?.projectId },
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: "front-desk",
+          connections: [],
+        },
+      ],
+    });
 
     // The coding agent was told, in the dispatch itself, never to touch an
     // environment file — the key is Egma's own code's to write.
@@ -508,6 +589,39 @@ describe("choosing monitoring on LiveKit", () => {
     // The lines survive the screen, one to a line, for the deployment.
     expect(exitLines(report)).toContain(`export EGMA_API_KEY=${minted.secret}`);
     expect(buildExitLine(report)).toContain("Monitoring page");
+  });
+
+  it("keeps the worker environment lines when the repository catalog cannot be written", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const unlock = await lockEgmaFolder();
+    let walked: Awaited<ReturnType<typeof walk>>;
+    try {
+      walked = await walk({
+        goal: "monitoring",
+        steps: liveKitDiscovery(),
+        stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+      });
+    } finally {
+      await unlock();
+    }
+
+    expect(walked.report.kind).toBe("monitoring-record-failed");
+    expect(walkExitCode(walked.report)).toBe(1);
+    const lines = exitLines(walked.report);
+    const printed = lines.join("\n");
+    expect(printed).toContain(`agent_id: ${platform.registered.agents[0]?.id ?? ""}`);
+    expect(printed).toContain(`export EGMA_URL=${platform.url}`);
+    expect(printed).toContain(`export EGMA_API_KEY=${platform.keys.minted[0]?.secret ?? ""}`);
+    expect(printed).toContain("status: repository-record-failed");
+    expect(printed).toContain(`url: ${platform.url}`);
+    expect(lines.findIndex((line) => line.startsWith("export EGMA_API_KEY="))).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("Egma could not record")),
+    );
+    expect(printed).toContain(
+      `egma monitoring record --agent ${platform.registered.agents[0]?.id ?? ""}`,
+    );
+    expect(printed).toContain(`--url ${platform.url}`);
+    expect(platform.registered.agents).toHaveLength(1);
   });
 
   /**
@@ -627,6 +741,23 @@ describe("choosing both", () => {
       platform.registered.agents[0]?.id,
     );
 
+    // Monitoring first records the agent with no connection. Testing then
+    // upserts its connection on that same agent instead of adding a duplicate.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toHaveLength(1);
+    expect(config).toMatchObject({
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: AGENT_NAME,
+          connections: [
+            { id: platform.registered.connections[0]?.id },
+          ],
+        },
+      ],
+    });
+
     // And the tests really ran.
     expect(platform.tests.tests).toHaveLength(1);
     expect(platform.running.runs).toHaveLength(1);
@@ -723,6 +854,21 @@ describe("choosing both", () => {
     expect(platform.registered.connections[0]?.agentId).toBe(
       platform.registered.agents[0]?.id,
     );
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toHaveLength(1);
+    expect(config).toMatchObject({
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: "front-desk",
+          connections: [
+            { id: platform.registered.connections[0]?.id },
+          ],
+        },
+      ],
+    });
 
     // The name was settled by the monitoring half, so nobody was asked for it.
     expect(ui.record.connectionAsks.map((ask) => ask.id)).not.toContain(

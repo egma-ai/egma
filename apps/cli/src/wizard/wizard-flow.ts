@@ -15,10 +15,9 @@
  * name into the testing lane, so a sitting that does both asks every shared
  * question once and leaves one agent row behind rather than two.
  *
- * One thing ends the walk before any of it: a repository that already has an
- * egma folder is refused where it stands, because the wizard onboards new
- * repositories and a second setup would half-run into somebody's committed
- * files.
+ * A repository may run the wizard again. Each completed walk records another
+ * target without replacing the targets already committed, and creates another
+ * direct suite beside the suites already there.
  *
  * The last step is the only one that does not end when it is finished. It ends
  * when the developer has seen one trace reach terminal grading, which is the point of the ten
@@ -26,22 +25,22 @@
  * a terminal has never stopped one.
  */
 
-import type { Dirent } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
 import process from "node:process";
 import path from "node:path";
 
 import {
   installedCodingAgent,
+  SUPPORTED_CODING_AGENT_IDS,
   type DrivenAgentLaunch,
   type InstalledCodingAgent,
 } from "../acp/coding-agents.ts";
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
+import { folderPathsIn } from "../folder/egma-folder.ts";
 import {
-  FOLDER_NAME,
-  folderPathsIn,
-  SUITE_MANIFEST_FILE_NAME,
-} from "../folder/egma-folder.ts";
+  MonitoringTargetRecordError,
+  recordMonitoringTarget,
+  type MonitoringTargetRecordStage,
+} from "../monitoring/record-target.ts";
 import type { Registered, RegisterOptions } from "../platform/agents.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
@@ -117,8 +116,12 @@ type WizardFlowBaseOptions = {
 export type WizardCodingAgent =
   | { readonly kind: "selected"; readonly launch: DrivenAgentLaunch }
   | {
-      readonly kind: "choose";
-      readonly installed: readonly InstalledCodingAgent[];
+      /** Resolve installed coding agents only after this CLI is authorized. */
+      readonly kind: "discover";
+      readonly discover: () => Promise<readonly InstalledCodingAgent[]>;
+      /** A named choice, or `null` when the wizard should apply its normal policy. */
+      readonly requestedId: string | null;
+      readonly selection: "interactive" | "headless";
     };
 
 export type WizardFlowOptions = WizardFlowBaseOptions &
@@ -129,19 +132,114 @@ export type WizardFlowOptions = WizardFlowBaseOptions &
         readonly codingAgent?: never;
       }
     | {
-        /** The installed agents the real wizard offers. */
+        /** How the real wizard resolves the coding agent after authorization. */
         readonly codingAgent: WizardCodingAgent;
         readonly launch?: never;
       }
   );
 
+function installedAgentLines(installed: readonly InstalledCodingAgent[]): string[] {
+  return installed.map(
+    (agent) => `  ${agent.id}  ${agent.name} ${agent.version}  ${agent.executable}`,
+  );
+}
+
+function noSelectedCodingAgent(
+  requested: string | null,
+  installed: readonly InstalledCodingAgent[],
+): string {
+  const first =
+    requested === null
+      ? "Egma needs --coding-agent when more than one supported coding agent is installed."
+      : `Egma could not find an installed supported coding agent called "${requested}".`;
+  return [
+    first,
+    "",
+    ...(installed.length === 0
+      ? ["No supported coding agents were found."]
+      : ["Installed coding agents:", ...installedAgentLines(installed)]),
+    "",
+    `Supported ids: ${SUPPORTED_CODING_AGENT_IDS.join(", ")}.`,
+  ].join("\n");
+}
+
+type CodingAgentResolution =
+  | { readonly kind: "selected"; readonly launch: DrivenAgentLaunch }
+  | { readonly kind: "ended"; readonly report: ExitReport };
+
+async function resolveCodingAgent(
+  source: WizardCodingAgent,
+  ui: WizardUI,
+  signal: AbortSignal,
+  enterCodingAgentPhase: () => void,
+): Promise<CodingAgentResolution> {
+  if (source.kind === "selected") {
+    enterCodingAgentPhase();
+    return source;
+  }
+
+  const installed = await source.discover();
+  if (signal.aborted) {
+    return { kind: "ended", report: stopReport(signal, "coding agent") };
+  }
+
+  if (source.requestedId !== null) {
+    enterCodingAgentPhase();
+    const selected = installedCodingAgent(installed, source.requestedId);
+    if (selected !== null) return { kind: "selected", launch: selected.launch };
+
+    // Headless output keeps the exact requested id and installed inventory
+    // before the ordinary paste fallback. The terminal UI leaves only its
+    // ordinary no-coding-agent notice after the alternate screen comes down.
+    ui.pushStatus(noSelectedCodingAgent(source.requestedId, installed));
+    return { kind: "ended", report: { kind: "no-coding-agent" } };
+  }
+
+  if (installed.length === 0) {
+    enterCodingAgentPhase();
+    return { kind: "ended", report: { kind: "no-coding-agent" } };
+  }
+
+  if (source.selection === "headless") {
+    enterCodingAgentPhase();
+    if (installed.length > 1) {
+      return {
+        kind: "ended",
+        report: { kind: "failed", reason: noSelectedCodingAgent(null, installed) },
+      };
+    }
+    return { kind: "selected", launch: installed[0]!.launch };
+  }
+
+  const choices = installed.map(
+    ({ id, name, version, executable }) => ({ id, name, version, executable }),
+  );
+  // Open the answer channel before the choices can draw. A fast Arrow, Arrow,
+  // Enter sequence may arrive in the same frame that first shows the picker;
+  // if the question opens afterwards, that valid answer is lost.
+  const answerPromise = ui.waitForAnswer("coding-agent");
+  ui.setCodingAgentChoices(choices);
+  // Put the ready picker on screen in one render. Rendering an empty picker
+  // first leaves a small input-listener handoff while the visible list redraws,
+  // and a fast Arrow, Arrow, Enter sequence can land inside that handoff.
+  enterCodingAgentPhase();
+  const answer = await untilAborted(answerPromise, signal);
+  if (signal.aborted) {
+    return { kind: "ended", report: stopReport(signal, "coding agent") };
+  }
+  const selected = installedCodingAgent(installed, answer ?? "");
+  return selected === null
+    ? { kind: "ended", report: { kind: "no-coding-agent" } }
+    : { kind: "selected", launch: selected.launch };
+}
+
 /**
  * Runs the wizard and returns the status it will leave behind.
  *
  * The one thing started here rather than inside the walk is the look around
- * this machine. It is started before the intro is dismissed and shown behind
- * the browser wait, which is the only dead time the walk has: nothing awaits
- * it, no step reads it back, and a look that fails costs nothing.
+ * this repository. It is started after the welcome gate and shown behind the
+ * browser wait. It deliberately does not look for a coding agent: this CLI is
+ * authorized before Claude Code, Codex, Cursor, or OpenCode is probed.
  *
  * What it does need is a way to stop mattering. A walk can end — quit,
  * interrupted, or simply finished — while the look is still going, and by then
@@ -153,8 +251,8 @@ export async function runWizard(options: WizardFlowOptions): Promise<ExitReport>
   const { ui, cwd } = options;
 
   let walking = true;
-  const startDetection = (launch: DrivenAgentLaunch): void => {
-    void detect({ cwd, drivenAgentName: launch.name }).then(
+  const startDetection = (): void => {
+    void detect({ cwd, drivenAgentName: null }).then(
       (detection) => {
         if (walking) ui.setDetection(detection);
       },
@@ -171,7 +269,7 @@ export async function runWizard(options: WizardFlowOptions): Promise<ExitReport>
 
 async function runWizardFlow(
   options: WizardFlowOptions,
-  startDetection: (launch: DrivenAgentLaunch) => void,
+  startDetection: () => void,
 ): Promise<ExitReport> {
   const { ui, cwd, signal } = options;
   let machine: WizardState = INITIAL_WIZARD_STATE;
@@ -183,84 +281,24 @@ async function runWizardFlow(
     ui.setPhase(machine.phase);
   };
 
-  // Asked before anything at all is started, because the answer is that
-  // nothing should be. The wizard onboards new repositories: a second walk over
-  // a folder somebody has already committed would create a second suite beside
-  // theirs and write half of another setup into files they own. So the refusal
-  // comes before a coding agent is even chosen, and it says the one thing that
-  // redoes setup on purpose.
-  if (await hasAnEgmaFolder(cwd)) {
-    advance({ type: "repository-already-onboarded" });
-    const report: ExitReport = {
-      kind: "already-onboarded",
-      folder: `${FOLDER_NAME}/`,
-      hasSuites: await hasASuite(cwd),
-    };
-    ui.setExit(report);
-    return report;
-  }
-
-  const codingAgent: WizardCodingAgent =
-    "launch" in options
-      ? { kind: "selected", launch: options.launch }
-      : options.codingAgent;
-  let launch: DrivenAgentLaunch;
-  if (codingAgent.kind === "selected") {
-    launch = codingAgent.launch;
-  } else {
-    const choices = codingAgent.installed.map(
-      ({ id, name, version, executable }) => ({ id, name, version, executable }),
-    );
-    ui.setCodingAgentChoices(choices);
-    if (choices.length === 0) {
-      advance({ type: "coding-agent-unavailable" });
-      const report: ExitReport = { kind: "no-coding-agent" };
-      ui.setExit(report);
-      return report;
-    }
-
-    const answer = await untilAborted(ui.waitForAnswer("coding-agent"), signal);
-    if (signal.aborted) {
-      const report = stopReport(signal, "coding agent");
-      ui.setExit(report);
-      return report;
-    }
-    const selected = installedCodingAgent(codingAgent.installed, answer ?? "");
-    if (selected === null) {
-      advance({ type: "coding-agent-unavailable" });
-      const report: ExitReport = { kind: "no-coding-agent" };
-      ui.setExit(report);
-      return report;
-    }
-    launch = selected.launch;
-  }
-
-  advance({ type: "coding-agent-selected", id: launch.id });
-  startDetection(launch);
-
-  ui.setDrivenAgent({ id: launch.id, name: launch.name });
-
-  const log = options.log ?? openDrivenAgentLog();
-  ui.setDrivenAgentLog(log.file);
-
-  // Which egma, said before the keystroke that agrees to all of it and before
-  // egma has asked that address anything. A bare command now reaches egma's own
-  // platform by default, so where a repository's identifiers are going is the
-  // developer's to read first, not to find out afterwards.
+  // Which egma, said before the first keystroke and before egma has asked that
+  // address anything. A bare command reaches egma's own platform by default, so
+  // where this CLI will be authorized is the developer's to read first.
   ui.setPlatform(
     options.platform === undefined ? null : { url: options.platform.url },
   );
 
-  await untilAborted(ui.waitForGate("begin"), signal);
+  await untilAborted(ui.waitForGate("welcome"), signal);
   if (signal.aborted) {
-    const report = stopReport(signal, launch.name);
+    const report = stopReport(signal, null);
     ui.setExit(report);
     return report;
   }
-  advance({ type: "intro-accepted" });
+  advance({ type: "welcome-accepted" });
+  startDetection();
 
-  // Login starts on the far side of the gate. A developer who reads the first
-  // screen and closes the wizard has sent nothing to the selected platform.
+  // CLI authorization is first. No supported coding-agent executable is probed,
+  // selected, or started until this step has completed.
   let platform: PlatformAccess | undefined;
   if (options.platform !== undefined) {
     platform = options.platform;
@@ -270,7 +308,34 @@ async function runWizardFlow(
       return refusal;
     }
   }
-  advance({ type: "login-finished" });
+  const codingAgent: WizardCodingAgent =
+    "launch" in options
+      ? { kind: "selected", launch: options.launch }
+      : options.codingAgent;
+  const resolved = await resolveCodingAgent(codingAgent, ui, signal, () => {
+    advance({ type: "login-finished" });
+  });
+  if (resolved.kind === "ended") {
+    if (resolved.report.kind === "no-coding-agent") {
+      advance({ type: "coding-agent-unavailable" });
+    }
+    ui.setExit(resolved.report);
+    return resolved.report;
+  }
+  const launch = resolved.launch;
+  advance({ type: "coding-agent-selected", id: launch.id });
+  ui.setDrivenAgent({ id: launch.id, name: launch.name });
+
+  const log = options.log ?? openDrivenAgentLog();
+  ui.setDrivenAgentLog(log.file);
+
+  await untilAborted(ui.waitForGate("begin"), signal);
+  if (signal.aborted) {
+    const report = stopReport(signal, launch.name);
+    ui.setExit(report);
+    return report;
+  }
+  advance({ type: "intro-accepted" });
 
   return withDrivenAgent(
     {
@@ -289,55 +354,6 @@ async function runWizardFlow(
 }
 
 /**
- * Whether this repository has been through the wizard already.
- *
- * The folder itself is the question, rather than what is inside it: it is what
- * the refusal names, what a developer deletes or renames to redo setup, and
- * what every clone of the repository commits. A folder that cannot be read at
- * all is treated as absent — a repository the wizard cannot look into is a
- * repository it has no reason to refuse.
- */
-async function hasAnEgmaFolder(cwd: string): Promise<boolean> {
-  try {
-    return (await stat(folderPathsIn(cwd).root)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Whether that folder holds a suite egma could push and run as it stands.
- *
- * Asked because the refusal offers `egma push` and `egma run` as the other way
- * forward, and those are only the other way forward when there is something to
- * push. A folder left behind by a walk that stopped between binding and
- * registering holds a platform line and nothing else, and `egma push` refuses
- * it. One manifest is the whole question, so it is answered by looking for one
- * rather than by parsing the repository — a folder egma cannot read is a folder
- * with nothing to offer either.
- */
-async function hasASuite(cwd: string): Promise<boolean> {
-  const paths = folderPathsIn(cwd);
-  let entries: Dirent[];
-  try {
-    entries = await readdir(paths.tests, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const found = await stat(
-      path.join(paths.tests, entry.name, SUITE_MANIFEST_FILE_NAME),
-    ).then(
-      (manifest) => manifest.isFile(),
-      () => false,
-    );
-    if (found) return true;
-  }
-  return false;
-}
-
-/**
  * The one question about what Egma is here to do, asked once.
  *
  * `null` — a closed wizard, a run with nobody watching — is testing, which is
@@ -348,6 +364,78 @@ function goalFrom(said: string | null): WizardGoal {
   return (WIZARD_GOALS as readonly string[]).includes(said ?? "")
     ? (said as WizardGoal)
     : "testing";
+}
+
+/** Keep the successful monitoring target in the committed format-2 catalog. */
+type MonitoringRecordFailure = {
+  readonly stage: MonitoringTargetRecordStage | "credentials" | "unknown";
+  readonly detail: string;
+};
+
+async function recordMonitoredTarget(
+  options: Pick<WizardFlowOptions, "cwd" | "connectionFetchImpl">,
+  platform: PlatformAccess,
+  monitored: NonNullable<MonitoringSetup["monitored"]>,
+): Promise<MonitoringRecordFailure | null> {
+  try {
+    const signedIn = await signedInAt(platform);
+    if (signedIn === null) {
+      return {
+        stage: "credentials",
+        detail: `this machine no longer holds a key for ${platform.url}`,
+      };
+    }
+
+    await recordMonitoringTarget({
+      cwd: options.cwd,
+      signedIn,
+      target: {
+        id: monitored.agentId,
+        name: monitored.agentName,
+        projectId: monitored.projectId,
+      },
+      fetchImpl: options.connectionFetchImpl,
+    });
+    return null;
+  } catch (cause) {
+    return cause instanceof MonitoringTargetRecordError
+      ? { stage: cause.stage, detail: cause.message }
+      : {
+          stage: "unknown",
+          detail: cause instanceof Error ? cause.message : String(cause),
+        };
+  }
+}
+
+/** Preserve the completed remote setup as actionable lines on a failed walk. */
+function monitoringRecordFailure(
+  setUp: MonitoringSetup,
+  monitored: NonNullable<MonitoringSetup["monitored"]>,
+  failure: MonitoringRecordFailure,
+  platformUrl: string,
+): ExitReport {
+  const receipt = [
+    `url: ${platformUrl}`,
+    `agent_id: ${monitored.agentId}`,
+    `agent_name: ${monitored.agentName}`,
+    `project_id: ${monitored.projectId}`,
+    ...(monitored.platformAgentId === null
+      ? []
+      : [
+          `platform_agent_id: ${monitored.platformAgentId}`,
+          "pull_production_calls: on",
+        ]),
+    ...(setUp.report.kind === "monitoring-wired" ? setUp.report.lines : []),
+    "status: repository-record-failed",
+  ];
+  return {
+    kind: "monitoring-record-failed",
+    receipt,
+    reason:
+      `remote monitoring is ready for agent ${monitored.agentId}, but ${failure.detail} The remote setup remains active. ` +
+      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId} --url ${platformUrl}. ` +
+      "That recovery command does not create an agent or mint a key.",
+  };
 }
 
 /** The wizard work that shares one coding-agent process and ACP session. */
@@ -456,6 +544,17 @@ async function runWizardWithAgent(
       return setUp.report;
     }
     monitored = setUp.monitored;
+    const localRecordFailure = await recordMonitoredTarget(options, platform, monitored);
+    if (localRecordFailure !== null) {
+      const report = monitoringRecordFailure(
+        setUp,
+        monitored,
+        localRecordFailure,
+        platform.url,
+      );
+      ui.setExit(report);
+      return report;
+    }
     advance({ type: "monitoring-ready" });
 
     // Monitoring alone creates no connection, no suite and no tests, so the

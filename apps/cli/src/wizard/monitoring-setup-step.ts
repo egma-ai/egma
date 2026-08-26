@@ -29,7 +29,6 @@ import {
   LIVEKIT_CLOSING_LINE,
   wireLiveKitMonitoring,
 } from "../monitoring/livekit-lane.ts";
-import { ENV_CONSENT_LINE } from "../monitoring/env-file.ts";
 import { refusalLines } from "../monitoring/refusals.ts";
 import {
   MONITORING_CUSTODY_LINE,
@@ -298,14 +297,6 @@ async function pushFromLiveKit(
     // developer's to change, so the lines they add by hand are printed and the
     // key is still minted for when they do.
     for (const line of monitorEntryInstructions()) ui.pushStatus(line);
-  }
-
-  // The one keystroke before a live credential is written into a working tree.
-  ui.setEnvConsent(ENV_CONSENT_LINE);
-  await untilAborted(ui.waitForGate("write-env"), signal);
-  ui.setEnvConsent(null);
-  if (signal.aborted) {
-    return { report: stopReport(signal, options.drivenAgent.name), monitored: null };
   }
 
   const wired = await wireLiveKitMonitoring({

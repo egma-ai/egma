@@ -6,11 +6,8 @@
  * will be shown. Consent is earned afterwards by showing everything, not by
  * asking again.
  *
- * It also names the egma this walk will use, and how to choose another. A bare
- * command in a repository that names no platform reaches egma's own, so which
- * egma this is stopped being something the developer chose and started being
- * something they have to be told — and told here, on the screen that takes the
- * keystroke, before that address has been asked anything at all.
+ * It also names the egma this CLI is already signed in to, and how to choose
+ * another on a later run.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -64,10 +61,11 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
       <Text>Egma tells it to change nothing. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
+      <Box height={1} />
       {state.platform === null ? null : (
         <>
           <Box height={1} />
-          <Text>{`This uses ${state.platform.url}. Nothing has been sent to it yet.`}</Text>
+          <Text>{`This CLI is signed in to ${state.platform.url}.`}</Text>
           <Text dimColor>{ANOTHER_PLATFORM}</Text>
         </>
       )}

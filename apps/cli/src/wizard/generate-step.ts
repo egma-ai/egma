@@ -15,9 +15,9 @@
  *
  * **What is on disk is the truth**, and it is what this step believes twice
  * over. While the agent works, the pane is drawn from the folder as much as
- * from what the agent says about it. When the writing stops, the list the
- * developer scans is built from the files that are really there — which is why
- * a coding agent that says it wrote twelve and wrote nine puts nine on screen.
+ * from what the agent says about it. When the writing stops, the files that
+ * are really there must match the first-suite count before any are reviewed or
+ * pushed.
  *
  * **What runs is the complete suite.** One invalid file or one atomic platform
  * refusal stops the step. The wizard never treats approval as permission to
@@ -28,9 +28,10 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  CONFIG_FORMAT,
   createEgmaFolder,
   readRepository,
-  updateConfig,
+  recordRegisteredTarget,
   writeSuiteManifest,
   type FolderPaths,
   type FolderContents,
@@ -51,6 +52,7 @@ import { readProject } from "../platform/projects.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import { createTestSuite } from "../platform/test-suites.ts";
+import { pullRepository } from "../sync/pull.ts";
 import { pushTests } from "../sync/push.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
@@ -110,7 +112,7 @@ export type GenerateStepOptions = {
   };
   /** What the find-the-agent step reported. */
   readonly facts: Facts;
-  /** How many tests a first suite holds. The default when it is left out. */
+  /** Exactly how many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
   /**
    * What happens between the test files landing and the list going up.
@@ -397,7 +399,7 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
    *
    * Every test names at least one persona from birth, so this is read here and
    * not at push time: a folder written against an empty list is a folder that
-   * cannot be pushed, and a refusal after a coding agent has written twelve
+   * cannot be pushed, and a refusal after a coding agent has written four
    * files is a far worse place to learn it.
    */
   const personas = await personasEgmaHolds(options.signedIn, project.id);
@@ -405,19 +407,27 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   const folder = await createEgmaFolder({
     repository: options.cwd,
     config: {
+      format: CONFIG_FORMAT,
       platform: null,
       project: { name: project.name, id: project.id },
-      agent,
-      connection,
+      agents: [{ ...agent, connections: [connection] }],
     },
   });
   if (!folder.created) {
-    await updateConfig(folder.paths.config, {
+    await recordRegisteredTarget(folder.paths.config, {
       project: { name: project.name, id: project.id },
       agent,
       connection,
     });
   }
+
+  // Push is the complete project working copy. A fresh repository can still
+  // point at a project with suites made in the browser or by an earlier local
+  // attempt, so materialize those before creating one more remote identity.
+  await pullRepository({ signedIn: options.signedIn, paths: folder.paths });
+  options.ui.pushStatus(
+    `${ACTION_MARK} Pulled the project's current suites, tests, and mock tools into this repository`,
+  );
 
   const repository = await readRepository(folder.paths);
   const used = new Set(repository.suites.map((suite) => suite.directory));
@@ -587,6 +597,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
         content: existing.content,
         taken: namesOf((await contentsFor(paths, suite.id)).found),
         personas: generated.personas,
+        limit: howMany,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
       // pane counts what turns up rather than promising a number.
@@ -633,6 +644,15 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   };
 
   const written = await contentsFor(paths, suite.id);
+  const writtenCount = (await namesInFolder(generated.root)).length;
+  if (writtenCount !== howMany) {
+    return ending({
+      kind: "failed",
+      reason:
+        `${options.drivenAgent.name} left ${String(writtenCount)} ${writtenCount === 1 ? "test" : "tests"} in the first suite, ` +
+        `but this setup requires exactly ${String(howMany)}. Keep exactly ${String(howMany)} test files there, then run the wizard again.`,
+    });
+  }
   const usable = written.found.filter(
     (file) => file.test.expectedBehaviors.length > 0,
   );

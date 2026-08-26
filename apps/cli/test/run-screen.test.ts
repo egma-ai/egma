@@ -33,7 +33,13 @@ import {
   type FixtureGrade,
   type Platform,
 } from "./support/fixture-platform/index.ts";
-import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+  type TerminalRun,
+} from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -68,8 +74,13 @@ const ONE_AGENT: FakeRetellScript = {
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
 
-/** Three, so a first result can be ready while two are still moving. */
-const TESTS = ["quoted-a-price", "lost-the-order-number", "open-on-sunday"] as const;
+/** Four, so a first result can be ready while three are still moving. */
+const TESTS = [
+  "quoted-a-price",
+  "lost-the-order-number",
+  "open-on-sunday",
+  "asked-for-the-binder",
+] as const;
 
 const EXPECTED_BEHAVIORS = [
   "confirms the new time back before finishing",
@@ -212,6 +223,9 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   });
   terminal = run;
 
+  await showing(run, "Welcome to Egma", "[enter] continue");
+  run.write("\r");
+
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
 
@@ -223,8 +237,7 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 
-  await showing(run, "Do you already have test cases", "[n] none");
-  run.write("n");
+  await chooseNoExistingTests(run);
 
   await showing(run, `${TESTS.length} tests generated`, "[enter] run");
   run.write("\r");
@@ -297,9 +310,9 @@ describe("the run screen", () => {
     await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     const held = platform.running.simulationsOf();
     expect(held.filter((one) => one.gradingState === "complete")).toHaveLength(1);
-    expect(held.filter((one) => one.gradingState === null)).toHaveLength(2);
+    expect(held.filter((one) => one.gradingState === null)).toHaveLength(3);
     expect(held.filter((one) => one.status === "running")).toHaveLength(1);
-    expect(held.filter((one) => one.status === "queued")).toHaveLength(1);
+    expect(held.filter((one) => one.status === "queued")).toHaveLength(2);
   });
 
   /**
@@ -324,15 +337,16 @@ describe("the run screen", () => {
       reason: "the agent never joined",
     });
     platform.running.advance({ simulation: TESTS[2], status: "canceled" });
+    platform.running.advance({ simulation: TESTS[3], status: "canceled" });
 
-    const screen = await showing(run, "execution 3/3 finished", "grading 0/1 terminal");
+    const screen = await showing(run, "execution 4/4 finished", "grading 0/1 terminal");
     expect(screen).toContain(TESTS[0]);
     expect(screen).toContain("waiting to grade");
     expect(screen).toContain(TESTS[1]);
     expect(screen).toContain("did not run");
     expect(screen).toContain(TESTS[2]);
     expect(screen).toContain("stopped");
-    expect(screen).toContain("execution 3/3 finished");
+    expect(screen).toContain("execution 4/4 finished");
     expect(screen).toContain("grading 0/1 terminal");
   });
 });

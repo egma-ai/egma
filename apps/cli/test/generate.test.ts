@@ -215,6 +215,38 @@ describe("generated suite", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("pulls existing project state before it creates and pushes the generated suite", async () => {
+    const existing = platform.suites.add("Earlier browser suite");
+
+    const result = await walk(
+      writes("never-quotes-a-price", ["The agent does not quote a price."]),
+      1,
+    );
+
+    expect(result.report.kind).toBe("run-started");
+    expect(result.ui.record.statuses).toContain(
+      "◆ Pulled the project's current suites, tests, and mock tools into this repository",
+    );
+
+    const repository = await readRepository(folderPathsIn(workspace.dir));
+    expect(repository.suites.map((suite) => suite.manifest.id)).toContain(existing.id);
+    expect(repository.suites).toHaveLength(2);
+
+    const pushed = platform.records.find(
+      (record) =>
+        record.method === "POST" && record.path === "/v1/repository/change-set",
+    );
+    expect(pushed?.body).toMatchObject({
+      suites: expect.arrayContaining([
+        { id: existing.id, name: "Earlier browser suite" },
+      ]),
+    });
+    expect(platform.suites.suites).toHaveLength(2);
+    expect(platform.tests.tests).toEqual([
+      expect.objectContaining({ name: "never-quotes-a-price" }),
+    ]);
+  });
+
   it("stops before writing when Egma lists no persona for the project", async () => {
     // A project holding none is a project the platform cannot make — the
     // pointer is set at creation and the column cannot be null. The wizard
@@ -255,6 +287,30 @@ describe("generated suite", () => {
         (record) => record.method === "POST" && record.path === "/v1/repository/change-set",
       ),
     ).toBe(false);
+  });
+
+  it.each([
+    ["too few", writes("only-one", ["The agent says the workshop name."]), 2, 1],
+    [
+      "too many",
+      [
+        ...writes("first", ["The agent says the workshop name."]),
+        ...writes("second", ["The agent says when the workshop opens."]),
+      ],
+      1,
+      2,
+    ],
+  ] as const)("does not push when the coding agent writes %s tests", async (_case, steps, wanted, written) => {
+    const result = await walk(steps, wanted);
+
+    expect(result.report).toEqual({
+      kind: "failed",
+      reason:
+        `Fake Agent left ${String(written)} ${written === 1 ? "test" : "tests"} in the first suite, ` +
+        `but this setup requires exactly ${String(wanted)}. Keep exactly ${String(wanted)} test files there, then run the wizard again.`,
+    });
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
   });
 
   it("does not remove a suite directory another process created after the remote write", async () => {

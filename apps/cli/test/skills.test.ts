@@ -121,12 +121,15 @@ describe("Egma's instruction content", () => {
   it("agrees with the README about the repository folder", () => {
     const layout = [
       "egma/",
-      "  config.yaml     what this folder points at — names and ids",
+      "  config.yaml     format 2 platform, project, agents, and connections",
       "  mock-tools.md   what Egma answers for the agent's tools with",
       "  tests/",
       "    release/      one local directory per suite",
       "      suite.yaml  stable suite id and mutable display name",
       "      *.md        zero or more tests in this suite",
+      "    regression/   another suite in the same project",
+      "      suite.yaml",
+      "      *.md",
     ].join("\n");
 
     expect(drivingSkill()).toContain(layout);

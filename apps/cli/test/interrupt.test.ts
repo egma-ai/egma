@@ -31,7 +31,12 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { chooseTesting, runInTerminal, showing } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+} from "./support/pty.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -103,6 +108,11 @@ function startWizard(script: string) {
   });
 }
 
+async function authorizeStoredCli(terminal: ReturnType<typeof startWizard>): Promise<void> {
+  await showing(terminal, "Welcome to Egma", "[enter] continue");
+  terminal.write("\r");
+}
+
 /** Every test file the folder holds, or none when there is no folder. */
 async function testsInFolder(): Promise<string[]> {
   return (await readdir(path.join(workspace.dir, "egma", "tests", "generated")).catch(
@@ -145,12 +155,12 @@ describe("Ctrl-C while the browser is being waited on", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "Egma is about to find", "[enter] begin");
+      await showing(terminal, "Welcome to Egma", "[enter] continue");
       terminal.write("\r");
 
       // The login screen: a code to approve, an address it is already in, and
-      // the wait filled with what egma worked out while the developer read the
-      // intro. None of it was asked for and none of it is waited on.
+      // the wait filled with what egma worked out after the welcome. Coding-agent
+      // discovery has not started yet, because CLI authorization comes first.
       //
       // Every line is waited for rather than read off one screen and asserted
       // afterwards. The pane arrives on its own and a terminal paints a line at
@@ -161,7 +171,6 @@ describe("Ctrl-C while the browser is being waited on", () => {
         "Code:",
         "Approve this code",
         "While you were away, Egma looked around:",
-        "Coding agent   node",
         "Git            not a repository",
         "egma folder    none yet — Egma will make one",
       );
@@ -197,6 +206,7 @@ describe("Ctrl-C while the coding agent is working", () => {
     const terminal = startWizard(script);
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Reading the repository");
@@ -228,7 +238,12 @@ describe("Ctrl-C at the gate, with the files already written", () => {
   it("says how many tests are in the repository and pushes none of them", async () => {
     await workspace.signIn(platform.url, platform.device.mint());
 
-    const names = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+    const names = [
+      "open-on-sunday",
+      "lost-the-order-number",
+      "wants-it-by-friday",
+      "needs-a-receipt",
+    ];
     const script = await workspace.script({
       spawnChild: true,
       steps: [
@@ -237,8 +252,8 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       ],
       stepsByTask: [
         {
-          // Whatever size of suite egma asked for, this agent writes three and
-          // stops. What reaches the gate is what is really on disk.
+          // The agent writes the required first-suite size and stops. What
+          // reaches the gate is what is really on disk.
           contains: GENERATE_TASK,
           steps: [
             { kind: "say", text: `egma:plan ${names.join(", ")}\n` },
@@ -252,6 +267,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
     const terminal = startWizard(script);
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
@@ -263,11 +279,11 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
-      await showing(terminal, "Do you already have test cases");
-      terminal.write("n");
+      await chooseNoExistingTests(terminal);
 
-      // The list, with every file on it, waiting on one keystroke.
-      await showing(terminal, "3 tests generated", "[enter] run", ...names);
+      // The gate names the suite size and keeps all four files on disk. It shows
+      // three rows at once and makes the fourth available through browsing.
+      await showing(terminal, "4 tests generated", "… 1 more", "[enter] run");
 
       terminal.write(CTRL_C);
 
@@ -276,7 +292,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       // shut nothing down. It stopped, and the files are where they always were.
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "Egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
+        "Egma stopped. Your 4 tests are in egma/tests/ — read them, then run egma push.",
       );
 
       // The agent that wrote them, and the process it started, are both gone —
@@ -302,7 +318,12 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
   it("leaves the address of a live run, and answers the shell as a run that got there", async () => {
     await workspace.signIn(platform.url, platform.device.mint());
 
-    const names = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+    const names = [
+      "open-on-sunday",
+      "lost-the-order-number",
+      "wants-it-by-friday",
+      "needs-a-receipt",
+    ];
     const script = await workspace.script({
       steps: [
         { kind: "say", text: "egma:found framework retell-sdk\n" },
@@ -342,6 +363,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
@@ -353,16 +375,15 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
-      await showing(terminal, "Do you already have test cases");
-      terminal.write("n");
+      await chooseNoExistingTests(terminal);
 
-      await showing(terminal, "3 tests generated", "[enter] run");
+      await showing(terminal, "4 tests generated", "[enter] run");
       terminal.write("\r");
 
       // The run is on the platform, and no trace result is ready: this is
       // the developer stopping before the first result, which is the moment
       // the wizard would otherwise have waited for.
-      await showing(terminal, "run run_", "3 simulations", "queued");
+      await showing(terminal, "run run_", "4 simulations", "queued");
       const started = platform.running.runs[0];
       expect(started).toBeDefined();
 
@@ -381,7 +402,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       const address = `${platform.url}/projects/${platform.projectId}/runs/${started?.id ?? ""}`;
 
       expect(lines).toEqual([
-        "✓ Your first run is live — no simulation result is ready yet (3 total).",
+        "✓ Your first run is live — no simulation result is ready yet (4 total).",
         address,
         "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
         'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."',
@@ -392,8 +413,8 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       // Not one word about egma having stopped, because egma did not.
       expect(terminal.scrollback()).not.toContain("stopped");
 
-      expect(platform.tests.tests).toHaveLength(3);
-      expect(platform.running.simulationsOf()).toHaveLength(3);
+      expect(platform.tests.tests).toHaveLength(4);
+      expect(platform.running.simulationsOf()).toHaveLength(4);
       expect(
         platform.running.simulationsOf().filter((one) => one.gradingState !== null),
       ).toHaveLength(0);

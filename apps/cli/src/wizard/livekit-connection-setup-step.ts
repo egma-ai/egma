@@ -31,7 +31,13 @@ import {
   type CredentialField,
 } from "../platform/connection-options.ts";
 import { readCredentials } from "../platform/credentials.ts";
-import type { ConnectionAsk, ConnectionAskId, WizardUI } from "../ui/wizard-ui.ts";
+import { connectionFieldIssue } from "../ui/connection-field-validation.ts";
+import type {
+  ConnectionAsk,
+  ConnectionAskId,
+  ConnectionFieldsAsk,
+  WizardUI,
+} from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
@@ -73,6 +79,13 @@ export type LiveKitConnected = {
 const SECRET_CUSTODY =
   "This value goes straight to Egma, which stores it sealed. It is not sent to the coding agent or written to this repository.";
 
+const LIVEKIT_FIELDS_HELP =
+  "Egma uses these values to connect each simulation to a LiveKit room.";
+
+const LIVEKIT_CREDENTIAL_NOTICE =
+  "Credentials go straight to Egma, which stores them sealed. " +
+  "They are not sent to the coding agent or written to this repository.";
+
 function ending(reason: string): LiveKitConnected {
   return { report: { kind: "failed", reason }, connected: null };
 }
@@ -112,51 +125,122 @@ function fieldAsk(
   };
 }
 
-function isJsonObject(text: string): boolean {
+type Collected =
+  | {
+      readonly kind: "values";
+      readonly config: Readonly<Record<string, string>>;
+      readonly credentials: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "stopped";
+      readonly field: string;
+      readonly reason: "missing" | "invalid-json";
+    }
+  | { readonly kind: "interrupted" };
+
+type ScopedField =
+  | { readonly scope: "config"; readonly field: ConnectionField }
+  | { readonly scope: "credentials"; readonly field: CredentialField };
+
+/** Server order around the credential boundary: config before, credentials, config after. */
+function orderedFields(option: ConnectionOption): readonly ScopedField[] {
+  return [
+    ...option.fields
+      .filter((field) => !field.afterCredentials)
+      .map((field): ScopedField => ({ scope: "config", field })),
+    ...option.credentialFields.map(
+      (field): ScopedField => ({ scope: "credentials", field }),
+    ),
+    ...option.fields
+      .filter((field) => field.afterCredentials)
+      .map((field): ScopedField => ({ scope: "config", field })),
+  ];
+}
+
+function valuesFrom(
+  fields: readonly ScopedField[],
+  answers: Readonly<Partial<Record<ConnectionAskId, string>>>,
+): Collected {
+  const config: Record<string, string> = {};
+  const credentials: Record<string, string> = {};
+  for (const { scope, field } of fields) {
+    const key = "key" in field ? field.key : field.field;
+    const value = answers[askId(`${scope}:${key}`)]?.trim() ?? "";
+    const issue = connectionFieldIssue(field, value);
+    if (issue !== null) return { kind: "stopped", field: field.label, reason: issue };
+    if (value !== "") {
+      (scope === "config" ? config : credentials)[key] = value;
+    }
+  }
+  return { kind: "values", config, credentials };
+}
+
+async function collectRequiredFields(
+  ui: WizardUI,
+  signal: AbortSignal,
+  fields: readonly ScopedField[],
+  option: ConnectionOption,
+): Promise<Collected> {
+  const questions = fields.map(({ scope, field }) => fieldAsk(scope, field, option));
+  const form: ConnectionFieldsAsk = {
+    title: "LiveKit connection details",
+    help: LIVEKIT_FIELDS_HELP,
+    notice: LIVEKIT_CREDENTIAL_NOTICE,
+    fields: questions,
+  };
+  ui.setConnectionFieldsAsk(form);
   try {
-    const value = JSON.parse(text) as unknown;
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  } catch {
-    return false;
+    const answer = await untilAborted(ui.waitForConnectionFields(), signal);
+    if (signal.aborted) return { kind: "interrupted" };
+    if (answer === null || answer === undefined) {
+      return {
+        kind: "stopped",
+        field: questions[0]?.label ?? "LiveKit connection details",
+        reason: "missing",
+      };
+    }
+    return valuesFrom(fields, answer.values);
+  } finally {
+    ui.setConnectionFieldsAsk(null);
   }
 }
 
-type Collected =
-  | { readonly kind: "values"; readonly values: Readonly<Record<string, string>> }
-  | { readonly kind: "stopped"; readonly field: string }
-  | { readonly kind: "interrupted" };
-
-async function collectFields(
+async function collectOptionalFields(
   ui: WizardUI,
   signal: AbortSignal,
-  scope: "config" | "credentials",
-  fields: readonly (ConnectionField | CredentialField)[],
+  fields: readonly ScopedField[],
   option: ConnectionOption,
 ): Promise<Collected> {
-  const values: Record<string, string> = {};
+  const config: Record<string, string> = {};
+  const credentials: Record<string, string> = {};
 
-  for (const field of fields) {
+  for (const { scope, field } of fields) {
     const key = "key" in field ? field.key : field.field;
     let problem: string | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const value = await ask(ui, signal, fieldAsk(scope, field, option, problem));
       if (signal.aborted) return { kind: "interrupted" };
       if (value === null || value.trim() === "") {
-        if (field.required) return { kind: "stopped", field: field.label };
         break;
       }
-      if (field.kind === "json" && !isJsonObject(value)) {
+      if (connectionFieldIssue(field, value.trim()) === "invalid-json") {
         if (attempt === 0) {
           problem = `${field.label} must be one JSON object. Correct it and try again.`;
           continue;
         }
-        return { kind: "stopped", field: field.label };
+        return { kind: "stopped", field: field.label, reason: "invalid-json" };
       }
-      values[key] = value.trim();
+      (scope === "config" ? config : credentials)[key] = value.trim();
       break;
     }
   }
-  return { kind: "values", values };
+  return { kind: "values", config, credentials };
+}
+
+function stoppedReason(stopped: Extract<Collected, { readonly kind: "stopped" }>): string {
+  return stopped.reason === "invalid-json"
+    ? `${stopped.field} must be one JSON object. Correct it and run Egma again.`
+    : `No value was given for ${stopped.field}, so nothing was created.`;
 }
 
 function providerReason(
@@ -303,56 +387,58 @@ export async function liveKitConnectionSetupStep(
     const variant = variants.find((entry) => entry.accessVariant === selected);
     if (variant === undefined) return ending("No LiveKit connection method was chosen.");
 
-    const config = await collectFields(
+    const ordered = orderedFields(variant);
+    const required = await collectRequiredFields(
       options.ui,
       options.signal,
-      "config",
-      variant.fields,
+      ordered.filter(({ field }) => field.required),
       variant,
     );
-    if (config.kind === "interrupted") {
+    if (required.kind === "interrupted") {
       return { report: stopReport(options.signal, null), connected: null };
     }
-    if (config.kind === "stopped") {
-      return ending(`No value was given for ${config.field}, so nothing was created.`);
+    if (required.kind === "stopped") {
+      return ending(stoppedReason(required));
     }
-    const credentials = await collectFields(
+    const optional = await collectOptionalFields(
       options.ui,
       options.signal,
-      "credentials",
-      variant.credentialFields,
+      ordered.filter(({ field }) => !field.required),
       variant,
     );
-    if (credentials.kind === "interrupted") {
+    if (optional.kind === "interrupted") {
       return { report: stopReport(options.signal, null), connected: null };
     }
-    if (credentials.kind === "stopped") {
-      return ending(`No value was given for ${credentials.field}, so nothing was created.`);
+    if (optional.kind === "stopped") {
+      return ending(stoppedReason(optional));
     }
 
-    const common = { name: suggestedName, url: config.values["url"] ?? "" };
+    const config = { ...required.config, ...optional.config };
+    const credentials = { ...required.credentials, ...optional.credentials };
+
+    const common = { name: suggestedName, url: config["url"] ?? "" };
     let input: LiveKitRegistration;
     if (variant.accessVariant === LIVEKIT_KEY_PAIR_VARIANT) {
       input = {
         ...common,
         variant: LIVEKIT_KEY_PAIR_VARIANT,
-        ...(config.values["agentName"] === undefined
+        ...(config["agentName"] === undefined
           ? {}
-          : { agentName: config.values["agentName"] }),
-        ...(config.values["metadata"] === undefined
+          : { agentName: config["agentName"] }),
+        ...(config["metadata"] === undefined
           ? {}
-          : { metadata: config.values["metadata"] }),
+          : { metadata: config["metadata"] }),
         credentials: liveKitKeyPair(
-          credentials.values["apiKey"] ?? "",
-          credentials.values["apiSecret"] ?? "",
+          credentials["apiKey"] ?? "",
+          credentials["apiSecret"] ?? "",
         ),
       };
     } else {
       input = {
         ...common,
         variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-        tokenEndpoint: config.values["tokenEndpoint"] ?? "",
-        credentials: liveKitTokenHeaders(credentials.values["headers"] ?? ""),
+        tokenEndpoint: config["tokenEndpoint"] ?? "",
+        credentials: liveKitTokenHeaders(credentials["headers"] ?? ""),
       };
     }
 

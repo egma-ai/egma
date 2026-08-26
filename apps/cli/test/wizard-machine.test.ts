@@ -16,14 +16,19 @@ function move(state: WizardState, event: WizardEvent): WizardState {
   return result.state;
 }
 
+function authorized(): WizardState {
+  let state = move(INITIAL_WIZARD_STATE, { type: "welcome-accepted" });
+  state = move(state, { type: "login-finished" });
+  return state;
+}
+
 function selected(id = "claude"): WizardState {
-  return move(INITIAL_WIZARD_STATE, { type: "coding-agent-selected", id });
+  return move(authorized(), { type: "coding-agent-selected", id });
 }
 
 /** Everything up to the one question, which is where the lanes part. */
 function askedTheGoal(platform: "retell" | "livekit"): WizardState {
-  let state = move(selected(), { type: "intro-accepted" });
-  state = move(state, { type: "login-finished" });
+  const state = move(selected(), { type: "intro-accepted" });
   return move(state, { type: "agent-found", platform });
 }
 
@@ -42,21 +47,24 @@ function walk(
 }
 
 describe("the wizard's phase order", () => {
-  it("starts by selecting one installed coding agent and keeps that choice", () => {
+  it("authorizes the CLI before selecting and driving a coding agent", () => {
     let state = INITIAL_WIZARD_STATE;
 
+    expect(state).toEqual({ phase: "welcome" });
+    state = move(state, { type: "welcome-accepted" });
+    expect(state).toEqual({ phase: "login" });
+    state = move(state, { type: "login-finished" });
     expect(state).toEqual({ phase: "coding-agent" });
     state = move(state, { type: "coding-agent-selected", id: "codex" });
     expect(state).toEqual({ phase: "intro", codingAgentId: "codex" });
     state = move(state, { type: "intro-accepted" });
-    expect(state).toEqual({ phase: "login", codingAgentId: "codex" });
+    expect(state).toEqual({ phase: "discovery", codingAgentId: "codex" });
   });
 
   it.each(["retell", "livekit"] as const)(
     "asks what Egma is for once it knows the agent runs on %s",
     (platform) => {
       let state = move(selected(), { type: "intro-accepted" });
-      state = move(state, { type: "login-finished" });
       expect(state).toEqual({ phase: "discovery", codingAgentId: "claude" });
 
       state = move(state, { type: "agent-found", platform });
@@ -243,38 +251,9 @@ describe("the goal, per platform", () => {
   });
 });
 
-describe("a repository that has been through the wizard already", () => {
-  /**
-   * Read before a coding agent is even selected. A second walk over a committed
-   * folder would write half of another setup into somebody's files, so nothing
-   * at all starts.
-   */
-  it("refuses politely before anything is started", () => {
-    const state = move(INITIAL_WIZARD_STATE, { type: "repository-already-onboarded" });
-
-    expect(state).toEqual({ phase: "already-onboarded" });
-  });
-
-  it("does not leave that terminal either", () => {
-    const state: WizardState = { phase: "already-onboarded" };
-    const result = transitionWizard(state, { type: "coding-agent-selected", id: "claude" });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("Expected an invalid transition");
-    expect(result.error.phase).toBe("already-onboarded");
-  });
-
-  it("is not something the wizard can decide once it has started", () => {
-    const result = transitionWizard(selected(), { type: "repository-already-onboarded" });
-
-    expect(result.ok).toBe(false);
-  });
-});
-
 describe("the terminals the goal question did not change", () => {
   it("ends at no-agent when discovery finds no voice agent", () => {
     let state = move(selected(), { type: "intro-accepted" });
-    state = move(state, { type: "login-finished" });
     state = move(state, { type: "agent-not-found" });
 
     expect(state).toEqual({ phase: "no-agent", codingAgentId: "claude" });
@@ -284,7 +263,6 @@ describe("the terminals the goal question did not change", () => {
     "ends at unsupported-platform for %s, without ever asking the goal",
     (platform) => {
       let state = move(selected(), { type: "intro-accepted" });
-      state = move(state, { type: "login-finished" });
       state = move(state, { type: "agent-unsupported", platform });
       expect(state).toEqual({ phase: "unsupported-platform", platform, codingAgentId: "claude" });
     },
@@ -292,7 +270,7 @@ describe("the terminals the goal question did not change", () => {
 
   it("ends at no-coding-agent when there is none to drive", () => {
     expect(
-      move(INITIAL_WIZARD_STATE, { type: "coding-agent-unavailable" }),
+      move(authorized(), { type: "coding-agent-unavailable" }),
     ).toEqual({ phase: "no-coding-agent" });
   });
 });

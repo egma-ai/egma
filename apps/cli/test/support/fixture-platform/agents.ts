@@ -41,6 +41,7 @@
 
 import { isIP } from "node:net";
 
+import { connectionOptionMetadata } from "@egma/db";
 import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
 import type { FixtureAnswer, RouteGroup } from "./server.ts";
 
@@ -1182,6 +1183,15 @@ export function agentRoutes(options: {
   const group: RouteGroup = {
     name: "agents",
     routes: [
+      {
+        // The same server-owned form catalog the real platform exposes.
+        method: "GET",
+        path: "/v1/connection-options",
+        handle: (request) =>
+          authorized(request.headers)
+            ? { status: 200, body: { items: connectionOptionMetadata() } }
+            : notAuthenticated,
+      },
       {
         /**
          * Register an agent, with the first way of reaching it written in

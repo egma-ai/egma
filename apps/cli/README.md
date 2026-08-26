@@ -25,12 +25,13 @@ is how CI runs it.
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx @egma/cli` first finds the supported coding agents installed on this
-machine and asks which one to use. It supports Claude Code, Codex, Cursor, and
-OpenCode. It signs this machine in to Egma, then finds your voice agent. It starts
-only the coding agent you chose, hands it Egma's own notes on how voice agents
-are built, and has it read this folder and report which framework runs it, what
-the voice agent is called, where its prompts live, where its tools are defined,
+`npx @egma/cli` signs this machine in to Egma first. Only after authorization
+succeeds does it look for Claude Code, Codex, Cursor, and OpenCode on this
+machine and ask which installed coding agent to use. It then finds your voice
+agent. It starts only the coding agent you chose, hands it Egma's own notes on
+how voice agents are built, and has it read this folder and report which
+framework runs it, what the voice agent is called, where its prompts live,
+where its tools are defined,
 how it reaches production, and
 where its identifier is written down. Every action it takes appears on screen
 while it works, and the facts it finds arrive one line at a time.
@@ -123,15 +124,18 @@ the screen says what happens to it before you type it:
 
 ```
 ◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
-  It is sent to Egma and stored encrypted. It never lands in a file here.
+  Egma uses this key now to read your Retell agents and confirm the selected setup.
+  For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API.
+  For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.
   › ●●●●●●●●●●●●●●●●
 ```
 
 That sentence is the whole promise, and it is enforced rather than intended.
-The key is held in memory, sent in one header to Retell and in one body to Egma,
-which seals it. It is written to no file, printed in no line, kept in no log,
-and never passed as a command argument — arguments are readable by every
-process on your machine and are kept in your shell history.
+The key is held in memory and sent to Retell during setup. For Chat, Egma also
+sends it to the platform, which seals it for simulations. For Phone, setup does
+not send it to the platform. It is written to no repository file, printed in no
+line, kept in no log, and never passed as a command argument — arguments are
+readable by every process on your machine and are kept in your shell history.
 
 Egma checks the key by listing the agents on the account. A key Retell will not
 take, and a key for an account with no agents on it, are told apart by name and
@@ -264,17 +268,48 @@ status: connected
 
 ```
 egma/
-  config.yaml     what this folder points at — names and ids
+  config.yaml     format 2 platform, project, agents, and connections
   mock-tools.md   what Egma answers for the agent's tools with
   tests/
     release/      one local directory per suite
       suite.yaml  stable suite id and mutable display name
       *.md        zero or more tests in this suite
+    regression/   another suite in the same project
+      suite.yaml
+      *.md
 ```
 
 `egma init` makes it. Everything in it is committed: nothing secret ever lands
 here, so there are no gitignore lines to write and none to forget. Your tests
 are code your team reviews in pull requests.
+
+`egma/config.yaml` has one strict shape. A project can name many agents, and
+each agent can name many connections:
+
+```yaml
+format: 2
+platform:
+  origin: https://app.egma.ai
+project:
+  id: prj_01K3XQ7M4E8YB2FVN0H9TZQWER
+  name: Voice agents
+agents:
+  - id: agt_01K3XQ7M4E8YB2FVN0H9TZQWER
+    name: Front desk
+    connections:
+      - id: con_01K3XQ7M4E8YB2FVN0H9TZQWER
+        name: livekit-1
+      - id: con_01K3XQ7M4E8YB2FVN0H9TZQWES
+        name: phone_number-1
+  - id: agt_01K3XQ7M4E8YB2FVN0H9TZQWES
+    name: After hours
+    connections: []
+```
+
+Format 2 is required. The former top-level `agent` and `connection` fields are
+refused; this CLI has no legacy reader or compatibility alias. Run the wizard
+again to add another target or another suite. It keeps the agents, connections,
+and suite directories that are already present.
 
 Create a suite with `egma suite create release --name "Release contract"`.
 Egma creates the platform record first, then writes exactly:
@@ -337,8 +372,8 @@ test cases written down — a spreadsheet, a document, a page of notes? Drop a
 path and your own coding agent turns each one into a test file first. Egma
 reads that file itself and hands the whole of it over inside the task, so
 nothing goes looking on your disk; the file has to be inside the folder you ran
-Egma in, and `.env` files are never read. Press `[n]` and Egma writes the whole
-suite itself.
+Egma in, and `.env` files are never read. Keep **No** selected and press
+`[enter]` for Egma to write the whole suite itself.
 
 Egma creates the real platform suite and writes its `suite.yaml` first. Then
 your coding agent writes tests into that direct suite directory, grounded in
@@ -350,7 +385,7 @@ A test                            ◼ quoted-a-price          written
                                   ▶ lost-the-order-number   writing…
 One situation to put your agent   ◻ open-on-sunday
 in: what the person on the other
-end wants, and the expected       Progress: 2/12
+end wants, and the expected       Progress: 2/4
 behaviors that say what should
 happen.
 ```
@@ -360,7 +395,7 @@ are, and the difference between a metric and a grader. The cards turn on their
 own and nothing waits on them — the suite is written at exactly the speed it
 would be with the pane closed.
 
-Twelve tests, each with at least one expected behavior. A test with none can
+Four tests, each with at least one expected behavior. A test with none can
 never fail, so Egma will not upload one; nor will it upload a file it could not
 read. Either way it says which file and why, and leaves the file exactly where
 it is for you to fix.
@@ -368,12 +403,12 @@ it is for you to fix.
 Then one keystroke:
 
 ```
-12 tests generated · suite "order-line tests"
+4 tests generated · suite "order-line tests"
 
   › quoted-a-price          Everyday caller
     lost-the-order-number   Everyday caller
     open-on-sunday          somebody-in-a-hurry
-    … 9 more (↑↓ browse · e opens in $EDITOR)
+    after-hours-emergency   default persona
 
 Run these against order-line over retell_chat_api-1 (chat)?
 
@@ -395,7 +430,7 @@ against your voice agent over the connection Egma registered. Each test becomes
 one **simulation** per persona, and each one arrives on its own line and moves:
 
 ```
-run run_01K7QXV2M8  ·  12 simulations
+run run_01K7QXV2M8  ·  4 simulations
 
 ◼ quoted-a-price            grading complete
 ▶ lost-the-order-number     in progress
@@ -404,7 +439,7 @@ run run_01K7QXV2M8  ·  12 simulations
 
 ✓ First result: quoted-a-price grading complete
 
-execution 1/12 finished  ·  grading 1/1 terminal  ·  errors 0
+execution 1/4 finished  ·  grading 1/1 terminal  ·  errors 0
 ```
 
 **The wizard does not wait for the suite.** It waits for the first completed
@@ -436,8 +471,17 @@ they came. You never wait on a run that could not happen.
 egma run generated
 ```
 
-is the same thing with nobody watching. It pins the version of every test it
-runs, prints every change as it lands, and answers with a number:
+is the same thing with nobody watching. The suite does not belong to one agent:
+a run selects the suite, agent, and connection together. When the config names
+more than one runnable agent or more than one connection under the selected
+agent, name them exactly:
+
+```sh
+egma run generated --agent "Front desk" --connection livekit-1
+```
+
+It pins the version of every test it runs, prints every change as it lands, and
+answers with a number:
 
 ```
 url: http://localhost:3101
@@ -517,7 +561,7 @@ away. So everything you need is printed after that screen is released, in plain
 text, each item alone on its line so a triple-click takes it whole:
 
 ```
-✓ Your first run is live — 3 of 12 simulation results ready.
+✓ Your first run is live — 3 of 4 simulation results ready.
 
 http://localhost:3101/projects/prj_01K7QXV2M8ZB4C6D8E0F2G4H6J/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
 
@@ -605,10 +649,11 @@ Leave out `--skill` to choose from all three.
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
-as a subprocess and Egma is the client. Before the consent screen, Egma checks
-for Claude Code, Codex, Cursor, and OpenCode on this machine and shows the ones
-it can prove are installed. It does not start ACP, log in, or download an agent
-during this check. `--coding-agent <id>` makes the choice without a screen.
+as a subprocess and Egma is the client. After the start screen, Egma authorizes
+the CLI. Only then does it check for Claude Code, Codex, Cursor, and OpenCode on
+this machine and show the ones it can prove are installed. It does not start
+ACP or download an agent during this check. `--coding-agent <id>` makes the
+choice without a screen after authorization.
 
 The wizard opens one ACP process and one session after consent. Discovery,
 conversion, and test writing are later turns in that same session, so the coding
@@ -632,8 +677,10 @@ still needs.
 
 That holds while Egma sets monitoring up on LiveKit, where a `.env` really is
 written: the two lines the Egma SDK reads are written by Egma's own code, with
-your agreement, and only when Git already ignores the file. Your coding agent
-still never opens it.
+no separate approval screen. The safe writer runs automatically only when Git
+already ignores the file, refuses links and non-regular files, writes
+atomically, and restricts the file to its owner. Your coding agent still never
+opens it.
 
 ## Options
 
@@ -657,11 +704,15 @@ egma monitoring enable [options]
                          Start watching this agent's production traffic. On
                          Retell the account key comes in on standard input,
                          never as an argument. On LiveKit Egma mints a project
-                         key and writes the two lines the Egma SDK reads into
-                         .env when Git ignores it, printing them either way.
+                         key and automatically writes the two lines the Egma SDK
+                         reads into .env when Git ignores it, printing them
+                         either way.
 egma monitoring disable  Turn the switch off. Everything stored stays stored.
 egma monitoring status   Print the switch, the binding, the key hint, and when
                          a production conversation last arrived.
+egma monitoring record --agent <id>
+                         Recover only the repository record after a completed
+                         remote setup could not write it.
 
   --coding-agent <id>  Use one installed coding agent without asking.
                        claude, codex, cursor, opencode
@@ -690,9 +741,12 @@ egma monitoring status   Print the switch, the binding, the key hint, and when
                        With the wizard: test cases you already have written
                        down, inside this folder. They are turned into test
                        files before Egma writes any of its own.
-  --agent <name>       With init: what to call the voice agent this
-                       folder's tests are for.
-  --connection <name>  With init: what to call the way Egma reaches it.
+  --agent <name-or-id> With run and ordinary monitoring actions: which
+                       configured voice agent to use. With monitoring record:
+                       the stable Egma agent id from the receipt.
+  --connection <name-or-id>
+                       With run: which configured connection under that agent
+                       to use when it has more than one.
   --name <name>        With suite create: the suite display name. With run:
                        an optional run name. With monitoring enable: what to
                        call the agent Egma writes.

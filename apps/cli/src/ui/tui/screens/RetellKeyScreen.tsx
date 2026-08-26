@@ -103,7 +103,7 @@ export function RetellKeyScreen({ state, onAnswer }: RetellKeyScreenProps) {
         </Box>
       )}
       <Text>{ask?.asking ?? ""}</Text>
-      <Text dimColor>{ask?.custody ?? ""}</Text>
+      <Text>{ask?.custody ?? ""}</Text>
       <Box height={1} />
       <Text>{`  › ${dots}`}</Text>
       <Box height={1} />

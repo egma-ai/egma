@@ -35,9 +35,10 @@ type OnAPlatform = {
 };
 
 export type WizardState =
+  | { readonly phase: "welcome" }
+  | { readonly phase: "login" }
   | { readonly phase: "coding-agent" }
   | ({ readonly phase: "intro" } & ChosenCodingAgent)
-  | ({ readonly phase: "login" } & ChosenCodingAgent)
   | ({ readonly phase: "discovery" } & ChosenCodingAgent)
   /** The one question, asked once the agent and its platform are known. */
   | ({ readonly phase: "goal"; readonly platform: WizardAgentPlatform } & ChosenCodingAgent)
@@ -93,8 +94,6 @@ export type WizardState =
       readonly goal: WizardGoal;
       readonly testCount: number;
     } & ChosenCodingAgent)
-  /** The repository has already been through the wizard once. */
-  | { readonly phase: "already-onboarded" }
   | ({ readonly phase: "no-agent" } & ChosenCodingAgent)
   | ({
       readonly phase: "unsupported-platform";
@@ -105,10 +104,9 @@ export type WizardState =
 export type WizardPhase = WizardState["phase"];
 
 export type WizardEvent =
+  | { readonly type: "welcome-accepted" }
   | { readonly type: "coding-agent-selected"; readonly id: string }
   | { readonly type: "coding-agent-unavailable" }
-  /** An egma folder is already here, so this repository is not a new one. */
-  | { readonly type: "repository-already-onboarded" }
   | { readonly type: "intro-accepted" }
   | { readonly type: "login-finished" }
   | { readonly type: "agent-found"; readonly platform: WizardAgentPlatform }
@@ -127,7 +125,7 @@ export type WizardEvent =
   | { readonly type: "review-approved"; readonly count: number }
   | { readonly type: "wizard-completed" };
 
-export const INITIAL_WIZARD_STATE: WizardState = { phase: "coding-agent" };
+export const INITIAL_WIZARD_STATE: WizardState = { phase: "welcome" };
 
 export type InvalidWizardTransition = {
   readonly kind: "invalid-transition";
@@ -149,14 +147,21 @@ export type WizardTransition =
 /** Move the wizard by one event. No state is changed in place. */
 export function transitionWizard(state: WizardState, event: WizardEvent): WizardTransition {
   switch (state.phase) {
+    case "welcome":
+      if (event.type === "welcome-accepted") {
+        return movedTo({ phase: "login" });
+      }
+      break;
+
+    case "login":
+      if (event.type === "login-finished") {
+        return movedTo({ phase: "coding-agent" });
+      }
+      break;
+
     case "coding-agent":
       if (event.type === "coding-agent-unavailable") {
         return movedTo({ phase: "no-coding-agent" });
-      }
-      // Read before a coding agent is even selected, so a repository that has
-      // been through the wizard once starts nothing at all the second time.
-      if (event.type === "repository-already-onboarded") {
-        return movedTo({ phase: "already-onboarded" });
       }
       if (event.type === "coding-agent-selected") {
         if (event.id.trim() === "") return invalid(state, event, "invalid-coding-agent");
@@ -166,12 +171,6 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
 
     case "intro":
       if (event.type === "intro-accepted") {
-        return movedTo({ phase: "login", codingAgentId: state.codingAgentId });
-      }
-      break;
-
-    case "login":
-      if (event.type === "login-finished") {
         return movedTo({ phase: "discovery", codingAgentId: state.codingAgentId });
       }
       break;
@@ -323,7 +322,6 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
       break;
 
     case "complete":
-    case "already-onboarded":
     case "no-agent":
     case "unsupported-platform":
     case "no-coding-agent":

@@ -26,6 +26,12 @@ import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/wo
 
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
 const PROMPT = "You answer the order line.\nNever quote a price.\n";
+const GENERATED_TEST_NAMES = [
+  "price-question",
+  "opening-hours",
+  "order-status",
+  "refund-policy",
+] as const;
 
 const DIALLED = "+14155550111";
 
@@ -171,7 +177,7 @@ describe("egma connect", () => {
     // The custody sentence is said before the key is asked for, on this
     // surface as much as on the wizard's.
     expect(result.stdout).toContain(
-      "note: It is sent to Egma and stored encrypted. It never lands in a file here.",
+      "note: Egma uses this key now to read your Retell agents and confirm the selected setup. For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);
@@ -179,13 +185,19 @@ describe("egma connect", () => {
     // The same four things the wizard's own walk writes, so a repository
     // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
+      format: 2,
       platform: { origin: platform.url },
       project: {
         name: "Fixture project",
         id: platform.registered.agents[0]?.projectId,
       },
-      agent: { name: said.agent_name, id: said.agent_id },
-      connection: { name: said.connection_name, id: said.connection_id },
+      agents: [
+        {
+          name: said.agent_name,
+          id: said.agent_id,
+          connections: [{ name: said.connection_name, id: said.connection_id }],
+        },
+      ],
     });
   });
 
@@ -275,7 +287,7 @@ describe("egma connect", () => {
     });
     // The order is what makes the file trustworthy: the agent that exists on
     // the platform is named in the same file as the platform that issued it.
-    expect(written.agent?.id).toBe(platform.registered.agents[0]?.id);
+    expect(written.agents[0]?.id).toBe(platform.registered.agents[0]?.id);
   });
 
   it("says an empty account is an empty account, not a bad key", async () => {
@@ -433,7 +445,10 @@ describe("which connection egma creates", () => {
 
     // And the committed file names the connection egma really made.
     const written = await readConfig(folderPathsIn(workspace.dir).config);
-    expect(written.connection).toEqual({ name: "phone_number-1", id: said.connection_id });
+    expect(written.agents[0]?.connections[0]).toEqual({
+      name: "phone_number-1",
+      id: said.connection_id,
+    });
     expect(JSON.stringify(written)).not.toContain(KEY);
   });
 
@@ -573,7 +588,7 @@ describe("the whole walk, headless", () => {
       // scripted agent has to answer that task too.
       stepsByTask: [
         {
-          contains: "Write 12 tests",
+          contains: "Write 4 tests",
           steps: [
             { kind: "say", text: "egma:plan price-question\n" },
             {
@@ -581,6 +596,24 @@ describe("the whole walk, headless", () => {
               path: "egma/tests/generated/price-question.md",
               content:
                 "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/opening-hours.md",
+              content:
+                "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/order-status.md",
+              content:
+                "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
+            },
+            {
+              kind: "write-file",
+              path: "egma/tests/generated/refund-policy.md",
+              content:
+                "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
             },
             { kind: "say", text: "egma:wrote price-question\n" },
             { kind: "stop", reason: "end_turn" },
@@ -616,7 +649,9 @@ describe("the whole walk, headless", () => {
     // And the walk did not stop at connecting: the test the coding agent wrote
     // is a file in the repository and a version on egma.
     expect(result.stdout).toContain("test: price-question no persona named");
-    expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
+    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual(
+      [...GENERATED_TEST_NAMES].sort(),
+    );
     // And it did not stop at pushing either: the run is going, and the line
     // left behind says where to watch it.
     expect(result.stdout).toContain("✓ Your first run is live");

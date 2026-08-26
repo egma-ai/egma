@@ -26,7 +26,12 @@ import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./suppo
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { bannedWordsIn } from "./support/glossary.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { chooseTesting, runInTerminal, showing } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+} from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -55,7 +60,12 @@ const ACCOUNT: FakeRetellScript = {
 /** The fragment only the write-the-tests task has, whatever it asks for. */
 const GENERATE_TASK = "## The words the agent is running on";
 
-const NAMES = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+const NAMES = [
+  "open-on-sunday",
+  "lost-the-order-number",
+  "wants-it-by-friday",
+  "changes-an-order",
+];
 const RELEASE_WRITING = ".fake-agent-release-teaching";
 
 function fileFor(name: string): string {
@@ -196,8 +206,8 @@ describe("the pane, while the files land", () => {
     // The gate is not the end of the walk any more: enter starts a run, and
     // the wizard leaves once one trace has terminal grading. Exactly one is ready on
     // each of the two platforms below, so the count in the ending is the same
-    // number on both — a sweep that judged all three would leave "1 of 3" on
-    // one run and "all 3" on the other, depending on which poll landed first.
+    // number on both — a sweep that judged all four would leave "1 of 4" on
+    // one run and "all 4" on the other, depending on which poll landed first.
     const grading = gradeEveryRun(platform, { atMost: 1 });
 
     const terminal = runInTerminal({
@@ -223,6 +233,8 @@ describe("the pane, while the files land", () => {
     });
 
     try {
+      await showing(terminal, "Welcome to Egma", "[enter] continue");
+      terminal.write("\r");
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
@@ -235,8 +247,7 @@ describe("the pane, while the files land", () => {
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
 
-      await showing(terminal, "Do you already have test cases");
-      terminal.write("n");
+      await chooseNoExistingTests(terminal);
 
       // The first card is up, beside the list it is meant to fill the wait of.
       const pane = await showing(
@@ -250,7 +261,7 @@ describe("the pane, while the files land", () => {
       expect(pane).toContain("behaviors that say what should");
 
       await writeFile(path.join(workspace.dir, RELEASE_WRITING), "continue\n", "utf8");
-      await showing(terminal, "3 tests generated", "[enter] run");
+      await showing(terminal, "4 tests generated", "[enter] run");
       terminal.write("\r");
 
       expect(await terminal.exited).toBe(0);
@@ -287,7 +298,7 @@ describe("the pane, while the files land", () => {
         const address = report.kind === "run-started" ? report.resultsUrl : "";
         const written = exitLines(report).filter((line) => line !== "");
         expect(written[0]).toBe(
-          "✓ Your first run is live — 1 of 3 simulation results ready.",
+          "✓ Your first run is live — 1 of 4 simulation results ready.",
         );
 
         // Line for line the same ending, and the same tests on egma either way.
@@ -335,6 +346,8 @@ describe("the pane, while the files land", () => {
     });
 
     try {
+      await showing(terminal, "Welcome to Egma", "[enter] continue");
+      terminal.write("\r");
       await showing(terminal, "[enter] begin");
       terminal.write("\r");
       await chooseTesting(terminal);
@@ -345,8 +358,7 @@ describe("the pane, while the files land", () => {
       // either: egma never picks one of the two for a developer.
       await showing(terminal, "How should Egma reach this agent?");
       terminal.write("\r");
-      await showing(terminal, "Do you already have test cases");
-      terminal.write("n");
+      await chooseNoExistingTests(terminal);
 
       const narrow = await showing(
         terminal,

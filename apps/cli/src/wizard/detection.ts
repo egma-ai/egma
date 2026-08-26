@@ -1,14 +1,13 @@
 /**
  * What egma can work out about this machine without asking anybody.
  *
- * Three facts, all of them free: which coding agent egma is about to drive,
- * whether this folder is a git repository, and whether somebody has already
- * been here — an `egma/` folder with tests in it means a teammate onboarded
- * this repository and this developer's path is the shorter one.
+ * Repository facts that cost no network access: whether this folder is a git
+ * repository and whether somebody has already been here. The optional coding
+ * agent name is retained for callers that already know it, but the wizard now
+ * runs this look before it probes installed coding agents.
  *
- * It is worked out while the developer is reading the intro and shown while
- * they are away in a browser, because that is the only dead time the wizard
- * has. Nothing waits on it and no step reads it: it is for the screen.
+ * It is worked out after the welcome and shown while the developer is away in
+ * a browser. Nothing waits on it and no step reads it: it is for the screen.
  */
 
 import { readdir, stat } from "node:fs/promises";

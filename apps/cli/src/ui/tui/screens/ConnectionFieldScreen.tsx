@@ -89,9 +89,9 @@ export function ConnectionFieldScreen({ ask, onAnswer }: ConnectionFieldScreenPr
       <Text bold>Egma</Text>
       <Box height={1} />
       {ask.problem == null ? null : <Text>{ask.problem}</Text>}
-      <Text>{`${ask.label}${ask.required ? "" : " (optional)"}`}</Text>
+      <Text>{`${ask.label}${ask.required ? " *" : " [optional]"}`}</Text>
       <Text dimColor>{ask.help}</Text>
-      {ask.custody === undefined ? null : <Text dimColor>{ask.custody}</Text>}
+      {ask.custody === undefined ? null : <Text>{ask.custody}</Text>}
       <Box height={1} />
       {ask.kind === "choice" ? (
         <Box flexDirection="column">

@@ -10,6 +10,7 @@ import { expect, it, vi } from "vitest";
 
 import {
   createEgmaFolder,
+  EMPTY_CONFIG,
   folderPathsIn,
   readRepository,
   serializeMockToolsFile,
@@ -78,13 +79,21 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
     const folder = await createEgmaFolder({
       repository: workspace.dir,
       config: {
+        ...EMPTY_CONFIG,
         platform: { origin: platform.url },
         project: { id: registered.agent.projectId, name: "Fixture project" },
-        agent: { id: registered.agent.id, name: registered.agent.name },
-        connection: {
-          id: registered.connection.id,
-          name: registered.connection.name,
-        },
+        agents: [
+          {
+            id: registered.agent.id,
+            name: registered.agent.name,
+            connections: [
+              {
+                id: registered.connection.id,
+                name: registered.connection.name,
+              },
+            ],
+          },
+        ],
       },
     });
     const env = workspace.env();

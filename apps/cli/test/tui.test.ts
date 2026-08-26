@@ -26,6 +26,11 @@ import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "
 // budget is generous so that only a broken wizard can reach it.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
+async function authorizeStoredCli(terminal: ReturnType<typeof runInTerminal>): Promise<void> {
+  await showing(terminal, "Welcome to Egma", "[enter] continue");
+  terminal.write("\r");
+}
+
 describe("the wizard on a real terminal", () => {
   let platform: Platform;
   let workspace: Workspace;
@@ -81,6 +86,13 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await showing(
+        terminal,
+        "Welcome to Egma",
+        "This wizard uses a coding agent on this machine to set up Egma for your voice agent",
+        "[enter] continue",
+      );
+      terminal.write("\r");
       await showing(terminal, "Claude Code", "Codex", "Cursor", "OpenCode");
       terminal.write("\u001b[B\u001b[B\r");
 
@@ -123,6 +135,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       // The intro says what is about to happen and what the keystroke means.
       const intro = await showing(
         terminal,
@@ -147,12 +160,15 @@ describe("the wizard on a real terminal", () => {
       const goal = await showing(
         terminal,
         "What should Egma do for this voice agent?",
-        "[t] Test it",
-        "[m] Watch its production traffic",
-        "[b] Both",
+        "› Test it",
+        "Watch its production traffic",
+        "Both",
+        "[enter] choose this one",
       );
-      expect(goal.indexOf("[t] Test it")).toBeLessThan(goal.indexOf("[b] Both"));
-      terminal.write("t");
+      expect(goal).not.toContain("[t]");
+      expect(goal).not.toContain("[m]");
+      expect(goal).not.toContain("[b]");
+      terminal.write("\r");
 
       // The walk goes on to the one secret it needs. This check is about the
       // screens before it, so the key is declined here and the ending is the
@@ -200,6 +216,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find your voice agent", "[enter] begin");
       terminal.write("\r");
 
@@ -233,6 +250,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[q] quit");
 
       terminal.write("q");
@@ -272,6 +290,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Thinking about it");

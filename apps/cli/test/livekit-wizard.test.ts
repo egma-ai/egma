@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,7 +21,13 @@ import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { runInTerminal } from "./support/pty.ts";
+import {
+  CLI_ENTRY,
+  FAKE_AGENT,
+  makeWorkspace,
+  type Workspace,
+} from "./support/workspace.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
@@ -321,6 +328,80 @@ function connectionSetupStep(ui: HeadlessUI) {
 }
 
 describe("LiveKit in the wizard", () => {
+  it("shows every required connection and credential field together before collection", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework livekit-agents\n" },
+        { kind: "say", text: "egma:found agent-name front-desk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
+      cwd: workspace.dir,
+      env: workspace.env(),
+      cols: 140,
+    });
+    const sees = async (...parts: readonly string[]): Promise<string> => {
+      const found = await terminal.waitFor(
+        () => parts.every((part) => terminal.screen().includes(part)),
+        5_000,
+      );
+      if (!found) {
+        throw new Error(
+          `LiveKit terminal did not show: ${parts.join(" | ")}\n\nlast screen:\n${terminal.screen()}`,
+        );
+      }
+      return terminal.screen();
+    };
+
+    try {
+      await sees("Welcome to Egma", "[enter] continue", "[q] quit");
+      terminal.write("\r");
+      await sees("[enter] begin", "[q] quit");
+      terminal.write("\r");
+      await sees("What should Egma do for this voice agent?", "› Test it");
+      terminal.write("\r");
+      await sees("Agent name on Egma *", "front-desk");
+      terminal.write("\r");
+      await sees("How should Egma get LiveKit room tokens?");
+      terminal.write("\r");
+
+      const form = await sees(
+        "LiveKit connection details",
+        "Egma uses these values to connect each simulation to a LiveKit room.",
+        "LiveKit WebSocket URL *",
+        "API key *",
+        "API secret *",
+      );
+      expect(form).not.toContain(API_KEY);
+      expect(form).not.toContain(API_SECRET);
+
+      terminal.write("wss://acme.livekit.cloud\r");
+      await sees("› API key *");
+      terminal.write(API_KEY);
+      const secret = await sees("●".repeat(API_KEY.length));
+      expect(secret).not.toContain(API_KEY);
+      expect(terminal.raw()).not.toContain(API_KEY);
+
+      terminal.write("\u0003");
+      expect(await terminal.exited).toBe(130);
+    } finally {
+      await terminal.kill();
+    }
+  });
+
   it.each([
     {
       name: "project key pair",
@@ -413,6 +494,27 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.asked).not.toContain("retell-key");
     expect(ui.record.asked).not.toContain("reach");
     expect(ui.record.connectionAsks.map((ask) => ask.id)).toContain("connection:variant");
+    expect(ui.record.connectionFieldGroups).toHaveLength(1);
+    expect(ui.record.connectionFieldGroups[0]).toMatchObject({
+      title: "LiveKit connection details",
+      help: "Egma uses these values to connect each simulation to a LiveKit room.",
+      notice:
+        "Credentials go straight to Egma, which stores them sealed. " +
+        "They are not sent to the coding agent or written to this repository.",
+    });
+    expect(ui.record.connectionFieldGroups[0]?.fields.map((field) => field.id)).toEqual(
+      shape.variant === LIVEKIT_KEY_PAIR_VARIANT
+        ? [
+            "connection:config:url",
+            "connection:credentials:apiKey",
+            "connection:credentials:apiSecret",
+          ]
+        : [
+            "connection:config:url",
+            "connection:config:tokenEndpoint",
+            "connection:credentials:headers",
+          ],
+    );
     expect(
       ui.record.connectionAsks.find((ask) => ask.id === "connection:variant"),
     ).toMatchObject({
@@ -433,6 +535,7 @@ describe("LiveKit in the wizard", () => {
       ],
     });
     expect(ui.record.connectionAsks.some((ask) => JSON.stringify(ask).includes(API_SECRET))).toBe(false);
+    expect(JSON.stringify(ui.record.connectionFieldGroups)).not.toContain(API_SECRET);
     expect(platform.tests.tests).toHaveLength(1);
     expect(platform.running.runs).toHaveLength(1);
 
@@ -836,6 +939,37 @@ describe("LiveKit correction paths", () => {
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
     expect(platform.registered.sealed).toHaveLength(0);
-    expect(ui.record.asked).not.toContain("connection:credentials:apiKey");
+    // Required fields are one form, so the headless seam receives every field
+    // in that form even when the first value is missing.
+    expect(ui.record.connectionFieldGroups[0]?.fields.map((field) => field.id)).toEqual([
+      "connection:config:url",
+      "connection:credentials:apiKey",
+      "connection:credentials:apiSecret",
+    ]);
+    expect(ui.record.asked).toContain("connection:credentials:apiKey");
+  });
+
+  it("reports invalid required JSON as a JSON-object correction", async () => {
+    const ui = new CorrectionUI({
+      "connection:agent-name": ["front-desk"],
+      "connection:variant": [LIVEKIT_TOKEN_ENDPOINT_VARIANT],
+      "connection:config:url": ["wss://acme.livekit.cloud"],
+      "connection:config:tokenEndpoint": ["https://tokens.example/livekit"],
+      "connection:credentials:headers": ["not-json"],
+    });
+
+    const result = await connectionSetupStep(ui);
+
+    expect(result).toEqual({
+      report: {
+        kind: "failed",
+        reason:
+          "Auth headers must be one JSON object. Correct it and run Egma again.",
+      },
+      connected: null,
+    });
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.registered.sealed).toHaveLength(0);
   });
 });

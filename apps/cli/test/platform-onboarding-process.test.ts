@@ -141,8 +141,8 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
 
     const config = await readConfig(paths.config);
     expect(config.platform).toEqual({ origin: platform.url });
-    expect(config.agent?.id).toMatch(/^agt_/u);
-    expect(config.connection?.id).toMatch(/^con_/u);
+    expect(config.agents[0]?.id).toMatch(/^agt_/u);
+    expect(config.agents[0]?.connections[0]?.id).toMatch(/^con_/u);
 
     // The binding is committed, so what is written beside it is read by
     // everybody who clones this repository. It carries the URL and no key:

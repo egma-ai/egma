@@ -3,7 +3,7 @@
  *
  * ```
  * egma/
- *   config.yaml     what this folder points at — names and ids
+ *   config.yaml     one platform and project, with many agents and connections
  *   mock-tools.md   what egma answers for the agent's tools with
  *   tests/          one direct directory per test suite
  *     release/
@@ -38,7 +38,14 @@ import {
 } from "./mock-tools.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
-import { mappingAtKey, readYaml, textAt, yamlScalar } from "./yaml.ts";
+import {
+  mappingAtKey,
+  readYaml,
+  sequenceAt,
+  textAt,
+  yamlScalar,
+  type YamlMapping,
+} from "./yaml.ts";
 import {
   isPortableSuiteDirectory,
   isPortableTestFile,
@@ -72,15 +79,18 @@ export function folderPathsIn(repository: string): FolderPaths {
   };
 }
 
-/**
- * One thing the folder points at: what a person calls it, and what egma calls
- * it. Both, because the name is what a developer reads in a pull request and
- * the id is what survives the name being changed.
- */
-export type NamedThing = {
+/** A platform-owned thing: a reviewable name and its stable identity. */
+export type IdentifiedThing = {
   readonly name: string;
-  /** Written once egma has registered it; `null` until then. */
-  readonly id: string | null;
+  readonly id: string;
+};
+
+/** One committed way Egma can reach an agent. */
+export type FolderConnection = IdentifiedThing;
+
+/** One agent in this project, and every committed way Egma can reach it. */
+export type FolderAgent = IdentifiedThing & {
+  readonly connections: readonly FolderConnection[];
 };
 
 /** The non-secret URL of the Egma platform that owns this folder. */
@@ -90,27 +100,28 @@ export type PlatformBinding = {
 };
 
 /**
- * What the folder points at. Each may be unset — the folder can exist before
- * the thing it names does, which is what lets `egma init` run in a repository
- * that has not been connected to anything yet.
+ * What the folder points at. The platform and project may be unset and the
+ * agent list may be empty, which lets `egma init` run before registration.
  */
 export type FolderConfig = {
+  readonly format: typeof CONFIG_FORMAT;
   readonly platform: PlatformBinding | null;
-  readonly project: NamedThing | null;
-  readonly agent: NamedThing | null;
-  readonly connection: NamedThing | null;
+  readonly project: IdentifiedThing | null;
+  readonly agents: readonly FolderAgent[];
 };
+
+export const CONFIG_FORMAT = 2 as const;
 
 export const EMPTY_CONFIG: FolderConfig = {
+  format: CONFIG_FORMAT,
   platform: null,
   project: null,
-  agent: null,
-  connection: null,
+  agents: [],
 };
 
-/** The resource keys, in the order they are written and read. */
-const CONFIG_KEYS = ["project", "agent", "connection"] as const;
-const ROOT_CONFIG_KEYS = ["platform", ...CONFIG_KEYS] as const;
+const ROOT_CONFIG_KEYS = ["format", "platform", "project", "agents"] as const;
+const NAMED_KEYS = ["id", "name"] as const;
+const AGENT_KEYS = [...NAMED_KEYS, "connections"] as const;
 
 const CONFIG_HEADER = [
   "# What this folder points at on Egma.",
@@ -120,26 +131,65 @@ const CONFIG_HEADER = [
 ];
 
 export function serializeConfig(config: FolderConfig): string {
-  const lines = [...CONFIG_HEADER];
+  const lines = [...CONFIG_HEADER, `format: ${String(CONFIG_FORMAT)}`];
   if (config.platform == null) {
     lines.push("platform:");
   } else {
     lines.push("platform:");
     lines.push(`  origin: ${yamlScalar(config.platform.origin)}`);
   }
-  for (const key of CONFIG_KEYS) {
-    const named = config[key];
-    if (named === null) {
-      lines.push(`${key}:`);
-      continue;
-    }
-    lines.push(`${key}:`);
-    lines.push(`  name: ${yamlScalar(named.name)}`);
-    if (named.id !== null && named.id !== "") {
-      lines.push(`  id: ${yamlScalar(named.id)}`);
+  if (config.project === null) {
+    lines.push("project:");
+  } else {
+    lines.push("project:");
+    lines.push(`  id: ${yamlScalar(config.project.id)}`);
+    lines.push(`  name: ${yamlScalar(config.project.name)}`);
+  }
+  if (config.agents.length === 0) {
+    lines.push("agents: []");
+  } else {
+    lines.push("agents:");
+    for (const agent of config.agents) {
+      lines.push(`  - id: ${yamlScalar(agent.id)}`);
+      lines.push(`    name: ${yamlScalar(agent.name)}`);
+      if (agent.connections.length === 0) {
+        lines.push("    connections: []");
+        continue;
+      }
+      lines.push("    connections:");
+      for (const connection of agent.connections) {
+        lines.push(`      - id: ${yamlScalar(connection.id)}`);
+        lines.push(`        name: ${yamlScalar(connection.name)}`);
+      }
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+function unsupportedKeys(
+  mapping: YamlMapping,
+  supported: readonly string[],
+  where: string,
+): void {
+  const unknown = Object.keys(mapping).filter((key) => !supported.includes(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${where} has unsupported ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`,
+    );
+  }
+}
+
+function identifiedThing(mapping: YamlMapping, where: string): IdentifiedThing {
+  unsupportedKeys(mapping, NAMED_KEYS, where);
+  const id = textAt(mapping, "id");
+  const name = textAt(mapping, "name");
+  if (id === null || name === null) {
+    throw new Error(`${where} must contain a nonblank id and name.`);
+  }
+  if (id !== id.trim() || name !== name.trim()) {
+    throw new Error(`${where} has outer whitespace in its id or name.`);
+  }
+  return { id, name };
 }
 
 /**
@@ -165,12 +215,23 @@ function committedOrigin(written: string): string {
 
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
-  const unknown = Object.keys(mapping).filter(
-    (key) => !(ROOT_CONFIG_KEYS as readonly string[]).includes(key),
-  );
-  if (unknown.length > 0) {
+  const writtenFormat = mapping["format"];
+  if (writtenFormat !== CONFIG_FORMAT) {
+    const said =
+      typeof writtenFormat === "string" || typeof writtenFormat === "number"
+        ? String(writtenFormat)
+        : "none";
     throw new Error(
-      `${where} has unsupported ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`,
+      `${where} uses folder format ${said}. This Egma requires format ${String(CONFIG_FORMAT)} and has no legacy reader.`,
+    );
+  }
+  unsupportedKeys(mapping, ROOT_CONFIG_KEYS, where);
+  const missing = ROOT_CONFIG_KEYS.filter(
+    (key) => !Object.prototype.hasOwnProperty.call(mapping, key),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `${where} is missing required ${missing.length === 1 ? "key" : "keys"}: ${missing.join(", ")}.`,
     );
   }
   const platformMapping = mappingAtKey(mapping, "platform");
@@ -186,6 +247,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
           return null;
         })()
       : (() => {
+          unsupportedKeys(platformMapping, ["origin"], `${where} platform`);
           const origin = textAt(platformMapping, "origin");
           if (origin === null) {
             throw new Error(
@@ -194,23 +256,71 @@ export function parseConfig(document: string, where: string): FolderConfig {
           }
           return { origin: committedOrigin(origin) };
         })();
-  const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
-    const under = mappingAtKey(mapping, key);
-    if (under === null) {
-      // A key written as `agent: receptionist` says the name and no id, which
-      // is what somebody types by hand before egma has registered anything.
-      const bare = textAt(mapping, key);
-      return bare === null ? null : { name: bare, id: null };
+
+  const projectMapping = mappingAtKey(mapping, "project");
+  if (projectMapping === null && textAt(mapping, "project") !== null) {
+    throw new Error(`${where} has a project value without an id and name.`);
+  }
+  const project =
+    projectMapping === null
+      ? null
+      : identifiedThing(projectMapping, `${where} project`);
+
+  const agents: FolderAgent[] = [];
+  const agentIds = new Set<string>();
+  const connectionOwners = new Map<string, string>();
+  for (const [index, entry] of sequenceAt(mapping, "agents").entries()) {
+    if (typeof entry !== "object") {
+      throw new Error(
+        `${where} agent ${String(index + 1)} must contain id, name, and connections.`,
+      );
     }
-    const name = textAt(under, "name");
-    return name === null ? null : { name, id: textAt(under, "id") };
-  };
+    unsupportedKeys(entry, AGENT_KEYS, `${where} agent ${String(index + 1)}`);
+    if (!Object.prototype.hasOwnProperty.call(entry, "connections")) {
+      throw new Error(
+        `${where} agent ${String(index + 1)} is missing required key: connections.`,
+      );
+    }
+    const agent = identifiedThing(
+      { id: entry["id"] ?? null, name: entry["name"] ?? null },
+      `${where} agent ${String(index + 1)}`,
+    );
+    if (agentIds.has(agent.id)) {
+      throw new Error(`${where} uses agent id ${agent.id} more than once.`);
+    }
+    agentIds.add(agent.id);
+
+    const connections: FolderConnection[] = [];
+    for (const [connectionIndex, connectionEntry] of sequenceAt(
+      entry,
+      "connections",
+    ).entries()) {
+      if (typeof connectionEntry !== "object") {
+        throw new Error(
+          `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id and name.`,
+        );
+      }
+      const connection = identifiedThing(
+        connectionEntry,
+        `${where} agent ${agent.id} connection ${String(connectionIndex + 1)}`,
+      );
+      const firstOwner = connectionOwners.get(connection.id);
+      if (firstOwner !== undefined) {
+        throw new Error(
+          `${where} uses connection id ${connection.id} under both agent ${firstOwner} and agent ${agent.id}.`,
+        );
+      }
+      connectionOwners.set(connection.id, agent.id);
+      connections.push(connection);
+    }
+    agents.push({ ...agent, connections });
+  }
 
   return {
+    format: CONFIG_FORMAT,
     platform,
-    project: read("project"),
-    agent: read("agent"),
-    connection: read("connection"),
+    project,
+    agents,
   };
 }
 
@@ -222,21 +332,85 @@ export async function writeConfig(file: string, config: FolderConfig): Promise<v
   await writeFile(file, serializeConfig(config), "utf8");
 }
 
-/**
- * Change what the folder points at, keeping everything the change does not
- * mention. This is the door the wizard writes an id through once it has
- * registered an agent or a connection.
- */
-export async function updateConfig(
+/** Change the singleton binding fields while preserving the target catalog. */
+async function updateConfig(
   file: string,
   changes: Partial<FolderConfig>,
 ): Promise<FolderConfig> {
   const held = await readConfig(file);
   const updated: FolderConfig = {
+    format: CONFIG_FORMAT,
     platform: changes.platform === undefined ? held.platform : changes.platform,
     project: changes.project === undefined ? held.project : changes.project,
-    agent: changes.agent === undefined ? held.agent : changes.agent,
-    connection: changes.connection === undefined ? held.connection : changes.connection,
+    agents: changes.agents === undefined ? held.agents : changes.agents,
+  };
+  await writeConfig(file, updated);
+  return updated;
+}
+
+export type RegisteredTarget = {
+  /** The project read beside the registered agent, when this call learned it. */
+  readonly project?: IdentifiedThing;
+  readonly agent: IdentifiedThing;
+  /** Omitted for an agent configured only for production monitoring. */
+  readonly connection?: IdentifiedThing;
+};
+
+/**
+ * Record one platform registration without replacing another agent's target.
+ *
+ * Stable ids decide identity. Names are refreshed from the platform, a new
+ * connection joins its owning agent, and every sibling the file already held
+ * stays in place. A connection id already owned by another agent is refused:
+ * moving it locally would make the folder disagree with the platform.
+ */
+export async function recordRegisteredTarget(
+  file: string,
+  target: RegisteredTarget,
+): Promise<FolderConfig> {
+  const held = await readConfig(file);
+  if (
+    target.project !== undefined &&
+    held.project !== null &&
+    held.project.id !== target.project.id
+  ) {
+    throw new Error(
+      `${CONFIG_FILE_NAME} names project ${held.project.id}, so it cannot record an agent from project ${target.project.id}.`,
+    );
+  }
+
+  const owner = held.agents.find((agent) =>
+    agent.connections.some((connection) => connection.id === target.connection?.id),
+  );
+  if (owner !== undefined && owner.id !== target.agent.id) {
+    throw new Error(
+      `${CONFIG_FILE_NAME} already records connection ${target.connection?.id ?? ""} under agent ${owner.id}, so it cannot move that connection under agent ${target.agent.id}.`,
+    );
+  }
+
+  const existing = held.agents.find((agent) => agent.id === target.agent.id);
+  const connections = existing?.connections ?? [];
+  const nextConnections =
+    target.connection === undefined
+      ? connections
+      : connections.some((connection) => connection.id === target.connection?.id)
+        ? connections.map((connection) =>
+            connection.id === target.connection?.id ? target.connection : connection,
+          )
+        : [...connections, target.connection];
+  const nextAgent: FolderAgent = {
+    ...target.agent,
+    connections: nextConnections,
+  };
+  const agents =
+    existing === undefined
+      ? [...held.agents, nextAgent]
+      : held.agents.map((agent) => (agent.id === target.agent.id ? nextAgent : agent));
+  const updated: FolderConfig = {
+    format: CONFIG_FORMAT,
+    platform: held.platform,
+    project: target.project ?? held.project,
+    agents,
   };
   await writeConfig(file, updated);
   return updated;
@@ -254,25 +428,31 @@ export function platformOwnedIds(
   suiteIds: readonly string[] = [],
 ): readonly string[] {
   return [
-    ...CONFIG_KEYS.filter((key) => {
-      const named = config[key];
-      return named !== null && named.id !== null && named.id !== "";
-    }).map((key) => `${key} in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`),
+    ...(config.project === null
+      ? []
+      : [`project ${config.project.id} in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`]),
+    ...config.agents.flatMap((agent) => [
+      `agent ${agent.id} in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+      ...agent.connections.map(
+        (connection) =>
+          `connection ${connection.id} under agent ${agent.id} in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+      ),
+    ]),
     ...suiteIds.map((id) => `suite ${id} in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/${SUITE_MANIFEST_FILE_NAME}`),
   ];
 }
 
 /** The ordered, reviewable local repair for an intentional platform move. */
 export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
-  "To move this repository to another platform, delete these in this order and run egma again:",
-  `  - the id: line under agent: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
-  `  - the id: line under connection: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
-  `  - the id: line under project: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  "To move this repository to another platform, clear these in this order and run egma again:",
+  `  - replace every connections: block with connections: [] in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - replace the whole agents: block with agents: [] in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - replace the whole project: block with project: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   `  - every id: line in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/${SUITE_MANIFEST_FILE_NAME}`,
   `  - the version: line at the top of every file in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/`,
-  `  - last of all, the whole platform: block in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
-  "Delete the platform block last: it is what keeps every id above it on the platform that issued it, so until it is gone nothing can leave for another one.",
-  "Keep every name. Your tests move with you and are created again on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
+  `  - last of all, replace the whole platform: block with platform: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  "Clear the platform block last: it is what keeps every id above it on the platform that issued it, so until it is empty nothing can leave for another one.",
+  "Keep your tests. Reconnect each agent and connection on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
 ];
 
 /**

@@ -20,6 +20,7 @@ import type {
   AskId,
   CodingAgentChoice,
   ConnectionAsk,
+  ConnectionFieldsAsk,
   DrivenAgent,
   GoalAsk,
   MonitoringAgentOffer,
@@ -28,6 +29,8 @@ import type {
 
 export type WizardState = {
   readonly phase: WizardPhase;
+  /** The developer has read why the wizard uses a coding agent. */
+  readonly welcomed: boolean;
   readonly drivenAgent: DrivenAgent | null;
   /** Supported coding agents found on this machine, before one is selected. */
   readonly codingAgentChoices: readonly CodingAgentChoice[];
@@ -64,16 +67,14 @@ export type WizardState = {
   readonly agentChoices: readonly RetellAgent[] | null;
   /** The account's agents Egma could watch, or `null` when none is offered. */
   readonly monitoringAgentChoices: readonly MonitoringAgentOffer[] | null;
-  /** What Egma is waiting to be allowed to write down, or `null`. */
-  readonly envConsent: string | null;
-  /** The developer has read that line and said write it. */
-  readonly envAgreed: boolean;
   /** The provider-safe ways currently offered. */
   readonly reachOptions: readonly Reach[] | null;
   /** The numbers a choice is open between, or `null` when none is. */
   readonly numberChoices: readonly RetellNumber[] | null;
   /** The provider field being collected. Its answer never enters this state. */
   readonly connectionAsk: ConnectionAsk | null;
+  /** Required provider field metadata. Typed values never enter this state. */
+  readonly connectionFieldsAsk: ConnectionFieldsAsk | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
   /** The developer has read the test list and said run them. */
@@ -101,7 +102,8 @@ export type WizardState = {
 
 export function emptyState(): WizardState {
   return {
-    phase: "coding-agent",
+    phase: "welcome",
+    welcomed: false,
     drivenAgent: null,
     codingAgentChoices: [],
     drivenAgentLog: null,
@@ -114,11 +116,10 @@ export function emptyState(): WizardState {
     keyAsk: null,
     agentChoices: null,
     monitoringAgentChoices: null,
-    envConsent: null,
-    envAgreed: false,
     reachOptions: null,
     numberChoices: null,
     connectionAsk: null,
+    connectionFieldsAsk: null,
     begun: false,
     agreedToRun: false,
     running: false,

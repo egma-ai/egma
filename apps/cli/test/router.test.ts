@@ -4,9 +4,8 @@ import { dispatchKey, hintBar, hintsFor, type KeyBinding } from "../src/ui/tui/k
 import { WizardStore } from "../src/ui/tui/store.ts";
 
 describe("which screen is on", () => {
-  it("shows every installed coding agent before the consent screen", async () => {
+  it("welcomes and authorizes the CLI before showing installed coding agents", async () => {
     const store = new WizardStore();
-    store.setPhase("coding-agent");
     store.setCodingAgentChoices([
       {
         id: "claude",
@@ -22,6 +21,17 @@ describe("which screen is on", () => {
       },
     ]);
 
+    expect(store.activeScreen).toBe("welcome");
+    store.welcome();
+    store.setPhase("login");
+    store.setLogin({
+      userCode: "ABCD-EFGH",
+      url: "https://egma.example/device?user_code=ABCD-EFGH",
+      browserOpened: true,
+    });
+    expect(store.activeScreen).toBe("login");
+    store.setLogin(null);
+    store.setPhase("coding-agent");
     expect(store.activeScreen).toBe("coding-agent");
     const answer = store.ask("coding-agent");
     store.answer("coding-agent", "codex");
@@ -64,36 +74,20 @@ describe("which screen is on", () => {
     expect(store.activeScreen).toBe("task");
   });
 
-  /**
-   * The one keystroke before Egma writes a live credential into a working tree.
-   *
-   * A gate rather than a question: the screen stays up until the developer
-   * agrees, and agreeing is what lets the flow past.
-   */
-  it("parks on the environment consent until the developer agrees", async () => {
-    const store = new WizardStore();
-    store.begin();
-    store.setPhase("monitoring-setup");
-    store.setEnvConsent("Egma will write two lines into .env.");
-
-    expect(store.activeScreen).toBe("env-consent");
-
-    let opened = false;
-    const gate = store.getGate("write-env").then(() => {
-      opened = true;
-    });
-    await Promise.resolve();
-    expect(opened).toBe(false);
-
-    store.writeEnv();
-    await gate;
-    expect(opened).toBe(true);
-    expect(store.activeScreen).toBe("task");
-  });
-
   it("is worked out from state, so nothing has to navigate", () => {
     const store = new WizardStore();
 
+    expect(store.activeScreen).toBe("welcome");
+    store.welcome();
+    store.setPhase("login");
+    store.setLogin({
+      userCode: "ABCD-EFGH",
+      url: "https://egma.example/device?user_code=ABCD-EFGH",
+      browserOpened: true,
+    });
+    expect(store.activeScreen).toBe("login");
+    store.setLogin(null);
+    store.setPhase("coding-agent");
     expect(store.activeScreen).toBe("coding-agent");
     store.setPhase("intro");
     expect(store.activeScreen).toBe("intro");

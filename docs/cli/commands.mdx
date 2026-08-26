@@ -427,12 +427,16 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     egma monitoring status
     egma monitoring disable
+
+    # Recovery only: record an already-created remote target in this repository
+    egma monitoring record --agent agt_01K…
     ```
 
     **Key flags**
 
     | Flag | Description |
     |---|---|
+    | `--agent <name-or-id>` | A configured agent for ordinary actions; the stable Egma agent id from the receipt for `record` recovery |
     | `--platform <retell\|livekit>` | Which platform runs this agent. Left out, Egma reads it from the repository's own binding |
     | `--platform-agent <id>` | Which agent on the Retell account to watch, when it holds more than one |
     | `--name <name>` | What to call the agent Egma writes, when it writes one |
@@ -451,6 +455,11 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     `disable` turns the switch off and keeps everything stored — the
     conversations, the platform binding, and the sealed key.
+
+    `record` is the safe recovery path after remote setup succeeded but
+    `egma/config.yaml` could not be updated. It reads the existing Egma agent
+    and writes only the repository catalog. It does not create another agent,
+    restart monitoring, or mint another key.
 
     **Example output**
 
@@ -479,6 +488,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `6` | No API key was provided |
     | `7` | Not signed in to Egma |
     | `8` | Egma would not start watching, and said which rule refused it |
+    | `9` | Remote monitoring is ready, but its repository record did not finish; the receipt and any LiveKit environment lines were still printed |
     | `130` | Stopped partway through |
 
     <Note>

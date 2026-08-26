@@ -45,7 +45,8 @@ export const MONITORING_KEY_ASK_LINE =
  * it leaves this machine, and it does not stay here.
  */
 export const MONITORING_CUSTODY_LINE =
-  "It is sent to Egma and stored encrypted on this agent. It never lands in a file here.";
+  "Egma uses this key to discover your Retell agents and import the selected agent's finished production conversations. " +
+  "It is stored encrypted on that Egma agent and never lands in this repository.";
 
 /** The exact failure for a key that opens an account with no voice agents. */
 export const NO_VOICE_AGENTS_LINE =

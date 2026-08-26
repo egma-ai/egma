@@ -19,7 +19,7 @@ import process from "node:process";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import { createEgmaFolder, EMPTY_CONFIG } from "../src/folder/egma-folder.ts";
 import { KEYS_UNUSABLE } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -39,10 +39,17 @@ beforeEach(async () => {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
+      ...EMPTY_CONFIG,
       platform: { origin: platform.url },
-      project: null,
-      agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
-      connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+      agents: [
+        {
+          name: "receptionist",
+          id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
+          connections: [
+            { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+          ],
+        },
+      ],
     },
   });
 

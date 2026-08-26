@@ -18,7 +18,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+  showingIn,
+  type TerminalRun,
+} from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -97,6 +104,15 @@ afterEach(async () => {
 /** This screen's own hints, and the last line it draws. */
 const KEY_HINTS = ["[enter] connect", "[esc] skip"] as const;
 
+/** Read wrapped panel copy as one sentence instead of one terminal row. */
+function asOneLine(screen: string): string {
+  return screen
+    .split("\n")
+    .map((line) => line.replaceAll("│", "").trim())
+    .join(" ")
+    .replaceAll(/\s+/gu, " ");
+}
+
 /** The wizard, past the intro, with a scripted coding agent that finds one fact. */
 async function wizard(): Promise<TerminalRun> {
   const script = await workspace.script({
@@ -105,16 +121,34 @@ async function wizard(): Promise<TerminalRun> {
       { kind: "stop", reason: "end_turn" },
     ],
     // These checks are about the key screen, and the walk carries on past it
-    // into writing tests. One file is enough for the run to reach its ending.
+    // into writing the four tests required for the first suite.
     stepsByTask: [
       {
-        contains: "Write 12 tests",
+        contains: "Write 4 tests",
         steps: [
           {
             kind: "write-file",
             path: "egma/tests/generated/price-question.md",
             content:
               "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+          },
+          {
+            kind: "write-file",
+            path: "egma/tests/generated/opening-hours.md",
+            content:
+              "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
+          },
+          {
+            kind: "write-file",
+            path: "egma/tests/generated/order-status.md",
+            content:
+              "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
+          },
+          {
+            kind: "write-file",
+            path: "egma/tests/generated/refund-policy.md",
+            content:
+              "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
           },
           { kind: "say", text: "egma:wrote price-question\n" },
           { kind: "stop", reason: "end_turn" },
@@ -144,6 +178,8 @@ async function wizard(): Promise<TerminalRun> {
   });
   terminal = run;
 
+  await showing(run, "Welcome to Egma", "[enter] continue");
+  run.write("\r");
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
   return run;
@@ -158,10 +194,12 @@ describe("the key screen", () => {
     // asserted below is what the screen does *not* say, and a frame that is
     // still arriving says nothing at all.
     await chooseTesting(run);
-    const asking = await showing(
+    const asking = await showingIn(
       run,
+      asOneLine,
       "Paste your Retell API key",
-      "It is sent to Egma and stored encrypted. It never lands in a file here.",
+      "Egma uses this key now to read your Retell agents",
+      "It never lands in this repository.",
       ...KEY_HINTS,
     );
     // Nothing is on the line before anything is typed.
@@ -187,8 +225,7 @@ describe("the key screen", () => {
     // The walk carries on to the one question the generate step asks. It is
     // answered here so the run reaches its own ending rather than the
     // teardown's.
-    await showing(run, "Do you already have test cases", "[n] none");
-    run.write("n");
+    await chooseNoExistingTests(run);
 
     await showing(run, "price-question", "[enter] run", "[q] quit");
     // The walk carries on into the run it starts, and results arrive when grading
@@ -214,16 +251,58 @@ describe("the key screen", () => {
   });
 });
 
+describe("the existing-tests choice", () => {
+  it("defaults to No, wraps to Yes, and reveals a required path on the same screen", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const run = await wizard();
+
+    await chooseTesting(run);
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\r`);
+    await showing(run, "How should Egma reach this agent?");
+    run.write("\r");
+
+    const choice = await showing(
+      run,
+      "Do you already have test cases",
+      "› No",
+      "[enter] choose this one",
+    );
+    expect(choice).not.toContain("[n]");
+
+    // Up from the first row wraps to the last row.
+    run.write("\u001B[A");
+    await showing(run, "› Yes");
+    run.write("\r");
+
+    await showing(
+      run,
+      "Do you already have test cases",
+      "Path to existing tests *",
+      "[enter] read it",
+    );
+    run.write("\r");
+    await showing(run, "Enter the path to your test cases before continuing.");
+
+    run.write("missing-tests.md\r");
+    await showing(run, "price-question", "[enter] run");
+    run.write("\u0003");
+    expect(await run.exited).toBe(130);
+  });
+});
+
 describe("stopping at the key screen", () => {
   it("comes down cleanly on Ctrl-C, leaving one honest line and no key", async () => {
     retell = await startFakeRetell(ONE_AGENT);
     const run = await wizard();
 
     await chooseTesting(run);
-    await showing(
+    await showingIn(
       run,
+      asOneLine,
       "Paste your Retell API key",
-      "It is sent to Egma and stored encrypted. It never lands in a file here.",
+      "Egma uses this key now to read your Retell agents",
+      "It never lands in this repository.",
       ...KEY_HINTS,
     );
     // Half a key typed, and then stopped: the characters exist only inside the
@@ -278,8 +357,7 @@ describe("the picker", () => {
     run.write("\r");
 
     // Past the one question the generate step asks, and past its gate.
-    await showing(run, "Do you already have test cases", "[n] none");
-    run.write("n");
+    await chooseNoExistingTests(run);
     await showing(run, "price-question", "[enter] run");
     const grading = gradeEveryRun(platform);
     run.write("\r");
@@ -317,8 +395,7 @@ describe("the choice between text and phone", () => {
 
     run.write("\r");
 
-    await showing(run, "Do you already have test cases", "[n] none");
-    run.write("n");
+    await chooseNoExistingTests(run);
     await showing(run, "price-question", "[enter] run");
     const grading = gradeEveryRun(platform);
     run.write("\r");
@@ -376,8 +453,7 @@ describe("the choice between text and phone", () => {
     await showing(run, `\u203a ${ALSO_DIALLED}`);
     run.write("\r");
 
-    await showing(run, "Do you already have test cases", "[n] none");
-    run.write("n");
+    await chooseNoExistingTests(run);
     await showing(run, "price-question", "[enter] run");
     const grading = gradeEveryRun(platform);
     run.write("\r");

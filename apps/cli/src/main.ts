@@ -12,11 +12,9 @@ import process from "node:process";
 
 import {
   discoverCodingAgents,
-  installedCodingAgent,
   supportedCodingAgentId,
   SUPPORTED_CODING_AGENT_IDS,
   type DrivenAgentLaunch,
-  type InstalledCodingAgent,
 } from "./acp/coding-agents.ts";
 import {
   AGENT_VARIABLE,
@@ -63,7 +61,6 @@ import { HeadlessUI } from "./ui/headless-ui.ts";
 import { walkExitCode } from "./wizard/exit-code.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
 import type { WizardPlatform } from "./wizard/login-step.ts";
-import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 import type { WizardCodingAgent } from "./wizard/wizard-flow.ts";
 
@@ -148,12 +145,13 @@ export type Invocation = {
   readonly repoPrompt: string | null;
   /** `--existing-tests`: the test cases the developer already had written down. */
   readonly existingTests: string | null;
-  /** What `egma init` should write into the folder's config file. */
+  /** `--agent`: the configured voice agent to use for run or monitoring. */
   readonly agentName: string | null;
+  /** `--connection`: the configured connection to use for a run. */
   readonly connectionName: string | null;
   /** The only suite subcommand this CLI exposes. */
   readonly suiteAction: string | null;
-  /** Which of the three things `egma monitoring` does. */
+  /** Which monitoring control or record-only recovery was requested. */
   readonly monitoringAction: string | null;
   /** `--platform`: which platform runs this agent, when Egma cannot tell. */
   readonly platformWord: string | null;
@@ -302,8 +300,8 @@ export function helpText(): string {
     "                           On Retell the account key comes in on standard",
     "                           input, never as an argument. On LiveKit Egma",
     "                           mints a project key and writes the two lines the",
-    "                           Egma SDK reads into .env when Git ignores it,",
-    "                           printing them either way.",
+    "                           Egma SDK reads into .env automatically when Git",
+    "                           ignores it, printing them either way.",
     "  egma monitoring disable  Turn the switch off. Everything stored stays",
     "                           stored: the conversations, the platform binding",
     "                           and the sealed key.",
@@ -311,6 +309,9 @@ export function helpText(): string {
     "                           when a production conversation last arrived. It",
     "                           is where arrivals are read: enable asks once and",
     "                           does not wait.",
+    "  egma monitoring record --agent <id>",
+    "                           Recover only the repository record after a",
+    "                           completed remote setup could not write it.",
     "",
     "In a platform workspace — the directory your Egma deployment lives in,",
     "which is never your agent repository:",
@@ -353,9 +354,12 @@ export function helpText(): string {
     "                       With the wizard: test cases you already have written",
     "                       down, inside this folder. They are turned into test",
     "                       files before Egma writes any of its own.",
-    "  --agent <name>       With init: what to call the voice agent this",
-    "                       folder's tests are for.",
-    "  --connection <name>  With init: what to call the way Egma reaches it.",
+    "  --agent <name-or-id> With run and ordinary monitoring actions: which",
+    "                       configured voice agent to use. With monitoring",
+    "                       record: the stable Egma agent id from the receipt.",
+    "  --connection <name-or-id>",
+    "                       With run: which configured connection under that",
+    "                       agent to use when it has more than one.",
     "  --name <name>        With suite create: the suite display name. With run:",
     "                       an optional name for this run. With monitoring",
     "                       enable: what to call the agent Egma writes.",
@@ -464,7 +468,9 @@ export function helpText(): string {
     "  5 Egma would not start the run, and said why",
     "  6 execution or grading had an operational error   130 stopped part way",
     "",
-    "The wizard finds supported coding agents already installed on this machine.",
+    "The wizard signs this machine in before it looks for supported coding agents.",
+    "Its first generated suite has four tests. Run the wizard again to add another target or suite.",
+    "egma/config.yaml requires format 2 with agents and nested connections; there is no legacy reader.",
   ].join("\n");
 }
 
@@ -498,31 +504,6 @@ function commandedLaunchFrom(invocation: Invocation): DrivenAgentLaunch | null {
     args,
     env: {},
   };
-}
-
-function installedAgentLines(installed: readonly InstalledCodingAgent[]): string[] {
-  return installed.map(
-    (agent) => `  ${agent.id}  ${agent.name} ${agent.version}  ${agent.executable}`,
-  );
-}
-
-function noSelectedCodingAgent(
-  requested: string | null,
-  installed: readonly InstalledCodingAgent[],
-): string {
-  const first =
-    requested === null
-      ? "Egma needs --coding-agent when more than one supported coding agent is installed."
-      : `Egma could not find an installed supported coding agent called "${requested}".`;
-  return [
-    first,
-    "",
-    ...(installed.length === 0
-      ? ["No supported coding agents were found."]
-      : ["Installed coding agents:", ...installedAgentLines(installed)]),
-    "",
-    `Supported ids: ${SUPPORTED_CODING_AGENT_IDS.join(", ")}.`,
-  ].join("\n");
 }
 
 /** Where Retell is for this run, or `undefined` for Retell's own address. */
@@ -624,7 +605,7 @@ function headlessAnswers(
 
 async function runHeadless(
   invocation: Invocation,
-  launch: DrivenAgentLaunch,
+  codingAgent: WizardCodingAgent,
   cwd: string,
   platform: WizardPlatform,
 ): Promise<number> {
@@ -642,7 +623,7 @@ async function runHeadless(
   try {
     const report = await runWizard({
       ui,
-      launch,
+      codingAgent,
       cwd,
       signal: controller.signal,
       platform,
@@ -732,10 +713,6 @@ async function runFolderVerb(
     if (verb === "init") {
       return await runInitCommand({
         ...options,
-        names: {
-          agent: invocation.agentName,
-          connection: invocation.connectionName,
-        },
         binding,
       });
     }
@@ -743,6 +720,10 @@ async function runFolderVerb(
       return await runRunCommand({
         ...options,
         suiteDirectory: invocation.suiteDirectory ?? "",
+        ...(invocation.agentName === null ? {} : { agent: invocation.agentName }),
+        ...(invocation.connectionName === null
+          ? {}
+          : { connection: invocation.connectionName }),
         ...(invocation.name === null ? {} : { name: invocation.name }),
         noFollow: invocation.noFollow,
         signal: controller.signal,
@@ -803,6 +784,7 @@ async function runMonitoring(
       access,
       cwd: path.resolve(invocation.cwd ?? process.cwd()),
       action,
+      agent: invocation.agentName,
       platform: invocation.platformWord,
       platformAgentId: invocation.platformAgentId,
       name: invocation.name,
@@ -903,6 +885,20 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (
+    invocation.verb === "init" &&
+    (invocation.agentName !== null || invocation.connectionName !== null)
+  ) {
+    const named = [
+      ...(invocation.agentName === null ? [] : ["--agent"]),
+      ...(invocation.connectionName === null ? [] : ["--connection"]),
+    ].join(" and ");
+    process.stderr.write(
+      `Egma does not use ${named} with init. Run the wizard or egma connect to add voice agents and connections.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (
     invocation.verb === "monitoring" &&
     !(MONITORING_ACTIONS as readonly string[]).includes(invocation.monitoringAction ?? "")
   ) {
@@ -971,11 +967,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  // The wizard's remaining work, held as one closure rather than a launch the
-  // compiler cannot prove is there. Everything a bare command needs — the
-  // keystroke of consent, the coding agent it will drive — is settled here,
-  // before a single network read, and what comes out is either the rest of the
-  // walk or nothing at all.
+  // The wizard's remaining work, held as one closure. The requested coding
+  // agent is described here but discovered later, inside the walk, after this
+  // CLI has been authorized.
   let theWizard: ((platform: WizardPlatform) => Promise<number>) | null = null;
   if (invocation.verb === null) {
     // Consent is checked before a network read. A piped bare command cannot
@@ -988,45 +982,17 @@ export async function main(argv: readonly string[]): Promise<void> {
     }
 
     const commanded = commandedLaunchFrom(invocation);
-    let codingAgent: WizardCodingAgent;
-    if (commanded !== null) {
-      codingAgent = { kind: "selected", launch: commanded };
-    } else {
-      const installed = await discoverCodingAgents();
-      if (invocation.drivenAgentNamed) {
-        const selected = installedCodingAgent(installed, invocation.drivenAgentId);
-        if (selected === null) {
-          process.stdout.write(
-            `${noSelectedCodingAgent(invocation.drivenAgentId, installed)}\n\n${pasteFallbackMessage()}\n`,
-          );
-          return;
-        }
-        codingAgent = { kind: "selected", launch: selected.launch };
-      } else if (invocation.headless) {
-        if (installed.length === 0) {
-          process.stdout.write(`${pasteFallbackMessage()}\n`);
-          return;
-        }
-        if (installed.length > 1) {
-          process.stderr.write(`${noSelectedCodingAgent(null, installed)}\n`);
-          process.exitCode = 1;
-          return;
-        }
-        codingAgent = { kind: "selected", launch: installed[0]!.launch };
-      } else {
-        if (installed.length === 0) {
-          process.stdout.write(`${pasteFallbackMessage()}\n`);
-          return;
-        }
-        codingAgent = { kind: "choose", installed };
-      }
-    }
+    const codingAgent: WizardCodingAgent =
+      commanded !== null
+        ? { kind: "selected", launch: commanded }
+        : {
+            kind: "discover",
+            discover: () => discoverCodingAgents(),
+            requestedId: invocation.drivenAgentNamed ? invocation.drivenAgentId : null,
+            selection: invocation.headless ? "headless" : "interactive",
+          };
     if (invocation.headless) {
-      if (codingAgent.kind !== "selected") {
-        throw new Error("A headless wizard reached coding-agent selection.");
-      }
-      const launch = codingAgent.launch;
-      theWizard = (platform) => runHeadless(invocation, launch, cwd, platform);
+      theWizard = (platform) => runHeadless(invocation, codingAgent, cwd, platform);
     } else {
       theWizard = (platform) => runInteractiveWizard(codingAgent, cwd, platform);
     }

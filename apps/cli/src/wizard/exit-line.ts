@@ -152,6 +152,16 @@ export type ExitReport =
       readonly platformUrl: string | null;
     }
   /**
+   * Remote monitoring setup finished, but its committed repository record did
+   * not. The receipt comes first so no later failure can hide the stable agent
+   * id or LiveKit deployment lines.
+   */
+  | {
+      readonly kind: "monitoring-record-failed";
+      readonly receipt: readonly string[];
+      readonly reason: string;
+    }
+  /**
    * The platform refused to start watching, and said which rule refused it.
    *
    * A nonzero ending on purpose: the monitoring lane's deliverable is that
@@ -186,26 +196,6 @@ export type ExitReport =
     }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
-  /**
-   * The repository has an egma folder already, so it is not a new one.
-   *
-   * v1 of the wizard onboards new repositories. A second run over a folder
-   * somebody already committed would half-write another suite into it, so it
-   * refuses before it starts anything and says the one thing that redoes setup.
-   *
-   * `hasSuites` is why the refusal is two sentences and not one. A folder
-   * holding tests can be pushed and run as it stands, and saying so is the
-   * useful half of this line. A folder holding only a binding — which is what
-   * an earlier walk that stopped between binding and registering leaves behind
-   * — cannot: `egma push` refuses it for the contract it does not yet have, and
-   * sending somebody to that command would be egma naming a command egma turns
-   * away.
-   */
-  | {
-      readonly kind: "already-onboarded";
-      readonly folder: string;
-      readonly hasSuites: boolean;
-    }
   /**
    * The coding agent stopped the work itself and said why. It is not the same
    * as finding nothing, and saying it was would put words in the agent's mouth.
@@ -347,17 +337,10 @@ export function buildExitLine(report: ExitReport): string {
           : `Egma put the two lines in ${report.envFile}, and they are below for wherever this worker really runs.`;
       return `${wired} ${where} ${monitoringPointer(report.platformUrl)}`;
     }
+    case "monitoring-record-failed":
+      return `Egma could not record the completed monitoring setup: ${oneLine(report.reason)}`;
     case "monitoring-refused":
       return `Egma did not start watching: ${oneLine(report.lines[0] ?? "")}`;
-    case "already-onboarded": {
-      const redo = `Delete or rename ${report.folder} and run egma again to redo setup`;
-      return (
-        `Egma is already set up here: ${report.folder} exists, and the wizard only works with new repositories for now. ` +
-        (report.hasSuites
-          ? `${redo}, or use egma push and egma run on the tests that are already there.`
-          : `${redo}.`)
-      );
-    }
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
@@ -398,6 +381,9 @@ export function buildExitLine(report: ExitReport): string {
  * and a squashed copy of it is neither readable nor usable.
  */
 export function exitLines(report: ExitReport): readonly string[] {
+  if (report.kind === "monitoring-record-failed") {
+    return [...report.receipt, buildExitLine(report)];
+  }
   if (report.kind === "failed") {
     const [, block] = saidAndBlock(report.reason);
     return block.length === 0
