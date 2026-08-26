@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { ROW_HOVER } from "./evidence.tsx";
+
 /**
  * A page of rows, described once and drawn once.
  *
@@ -108,6 +110,7 @@ export function DataTable<Row>({
   rows,
   keyOf,
   stretchPrimaryLink = false,
+  onRowActivate,
   stackWhenConstrained = false,
   more,
   pagination,
@@ -122,6 +125,17 @@ export function DataTable<Row>({
    * row. There is still only one link in the accessibility tree.
    */
   readonly stretchPrimaryLink?: boolean;
+  /**
+   * Makes the whole row a pointer target for one action that opens in place —
+   * a sheet, not a URL. `stretchPrimaryLink` is for rows whose name is a real
+   * link; this is for rows whose name is a real button. The row answers the
+   * pointer and lights up under it with the evidence surface's own hover mix;
+   * the keyboard path stays the primary cell's button, so the accessibility
+   * tree still holds exactly one control for the one action. A click that
+   * lands on a control inside the row — the ⋮ menu, the name button itself —
+   * is that control's, not the row's.
+   */
+  readonly onRowActivate?: (row: Row) => void;
   /**
    * Switches this same semantic table to labelled rows when its own container,
    * rather than the browser viewport, is too narrow for all of its columns.
@@ -227,12 +241,42 @@ export function DataTable<Row>({
                   "stacked:flex stacked:flex-col stacked:gap-1",
                   "stacked:border-t stacked:border-border stacked:px-(--row-padding-x) stacked:py-3",
                   "stacked:first:border-t-0",
+                  onRowActivate !== undefined && [
+                    "cursor-pointer transition-colors duration-(--duration-hover) ease-out",
+                    /* The evidence surface's own hover mix; one recipe for a row under the pointer. */
+                    ROW_HOVER,
+                    "motion-reduce:transition-none",
+                  ],
                 )}
                 data-slot="data-table-row"
                 data-stretch-primary-link={
                   stretchPrimaryLink ? "true" : undefined
                 }
                 key={keyOf(row)}
+                onClick={
+                  onRowActivate === undefined
+                    ? undefined
+                    : (event) => {
+                        const pressed = event.target as HTMLElement;
+                        /*
+                         * A portalled surface — the ⋮ panel lives in `body` —
+                         * still bubbles through the React tree to this row, so
+                         * containment is checked before anything else: a click
+                         * that is not physically inside the row is not the
+                         * row's.
+                         */
+                        if (!event.currentTarget.contains(pressed)) return;
+                        /* A control inside the row keeps its own click. */
+                        if (
+                          pressed.closest(
+                            "button, a, input, label, select, textarea",
+                          ) !== null
+                        ) {
+                          return;
+                        }
+                        onRowActivate(row);
+                      }
+                }
               >
                 {columns.map((column) => (
                   <TableCell
@@ -299,7 +343,15 @@ export function DataTable<Row>({
                   >
                     <span
                       className={cn(
-                        "block overflow-hidden text-ellipsis whitespace-nowrap",
+                        column === primary && onRowActivate !== undefined
+                          ? /*
+                             * An activatable row's name is a real button, and
+                             * the focus indicator draws outside its box; this
+                             * cell must not clip it. The button truncates its
+                             * own text instead.
+                             */
+                            "block overflow-visible whitespace-nowrap"
+                          : "block overflow-hidden text-ellipsis whitespace-nowrap",
                         /*
                          * The name of the row, at the ordinary weight. The
                          * boards write it in the same 400 as the facts beside

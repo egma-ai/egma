@@ -68,7 +68,7 @@ Rules:
 
 - Keep the canonical geometry, proportions, and black-and-white treatment.
 - Do not recolor, stretch, rotate, outline, shadow, or animate the logo.
-- The signed-in sidebar starts with the Egma loop mark beside the current organization, its `Free` plan chip and paired arrows, in a 56px bar with a hairline under it. Use the square light/dark mark asset, not the full wordmark. (Developer decision, 2026-08-24, from the approved Paper refinement.)
+- The signed-in sidebar starts with the Egma loop mark beside the current organization and paired arrows, in a 56px bar with a hairline under it. Use the square light/dark mark asset, not the full wordmark. (Developer decision, 2026-08-24, from the approved Paper refinement. The `Free` plan chip left this bar by developer decision, 2026-08-25 on the Paper canvas, implemented the same day.)
 - The sidebar mark follows the access pages' existing dark-theme treatment: black line art is printed white by inversion.
 - Project context is a separate control under the organization bar. It always shows the word `Project`, the current project name and paired arrows.
 - Auth, onboarding, and public brand surfaces may use the full logo.
@@ -213,7 +213,7 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 - Neutral Paper is the application canvas.
 - The sidebar is a quiet paper region separated by a neutral hairline.
-- The organization control is the topmost thing in the sidebar. It holds the Egma mark, organization name, current plan and paired arrows in a bar of its own.
+- The organization control is the topmost thing in the sidebar. It holds the Egma mark, organization name and paired arrows in a bar of its own.
 - The project selector is a separate control under the organization bar and keeps the word `Project` visible.
 - Navigation uses text and small line icons.
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
@@ -243,9 +243,8 @@ The measurements, all of them theme values:
 
 ### Organization and project controls
 
-- Keep organization and project as two clear controls. The organization bar shows the Egma mark, organization name, the fixed `Free` release-plan chip and paired arrows. The project control below shows the explicit `Project` label, project name and paired arrows. (Developer decision, 2026-08-24.)
-- The organization menu is informational in the current one-organization model. It shows the organization name, `Free Plan`, and the person's real `Admin`, `Member`, or `Viewer` role. It does not offer organization switching or Organization settings yet.
-- `Free` is fixed release copy because billing data does not exist in the session yet. Show it only after a real organization has loaded; do not make a plan claim while loading or when the organization is absent.
+- Keep organization and project as two clear controls. The organization bar shows the Egma mark, organization name and paired arrows. The project control below shows the explicit `Project` label, project name and paired arrows. (Developer decision, 2026-08-24.)
+- The organization menu is informational in the current one-organization model. It shows a grey `Organization` label and the organization name. It does not offer organization switching or Organization settings yet. The label is the `Project` label's own recipe, one control down. (Developer decision, 2026-08-25 on the Paper canvas. The `Free Plan` line and the role line left the menu that same day: billing is not in the session read, and the role is already said by the account control at the foot of the same sidebar. The `Organization` label arrived 2026-08-26.)
 - The project selector is a direct list with no search field. It keeps the project name neutral when open and continues to support keyboard use, Escape, focus return, URL-based selection, and unsaved-work protection. (Developer decision, 2026-08-24.)
 - Open each menu from its trigger with an origin-aware transition.
 - Do not add fake teams, sample projects, or a second navigation model.

@@ -59,9 +59,11 @@ import { Empty } from "./page-state.tsx";
  * without becoming a surface of its own, and nothing else in the product wants
  * it. A token would be a name with one caller, so the recipe stays an arbitrary
  * value here; a second surface that ever wants the same tint earns the token
- * then.
+ * then. The data table's activatable rows are that second surface, so the
+ * recipe is exported rather than retyped — still one string, now with two
+ * callers instead of a copy.
  */
-const ROW_HOVER =
+export const ROW_HOVER =
   "pointer-hover:bg-[color-mix(in_srgb,var(--surface-soft)_62%,transparent)]";
 
 /** Identifiers, scores and clock times, in the shared monospace face. */

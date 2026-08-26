@@ -154,6 +154,7 @@ export function NumberField({
           disabled={disabled}
           readOnly={readOnly}
           required={required}
+          aria-required={required === true ? true : undefined}
           aria-invalid={invalid === true ? true : undefined}
           aria-describedby={described === "" ? undefined : described}
           autoComplete="off"
