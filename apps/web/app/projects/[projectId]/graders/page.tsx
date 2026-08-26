@@ -180,6 +180,21 @@ function PassThreshold({ value }: { readonly value: number }) {
   );
 }
 
+/**
+ * **The name lane is stated; the facts share what is left.**
+ *
+ * `ui/data-table.tsx` gives the slack to the columns that ask for no width, so
+ * a list that states a width for all but one of them hands that one column
+ * every spare pixel. Every fact on a grader is short — a chip, "All", "20%",
+ * "0.80" — so the column that took the slack drew a lane of empty paper mid-
+ * table, and the measures ended up pushed against the ⋮ lane far to its right.
+ *
+ * Personas can state five widths because the column it leaves out is
+ * Description, which is prose and fills whatever it is given. This list has no
+ * such column, so it states only the 260px name lane the boards give every list
+ * and lets the five facts divide the rest between them in proportion to what
+ * each one has to say.
+ */
 function activeColumns(
   mayAuthor: boolean,
   open: (grader: ProjectGrader) => void,
@@ -190,7 +205,7 @@ function activeColumns(
       key: "name",
       header: "Grader",
       primary: true,
-      width: "240px",
+      width: "260px",
       cell: (grader) => (
         <RowOpener
           name={graderDefinitionDisplayName(
@@ -204,14 +219,12 @@ function activeColumns(
     {
       key: "type",
       header: "Type",
-      width: "160px",
       hideOnMobile: true,
       cell: (grader) => <GraderTypeChip type={grader.type} />,
     },
     {
       key: "modalities",
       header: "Modalities",
-      width: "170px",
       hideOnMobile: true,
       cell: (grader) => (
         <GraderModalityChips modalities={grader.modalities} />
@@ -233,7 +246,6 @@ function activeColumns(
     {
       key: "production",
       header: "Production",
-      width: "130px",
       cell: (grader) => (
         <ScopeValue value={productionScopeSummary(grader.scope)} />
       ),
@@ -241,7 +253,6 @@ function activeColumns(
     {
       key: "threshold",
       header: "Pass threshold",
-      width: "140px",
       cell: (grader) => <PassThreshold value={grader.passThreshold} />,
     },
     {
@@ -318,21 +329,18 @@ function libraryColumns(
     {
       key: "owner",
       header: "Owner",
-      width: "120px",
       hideOnMobile: true,
       cell: (entry) => graderOwnerLabel(entry.owner),
     },
     {
       key: "type",
       header: "Type",
-      width: "160px",
       hideOnMobile: true,
       cell: (entry) => <GraderTypeChip type={entry.type} />,
     },
     {
       key: "modalities",
       header: "Modalities",
-      width: "170px",
       hideOnMobile: true,
       cell: (entry) => <GraderModalityChips modalities={entry.modalities} />,
     },
