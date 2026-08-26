@@ -370,7 +370,16 @@ describe("the ordinary reads, over migrated rows", () => {
     const names = items.map((one) => one.name);
 
     expect(names).toContain("Impatient Rita");
-    expect(names).toContain("Everyday caller");
+    /*
+     * **The name the baseline wrote, not the name the catalog now ships.**
+     * This file applies migrations and nothing else — no boot, so no
+     * `seedPersonaLibrary` — and reconciling the shelf persona to its current
+     * catalog name is that seed's work, not a migration's. So the row here is
+     * still "Default Persona", and it is supposed to be: what this test proves
+     * is that the migration carried the row through, and a migration that
+     * renamed it would be doing something nobody asked a migration to do.
+     */
+    expect(names).toContain("Default Persona");
     expect(names).not.toContain("Retired Ray");
   });
 
