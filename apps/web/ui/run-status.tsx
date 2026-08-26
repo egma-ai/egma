@@ -1,5 +1,7 @@
 "use client";
 
+import type { VariantProps } from "class-variance-authority";
+import { Loader2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -7,11 +9,9 @@ import {
   type RunStatusWord,
   type SimulationStatusWord,
 } from "../lib/runs.ts";
-import type { VariantProps } from "class-variance-authority";
 
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
 
 /**
  * The parts every surface that shows a run is built from — and the reason they
@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
  */
 
 /* ------------------------------------------------------------------------ *
- * The four facts, as words with a tone.
+ * Run state, as a word with motion only while work is active.
  * ------------------------------------------------------------------------ */
 
 /**
@@ -41,23 +41,6 @@ import { cn } from "@/lib/utils";
  * `completed` means the work finished, which is not the same as the work going
  * well. Painting it green would answer a question this word does not ask.
  */
-/**
- * The tones a state word can be said in, read off the chip that says them.
- *
- * It is the `Badge`'s own variant union rather than a list repeated here, so a
- * variant that is added or withdrawn from the chip cannot leave this file
- * naming one that no longer exists. `InlineState` is the same word without the
- * chip around it, so it takes the same vocabulary.
- */
-type StateTone = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
-
-const RUN_STATUS_TONE: Readonly<Record<RunStatusWord, StateTone>> = {
-  pending: "neutral",
-  running: "neutral",
-  completed: "neutral",
-  canceled: "warning",
-};
-
 const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
   pending: "Nothing has been claimed yet.",
   running: "Egma is conducting this run.",
@@ -65,6 +48,13 @@ const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
     "The run finished. Trace-level grade scores are separate facts.",
   canceled:
     "Somebody stopped this run, or the agent or connection it used was archived. Work already reported stays on the record.",
+};
+
+const RUN_STATUS_LABEL: Readonly<Record<RunStatusWord, string>> = {
+  pending: "Pending",
+  running: "Running",
+  completed: "Completed",
+  canceled: "Canceled",
 };
 
 export type StateMarkKind =
@@ -77,11 +67,11 @@ export type StateMarkKind =
   | "error";
 
 /**
- * A second, non-colour signal beside every state word.
+ * A second, non-colour signal for simulation, grading, and result states.
  *
  * The word remains the source of meaning. The same outline square anchors
- * every status and keeps state marks distinct from radio controls and progress
- * dots. Tone and text carry the difference between states.
+ * those states and keeps their marks distinct from radio controls and progress
+ * dots. A run uses plain text instead, with a loader only while it is running.
  */
 export function StateMark({
   kind,
@@ -101,44 +91,42 @@ export function StateMark({
   );
 }
 
-const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
-  pending: "waiting",
-  running: "active",
-  completed: "complete",
-  canceled: "stopped",
-};
-
 export function RunStatus({
   status,
-  compact = false,
 }: {
   readonly status: RunStatusWord;
-  readonly compact?: boolean;
 }) {
-  const mark = (
-    <StateMark
-      kind={RUN_STATUS_MARK[status]}
-      moving={status === "running"}
-    />
-  );
-  if (compact) {
-    return (
-      <InlineState
-        tone={RUN_STATUS_TONE[status]}
-        title={RUN_STATUS_MEANING[status]}
-      >
-        {mark}
-        {status}
-      </InlineState>
-    );
-  }
   return (
-    <Badge variant={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
-      {mark}
-      {status}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-2 whitespace-nowrap text-sm text-foreground",
+        status === "canceled" && "text-warning",
+      )}
+      data-slot="run-status"
+      data-status={status}
+      title={RUN_STATUS_MEANING[status]}
+    >
+      {status === "running" ? (
+        <Loader2Icon
+          className="size-3.5 flex-none animate-spin motion-reduce:animate-none"
+          data-slot="run-status-loader"
+          aria-hidden="true"
+        />
+      ) : null}
+      {RUN_STATUS_LABEL[status]}
+    </span>
   );
 }
+
+/**
+ * The tones a state word can be said in, read off the chip that says them.
+ *
+ * It is the `Badge`'s own variant union rather than a list repeated here, so a
+ * variant that is added or withdrawn from the chip cannot leave this file
+ * naming one that no longer exists. `InlineState` is the same word without the
+ * chip around it, so it takes the same vocabulary.
+ */
+type StateTone = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
 /**
  * One simulation's machinery.

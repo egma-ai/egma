@@ -6,7 +6,7 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
-The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. The palette and the logo's own treatment rules did not move.
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. On 2026-08-26, the run-flow refinement removed decorative markers from settled run states, reserved a spinner for active work, and moved grader verdict meaning into explicit `Result · Passed` or `Result · Failed` text. The palette and the logo's own treatment rules did not move.
 
 ## Product context
 
@@ -113,8 +113,9 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 | Warning | `#9a691c` | Skipped, limited, or needs attention |
 | Failure | `#b44444` | Failed, errored, invalid, or destructive |
 
-- Every state includes a word and an icon or shape. Color is supporting information.
-- **A status marker is a square.** Every small mark that stands for a state — a step marker beside a transcript line, a dot on a row — is a square of the same size, never a circle. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24.)
+- Every state includes a word. An icon or shape is optional supporting information, not a second code the reader must learn. Color is supporting information.
+- **Run execution status is text first.** `Completed`, `Pending`, and `Canceled` use plain text with no marker. `Running` adds a spinner because motion communicates active work. A failed run may color the word `Failed`; it does not add a decorative marker. Grader verdicts use `Result · Passed` or `Result · Failed`, with color only on the verdict word. (Developer decision, 2026-08-26, from Paper page `05 — Run flow iterations`.)
+- **A status marker is a square when a marker is useful.** Small static marks that stand for state elsewhere — for example, a step marker beside a transcript line — are squares of the same size, never circles. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24; narrowed for run surfaces on 2026-08-26.)
 - Brand orange does not mean passed, failed, skipped, or errored.
 - Destructive actions use the failure color inside a clear confirmation flow.
 - Dark theme uses lighter status values that keep the same meanings.
@@ -292,7 +293,7 @@ The measurements, all of them theme values:
 ### Run evidence
 
 - Results begin with one compact row above every grader: Combined score, Duration, Total turns and P90 turn latency. Keep all four facts on one desktop row, stacking each fact's label over its value when the detail pane is narrow. The latency is the platform's recorded `turn_response_latency.p90`, shown in milliseconds with at most three significant digits; mark it as partial when the trace was truncated. Do not repeat the full latency list or the frozen grading plan on this surface; each grader card already carries its definition and pass threshold. (Developer decision, 2026-08-26.)
-- Expected-behavior tables say `Expected behavior`, `Grader result` and `Final score`. A grader result is evidence returned by the grader, not a claim about which model produced it. (Developer decision, 2026-08-26.)
+- Expected-behavior tables say `Expected behavior`, `Grader result` and `Total Score`. A grader result is evidence returned by the grader, not a claim about which model produced it. (Developer decision, 2026-08-26.)
 - A highlighted transcript event already means it is current. Do not repeat that state with a `Playing` label. Its timestamp remains visible and selecting the event seeks the shared recording. Recording-backed timestamps use the recorded media clock origin when one was captured; historical evidence without that origin stays on its existing trace clock rather than using a guessed offset. (Developer decision, 2026-08-26.)
 
 ### Side sheets

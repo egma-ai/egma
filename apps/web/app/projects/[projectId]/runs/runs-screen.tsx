@@ -24,11 +24,7 @@ import {
 } from "../../../../lib/platform-client.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import type {
-  RunHistoryPage,
-  RunRow,
-  RunStatusWord,
-} from "../../../../lib/runs.ts";
+import type { RunHistoryPage, RunRow } from "../../../../lib/runs.ts";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
@@ -37,7 +33,7 @@ import { useProjectRead } from "../../../../ui/resource.ts";
 import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
 import { currentDraftState } from "../../../../ui/settings-read.ts";
 import { Actions, TOOLBAR_FILTER } from "../../../../ui/section.tsx";
-import { StateMark, type StateMarkKind } from "../../../../ui/run-status.tsx";
+import { RunStatus } from "../../../../ui/run-status.tsx";
 import {
   AppShell,
   PageBody,
@@ -46,15 +42,6 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import { CreateRunSheet } from "./create-run-sheet.tsx";
-
-const RUN_STATUS_PRESENTATION: Readonly<
-  Record<RunStatusWord, { readonly label: string; readonly mark: StateMarkKind }>
-> = {
-  pending: { label: "Pending", mark: "waiting" },
-  running: { label: "Running", mark: "active" },
-  completed: { label: "Completed", mark: "complete" },
-  canceled: { label: "Canceled", mark: "stopped" },
-};
 
 function suiteLabel(run: RunRow): string {
   return `${run.suiteName}${run.suiteDeleted ? " (deleted)" : ""}`;
@@ -70,16 +57,6 @@ function StartedAt({ instant }: { readonly instant: string }) {
     >
       {asListInstant(instant)}
     </time>
-  );
-}
-
-function RunListStatus({ status }: { readonly status: RunStatusWord }) {
-  const shown = RUN_STATUS_PRESENTATION[status];
-  return (
-    <span className="inline-flex items-center gap-2 text-sm text-foreground">
-      <StateMark kind={shown.mark} moving={status === "running"} />
-      {shown.label}
-    </span>
   );
 }
 
@@ -135,7 +112,7 @@ function columnsFor(
       key: "status",
       header: "Status",
       width: "17%",
-      cell: (run) => <RunListStatus status={run.status} />,
+      cell: (run) => <RunStatus status={run.status} />,
     },
     {
       key: "stop",

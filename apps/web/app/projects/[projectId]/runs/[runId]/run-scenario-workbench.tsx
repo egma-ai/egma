@@ -4,7 +4,6 @@ import { getSimulation, regradeSimulation } from "@egma/platform-api/client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -50,10 +49,7 @@ import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Problem, Refused } from "../../../../../ui/form.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import {
-  StateMark,
-  shownScore,
-} from "../../../../../ui/run-status.tsx";
+import { shownScore } from "../../../../../ui/run-status.tsx";
 import {
   ChatTranscript,
   RecordingEvidence,
@@ -61,7 +57,6 @@ import {
   simulationToolCalls,
   useSimulationEvidenceRecording,
 } from "../../../../../ui/simulation-evidence.tsx";
-import { GradeResultBadge } from "../../../../../ui/grade.tsx";
 import { Actions, SearchField } from "../../../../../ui/section.tsx";
 import { useShellSession } from "../../../../../ui/shell.tsx";
 
@@ -80,36 +75,6 @@ const EXECUTION_LABEL: Readonly<Record<SimulationStatusWord, string>> = {
   canceled: "Canceled",
 };
 
-function durationOf(row: RunSimulation): number | null {
-  if (row.startedAt === null || row.endedAt === null) return null;
-  const started = Date.parse(row.startedAt);
-  const ended = Date.parse(row.endedAt);
-  if (Number.isNaN(started) || Number.isNaN(ended) || ended < started) return null;
-  return ended - started;
-}
-
-function durationText(row: RunSimulation): string {
-  const duration = durationOf(row);
-  if (duration === null) return "No duration";
-  const seconds = Math.max(0, Math.round(duration / 1000));
-  if (seconds < 60) return `${String(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${String(minutes)}m ${String(seconds % 60).padStart(2, "0")}s`;
-}
-
-function scoreText(row: RunSimulation): string {
-  if (typeof row.combinedScore === "number" && Number.isFinite(row.combinedScore)) {
-    return `Score ${shownScore(row.combinedScore)}`;
-  }
-  const pending =
-    row.status === "queued" ||
-    row.status === "claimed" ||
-    row.status === "running" ||
-    row.gradingState === "pending" ||
-    row.gradingState === "running";
-  return pending ? "Score pending" : "No score";
-}
-
 function SimulationChoice({
   row,
   selected,
@@ -123,13 +88,13 @@ function SimulationChoice({
     <li className="m-0 min-w-0">
       <button
         className={cn(
-          "relative grid min-h-(--tap-target) w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] gap-3 border-0 border-b border-border bg-transparent px-4 py-3 text-left",
+          "relative block min-h-(--tap-target) w-full cursor-pointer border-0 border-b border-border bg-transparent px-4 py-3 text-left",
           "pointer-hover:data-[selected=false]:bg-surface-soft",
           selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
         )}
         data-selected={selected ? "true" : "false"}
         type="button"
-        aria-label={`${row.testName ?? "No stored test"}, ${row.personaName}, ${EXECUTION_LABEL[row.status]}, ${scoreText(row)}, ${durationText(row)}`}
+        aria-label={`${row.testName ?? "No stored test"}, ${row.personaName}, ${EXECUTION_LABEL[row.status]}`}
         aria-pressed={selected}
         onClick={onSelect}
       >
@@ -141,10 +106,6 @@ function SimulationChoice({
             {row.personaName}
             {row.status === "completed" ? null : ` · ${EXECUTION_LABEL[row.status]}`}
           </span>
-        </span>
-        <span className="flex flex-col items-end gap-1 text-end text-sm tabular-nums">
-          <span className="text-foreground">{scoreText(row)}</span>
-          <span className="text-muted-foreground">{durationText(row)}</span>
         </span>
       </button>
     </li>
@@ -260,6 +221,35 @@ function assertionFinding(
   return "The grader returned a score without a written result.";
 }
 
+function GradeResultText({
+  result,
+  missing,
+}: {
+  readonly result: EvidenceGrade["result"] | null;
+  readonly missing?: "Grading" | "No grade";
+}) {
+  const shown = result === null
+    ? missing ?? "No grade"
+    : result === "errored"
+      ? "Error"
+      : result === "passed"
+        ? "Passed"
+        : "Failed";
+  return (
+    <span className="text-sm text-muted-foreground">
+      Result <span aria-hidden="true">·</span>{" "}
+      <span
+        className={cn(
+          result === "passed" && "text-success",
+          (result === "failed" || result === "errored") && "text-failure",
+        )}
+      >
+        {shown}
+      </span>
+    </span>
+  );
+}
+
 function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }) {
   if (grades.length === 0) return null;
   return (
@@ -276,7 +266,7 @@ function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }
             <span className="font-mono tabular-nums text-muted-foreground">
               {asSecond(older.gradedAt)} · score {older.score === null ? "—" : shownScore(older.score)}
             </span>
-            <GradeResultBadge result={older.result} />
+            <GradeResultText result={older.result} />
           </div>
         ))}
       </div>
@@ -369,8 +359,8 @@ function GraderResultCard({
     <section className="min-w-0 border border-border bg-surface" aria-label={row.name}>
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-4 border-b border-border bg-surface-soft px-5 py-4 max-[40rem]:px-4">
         <div className="min-w-0">
-          <p className="m-0 text-sm text-faint">Grader</p>
-          <h3 className="m-0 mt-1 text-base font-medium wrap-anywhere text-foreground">
+          <h3 className="m-0 text-sm font-medium wrap-anywhere text-foreground">
+            Grader <span aria-hidden="true">·</span>{" "}
             {definitionHref === null ? row.name : (
               <Link
                 className="no-underline underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline"
@@ -387,16 +377,12 @@ function GraderResultCard({
           )}
         </div>
         <div className="flex flex-none flex-wrap items-center justify-end gap-3">
-          {row.grade === null ? (
-            <Badge>
-              <StateMark kind={stillGrading ? "active" : "waiting"} />
-              {stillGrading ? "Grading" : "No grade"}
-            </Badge>
-          ) : (
-            <GradeResultBadge result={row.grade.result} />
-          )}
+          <GradeResultText
+            result={row.grade?.result ?? null}
+            missing={stillGrading ? "Grading" : "No grade"}
+          />
           <span className="font-mono text-sm tabular-nums text-foreground">
-            Final score {row.grade === null ? "—" : shownScore(row.grade.score)}
+            Total Score {row.grade === null ? "—" : shownScore(row.grade.score)}
           </span>
         </div>
       </header>
@@ -422,7 +408,7 @@ function GraderResultCard({
                 <TableRow>
                   <TableHead className="w-[38%]">Expected behavior</TableHead>
                   <TableHead>Grader result</TableHead>
-                  <TableHead className="w-28 text-end">Final score</TableHead>
+                  <TableHead className="w-28 text-center">Total Score</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className="stacked:block">
@@ -447,8 +433,8 @@ function GraderResultCard({
                       </span>
                     </TableCell>
                     <TableCell
-                      className={cn(STACKED_BEHAVIOR_CELL, "text-end font-mono tabular-nums text-foreground")}
-                      data-label="Final score"
+                      className={cn(STACKED_BEHAVIOR_CELL, "text-center font-mono tabular-nums text-foreground stacked:text-end")}
+                      data-label="Total Score"
                     >
                       {behavior.assertion?.score === undefined
                         ? "—"

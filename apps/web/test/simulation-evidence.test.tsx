@@ -676,9 +676,16 @@ describe("recording evidence", () => {
     expect(audio.hasAttribute("controls")).toBe(false);
     expect(screen.getByText("User")).toBeTruthy();
     expect(screen.getByText("Agent")).toBeTruthy();
-    expect(screen.getByLabelText("Waveform speakers")).toBeTruthy();
+    const speakers = screen.getByLabelText("Waveform speakers");
     const seekControl = screen.getByRole("slider", { name: "Seek the recording" });
     expect(seekControl.parentElement?.querySelectorAll("svg path")).toHaveLength(2);
+    const waveform = seekControl.parentElement;
+    expect(waveform).not.toBeNull();
+    expect(
+      waveform !== null &&
+        (waveform.compareDocumentPosition(speakers) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBeTruthy();
 
     fireEvent.click(playButton);
     expect(play).toHaveBeenCalledTimes(1);

@@ -824,19 +824,6 @@ export function RecordingEvidence({
       ) : (
         <div className="border-t border-border p-3">
           <div
-            className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
-            aria-label="Waveform speakers"
-          >
-            <span className="inline-flex items-center gap-2">
-              <span className="size-2.5 flex-none bg-foreground" aria-hidden="true" />
-              User
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <span className="size-2.5 flex-none bg-brand" aria-hidden="true" />
-              Agent
-            </span>
-          </div>
-          <div
             className={cn(
               "relative outline-2 outline-offset-2 outline-transparent",
               /* The invisible native range gives the drawn waveform keyboard semantics. */
@@ -871,6 +858,19 @@ export function RecordingEvidence({
               disabled={recording.duration <= 0}
               onChange={(event) => recording.seek(Number(event.currentTarget.value))}
             />
+          </div>
+          <div
+            className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
+            aria-label="Waveform speakers"
+          >
+            <span className="inline-flex items-center gap-2">
+              <span className="size-2.5 flex-none bg-foreground" aria-hidden="true" />
+              User
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="size-2.5 flex-none bg-brand" aria-hidden="true" />
+              Agent
+            </span>
           </div>
         </div>
       )}

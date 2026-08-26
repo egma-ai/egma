@@ -461,7 +461,10 @@ describe("one run after suites", () => {
       expect(link.className).toContain("pointer-hover:underline");
     }
     const first = await screen.findByRole("button", { name: /Books service,/u });
-    expect(first.getAttribute("aria-label")).toContain("59s");
+    expect(first.getAttribute("aria-label")).toBe(
+      "Books service, Patient caller, Completed",
+    );
+    expect(within(first).queryByText(/Score|59s/u)).toBeNull();
     expect(first.getAttribute("aria-pressed")).toBe("true");
     expect(first.className).toContain("bg-selected");
     expect(first.className).toContain("before:bg-brand");
@@ -471,6 +474,12 @@ describe("one run after suites", () => {
     for (const label of ["Status", "Started", "Test suite", "Agent", "Connection"]) {
       expect(within(summary).getByText(label)).toBeTruthy();
     }
+    const completedStatus = within(summary)
+      .getByText("Completed")
+      .closest('[data-slot="run-status"]');
+    expect(completedStatus).not.toBeNull();
+    expect(completedStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(completedStatus?.querySelector('[data-slot="run-status-loader"]')).toBeNull();
     const resultsTab = screen.getByRole("tab", { name: "Results summary" });
     expect(resultsTab.getAttribute("data-state")).toBe("active");
     expect(resultsTab.className).toContain(
@@ -488,7 +497,14 @@ describe("one run after suites", () => {
       `/projects/prj_1/graders?graderDefinition=${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}&definitionVersion=2`,
     );
     expect(graderLink.className).toContain("pointer-hover:underline");
-    expect(within(expected).getByText("Final score 1")).toBeTruthy();
+    const graderHeading = within(expected).getByRole("heading", {
+      name: "Grader Expected behaviors",
+    });
+    expect(graderHeading.textContent).toBe("Grader · Expected behaviors");
+    const passed = within(expected).getByText("Passed");
+    expect(passed.className).toContain("text-success");
+    expect(passed.parentElement?.textContent).toBe("Result · Passed");
+    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
     const behaviorTable = within(expected).getByRole("table", {
       name: "Expected behaviors results",
     });
@@ -496,7 +512,14 @@ describe("one run after suites", () => {
       within(behaviorTable)
         .getAllByRole("cell")
         .map((cell) => cell.getAttribute("data-label")),
-    ).toEqual(["Expected behavior", "Grader result", "Final score"]);
+    ).toEqual(["Expected behavior", "Grader result", "Total Score"]);
+    expect(
+      within(behaviorTable).getByRole("columnheader", { name: "Total Score" })
+        .className,
+    ).toContain("text-center");
+    expect(within(behaviorTable).getAllByRole("cell")[2]?.className).toContain(
+      "text-center",
+    );
     expect(within(behaviorTable).getByText("Finds and confirms the appointment"))
       .toBeTruthy();
     expect(within(behaviorTable).getByText("The agent found and confirmed the appointment."))
@@ -564,8 +587,8 @@ describe("one run after suites", () => {
     });
     expect(within(table).getByText("Finds and confirms the appointment")).toBeTruthy();
     expect(within(table).getByText("Waiting for the grader.")).toBeTruthy();
-    expect(within(table).getByRole("columnheader", { name: "Final score" })).toBeTruthy();
-    expect(within(expected).getByText("Final score —")).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Total Score" })).toBeTruthy();
+    expect(within(expected).getByText("Total Score —")).toBeTruthy();
   });
 
   it("shows partial-transcript disclosure before the recorded conversation", async () => {
@@ -783,7 +806,7 @@ describe("one run after suites", () => {
       document.querySelector('[data-slot="selected-simulation-header"]')?.textContent,
     ).not.toContain("Execution failed");
     expect(await screen.findByText("No grading was requested")).toBeTruthy();
-    expect(screen.getByText("No score")).toBeTruthy();
+    expect(screen.queryByText("No score")).toBeNull();
     expect(screen.queryByText(/capabilit/u)).toBeNull();
   });
 
@@ -1049,7 +1072,7 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const refreshed = await screen.findByRole("button", {
-      name: /Reschedules service, Patient caller, Completed, Score 0.7, 59s/u,
+      name: "Reschedules service, Patient caller, Completed",
     });
     expect(refreshed.getAttribute("aria-pressed")).toBe("false");
   });
@@ -1098,8 +1121,11 @@ describe("one run after suites", () => {
       name: "Expected behaviors",
     });
     const policy = within(results).getByRole("region", { name: "Policy grader" });
-    expect(within(expected).getByText("Final score 1")).toBeTruthy();
-    expect(within(policy).getByText("Final score 0.65")).toBeTruthy();
+    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
+    expect(within(policy).getByText("Total Score 0.65")).toBeTruthy();
+    const failed = within(policy).getByText("Failed");
+    expect(failed.className).toContain("text-failure");
+    expect(failed.parentElement?.textContent).toBe("Result · Failed");
     expect(within(policy).getByText("The agent did not confirm consent.")).toBeTruthy();
   });
 
@@ -1233,7 +1259,7 @@ describe("one run after suites", () => {
     await waitFor(
       () => {
         const refreshed = screen.getByRole("button", {
-          name: /Reschedules service, Patient caller, Completed, Score 0.7, 59s/u,
+          name: "Reschedules service, Patient caller, Completed",
         });
         expect(refreshed.getAttribute("aria-pressed")).toBe("true");
         expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
@@ -1264,6 +1290,16 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/events": "never",
     });
     render(<RunDetailPage />);
+
+    const summary = await screen.findByRole("group", { name: "Run summary" });
+    const runningStatus = within(summary)
+      .getByText("Running")
+      .closest('[data-slot="run-status"]');
+    expect(runningStatus).not.toBeNull();
+    expect(runningStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(
+      runningStatus?.querySelector('[data-slot="run-status-loader"]'),
+    ).not.toBeNull();
 
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog", { name: "Cancel run “Release check”?" });

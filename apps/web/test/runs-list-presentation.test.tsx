@@ -256,9 +256,37 @@ describe("runs list presentation", () => {
     expect(runLink.className).toContain("pointer-hover:underline");
     const completed = within(table).getByText("Completed");
     expect(completed.closest('[data-slot="badge"]')).toBeNull();
-    expect(completed.querySelector('[data-slot="state-mark"]')?.className).toContain(
-      "size-2.5",
+    expect(completed.closest('[data-slot="run-status"]')).toBeTruthy();
+    expect(completed.closest('[data-slot="run-status"]')?.children).toHaveLength(0);
+  });
+
+  it("uses a loader only for a running run status", async () => {
+    answers(
+      shellStubs([
+        run({ id: "run_running", name: "Live run", status: "running" }),
+        run({ id: "run_canceled", name: "Stopped run", status: "canceled" }),
+      ]),
     );
+    render(<RunsPage />);
+
+    const table = await screen.findByRole("table", { name: "Runs in this project" });
+    const liveRow = within(table)
+      .getByRole("link", { name: "Live run" })
+      .closest("tr");
+    const stoppedRow = within(table)
+      .getByRole("link", { name: "Stopped run" })
+      .closest("tr");
+
+    expect(liveRow).not.toBeNull();
+    expect(stoppedRow).not.toBeNull();
+    expect(
+      within(liveRow!).getByText("Running").closest('[data-slot="run-status"]')
+        ?.querySelector('[data-slot="run-status-loader"]'),
+    ).toBeTruthy();
+    expect(
+      within(stoppedRow!).getByText("Canceled").closest('[data-slot="run-status"]')
+        ?.children,
+    ).toHaveLength(0);
   });
 
   it("uses an honest fallback and a local date-time for an older run", async () => {

@@ -550,7 +550,7 @@ function RunDetailView({
             <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
               <dt className="text-sm text-faint">Status</dt>
               <dd className="m-0 mt-1 min-w-0">
-                <RunStatus status={status} compact />
+                <RunStatus status={status} />
               </dd>
             </div>
             <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
