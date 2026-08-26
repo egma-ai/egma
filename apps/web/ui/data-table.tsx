@@ -61,6 +61,12 @@ export type Column<Row> = {
   readonly hideOnMobile?: boolean;
   /** Identifiers, counts and times, which read straight in the mono face. */
   readonly mono?: boolean;
+  /**
+   * Numbers read from their right edge, so a column of them may say so. The
+   * header moves with its values: a label left on the other edge of the lane
+   * floats away from the figures it names.
+   */
+  readonly align?: "end";
   /** A row control. It stays at the trailing edge in both table layouts. */
   readonly action?: boolean;
   /**
@@ -235,6 +241,7 @@ export function DataTable<Row>({
                      */
                     "data-[action=true]:px-0",
                     hiddenWhenStacked(column) && "stacked:hidden",
+                    column.align === "end" && "text-right",
                   )}
                   data-action={column.action === true ? "true" : undefined}
                   data-mobile-hidden={mobileHidden(column)}
@@ -389,6 +396,8 @@ export function DataTable<Row>({
                          */
                         column === primary && "text-foreground",
                         column.mono === true && "font-mono text-sm",
+                        /* The values' edge, which the header cell above shares. */
+                        column.align === "end" && "text-right",
                         /*
                          * The action cell's own shape, read off the cell it
                          * sits in rather than off a prop this file re-tested.
