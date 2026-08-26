@@ -166,7 +166,15 @@ export function startService(options: ServiceOptions): Service {
   const pacing: Pacing = { hold: holdBeforeRetry };
 
   const finished = (async (): Promise<void> => {
-    watching = await watchGradingWork(nudge);
+    watching = await watchGradingWork(nudge, (error: unknown) => {
+      log.warn(
+        platformEvent("egma.grading_listener.failed", {
+          "error.type": "grading_listener_failed",
+          "exception.type": safeExceptionType(error),
+        }),
+        "grader work listener failed; reconnecting",
+      );
+    });
     log.info(
       platformEvent("egma.service.started", { capacity: config.capacity }),
       "grader service started",
