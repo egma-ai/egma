@@ -2135,9 +2135,12 @@ describe("the project grader library", () => {
         .toBe(1);
       expect(await page.getByRole("tab", { name: "Grader library" }).count())
         .toBe(1);
-      expect(await page.innerText("main")).toContain(
-        "All simulations · Production off",
-      );
+      const expectedBehaviorsRow = page
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: "Expected behaviors" });
+      expect(await expectedBehaviorsRow.innerText()).toContain("All");
+      expect(await expectedBehaviorsRow.innerText()).toContain("Off");
 
       await page.getByRole("tab", { name: "Grader library" }).click();
       const latency = page
@@ -2146,16 +2149,14 @@ describe("the project grader library", () => {
         .filter({ hasText: "Response latency" });
       await latency.waitFor();
       expect(await latency.innerText()).toContain("Available");
-      await latency
-        .getByRole("button", { name: "Open the menu for Response latency" })
-        .click();
-      await page.getByRole("menuitem", { name: "View details" }).click();
+      /* The whole row opens the review sheet now; the ⋮ holds Use in project. */
+      await latency.click();
 
       const details = page.getByRole("dialog", { name: "Response latency" });
       await details.waitFor();
       await expect
         .poll(() => details.innerText(), { timeout: 30_000 })
-        .toContain("turn response latency");
+        .toContain("Turn response latency");
       expect(await details.innerText()).toContain(
         "Maximum average response time: 3 seconds by default",
       );
@@ -2171,11 +2172,11 @@ describe("the project grader library", () => {
         .getByRole("row")
         .filter({ hasText: "Response latency" });
       await activeLatency.waitFor();
-      expect(await activeLatency.innerText()).toContain("All simulations");
+      expect(await activeLatency.innerText()).toContain("All");
       await activeLatency
         .getByRole("button", { name: "Open the menu for Response latency" })
         .click();
-      await page.getByRole("menuitem", { name: "View and edit" }).click();
+      await page.getByRole("menuitem", { name: "Edit" }).click();
       const activeLatencyDetails = page.getByRole("dialog", {
         name: "Response latency",
       });
@@ -2202,8 +2203,7 @@ describe("the project grader library", () => {
         .getByRole("row")
         .filter({ hasText: BROWSER_CUSTOM_GRADER });
       await activeCustom.waitFor();
-      expect(await activeCustom.innerText()).toContain("Organization");
-      expect(await activeCustom.innerText()).toContain("LLM judge");
+      expect(await activeCustom.innerText()).toContain("llm_as_judge");
     },
     SETTLE,
   );
@@ -2854,7 +2854,8 @@ describe("the complete product, walked in order in a second project", () => {
     async () => {
       await walk.goto(at("graders"));
       await walk.waitForSelector("text=Expected behaviors");
-      await saysWithin(walk, "All simulations · Production off");
+      await saysWithin(walk, "Simulations");
+      await saysWithin(walk, "Production");
 
       expect(
         await walk
@@ -2880,7 +2881,7 @@ describe("the complete product, walked in order in a second project", () => {
       await secondProjectGrader
         .getByRole("button", { name: "Open the menu for Expected behaviors" })
         .click();
-      await walk.getByRole("menuitem", { name: "View and edit" }).click();
+      await walk.getByRole("menuitem", { name: "Edit" }).click();
       const thresholdEditor = walk.getByRole("dialog", {
         name: "Expected behaviors",
       });

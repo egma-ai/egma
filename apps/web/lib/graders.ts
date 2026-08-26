@@ -19,6 +19,8 @@ export type SimulationScopeSelector =
   ProjectGraderScope["simulations"][number];
 export type GraderSettingDefinition =
   GraderLibraryEntry["settingDefinitions"][number];
+export type GraderRequiredEvidence =
+  GraderLibraryEntry["requiredEvidence"][number];
 
 /**
  * The one predefined definition whose stored key needs product copy.
@@ -43,65 +45,76 @@ export function graderOwnerLabel(owner: GraderOwner): string {
   return owner === "egma" ? "Egma" : "Organization";
 }
 
-export function graderTypeLabel(type: GraderType): string {
-  return type === "llm_as_judge" ? "LLM judge" : "Code";
+/**
+ * There is no `graderTypeLabel`, and that is a decision rather than an
+ * omission.
+ *
+ * "LLM judge" and "Code" were product words for `llm_as_judge` and `code`, and
+ * the two never agreed: the API's word is what a person reads in a request, in
+ * a webhook and in the library's own contract. **The type now reads as the
+ * identifier it is** — the raw value, in the monospace stack, in a chip
+ * (developer decision, 2026-08-25). A screen that wants it only has to draw
+ * `grader.type`, so a helper that renamed it would be a second name to keep in
+ * step with nothing.
+ */
+
+/** One modality, as the word a person reads on a chip. */
+export function graderModalityLabel(modality: GraderModality): string {
+  return modality === "chat" ? "Chat" : "Voice";
 }
 
-export function graderModalitiesLabel(
-  modalities: readonly GraderModality[],
-): string {
-  if (modalities.length === 2) return "Chat and voice";
-  if (modalities[0] === "chat") return "Chat";
-  if (modalities[0] === "voice") return "Voice";
-  return "None";
-}
+/**
+ * What a grader grading nothing says, in either scope column.
+ *
+ * It is named because the columns draw it in the faint colour: "Off" is the
+ * absence of a scope rather than a scope, and a page deciding that by comparing
+ * against a literal it wrote itself would drift the first time this word does.
+ */
+export const SCOPE_OFF = "Off";
 
-/** Compact table copy. The nested selector list belongs in the detail sheet. */
-export function scopeSummary(scope: ProjectGraderScope): string {
+/**
+ * What the Simulations column says: `All`, the suites and tests counted, or
+ * `Off`.
+ *
+ * The two evidence sources are two columns rather than one dot-joined
+ * sentence, so each is scannable down its own lane (approved boards,
+ * 2026-08-25). The pluralisation is the one the single summary used.
+ */
+export function simulationScopeSummary(scope: ProjectGraderScope): string {
   const all = scope.simulations.some((selector) => selector.kind === "all");
+  if (all) return "All";
   const suites = scope.simulations.filter(
     (selector) => selector.kind === "test_suite",
   ).length;
   const tests = scope.simulations.filter(
     (selector) => selector.kind === "test",
   ).length;
-  const simulations = all
-    ? "All simulations"
-    : suites + tests === 0
-      ? "Simulations off"
-      : [
-          suites === 0
-            ? null
-            : `${String(suites)} test suite${suites === 1 ? "" : "s"}`,
-          tests === 0
-            ? null
-            : `${String(tests)} test${tests === 1 ? "" : "s"}`,
-        ]
-          .filter((part): part is string => part !== null)
-          .join(", ");
-  const production =
-    scope.production === null
-      ? "Production off"
-      : `${String(scope.production.samplePercent)}% of production`;
-  return `${simulations} · ${production}`;
+  if (suites + tests === 0) return SCOPE_OFF;
+  return [
+    suites === 0 ? null : `${String(suites)} test suite${suites === 1 ? "" : "s"}`,
+    tests === 0 ? null : `${String(tests)} test${tests === 1 ? "" : "s"}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(", ");
 }
 
-/** Product copy kept for callers that show the two evidence sources separately. */
-export function simulationScopeLabel(grader: ProjectGrader): string {
-  const all = grader.scope.simulations.some(
-    (selector) => selector.kind === "all",
-  );
-  return all
-    ? "Grades all simulations"
-    : grader.scope.simulations.length === 0
-      ? "Does not grade simulations"
-      : "Grades selected simulations";
+/** What the Production column says: the sampled share, or `Off`. */
+export function productionScopeSummary(scope: ProjectGraderScope): string {
+  return scope.production === null
+    ? SCOPE_OFF
+    : `${String(scope.production.samplePercent)}%`;
 }
 
-export function productionScopeLabel(grader: ProjectGrader): string {
-  return grader.scope.production === null
-    ? "Production off"
-    : `Grades ${String(grader.scope.production.samplePercent)}% of production`;
+/**
+ * One piece of evidence a grader reads, in words rather than in its stored key.
+ *
+ * The keys are the contract's — `test_expected_behaviors`, `tool_calls` — and
+ * every one of them is an ordinary sentence with underscores in it, so the
+ * words are the key with its separators and its capital restored.
+ */
+export function graderEvidenceLabel(evidence: GraderRequiredEvidence): string {
+  const words = evidence.replaceAll("_", " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 export const EMPTY_GRADER_SCOPE: ProjectGraderScope = {
