@@ -143,7 +143,6 @@ function SheetMenu({
     <Menu
       label={label}
       placement="below-end"
-      panelClassName="min-w-[210px]"
       trigger={
         <EllipsisVerticalIcon
           aria-hidden="true"

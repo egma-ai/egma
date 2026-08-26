@@ -2876,6 +2876,28 @@ describe("the complete product, walked in order in a second project", () => {
         "#persona-personality",
         "Speaks quickly, interrupts, and has stopped apologising for it.",
       );
+
+      /*
+       * **A click outside the panel asks before it throws the draft away.**
+       * The panel offers three ways out — Escape, the close control, and a
+       * click on the scrim — and all three land on one gate. The first two are
+       * proved in `apps/web/test/personas.test.tsx`; this one is proved here
+       * because the gesture is dispatched from a document listener that
+       * jsdom's synthetic events never reach.
+       */
+      // Well clear of the 440px panel at the right edge, on empty page below
+      // the list. The scrim is what actually takes the press.
+      await walk.mouse.click(600, 600);
+      const keepsIt = walk.getByRole("dialog", {
+        name: "Leave without saving?",
+      });
+      await keepsIt.waitFor();
+      await keepsIt.getByRole("button", { name: "Keep editing" }).click();
+      // Kept: the panel is still open and still holds what was typed into it.
+      expect(await walk.inputValue("#persona-personality")).toContain(
+        "stopped apologising",
+      );
+
       await walk.getByRole("button", { name: "Save changes" }).click();
 
       // The new version is current and the one the earlier runs pinned is still

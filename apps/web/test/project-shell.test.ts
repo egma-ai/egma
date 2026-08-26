@@ -290,7 +290,13 @@ describe("the product navigation", () => {
    */
   it("knows which item an address is under, and says nothing outside the product", () => {
     expect(activeSectionIn("/projects/prj_1/agents")).toBe("agents");
-    expect(activeSectionIn("/projects/prj_1/personas/prs_3")).toBe("personas");
+    /*
+     * Personas is one address: a persona is read in a panel over its list
+     * rather than at an address of its own, so a path under it is a URL this
+     * product no longer answers. The nesting rule this file is about is proved
+     * above on `runs`, which does still carry a record address.
+     */
+    expect(activeSectionIn("/projects/prj_1/personas")).toBe("personas");
     expect(activeSectionIn("/projects/prj_1/global")).toBeNull();
     expect(activeSectionIn("/projects/prj_1/simulations")).toBeNull();
   });

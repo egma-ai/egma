@@ -301,10 +301,10 @@ reschedule this week. They are short on time and irritated.
 3. The agent confirms the new booking before ending the call.
 ```
 
-Name a persona only when the situation needs a particular kind of person on the
-other end; leave `personas` out and the default one applies. A new format 4 file
-can leave out `version`, `identity_revision`, and persona IDs. `pull` or `push`
-writes the current machine fields.
+Name at least one persona under `personas`: a test says who calls, so Egma
+refuses one that names none and the push turns that file away. A new format 4
+file can leave out `version` and `identity_revision`, and may name its personas
+by name rather than by ID. `pull` or `push` writes the current machine fields.
 
 `egma/mock-tools.md` is the mocked world: a **mock tool** answers for one of
 your agent's tools while a simulation runs, so a test never reaches your real
@@ -370,8 +370,8 @@ Then one keystroke:
 ```
 12 tests generated · suite "order-line tests"
 
-  › quoted-a-price          default persona
-    lost-the-order-number   default persona
+  › quoted-a-price          Everyday caller
+    lost-the-order-number   Everyday caller
     open-on-sunday          somebody-in-a-hurry
     … 9 more (↑↓ browse · e opens in $EDITOR)
 
@@ -450,14 +450,14 @@ run: run_01K…
 tests: 2
 simulations: 2
 results: http://localhost:3101/projects/prj_01K…/runs/run_01K…
-simulation: quoted-a-price default-persona running
-simulation: quoted-a-price default-persona completed
-grading: quoted-a-price default-persona pending
-grading: quoted-a-price default-persona running
-grading: quoted-a-price default-persona complete
-first-result: quoted-a-price default-persona complete
-simulation: lost-the-order-number default-persona completed
-grading: lost-the-order-number default-persona not_requested
+simulation: quoted-a-price Everyday caller running
+simulation: quoted-a-price Everyday caller completed
+grading: quoted-a-price Everyday caller pending
+grading: quoted-a-price Everyday caller running
+grading: quoted-a-price Everyday caller complete
+first-result: quoted-a-price Everyday caller complete
+simulation: lost-the-order-number Everyday caller completed
+grading: lost-the-order-number Everyday caller not_requested
 execution-finished: 2
 execution-failed: 0
 execution-canceled: 0

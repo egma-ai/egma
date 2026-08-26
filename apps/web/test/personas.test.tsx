@@ -846,18 +846,23 @@ describe("one persona's sheet", () => {
     expect(within(sheet).queryByText("Created")).toBeNull();
   });
 
-  it("closes on Escape, and asks first when there is a draft to lose", async () => {
-    withClosingSheetAnimation();
-    ritaOpen();
-    render(<PersonasPage />);
+  /** The editor, open on Rita, with one unsaved change in it. */
+  async function aDirtyEditor(): Promise<HTMLElement> {
     await openRow("Impatient Rita");
-
     await openSheetMenu("Impatient Rita");
     fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
     const sheet = await screen.findByRole("dialog", { name: "Impatient Rita" });
     fireEvent.change(within(sheet).getByLabelText("Identity name*"), {
       target: { value: "Somebody else" },
     });
+    return sheet;
+  }
+
+  it("closes on Escape, and asks first when there is a draft to lose", async () => {
+    withClosingSheetAnimation();
+    ritaOpen();
+    render(<PersonasPage />);
+    const sheet = await aDirtyEditor();
 
     /*
      * The product's own question, not the browser's: the shell mounts the
@@ -891,6 +896,44 @@ describe("one persona's sheet", () => {
     /* Closing a panel is not navigation. */
     expect(routed.push).not.toHaveBeenCalled();
   });
+
+  /*
+   * **All three ways out ask the same question.** The boards give this panel a
+   * close control, an outside click and Escape, and a draft that only one of
+   * them protected would be a draft lost by whichever way somebody happened to
+   * reach for. All three land on one `onOpenChange`, which is the gate.
+   *
+   * Escape is proved above and the close control here. **The outside click is
+   * proved in the real browser instead**, in `apps/api/test/browser.test.ts`:
+   * that gesture is Radix's own, dispatched from a document listener that
+   * jsdom's synthetic events never reach, and a test that faked its way past
+   * that would be proving the fake rather than the panel.
+   */
+  it("asks before discarding when the close control is pressed", async () => {
+    withClosingSheetAnimation();
+    ritaOpen();
+    render(<PersonasPage />);
+    const sheet = await aDirtyEditor();
+
+    /* The head's own ✕, which is the last Close in the panel. */
+    const close = within(sheet)
+      .getAllByRole("button", { name: "Close" })
+      .at(-1);
+    if (close === undefined) throw new Error("the sheet has no close control");
+    fireEvent.click(close);
+
+    const asks = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    fireEvent.click(within(asks).getByRole("button", { name: "Keep editing" }));
+
+    expect(sheet.getAttribute("data-state")).toBe("open");
+    expect(
+      (within(sheet).getByLabelText("Identity name*") as HTMLInputElement)
+        .value,
+    ).toBe("Somebody else");
+  });
+
 });
 
 /* ------------------------------------------------------------------------ */
