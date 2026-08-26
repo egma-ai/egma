@@ -1,12 +1,14 @@
 import {
   authorize,
   createCustomLlmGrader,
+  getGraderDefinitionVersion,
   getGraderLibraryEntry,
   listGraderLibrary,
   NotPermittedError,
   PREDEFINED_GRADERS,
   UnprocessableInputError,
   useGraderInProject,
+  type GraderDefinitionSnapshot,
   type GraderLibraryEntry,
   type GraderModality,
   type ProjectGrader,
@@ -46,6 +48,7 @@ export type GraderLibraryRoutesOptions = {
 type Query = {
   readonly projectId?: string;
   readonly pageToken?: string;
+  readonly definitionVersion?: number;
 };
 
 type Body = Record<string, unknown>;
@@ -104,22 +107,33 @@ function requiredEvidence(
 function describedLibraryEntry(
   entry: GraderLibraryEntry,
   activeProjectGraderId = entry.activeProjectGraderId,
+  definition?: GraderDefinitionSnapshot,
 ): Record<string, unknown> {
+  const definitionVersion =
+    definition?.definitionVersion ?? entry.definitionVersion;
+  const type = definition?.type ?? entry.type;
+  const prompt = definition === undefined
+    ? entry.gradingInstructions
+    : definition.prompt;
+  const parameterContract =
+    definition?.parameterContract ?? entry.parameterContract;
+  const modalities = definition?.modalities ?? entry.modalities;
   return {
     id: entry.id,
     name: entry.name,
     description: entry.description,
     owner: entry.owner,
-    type: entry.type,
+    type,
     scopeEditable: entry.scopeEditable,
     currentDefinitionVersion: entry.currentDefinitionVersion,
-    modalities: entry.modalities,
+    definitionVersion,
+    modalities,
     // Egma-owned prompts and trusted implementation details are not an
     // authoring surface. Organization-owned instructions are the customer's.
     gradingInstructions:
-      entry.owner === "organization" ? entry.gradingInstructions : null,
-    requiredEvidence: requiredEvidence(entry),
-    settingDefinitions: entry.parameterContract,
+      entry.owner === "organization" ? prompt : null,
+    requiredEvidence: requiredEvidence({ id: entry.id, type }),
+    settingDefinitions: parameterContract,
     activeProjectGraderId,
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString(),
@@ -244,9 +258,23 @@ export async function graderLibraryRoutes(
         acting.auth,
         graderDefinitionId,
       );
-      return entry === undefined
-        ? notFound(reply, noSuchDefinition(graderDefinitionId))
-        : reply.send(describedLibraryEntry(entry));
+      if (entry === undefined) {
+        return notFound(reply, noSuchDefinition(graderDefinitionId));
+      }
+      const definition = query.definitionVersion === undefined
+        ? undefined
+        : await getGraderDefinitionVersion(
+            acting.auth,
+            graderDefinitionId,
+            query.definitionVersion,
+          );
+      if (query.definitionVersion !== undefined && definition === undefined) {
+        return notFound(
+          reply,
+          `There is no grader definition ${graderDefinitionId} version ${String(query.definitionVersion)} available in this organization.`,
+        );
+      }
+      return reply.send(describedLibraryEntry(entry, undefined, definition));
     },
   );
 

@@ -229,6 +229,7 @@ describe("run grading progress", () => {
     })))).resolves.toEqual(claims.map((claim) => ({
       simulationId: claim.id,
       state: "pending",
+      combinedScore: null,
     })));
 
     const firstTrace = await requestSimulationGrade(claims[0]!);
@@ -244,8 +245,16 @@ describe("run grading progress", () => {
       simulationId: claim.id,
       runId: claim.runId,
     })))).resolves.toEqual([
-      { simulationId: claims[0]!.id, state: "complete" },
-      { simulationId: claims[1]!.id, state: "pending" },
+      {
+        simulationId: claims[0]!.id,
+        state: "complete",
+        combinedScore: 1,
+      },
+      {
+        simulationId: claims[1]!.id,
+        state: "pending",
+        combinedScore: null,
+      },
     ]);
 
     const secondTrace = await requestSimulationGrade(claims[1]!);
@@ -267,8 +276,16 @@ describe("run grading progress", () => {
       simulationId: claim.id,
       runId: claim.runId,
     })))).resolves.toEqual([
-      { simulationId: claims[0]!.id, state: "complete" },
-      { simulationId: claims[1]!.id, state: "error" },
+      {
+        simulationId: claims[0]!.id,
+        state: "complete",
+        combinedScore: 1,
+      },
+      {
+        simulationId: claims[1]!.id,
+        state: "error",
+        combinedScore: null,
+      },
     ]);
   });
 

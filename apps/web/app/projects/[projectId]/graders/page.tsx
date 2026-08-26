@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   listGraderLibrary,
   listGraders,
@@ -423,6 +423,18 @@ function libraryColumns(
 }
 
 function ProjectGraders({ projectId }: { readonly projectId: string }) {
+  const searchParams = useSearchParams();
+  const linkedGraderId = searchParams.get("grader");
+  const linkedDefinitionId = searchParams.get("graderDefinition");
+  const linkedDefinitionVersionValue = Number(
+    searchParams.get("definitionVersion"),
+  );
+  const linkedDefinitionVersion =
+    linkedDefinitionId !== null &&
+    Number.isSafeInteger(linkedDefinitionVersionValue) &&
+    linkedDefinitionVersionValue > 0
+      ? linkedDefinitionVersionValue
+      : null;
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
@@ -440,12 +452,17 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     null,
   );
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryDefinitionVersion, setLibraryDefinitionVersion] = useState<
+    number | undefined
+  >(undefined);
   /** Which half of the library sheet its opener asked for. */
   const [libraryMode, setLibraryMode] = useState<"details" | "use">("details");
   const [activeGrader, setActiveGrader] = useState<ProjectGrader | null>(null);
   const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState<ProjectGrader | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  const openedLinkedGrader = useRef<string | null>(null);
+  const openedLinkedDefinition = useRef<string | null>(null);
 
   useEffect(() => {
     if (
@@ -455,6 +472,55 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       window.location.replace("/sign-in");
     }
   }, [active.answer, library.answer]);
+
+  useEffect(() => {
+    if (linkedDefinitionId !== null && linkedDefinitionVersion !== null) return;
+    const key = linkedGraderId === null ? null : `${projectId}:${linkedGraderId}`;
+    if (key === null || openedLinkedGrader.current === key) return;
+    const answer = active.answer;
+    if (answer?.status !== "ready") return;
+    openedLinkedGrader.current = key;
+    const grader = answer.value.graders.find((one) => one.id === linkedGraderId);
+    if (grader === undefined) {
+      setSaid("This grader definition is no longer active in this project.");
+      return;
+    }
+    setTab("active");
+    setActiveGrader(grader);
+    setActiveOpen(true);
+  }, [
+    active.answer,
+    linkedDefinitionId,
+    linkedDefinitionVersion,
+    linkedGraderId,
+    projectId,
+  ]);
+
+  useEffect(() => {
+    if (linkedDefinitionId === null || linkedDefinitionVersion === null) return;
+    const key = `${projectId}:${linkedDefinitionId}:${String(linkedDefinitionVersion)}`;
+    if (openedLinkedDefinition.current === key) return;
+    const answer = library.answer;
+    if (answer?.status !== "ready") return;
+    openedLinkedDefinition.current = key;
+    const entry = answer.value.graderLibraryEntries.find(
+      (one) => one.id === linkedDefinitionId,
+    );
+    if (entry === undefined) {
+      setSaid("This grader definition is no longer available.");
+      return;
+    }
+    setTab("library");
+    setLibraryEntry(entry);
+    setLibraryDefinitionVersion(linkedDefinitionVersion);
+    setLibraryMode("details");
+    setLibraryOpen(true);
+  }, [
+    library.answer,
+    linkedDefinitionId,
+    linkedDefinitionVersion,
+    projectId,
+  ]);
 
   const whyNot =
     mayAuthor || role === null
@@ -488,6 +554,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
   ): void {
     setSaid(null);
     setLibraryEntry(entry);
+    setLibraryDefinitionVersion(undefined);
     setLibraryMode(mode);
     setLibraryOpen(true);
   }
@@ -647,11 +714,12 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       />
       {libraryEntry === null ? null : (
         <LibraryGraderSheet
-          key={libraryEntry.id}
+          key={`${libraryEntry.id}:${String(libraryDefinitionVersion ?? "current")}`}
           entry={libraryEntry}
           projectId={projectId}
           open={libraryOpen}
           mode={libraryMode}
+          definitionVersion={libraryDefinitionVersion}
           mayAuthor={mayAuthor}
           onClose={() => setLibraryOpen(false)}
           onUsed={() => {

@@ -1,6 +1,8 @@
 import {
+  GRADER_DEFINITION_CATALOG,
   MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
+  reconcileGraderCatalog,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -45,6 +47,8 @@ type Listed = {
   readonly owner: "egma" | "organization";
   readonly type: "llm_as_judge" | "code";
   readonly scopeEditable: boolean;
+  readonly currentDefinitionVersion: number;
+  readonly definitionVersion: number;
   readonly modalities: readonly ("chat" | "voice")[];
   readonly gradingInstructions: string | null;
   readonly requiredEvidence: readonly string[];
@@ -171,6 +175,43 @@ describe("the grader library", () => {
       },
     );
     expect(createRefused.statusCode).toBe(403);
+  });
+
+  it("reads one exact immutable definition version after the current version moves", async () => {
+    api = await createApi("grader_library_version_read");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const expected = GRADER_DEFINITION_CATALOG.find(
+      (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
+    );
+    if (expected === undefined) {
+      throw new Error("the Expected behaviors catalog fixture is missing");
+    }
+    await reconcileGraderCatalog([{ ...expected, modalities: ["chat"] }]);
+
+    const current = await request(
+      "GET",
+      `/v1/grader-library/${expected.id}`,
+      key,
+    );
+    expect(current.statusCode, JSON.stringify(current.body)).toBe(200);
+    expect(current.body).toMatchObject({
+      currentDefinitionVersion: 2,
+      definitionVersion: 2,
+      modalities: ["chat"],
+    });
+
+    const frozen = await request(
+      "GET",
+      `/v1/grader-library/${expected.id}?definitionVersion=1`,
+      key,
+    );
+    expect(frozen.statusCode, JSON.stringify(frozen.body)).toBe(200);
+    expect(frozen.body).toMatchObject({
+      currentDefinitionVersion: 2,
+      definitionVersion: 1,
+      modalities: ["chat", "voice"],
+    });
   });
 
   it("uses one predefined grader once in the current project", async () => {

@@ -4981,6 +4981,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "definitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
                           "modalities": {
                             "type": "array",
                             "items": {
@@ -5108,6 +5112,7 @@
                           "type",
                           "scopeEditable",
                           "currentDefinitionVersion",
+                          "definitionVersion",
                           "modalities",
                           "gradingInstructions",
                           "requiredEvidence",
@@ -5245,6 +5250,15 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "name": "definitionVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         ],
         "responses": {
@@ -5290,6 +5304,10 @@
                       "type": "boolean"
                     },
                     "currentDefinitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "definitionVersion": {
                       "type": "integer",
                       "minimum": 1
                     },
@@ -5420,6 +5438,7 @@
                     "type",
                     "scopeEditable",
                     "currentDefinitionVersion",
+                    "definitionVersion",
                     "modalities",
                     "gradingInstructions",
                     "requiredEvidence",
@@ -6162,6 +6181,10 @@
                           "type": "integer",
                           "minimum": 1
                         },
+                        "definitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
                         "modalities": {
                           "type": "array",
                           "items": {
@@ -6289,6 +6312,7 @@
                         "type",
                         "scopeEditable",
                         "currentDefinitionVersion",
+                        "definitionVersion",
                         "modalities",
                         "gradingInstructions",
                         "requiredEvidence",
@@ -15376,6 +15400,18 @@
                               }
                             ]
                           },
+                          "combinedScore": {
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "reason": {
                             "anyOf": [
                               {
@@ -15391,6 +15427,28 @@
                                   "orphaned",
                                   "dispatch_failed"
                                 ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "endedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
                               },
                               {
                                 "type": "null"
@@ -15455,7 +15513,10 @@
                           "personaVersionId",
                           "status",
                           "gradingState",
+                          "combinedScore",
                           "reason",
+                          "startedAt",
+                          "endedAt",
                           "modality",
                           "hasRecording",
                           "mockToolCoverage"
@@ -16500,6 +16561,16 @@
                         }
                       ]
                     },
+                    "failureDetail": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "modality": {
                       "type": "string",
                       "enum": [
@@ -16545,6 +16616,17 @@
                     },
                     "hasRecording": {
                       "type": "boolean"
+                    },
+                    "recordingStartedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "measures": {
                       "type": "object",
@@ -17146,12 +17228,14 @@
                     "gradeHistory",
                     "combinedScore",
                     "reason",
+                    "failureDetail",
                     "modality",
                     "createdAt",
                     "startedAt",
                     "endedAt",
                     "providerReference",
                     "hasRecording",
+                    "recordingStartedAt",
                     "measures",
                     "metrics",
                     "test",

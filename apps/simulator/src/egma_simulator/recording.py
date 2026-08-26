@@ -15,6 +15,7 @@ import sys
 import wave
 from array import array
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from .speech import SAMPLE_WIDTH_BYTES
 
@@ -32,10 +33,22 @@ class AudioFacts:
     """The stored recording produced by a voice simulation."""
 
     recording: str
+    started_unix_nano: int
+    """The shared origin of the recording and every transcript span.
+
+    VoiceConductor stamps turns as offsets from this instant. Keeping the
+    same origin beside the recording lets a reader place those turns on the
+    WAV timeline without guessing from a provider event or the first span.
+    """
 
     def as_report(self) -> dict:
         """The contract's audio block, exactly."""
-        return {"recording": self.recording}
+        seconds, nanos = divmod(self.started_unix_nano, 1_000_000_000)
+        instant = datetime.fromtimestamp(seconds, UTC)
+        return {
+            "recording": self.recording,
+            "started_at": f"{instant:%Y-%m-%dT%H:%M:%S}.{nanos:09d}Z",
+        }
 
 
 def dual_channel_wav(

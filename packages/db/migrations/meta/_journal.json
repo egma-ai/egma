@@ -15,6 +15,13 @@
       "when": 1787726983377,
       "tag": "0001_persona_rework",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787768932792,
+      "tag": "0002_silky_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

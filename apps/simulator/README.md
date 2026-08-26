@@ -356,8 +356,9 @@ stays honestly silent; and a planted credential appears in no log, report,
 or write-ahead log.
 
 Voice is proved the same way, off the same records: a voice fixture yields
-a transcript, an ending and a recording reference. The recording is then
-opened and each channel is transcribed to show one speaker to a channel.
+a transcript, an ending, a recording reference and the recording's clock
+origin. The recording is then opened and each channel is transcribed to show
+one speaker to a channel.
 One scenario run over chat and over voice produces one transcript, which
 is the diagnostic the modality split exists for.
 

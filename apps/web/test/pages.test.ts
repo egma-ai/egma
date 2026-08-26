@@ -461,31 +461,24 @@ describe("the pages", () => {
     expect(home).not.toContain("Sign out");
   });
 
-  /**
-   * **Simulation runs is a label, and only a label.**
-   *
-   * Monitoring gave production traffic a surface of its own, so the surface
-   * beside it has to say which traffic *it* holds. What changed is the words on
-   * four pages and one navigation item. What did not change is anything a
-   * machine reads: the addresses stay at `/projects/{projectId}/runs`, and the
-   * stored word stays `run` — which is why this reads the page headings rather
-   * than sweeping the sources for the word.
-   */
-  it("labels every runs surface Simulation runs, without moving one address", async () => {
+  it("uses Runs as the one section label without moving an address", async () => {
     for (const page of [
-      "app/projects/[projectId]/runs/page.tsx",
-      "app/projects/[projectId]/runs/new/page.tsx",
+      "app/projects/[projectId]/runs/runs-screen.tsx",
+      "app/projects/[projectId]/runs/loading.tsx",
+      "app/projects/[projectId]/runs/new/loading.tsx",
       "app/projects/[projectId]/runs/[runId]/page.tsx",
       "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
-      expect(source, page).toContain('"Simulation runs"');
-      expect(source, page).not.toContain('eyebrow="Runs"');
-      expect(source, page).not.toContain('title="Runs"');
-      // And the addresses are where they were: every link is still built from
-      // the `runs` section, which is the stored word and stays one.
+      expect(source, page).not.toContain('"Simulation runs"');
       expect(source, page).not.toContain("simulation-runs");
     }
+
+    const list = await readFile(
+      path.join(WEB, "app/projects/[projectId]/runs/runs-screen.tsx"),
+      "utf8",
+    );
+    expect(list).toContain('title="Runs"');
   });
 
   it("keeps simulation execution and grading progress separate", async () => {
@@ -500,18 +493,27 @@ describe("the pages", () => {
       ),
       "utf8",
     );
+    const runWorkbench = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/run-scenario-workbench.tsx",
+      ),
+      "utf8",
+    );
     const grades = await readFile(
       path.join(WEB, "ui/simulation-evidence.tsx"),
       "utf8",
     );
-    // A simulation Egma could not conduct is an execution failure. It does not
-    // become a zero score or an errored grader.
-    for (const page of [run, simulation]) {
-      expect(page).toContain("Egma could not conduct this simulation.");
-    }
-    // The run reports grading progress, while the simulation reads its own
-    // trace-level grading state and grade results.
-    expect(run).toContain("read.gradedCount");
+    // The run list names the execution state. The simulation page explains it.
+    // Neither turns that failure into a zero score or an errored grader.
+    expect(runWorkbench).toContain("Execution failed");
+    expect(simulation).toContain("Egma could not conduct this simulation.");
+    expect(simulation).toContain("This is an execution problem, not a failed grade");
+    // The run keeps execution state and score as separate facts in each
+    // simulation choice, while the simulation reads its own trace-level grades.
+    expect(runWorkbench).toContain("EXECUTION_LABEL");
+    expect(runWorkbench).toContain("row.gradingState");
+    expect(runWorkbench).toContain("row.combinedScore");
     expect(simulation).toContain('evidence.gradingState === "pending"');
     expect(grades).toContain("evidence.grades");
     expect(grades).toContain("evidence.gradeHistory");

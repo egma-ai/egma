@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -11,6 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SimulationEvidencePage from "../app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx";
 import type { Me } from "../lib/me.ts";
+import {
+  ChatTranscript,
+  RecordingEvidence,
+  type SimulationEvidenceRecording,
+  useSimulationEvidenceRecording,
+} from "../ui/simulation-evidence.tsx";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 const routed = vi.hoisted(() => ({
@@ -153,12 +161,14 @@ function evidence(overrides: Record<string, unknown> = {}) {
     ],
     combinedScore: 0.5,
     reason: null,
+    failureDetail: null,
     modality: "voice",
     createdAt: "2026-08-15T09:59:00.000Z",
     startedAt: "2026-08-15T10:00:00.000Z",
     endedAt: "2026-08-15T10:00:40.000Z",
     providerReference: "call_abc123",
     hasRecording: false,
+    recordingStartedAt: null,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
     metrics: [
       {
@@ -270,9 +280,52 @@ afterEach(() => {
 });
 
 describe("one simulation's grades", () => {
+  it("shows the simulator's specific failure detail", async () => {
+    page({
+      read: evidence({
+        status: "failed",
+        gradingState: "not_requested",
+        grades: [],
+        gradeHistory: [],
+        combinedScore: null,
+        reason: "simulator_error",
+        failureDetail:
+          "OpenAI Realtime STT refused the request because the account has no credits remaining.",
+        gradingPlan: null,
+        transcript: null,
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(
+      await screen.findByText(
+        "OpenAI Realtime STT refused the request because the account has no credits remaining.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/execution problem, not a failed grade/iu)).toBeTruthy();
+  });
+
   it("shows the combined score without creating an overall pass or fail", async () => {
     page();
     render(<SimulationEvidencePage />);
+
+    const title = await screen.findByRole("heading", {
+      name: "Reschedules a booked appointment",
+    });
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(title.closest("nav")).toBe(navigation);
+    expect(
+      within(navigation).getByRole("link", { name: "Runs" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/runs");
+    expect(
+      within(navigation).getByRole("link", { name: "Nightly smoke" }).getAttribute(
+        "href",
+      ),
+    ).toBe("/projects/prj_1/runs/run_1");
+    expect(navigation.textContent).toBe(
+      "Runs/Nightly smoke/Reschedules a booked appointment",
+    );
+    expect(within(navigation).queryByText("Simulation 01")).toBeNull();
 
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
@@ -451,5 +504,212 @@ describe("one simulation's grades", () => {
     expect(screen.getByText("No grader was asked to grade this simulation."))
       .toBeTruthy();
     expect(document.body.textContent?.toLocaleLowerCase()).not.toContain("skipped");
+  });
+});
+
+describe("the transcript time rail", () => {
+  it("seeks speech without autoplay and expands exact tool requests and responses", () => {
+    const read = evidence();
+    const tool = {
+      spanId: "span_tool",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: '{"customer":"Ada"}',
+      toolResult: '{"appointment":"Tuesday at 10"}',
+      spans: [],
+    };
+    const seek = vi.fn();
+    const rendered = render(
+      <ChatTranscript
+        transcript={read.transcript as never}
+        toolCalls={[tool as never]}
+        currentTime={1}
+        onSeek={seek}
+      />,
+    );
+
+    const user = screen.getByRole("button", { name: /Move Thursday's clean/u });
+    fireEvent.click(user);
+    expect(seek).toHaveBeenCalledWith(1);
+    expect(user.getAttribute("aria-pressed")).toBe("true");
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={read.transcript as never}
+        toolCalls={[tool as never]}
+        currentTime={4.5}
+        onSeek={seek}
+      />,
+    );
+    const agent = screen.getByRole("button", { name: /You are all set for Tuesday/u });
+    expect(agent.getAttribute("aria-current")).toBe("true");
+    expect(screen.queryByText("Playing")).toBeNull();
+    expect(screen.getByRole("button", { name: /Move Thursday's clean/u }).getAttribute("aria-pressed"))
+      .toBe("true");
+
+    const toolName = screen.getByText("lookup_appointment");
+    const details = toolName.closest("details");
+    fireEvent.click(toolName.closest("summary")!);
+    expect(details?.open).toBe(true);
+    expect(seek).toHaveBeenLastCalledWith(6);
+    expect(within(details!).getByRole("region", { name: "lookup_appointment request" }).textContent)
+      .toContain('{"customer":"Ada"}');
+    expect(within(details!).getByRole("region", { name: "lookup_appointment response" }).textContent)
+      .toContain('{"appointment":"Tuesday at 10"}');
+
+    fireEvent.click(
+      within(details!.parentElement!).getByRole("button", {
+        name: "Seek recording to tool call lookup_appointment at 0:06",
+      }),
+    );
+    expect(seek).toHaveBeenLastCalledWith(6);
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={read.transcript as never}
+        toolCalls={[{ ...tool, status: "unset" } as never]}
+        currentTime={6}
+        onSeek={seek}
+      />,
+    );
+    expect(screen.getByText(/Status not recorded ·/u)).toBeTruthy();
+  });
+
+  it("uses the recorded media origin for timestamps, seeking, and the active row", () => {
+    const read = evidence();
+    const tool = {
+      spanId: "span_tool_origin",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const seek = vi.fn();
+
+    render(
+      <ChatTranscript
+        transcript={read.transcript as never}
+        toolCalls={[tool as never]}
+        recordingStartedAt="2026-08-15T10:00:00.500000Z"
+        currentTime={5.75}
+        onSeek={seek}
+      />,
+    );
+
+    const toolRow = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(toolRow.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(
+      within(toolRow).getByRole("button", {
+        name: "Seek recording to tool call lookup_appointment at 0:05",
+      }),
+    );
+    expect(seek).toHaveBeenCalledWith(5.5);
+  });
+});
+
+describe("recording evidence", () => {
+  it("applies an early transcript seek after media metadata arrives", () => {
+    const { result } = renderHook(() =>
+      useSimulationEvidenceRecording(
+        evidence({ hasRecording: false }) as never,
+        "prj_1",
+      ),
+    );
+    const audio = { currentTime: 0, duration: Number.NaN } as HTMLAudioElement;
+    (result.current.audioRef as { current: HTMLAudioElement | null }).current = audio;
+
+    act(() => result.current.seek(29));
+    expect(audio.currentTime).toBe(0);
+
+    Object.defineProperty(audio, "duration", {
+      configurable: true,
+      value: 78,
+    });
+    act(() => result.current.onLoadedMetadata());
+
+    expect(audio.currentTime).toBe(29);
+    expect(result.current.currentTime).toBe(29);
+  });
+
+  it("uses one 44px play control and keeps stereo seeking keyboard accessible", () => {
+    const audioRef: { current: HTMLAudioElement | null } = { current: null };
+    const seek = vi.fn();
+    const recording: SimulationEvidenceRecording = {
+      status: "ready",
+      message: null,
+      url: "https://recordings.example/sim_1.wav",
+      audioRef,
+      currentTime: 5,
+      duration: 60,
+      playing: false,
+      waveform: { human: [0.2, 0.6, 0.3], agent: [0.1, 0.4, 0.2] },
+      waveformLoading: false,
+      seek,
+      onTimeUpdate: vi.fn(),
+      onLoadedMetadata: vi.fn(),
+      onError: vi.fn(),
+      onPlay: vi.fn(),
+      onPause: vi.fn(),
+    };
+    render(<RecordingEvidence recording={recording} active={false} />);
+
+    const audio = screen.getByLabelText("Simulation recording") as HTMLAudioElement;
+    const play = vi.fn(async () => undefined);
+    Object.defineProperty(audio, "play", { configurable: true, value: play });
+    const playButton = screen.getByRole("button", { name: "Play recording" });
+    expect(playButton.className).toContain("min-h-(--control-lg)");
+    expect(audio.hasAttribute("controls")).toBe(false);
+    expect(screen.getByText("User")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+    expect(screen.getByLabelText("Waveform speakers")).toBeTruthy();
+    const seekControl = screen.getByRole("slider", { name: "Seek the recording" });
+    expect(seekControl.parentElement?.querySelectorAll("svg path")).toHaveLength(2);
+
+    fireEvent.click(playButton);
+    expect(play).toHaveBeenCalledTimes(1);
+    fireEvent.change(seekControl, {
+      target: { value: "12" },
+    });
+    expect(seek).toHaveBeenCalledWith(12);
+  });
+
+  it("keeps the fallback seek control at the 44px coarse-pointer target", () => {
+    const recording: SimulationEvidenceRecording = {
+      status: "ready",
+      message: null,
+      url: "https://recordings.example/sim_1.wav",
+      audioRef: { current: null },
+      currentTime: 5,
+      duration: 60,
+      playing: false,
+      waveform: null,
+      waveformLoading: false,
+      seek: vi.fn(),
+      onTimeUpdate: vi.fn(),
+      onLoadedMetadata: vi.fn(),
+      onError: vi.fn(),
+      onPlay: vi.fn(),
+      onPause: vi.fn(),
+    };
+    render(<RecordingEvidence recording={recording} active={false} />);
+
+    expect(
+      screen.getByRole("slider", { name: "Seek the recording" }).className,
+    ).toContain("h-(--tap-target)");
   });
 });

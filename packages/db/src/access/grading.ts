@@ -1090,11 +1090,13 @@ type SimulationPlanRow = {
 type ResolvedSimulationState = {
   readonly gradable: boolean;
   readonly state: TraceGradingState | null;
+  readonly combinedScore: number | null;
 };
 
 export type SimulationGradingState = {
   readonly simulationId: string;
   readonly state: TraceGradingState | null;
+  readonly combinedScore: number | null;
 };
 
 export type SimulationGradingRef = {
@@ -1181,15 +1183,21 @@ function resolvedSimulationState(
   row: SimulationPlanRow,
   facts: ReadonlyMap<string, ReadonlyMap<string, CurrentSimulationGradeFact>>,
 ): ResolvedSimulationState {
-  if (row.status !== "completed") return { gradable: false, state: null };
+  if (row.status !== "completed") {
+    return { gradable: false, state: null, combinedScore: null };
+  }
 
   const group = selectedGroup(row);
   if (group.items.length === 0) {
-    return { gradable: false, state: "not_requested" };
+    return { gradable: false, state: "not_requested", combinedScore: null };
   }
 
-  if (row.jobStatus === "claimed") return { gradable: true, state: "running" };
-  if (row.jobStatus === "pending") return { gradable: true, state: "pending" };
+  if (row.jobStatus === "claimed") {
+    return { gradable: true, state: "running", combinedScore: null };
+  }
+  if (row.jobStatus === "pending") {
+    return { gradable: true, state: "pending", combinedScore: null };
+  }
 
   const traceId = traceIdOfSimulation(row.simulationId);
   if (traceId === undefined) {
@@ -1203,11 +1211,20 @@ function resolvedSimulationState(
       return {
         gradable: true,
         state: row.jobStatus === "abandoned" ? "error" : "pending",
+        combinedScore: null,
       };
     }
     errored ||= grade.errored;
   }
-  return { gradable: true, state: errored ? "error" : "complete" };
+  if (errored) return { gradable: true, state: "error", combinedScore: null };
+  return {
+    gradable: true,
+    state: "complete",
+    combinedScore: combinedGradeScore(
+      group.items.map((item) => item.projectGraderId),
+      current === undefined ? [] : [...current.values()],
+    ),
+  };
 }
 
 /** One batch state read for the simulations on an API page. */
@@ -1250,12 +1267,13 @@ export async function readSimulationGradingStates(
   const byId = new Map(eligible.map((row) => [row.simulationId, row] as const));
   return refs.flatMap((ref) => {
     const row = byId.get(ref.simulationId);
-    return row === undefined
-      ? []
-      : [{
-          simulationId: row.simulationId,
-          state: resolvedSimulationState(row, facts).state,
-        }];
+    if (row === undefined) return [];
+    const resolved = resolvedSimulationState(row, facts);
+    return [{
+      simulationId: row.simulationId,
+      state: resolved.state,
+      combinedScore: resolved.combinedScore,
+    }];
   });
 }
 

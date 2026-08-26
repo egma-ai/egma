@@ -337,6 +337,8 @@ export async function landOneConversationOf(
 export type ConductedRunOptions = {
   /** What the recorded conversation reports as its recording. */
   readonly reference: string;
+  /** Sample zero on the same clock as the transcript spans. */
+  readonly recordingStartedAt?: Date;
   /** Chat rather than voice, for the refusal a chat earns. */
   readonly modality?: "voice" | "chat";
   readonly label?: string;
@@ -442,6 +444,9 @@ export async function aConductedRun(
       ? {}
       : {
           recordingReference: options.reference,
+          ...(options.recordingStartedAt === undefined
+            ? {}
+            : { recordingStartedAt: options.recordingStartedAt }),
         }),
   });
 

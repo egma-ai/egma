@@ -1783,16 +1783,43 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
        * conversation. A run of two hundred must never mint two hundred links to
        * serve the one somebody wanted.
        */
+      const simulationsRead = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname ===
+            `/v1/runs/${run.runId}/simulations`,
+      );
       await page.goto(inProject);
-      await page.getByRole("link", { name: /Reschedules/u }).first().waitFor({
-        timeout: 30_000,
-      });
+      const simulationsResponse = await simulationsRead;
+      expect(simulationsResponse.status()).toBe(200);
+      const simulations = (await simulationsResponse.json()) as {
+        simulations: readonly { id: string; personaName: string }[];
+      };
+      const heard = simulations.simulations.find(
+        (simulation) => simulation.id === run.heard,
+      );
+      const silent = simulations.simulations.find(
+        (simulation) => simulation.id === run.silent,
+      );
+      expect(heard, "the run lists the simulation that recorded audio").toBeDefined();
+      expect(silent, "the run lists the simulation that recorded no audio").toBeDefined();
+
+      const heardChoice = page
+        .getByRole("button")
+        .filter({ hasText: heard?.personaName ?? "missing heard simulation" });
+      await heardChoice.waitFor({ timeout: 30_000 });
+      if ((await heardChoice.getAttribute("aria-pressed")) !== "true") {
+        await heardChoice.click();
+      }
       expect(await page.locator("audio").count()).toBe(0);
 
-      await page.goto(`${inProject}/simulations/${run.heard}`);
+      await page.getByRole("tab", { name: "Transcript & audio" }).click();
 
       const player = page.getByLabel("Simulation recording");
-      await player.waitFor({ timeout: 30_000 });
+      // The real audio element is intentionally screen-reader-only. The
+      // visible play button and waveform control it, so presence rather than
+      // visibility is the correct readiness boundary here.
+      await player.waitFor({ state: "attached", timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
       // pass through the control plane; only the decision did.
@@ -1907,16 +1934,27 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       // recording — and its own page offers no control at all. A disabled
       // player there would read as a broken feature rather than an honest
       // absence.
-      await page.goto(`${inProject}/simulations/${run.silent}`);
-      // **Waited for the read that would have supplied a player**: the
-      // default-open evidence sheet is drawn from the same answer, so by here
-      // the page has been told everything it knows and is offering nothing.
-      const silentEvidence = page.getByRole("dialog", {
-        name: "Transcript and audio",
+      const silentChoice = page
+        .getByRole("button")
+        .filter({ hasText: silent?.personaName ?? "missing silent simulation" });
+      await silentChoice.click();
+      await expect
+        .poll(() => silentChoice.getAttribute("aria-pressed"))
+        .toBe("true");
+      await expect.poll(() => page.locator("audio").count()).toBe(0);
+      const transcriptTab = page.getByRole("tab", {
+        name: "Transcript & audio",
       });
-      await silentEvidence.waitFor({ timeout: 30_000 });
+      await transcriptTab.waitFor({ timeout: 30_000 });
+      await transcriptTab.click();
+      // **Waited for the read that would have supplied a player**: the inline
+      // transcript tab is drawn from the same answer, so by here the page has
+      // been told everything it knows and is offering nothing.
+      const silentEvidence = page.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
       await silentEvidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
       expect(await page.locator("audio").count()).toBe(0);
     },
@@ -1945,17 +1983,20 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       });
 
       await page.goto(
-        `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}/simulations/${run.heard}`,
+        `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}`,
       );
-      // The default-open sheet comes off the same answer a player would have,
-      // so waiting for it is waiting for the read that could contradict the
-      // absence below.
-      const evidence = page.getByRole("dialog", {
-        name: "Transcript and audio",
+      await page.getByRole("button", { name: /Reschedules/u }).first().waitFor({
+        timeout: 30_000,
       });
-      await evidence.waitFor({ timeout: 30_000 });
+      await page.getByRole("tab", { name: "Transcript & audio" }).click();
+      // The inline transcript tab comes off the same answer a player would
+      // have, so waiting for it is waiting for the read that could contradict
+      // the absence below.
+      const evidence = page.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       expect(await page.locator("audio").count()).toBe(0);
@@ -3130,6 +3171,8 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("runs"));
       await walk.getByRole("link", { name: "Create a run" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/runs/new$`));
+      const runBuilder = walk.getByRole("dialog", { name: "Create a run" });
+      await runBuilder.waitFor();
 
       await walk.waitForSelector("#run-suite");
       await walk.selectOption("#run-suite", { label: "Support reception" });
@@ -3138,12 +3181,11 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForSelector("#run-connection");
       await walk.selectOption("#run-connection", { index: 1 });
 
-      const runBuilder = await walk.innerText("main");
-      expect(runBuilder).toContain(
-        "Egma runs the full suite. Individual tests cannot be picked here.",
+      expect(await runBuilder.innerText()).toContain(
+        "Run one test suite against one agent.",
       );
       expect(
-        await walk
+        await runBuilder
           .getByRole("checkbox", {
             name: "Include Reschedules a booked appointment",
           })
@@ -3180,14 +3222,27 @@ describe("the complete product, walked in order in a second project", () => {
   it(
     "opens the run, which lists the simulation it wrote",
     async () => {
+      const simulationsRead = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname ===
+            `/v1/runs/${runIdOf(runAddress)}/simulations`,
+      );
       await walk.goto(runAddress);
       // The section heading is present before its request finishes. Wait for
       // the row that proves the simulations response has landed, so every
       // assertion below reads the settled page rather than its loading shell.
       const row = walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first();
       await row.waitFor();
+      const simulationsResponse = await simulationsRead;
+      expect(simulationsResponse.status()).toBe(200);
+      const listed = (await simulationsResponse.json()) as {
+        simulations: readonly { id: string }[];
+      };
+      const simulation = listed.simulations[0];
+      expect(simulation, "the run wrote its one simulation").toBeDefined();
 
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
@@ -3198,7 +3253,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("The Support line");
       expect(shown).toContain("Retell staging");
 
-      conversation = (await row.getAttribute("href")) ?? "";
+      conversation = `${new URL(runAddress).pathname}/simulations/${simulation?.id ?? ""}`;
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
     },
     SETTLE,
@@ -3207,13 +3262,17 @@ describe("the complete product, walked in order in a second project", () => {
   it(
     "opens that conversation's own evidence, before anything has conducted it",
     async () => {
-      await walk.goto(`${origin}${conversation}`);
-      const evidence = walk.getByRole("dialog", {
-        name: "Transcript and audio",
+      await walk.goto(runAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .waitFor({ timeout: 30_000 });
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const evidence = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
       });
-      await evidence.waitFor({ timeout: 30_000 });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       const shown = await walk.innerText("main");
@@ -3223,7 +3282,9 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Impatient Rita");
       // And nothing has happened yet, said as an absence rather than as a
       // failure or as an empty space that could mean either.
-      expect(await evidence.innerText()).toContain("No transcript was filed");
+      expect(await evidence.innerText()).toContain(
+        "No transcript was filed for this simulation.",
+      );
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -3260,13 +3321,17 @@ describe("the complete product, walked in order in a second project", () => {
       expect(filed.traceId).toBe(traceIdOfSimulation(landed));
       await finishExpectedBehaviorsGrade(filed.traceId);
 
-      await walk.goto(`${origin}${conversation}`);
-      const evidence = walk.getByRole("dialog", {
-        name: "Transcript and audio",
+      await walk.goto(runAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .waitFor({ timeout: 30_000 });
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const evidence = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
       });
-      await evidence.waitFor({ timeout: 30_000 });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       await expect
@@ -3278,23 +3343,27 @@ describe("the complete product, walked in order in a second project", () => {
 
       // One trace, one current grade, seven nested assertions, and one mean.
       // With one selected grader the display-only mean is that grader's score.
-      const summary = walk.getByRole("region", { name: "Simulation summary" });
+      await walk.getByRole("tab", { name: "Results summary" }).click();
+      const results = walk.getByRole("tabpanel", { name: "Results summary" });
+      const summary = results.getByRole("region", { name: "Simulation summary" });
       expect(await summary.innerText()).toMatch(/Combined score\s+0\.86/u);
 
-      const grades = walk.getByRole("region", { name: "Grades" });
+      const grades = results.getByRole("region", { name: "Grader results" });
       const expected = grades.getByRole("region", {
         name: "Expected behaviors",
       });
       expect(await expected.innerText()).toContain(
-        "Score 0.86 · pass threshold 0.62",
+        "Pass threshold 0.62 · Definition v1",
       );
-      expect(await expected.innerText()).toContain(
-        "Six of seven expected behaviors were present.",
-      );
-      const assertionDetails = expected
-        .getByText("Assertion details")
-        .locator("..");
-      expect(await assertionDetails.getByRole("listitem").count()).toBe(7);
+      // The combined summary is rounded for scanning. A grader result keeps
+      // the exact stored score.
+      expect(await expected.innerText()).toContain("Final score 0.857");
+      expect(
+        await expected
+          .getByRole("table", { name: "Expected behaviors results" })
+          .getByRole("row")
+          .count(),
+      ).toBe(8);
       expect(await expected.innerText()).toContain(expectedBehaviors[0]);
       expect(await expected.innerText()).toContain(expectedBehaviors[6]);
       expect(await expected.innerText()).toContain(
@@ -3306,7 +3375,7 @@ describe("the complete product, walked in order in a second project", () => {
         "gate",
         "Latency",
       ]) {
-        expect((await grades.innerText()).toLowerCase()).not.toContain(
+        expect((await expected.innerText()).toLowerCase()).not.toContain(
           retired.toLowerCase(),
         );
       }
@@ -3344,6 +3413,8 @@ describe("the complete product, walked in order in a second project", () => {
      * arriving is proved rather than assumed.
      */
     readonly says: string;
+    /** A route that opens a named sheet reads that sheet, not the page behind it. */
+    readonly dialog?: string;
     /**
      * Where this address ends up, when that is not itself.
      *
@@ -3471,9 +3542,10 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Create a run",
         address: at("runs", "new"),
-        // The whole page waits on the agents read, so its own sentence is
-        // drawn only after that read answers.
-        says: "Run every current test in one suite against one agent and one connection.",
+        // The route opens a sheet over the runs list. Reading `main` here would
+        // only prove that the list behind it loaded.
+        dialog: "Create a run",
+        says: "Run one test suite against one agent.",
       },
       {
         what: "one run",
@@ -3540,8 +3612,11 @@ describe("the complete product, walked in order in a second project", () => {
         timeout: 30_000,
       })
       .toContain("Support");
+    const surface = route.dialog === undefined
+      ? which.locator("main")
+      : which.getByRole("dialog", { name: route.dialog });
     await expect
-      .poll(() => which.innerText("main").catch(() => ""), { timeout: 30_000 })
+      .poll(() => surface.innerText().catch(() => ""), { timeout: 30_000 })
       .toContain(route.says);
   }
 
@@ -4157,18 +4232,17 @@ describe("the complete product, walked in order in a second project", () => {
     it(
       "keeps one status meaning on a list and on the page it links to",
       async () => {
-        const theRunsStatus = 'main span[title^="The run finished"]';
         const stateOf = async (): Promise<string> =>
           walk
-            .locator(theRunsStatus)
+            .locator('main [data-state-mark="complete"]')
             .first()
             .evaluate((element) => {
               if (element.getBoundingClientRect().height === 0) return "";
+              const parent = element.parentElement;
               return JSON.stringify({
-                meaning: element.getAttribute("title"),
-                text: element.textContent?.trim(),
-                moving:
-                  element.querySelector('[data-motion="active"]') !== null,
+                mark: element.getAttribute("data-state-mark"),
+                text: parent?.textContent?.trim().toLowerCase(),
+                moving: element.getAttribute("data-motion") === "active",
               });
             })
             .catch(() => "");
@@ -4210,7 +4284,10 @@ describe("the complete product, walked in order in a second project", () => {
     it(
       "carries a retuned token into pages that share only their components",
       async () => {
-        for (const address of [at("agents"), at("runs")]) {
+        // Runs intentionally gives its workbench choices a local 56px floor;
+        // Agents and Personas are both shared DataTable lists, so they are the
+        // honest pair for proving the root table token propagates.
+        for (const address of [at("agents"), at("personas")]) {
           await walk.goto(address);
           await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
 
@@ -4317,13 +4394,17 @@ describe("the complete product, walked in order in a second project", () => {
         expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(field);
 
         // And a transcript is dense: its turns are lines rather than cards.
-        await walk.goto(`${origin}${conversation}`);
-        const evidence = walk.getByRole("dialog", {
-          name: "Transcript and audio",
+        await walk.goto(runAddress);
+        await walk
+          .getByRole("button", { name: /Reschedules a booked appointment/u })
+          .first()
+          .waitFor({ timeout: 30_000 });
+        await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+        const evidence = walk.getByRole("tabpanel", {
+          name: "Transcript & audio",
         });
-        await evidence.waitFor({ timeout: 30_000 });
         await evidence
-          .getByRole("heading", { name: "Transcript", exact: true })
+          .getByRole("heading", { name: "Conversation", exact: true })
           .waitFor();
         await expect
           .poll(() => evidence.innerText(), { timeout: 30_000 })
@@ -4695,23 +4776,26 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /**
-     * The recording controls, which are the browser's own.
-     *
-     * Egma does not draw a scrubber; it renders `<audio controls>` and Chrome
-     * draws one that is already keyboard-operable. What egma can get wrong is
-     * putting it somewhere the keyboard cannot reach, so what is asserted is
-     * that it is in the tab order and takes the focus.
-     */
+    /** The custom play and waveform controls remain keyboard reachable. */
     it.skipIf(!storage.available)(
       "reaches the recording controls with the keyboard",
       async () => {
-        await walk.goto(`${origin}${conversation}`);
-        const player = walk.getByLabel("Simulation recording");
-        await player.waitFor({ timeout: 30_000 });
+        await walk.goto(runAddress);
+        await walk
+          .getByRole("button", { name: /Reschedules a booked appointment/u })
+          .first()
+          .waitFor({ timeout: 30_000 });
+        await walk.getByRole("tab", { name: "Transcript & audio" }).click();
 
-        expect(await player.getAttribute("controls")).not.toBeNull();
-        await player.focus();
+        const play = walk.getByRole("button", { name: "Play recording" });
+        const seek = walk.getByRole("slider", { name: "Seek the recording" });
+        await play.waitFor({ timeout: 30_000 });
+        await seek.waitFor({ timeout: 30_000 });
+        await expect
+          .poll(() => seek.isEnabled(), { timeout: 30_000 })
+          .toBe(true);
+
+        await play.focus();
         expect(
           await walk.evaluate(() => {
             const root = Reflect.get(globalThis, "document") as {
@@ -4719,7 +4803,17 @@ describe("the complete product, walked in order in a second project", () => {
             };
             return root.activeElement?.tagName ?? "";
           }),
-        ).toBe("AUDIO");
+        ).toBe("BUTTON");
+
+        await seek.focus();
+        expect(
+          await walk.evaluate(() => {
+            const root = Reflect.get(globalThis, "document") as {
+              readonly activeElement: { readonly tagName: string } | null;
+            };
+            return root.activeElement?.tagName ?? "";
+          }),
+        ).toBe("INPUT");
       },
       SETTLE,
     );
@@ -4879,7 +4973,7 @@ describe("the complete product, walked in order in a second project", () => {
         "Northside Ford (deleted)",
       );
       await walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first()
         .waitFor();
     },

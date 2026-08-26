@@ -17,7 +17,7 @@ import { ProductStatePage } from "../../../../ui/shell.tsx";
 export default function RunsLoading() {
   return (
     <div data-slot="route-loading">
-      <ProductStatePage title="Simulation runs">
+      <ProductStatePage title="Runs">
         <Loading what="this project's runs" />
       </ProductStatePage>
     </div>

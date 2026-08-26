@@ -335,6 +335,13 @@ export const simulation = pgTable(
      */
     endingReason: text("ending_reason"),
     /**
+     * The simulator's safe, credential-redacted explanation of a failed run.
+     * The ending reason classifies the failure; this tells a person what to
+     * fix. It is null for every non-failed simulation and for older failures
+     * that landed before this fact was retained.
+     */
+    failureDetail: text("failure_detail"),
+    /**
      * Claim bookkeeping. The claimant is the simulator instance's own name
      * for itself — an operational label, never an identity in egma's tables
      * — and the heartbeat is what the orphan sweep reads.
@@ -352,6 +359,12 @@ export const simulation = pgTable(
     endedAt: moment("ended_at"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
+    /**
+     * Sample zero of that recording on the same wall clock as the transcript
+     * spans. Null for simulations without audio and for historical recordings
+     * written before the simulator reported this origin.
+     */
+    recordingStartedAt: moment("recording_started_at"),
     /**
      * How many transcript turns the conversation reached, both speakers
      * counted — a terminal fact off the report, kept on the row because it is
@@ -418,6 +431,10 @@ export const simulation = pgTable(
         else ${table.endingReason} is null
       end`,
     ),
+    check(
+      "simulation_failure_detail_agrees",
+      sql`${table.failureDetail} is null or ${table.status} = 'failed'`,
+    ),
     // The three claim columns are one fact and arrive together.
     check(
       "simulation_claim_columns_agree",
@@ -467,6 +484,16 @@ export const simulation = pgTable(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
         or ${table.recordingReference} is null`,
+    ),
+    // Added separately from the older recording checks so this remains an
+    // additive migration. A historical recording may have no origin, but an
+    // origin can never stand without the recording whose sample zero it names.
+    check(
+      "simulation_recording_origin_agrees",
+      sql`${table.recordingStartedAt} is null
+        or (${table.endedAt} is not null
+          and ${table.modality} = 'voice'
+          and ${table.recordingReference} is not null)`,
     ),
     // The two summary facts are terminal facts too; a check of their own
     // beside the report's rather than a rewrite of it, because they arrived

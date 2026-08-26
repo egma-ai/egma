@@ -72,6 +72,7 @@ export function reportPathFor(simulationId: string): string {
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
   readonly status: "running" | "completed" | "failed" | "canceled";
+  readonly reason: string | null;
   readonly facts?: {
     readonly ending: string;
     readonly started_at: string;
@@ -79,6 +80,8 @@ type StatusEvent = {
     readonly turn_count: number;
     readonly audio: {
       readonly recording: string;
+      /** Absent only for reports from simulators predating this fact. */
+      readonly started_at?: string;
     } | null;
     readonly provider_reference: string | null;
     /**
@@ -152,7 +155,12 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
       : { providerReference: facts.provider_reference }),
     ...(facts.audio === null
       ? {}
-      : { recordingReference: facts.audio.recording }),
+      : {
+          recordingReference: facts.audio.recording,
+          ...(facts.audio.started_at === undefined
+            ? {}
+            : { recordingStartedAt: new Date(facts.audio.started_at) }),
+        }),
     // Left off where the document left it off, rather than landed as three
     // empty lists: absent is the report saying nobody was ever asked, and
     // empty is the asking happening and nothing coming back. Writing one for
@@ -468,8 +476,12 @@ async function applyLanding(
       // a schema drift fails a request, never the process.
       throw new Error(`"${ending}" is not a failed ending the wire carries`);
     }
+    if (event.reason === null) {
+      throw new Error("a failed simulation report has no failure detail");
+    }
     return failSimulation(standing.auth, standing.id, conductor, {
       reason,
+      detail: event.reason,
       ...facts,
     });
   }

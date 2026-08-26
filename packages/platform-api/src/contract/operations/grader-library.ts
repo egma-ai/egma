@@ -16,6 +16,10 @@ import {
 
 const stringSchema = { type: "string" } as const;
 const projectQuery = parameters({ projectId: stringIdSchema });
+const definitionReadQuery = parameters({
+  projectId: stringIdSchema,
+  definitionVersion: { type: "integer", minimum: 1 },
+});
 const definitionParams = parameters(
   { graderDefinitionId: stringIdSchema },
   ["graderDefinitionId"],
@@ -74,7 +78,7 @@ export const graderLibraryOperations = {
     summary: "Get one grader library entry",
     tag: "Graders",
     security: "credentialed",
-    request: { params: definitionParams, query: projectQuery },
+    request: { params: definitionParams, query: definitionReadQuery },
     responses: {
       200: {
         description: "The grader definition and its current-project use state.",

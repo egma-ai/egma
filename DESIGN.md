@@ -219,10 +219,11 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
 - Every page has a title bar of its own, the same height as the wordmark bar, holding the page title alone. A purpose statement, where a form or settings page needs one, is the first quiet line of the page body; list screens carry none (read off the boards, 2026-08-23). Page actions are not in that bar.
-- A page below a section carries the trail into its record in that bar, and **the trail never repeats the title beside it**. A page passes the real trail, ending with the record's own name; the bar draws every step but the last, because the heading beside it is that last step. There is no separator after the step that is left. (Read off the boards, 2026-08-23.)
+- A page below a section carries one uniform trail into its record in that bar. A page passes the real trail, ending with the record's own name; `PageNavigation` draws that final step as the page's only `h1`. Every segment and separator uses the 14px / 400 step, so the current page never jumps in size or weight. Parent steps are muted links, `/` separates every adjacent step, pointer hover reveals an underline, and keyboard focus uses the standard two-pixel Ember indicator. Page changes are immediate and carry no transition. (Developer decision, 2026-08-26, from the selected Paper PageHeader refinement.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
 - The toolbar row is 52px, and the last 16px of it is the gap to whatever it stands over. The page body adds no gutter of its own under a toolbar row, so a list's panel begins 132px down the page: the 56px title bar, the 24px gutter, and the 52px row. A page whose header draws no toolbar row keeps the 24px gutter, because then nothing above it carries one. (Read off `71N-0` and `6ZM-0` on `6ZJ-0`, 2026-08-23; the application had been drawing the panel at 156.)
-- Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
+- Page content is held to the page maximum and centered when the viewport has spare width. The title bar, toolbar and page body share that frame, so both outer gutters are equal and the title stays aligned with the first column below it. (Developer decision, 2026-08-26, from the Runs alignment review.)
+- A run detail is a bounded workbench on desktop. The run facts, simulation list, selected-simulation heading and tab rail stay in place; only the active Results or Transcript panel scrolls. At 900px and below it returns to normal document flow so the stacked run facts do not consume the usable viewport. (Developer decision, 2026-08-26, from the run-detail results review.)
 
 The measurements, all of them theme values:
 
@@ -259,6 +260,7 @@ The measurements, all of them theme values:
 - Pointer press feedback uses a subtle scale. Keyboard activation is immediate.
 - A link inside a table cell is underlined in the text colour and turns Ember under a pointer.
 - **A segmented control's chosen segment carries a two-pixel Ember line on its top edge**, over a plain fill, plus weight 500 so the state is not colour alone. It is the narrow active edge this file already asks Ember for, moved to the edge a person reads first. A wash fill is not used here: the wash is the primary action's own surface, and a segment wearing it reads as a button to press rather than a choice already made. (Developer decision, 2026-08-24.)
+- A rail tab at the top of a page or panel carries its two-pixel Ember line on the bottom edge, where the tab meets its content. This does not change the segmented control above. (Developer decision, 2026-08-26, from the run-detail review.)
 
 ### Forms and Settings
 
@@ -286,6 +288,12 @@ The measurements, all of them theme values:
 - Empty, loading, failed, and filtered-empty are separate states.
 - The empty state is a solid Pure Paper card inside one hairline, with 40px of padding, a 16px weight-500 title, one 14px supporting sentence, and the page's action under them as the wash button. It is a fact about the project rather than about egma, so it sits on the page like anything else. Loading, failed, and not-available are interruptions and stay set apart from it. (Read off `AN8-0`, 2026-08-23.)
 - A list's date column is the absolute short date — `Aug 16, 2026` — in tabular numerals, with the exact instant kept on the element. A relative age belongs in a sentence ("started just now", "last received 2 min ago") and never in a column: a column of ages cannot be scanned, and two rows a minute apart read the same for the whole of the first hour. One column names a moment rather than a day, and it keeps its precision in the same shape. (Read off `6ZJ-0`, `8TQ-0` and `8P4-0`, 2026-08-23.)
+
+### Run evidence
+
+- Results begin with one compact row above every grader: Combined score, Duration, Total turns and P90 turn latency. Keep all four facts on one desktop row, stacking each fact's label over its value when the detail pane is narrow. The latency is the platform's recorded `turn_response_latency.p90`, shown in milliseconds with at most three significant digits; mark it as partial when the trace was truncated. Do not repeat the full latency list or the frozen grading plan on this surface; each grader card already carries its definition and pass threshold. (Developer decision, 2026-08-26.)
+- Expected-behavior tables say `Expected behavior`, `Grader result` and `Final score`. A grader result is evidence returned by the grader, not a claim about which model produced it. (Developer decision, 2026-08-26.)
+- A highlighted transcript event already means it is current. Do not repeat that state with a `Playing` label. Its timestamp remains visible and selecting the event seeks the shared recording. Recording-backed timestamps use the recorded media clock origin when one was captured; historical evidence without that origin stays on its existing trace clock rather than using a guessed offset. (Developer decision, 2026-08-26.)
 
 ### Side sheets
 

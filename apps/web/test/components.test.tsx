@@ -395,12 +395,22 @@ describe("nested page navigation", () => {
     const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     const runs = within(navigation).getByRole("link", { name: "Runs" });
     const run = within(navigation).getByRole("link", { name: "Nightly smoke" });
-    const current = within(navigation).getByText("Simulation 01");
+    const current = within(navigation).getByRole("heading", {
+      name: "Simulation 01",
+    });
 
     expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
     expect(run.getAttribute("href")).toBe("/projects/prj_1/runs/run_1");
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.closest("a")).toBeNull();
+    expect(current.classList.contains("text-sm")).toBe(true);
+    expect(current.classList.contains("font-normal")).toBe(true);
+    expect(runs.classList.contains("no-underline")).toBe(true);
+    expect(runs.classList.contains("pointer-hover:underline")).toBe(true);
+    expect(navigation.querySelector("ol")?.classList.contains("flex-wrap")).toBe(true);
+    expect(current.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(runs.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(within(navigation).getAllByText("/")).toHaveLength(2);
   });
 
   it("lets the breadcrumb own section context instead of repeating the eyebrow", () => {
@@ -415,8 +425,12 @@ describe("nested page navigation", () => {
       />,
     );
 
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(screen.getAllByText("Runs")).toHaveLength(1);
-    expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
+    expect(
+      within(navigation).getByRole("heading", { name: "Nightly smoke" }),
+    ).toBeTruthy();
+    expect(navigation.textContent).toBe("Runs/Nightly smoke");
   });
 
   /**
@@ -1423,15 +1437,7 @@ describe("what the router draws while a page is still coming", () => {
     expect(within(crumbs).getByRole("link", { name: "Tests" }).getAttribute("href")).toBe(
       "/projects/prj_1/tests",
     );
-    /*
-     * The current page is the `<h1>` beside the trail rather than a second copy
-     * inside it. `PageHeader` draws both in one 56px bar, so a trail that
-     * ended with the page said its name twice — "Tests / Test   Test" — which
-     * is not what `9VT-0` and `B9M-0` draw. The fallback and the page it
-     * stands in for both stop the trail at the parent (ui-refresh ticket 05);
-     * the shape they have to share is what this case is about, and they still
-     * share it.
-     */
+    /* The current trail step is the page's one `<h1>`. */
     expect(screen.getByRole("heading", { name: "Test" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });

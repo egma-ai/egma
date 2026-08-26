@@ -370,7 +370,13 @@ function thresholdValue(value: string): number | null {
  * read as the sheet's own introduction instead of as this grader's. A grader
  * with no description has no row: an empty lane says less than nothing.
  */
-function LibraryFacts({ entry }: { readonly entry: GraderLibraryEntry }) {
+function LibraryFacts({
+  entry,
+  historical,
+}: {
+  readonly entry: GraderLibraryEntry;
+  readonly historical: boolean;
+}) {
   return (
     <Facts>
       {entry.description === null ? null : (
@@ -383,9 +389,13 @@ function LibraryFacts({ entry }: { readonly entry: GraderLibraryEntry }) {
       <Fact label="Modalities">
         <GraderModalityChips modalities={entry.modalities} />
       </Fact>
-      <Fact label="Project use">
-        <ProjectUseChip active={entry.activeProjectGraderId !== null} />
-      </Fact>
+      {historical ? (
+        <Fact label="Definition version">v{entry.definitionVersion}</Fact>
+      ) : (
+        <Fact label="Project use">
+          <ProjectUseChip active={entry.activeProjectGraderId !== null} />
+        </Fact>
+      )}
     </Facts>
   );
 }
@@ -418,22 +428,28 @@ function ReadsSection({ entry }: { readonly entry: GraderLibraryEntry }) {
 function DefinitionRead({
   projectId,
   definitionId,
+  definitionVersion,
   children,
 }: {
   readonly projectId: string;
   readonly definitionId: string;
+  readonly definitionVersion?: number;
   readonly children: (entry: GraderLibraryEntry) => ReactNode;
 }) {
   const { answer, reload } = useProjectRead<GraderLibraryEntry>(
     (selectedProjectId) =>
       platformAnswer(
         getGraderLibraryEntry(
-          { graderDefinitionId: definitionId, projectId: selectedProjectId },
+          {
+            graderDefinitionId: definitionId,
+            projectId: selectedProjectId,
+            ...(definitionVersion === undefined ? {} : { definitionVersion }),
+          },
           { client: platformClient },
         ),
       ),
     projectId,
-    definitionId,
+    `${definitionId}:${String(definitionVersion ?? "current")}`,
   );
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
@@ -461,6 +477,7 @@ export function LibraryGraderSheet({
   projectId,
   open,
   mode: opened = "details",
+  definitionVersion,
   mayAuthor,
   onClose,
   onUsed,
@@ -477,6 +494,8 @@ export function LibraryGraderSheet({
    * form and does not make them press past the review to reach it.
    */
   readonly mode?: "details" | "use";
+  /** An immutable historical definition. Historical reads have no live actions. */
+  readonly definitionVersion?: number;
   readonly mayAuthor: boolean;
   readonly onClose: () => void;
   readonly onUsed: () => void;
@@ -494,17 +513,24 @@ export function LibraryGraderSheet({
             {graderDefinitionDisplayName(entry.id, entry.name)}
           </SheetTitle>
           <SheetDescription>
-            {mode === "details"
+            {definitionVersion !== undefined
+              ? "The immutable grader definition used for this recorded result."
+              : mode === "details"
               ? "Review this grader before choosing it for the project."
               : "Choose how this project will use the grader."}
           </SheetDescription>
         </SheetHeader>
-        <DefinitionRead projectId={projectId} definitionId={entry.id}>
+        <DefinitionRead
+          projectId={projectId}
+          definitionId={entry.id}
+          definitionVersion={definitionVersion}
+        >
           {(read) =>
-            mode === "details" ? (
+            definitionVersion !== undefined || mode === "details" ? (
               <LibraryDetails
                 entry={read}
-                mayAuthor={mayAuthor}
+                historical={definitionVersion !== undefined}
+                mayAuthor={mayAuthor && definitionVersion === undefined}
                 onUse={() => setMode("use")}
                 onEditActive={onEditActive}
               />
@@ -525,11 +551,13 @@ export function LibraryGraderSheet({
 
 function LibraryDetails({
   entry,
+  historical,
   mayAuthor,
   onUse,
   onEditActive,
 }: {
   readonly entry: GraderLibraryEntry;
+  readonly historical: boolean;
   readonly mayAuthor: boolean;
   readonly onUse: () => void;
   readonly onEditActive: (projectGraderId: string) => void;
@@ -537,7 +565,7 @@ function LibraryDetails({
   return (
     <>
       <SheetBody>
-        <LibraryFacts entry={entry} />
+        <LibraryFacts entry={entry} historical={historical} />
         <ReadsSection entry={entry} />
         {entry.settingDefinitions.length === 0 ? null : (
           <Section title="Settings">
@@ -562,7 +590,7 @@ function LibraryDetails({
         )}
       </SheetBody>
       <SheetFooter>
-        {entry.activeProjectGraderId === null ? (
+        {historical ? null : entry.activeProjectGraderId === null ? (
           <Button
             type="button"
             size="lg"

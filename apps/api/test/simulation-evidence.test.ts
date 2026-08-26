@@ -119,6 +119,65 @@ async function writeGrade(
   await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
 }
 
+describe("one simulation's recording clock", () => {
+  it("returns the captured origin and leaves historical or absent origins null", async () => {
+    api = await createApi("simulation_recording_origin", { traceStore: true });
+    const customer = await signUp(
+      api.app,
+      "simulation-recording-origin@acme.example",
+      "Acme",
+    );
+    const standing = {
+      key: await projectKeyFor(api.app, customer),
+      auth: contextFor(customer, "admin"),
+    };
+    const origin = new Date("2026-08-05T09:00:17.123Z");
+    const run = await aConductedRun(api.app, standing, {
+      reference: "recordings/clock-origin.wav",
+      recordingStartedAt: origin,
+    });
+
+    const heard = await request(
+      api.app,
+      "GET",
+      `/v1/simulations/${run.heard}`,
+      standing.key,
+    );
+    expect(heard.statusCode, JSON.stringify(heard.body)).toBe(200);
+    expect(heard.body).toMatchObject({
+      hasRecording: true,
+      recordingStartedAt: origin.toISOString(),
+    });
+
+    const silent = await request(
+      api.app,
+      "GET",
+      `/v1/simulations/${run.silent}`,
+      standing.key,
+    );
+    expect(silent.statusCode, JSON.stringify(silent.body)).toBe(200);
+    expect(silent.body).toMatchObject({
+      hasRecording: false,
+      recordingStartedAt: null,
+    });
+
+    const historical = await aConductedRun(api.app, standing, {
+      reference: "recordings/before-clock-origins.wav",
+    });
+    const olderEvidence = await request(
+      api.app,
+      "GET",
+      `/v1/simulations/${historical.heard}`,
+      standing.key,
+    );
+    expect(olderEvidence.statusCode, JSON.stringify(olderEvidence.body)).toBe(200);
+    expect(olderEvidence.body).toMatchObject({
+      hasRecording: true,
+      recordingStartedAt: null,
+    });
+  });
+});
+
 describe("one simulation's grades", () => {
   it("shows current grades, append-only history, a combined score, and whole-plan regrade", async () => {
     const { standing, run } = await aCustomerWhoRan("simulation_grade_history");

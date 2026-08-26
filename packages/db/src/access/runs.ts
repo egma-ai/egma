@@ -147,6 +147,7 @@ export type Simulation = {
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
+  readonly failureDetail: string | null;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
@@ -154,6 +155,7 @@ export type Simulation = {
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
   readonly recordingReference: string | null;
+  readonly recordingStartedAt: Date | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly mockToolCoverage: MockToolCoverage | null;
@@ -172,6 +174,7 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
+  readonly recordingStartedAt?: Date | undefined;
   readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
@@ -183,6 +186,7 @@ export type SimulationReport = SimulationSummaryFacts & {
 
 export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
+  readonly detail: string;
 };
 
 const RUN_COLUMNS = {
@@ -219,6 +223,7 @@ const SIMULATION_COLUMNS = {
   modality: simulation.modality,
   status: simulation.status,
   endingReason: simulation.endingReason,
+  failureDetail: simulation.failureDetail,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
   heartbeatAt: simulation.heartbeatAt,
@@ -226,6 +231,7 @@ const SIMULATION_COLUMNS = {
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
   recordingReference: simulation.recordingReference,
+  recordingStartedAt: simulation.recordingStartedAt,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
@@ -281,6 +287,9 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
+  }
+  if (facts.recordingStartedAt !== undefined) {
+    write.recordingStartedAt = facts.recordingStartedAt;
   }
   if (facts.mockToolCoverage !== undefined) {
     write.mockToolCoverage = {
@@ -1905,6 +1914,7 @@ export async function failSimulation(
     write: {
       status: "failed",
       endingReason: failure.reason,
+      failureDetail: failure.detail,
       ...summaryFactsWrite(failure),
     },
   });

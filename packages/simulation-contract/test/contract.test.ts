@@ -551,7 +551,7 @@ describe("the two schemas, as one contract", () => {
     expect(stripped[2]).toEqual(stripped[0]);
   });
 
-  it("keeps a voice recording without a second sample-rate fact", async () => {
+  it("keeps a voice recording with its clock origin and no second sample-rate fact", async () => {
     const report = await readJson(
       "fixtures",
       "report",
@@ -563,6 +563,7 @@ describe("the two schemas, as one contract", () => {
     if (!event) throw new Error("the completed report has no event");
     const facts = event.facts as Record<string, unknown>;
     const audio = facts.audio as Record<string, unknown>;
+    expect(audio.started_at).toBe("2026-08-05T09:00:17.123456789Z");
 
     delete audio.measured_sample_rate_hz;
     expect(
@@ -579,6 +580,35 @@ describe("the two schemas, as one contract", () => {
         params: { additionalProperty: "measured_sample_rate_hz" },
       }),
     );
+
+    delete audio.measured_sample_rate_hz;
+    audio.started_at = "not-an-instant";
+    expect(validators.report(report)).toBe(false);
+    expect(validators.report.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "/events/0/facts/audio/started_at",
+        keyword: "format",
+      }),
+    );
+  });
+
+  it("still accepts a recording reported before the clock origin existed", async () => {
+    const report = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-unmocked-nothing-discovered.json",
+    );
+    const event = (report.events as Record<string, unknown>[])[0];
+    expect(event).toBeDefined();
+    if (!event) throw new Error("the completed report has no event");
+    const facts = event.facts as Record<string, unknown>;
+    const audio = facts.audio as Record<string, unknown>;
+    expect(audio).not.toHaveProperty("started_at");
+    expect(
+      validators.report(report),
+      JSON.stringify(validators.report.errors),
+    ).toBe(true);
   });
 
   it("gives each terminal status its own endings, sharing none", () => {

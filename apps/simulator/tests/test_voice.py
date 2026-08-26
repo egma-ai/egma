@@ -390,7 +390,7 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
     assert audio is not None
 
     recording = (tmp_path / audio["recording"]).read_bytes()
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "started_at"}
     assert channels_of(recording)[2] > 0
 
     # Every transcript turn was carried on its own speaker's channel and on
@@ -494,6 +494,7 @@ async def test_every_span_points_at_the_audio_it_names(
     assert inserted_gap
     audio = observed.assembled.audio
     assert audio is not None
+    assert audio["started_at"] == "2027-01-15T08:00:00.000000000Z"
     persona_audio, agent_audio, band = channels_of(
         (tmp_path / audio["recording"]).read_bytes()
     )

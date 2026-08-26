@@ -265,7 +265,7 @@
       "type": ["string", "null"]
     },
     "audio_recording": {
-      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; the report stores only the recording reference.",
+      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback. New simulators also report the recording clock origin; it stays optional so a control plane can still accept an in-flight report from an older simulator during an additive rollout.",
       "type": "object",
       "additionalProperties": false,
       "required": ["recording"],
@@ -274,6 +274,11 @@
           "description": "An opaque reference to the Pipecat-captured, dual-channel recording the simulator wrote to the blob store — human on the first channel and agent on the second, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
           "type": "string",
           "minLength": 1
+        },
+        "started_at": {
+          "description": "The RFC 3339 instant at sample zero of the recording. Transcript span timestamps use this same clock, so their playback offsets are computed from this origin instead of guessed from a provider event or the first observed span. Absent only on reports produced before this fact existed.",
+          "type": "string",
+          "format": "date-time"
         }
       }
     }

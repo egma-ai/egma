@@ -1409,8 +1409,23 @@ export function TestsGrid(props: GridProps) {
         <tbody>
           {tests.length === 0 && entry === null ? (
             <tr>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                One situation to put the agent in…
+              <td
+                className={cn(
+                  CELL,
+                  PAD,
+                  TEXT,
+                  "text-faint",
+                  mayAuthor && "cursor-text",
+                )}
+                onClick={mayAuthor ? openEntry : undefined}
+              >
+                <button
+                  className="w-full cursor-text bg-transparent p-0 text-left text-inherit disabled:cursor-default"
+                  type="button"
+                  disabled={!mayAuthor}
+                >
+                  One situation to put the agent in…
+                </button>
               </td>
               <td className={cn(CELL, PAD, TEXT, "text-faint")}>
                 …what should happen…

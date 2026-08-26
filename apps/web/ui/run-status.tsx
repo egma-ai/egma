@@ -79,9 +79,9 @@ export type StateMarkKind =
 /**
  * A second, non-colour signal beside every state word.
  *
- * The word remains the source of meaning. The small line mark makes nearby
- * badges easier to scan and keeps their difference visible without asking a
- * reader to learn the temporary green, amber, and red compatibility palette.
+ * The word remains the source of meaning. The same outline square anchors
+ * every status and keeps state marks distinct from radio controls and progress
+ * dots. Tone and text carry the difference between states.
  */
 export function StateMark({
   kind,
@@ -91,34 +91,13 @@ export function StateMark({
   readonly moving?: boolean;
 }) {
   return (
-    <svg
-      className="block size-3 flex-none"
+    <span
+      className="block size-2.5 flex-none border border-current bg-transparent"
       data-slot="state-mark"
       data-state-mark={kind}
       data-motion={moving ? "active" : undefined}
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.4}
       aria-hidden="true"
-      focusable="false"
-    >
-      {kind === "waiting" ? <circle cx="6" cy="6" r="3.75" /> : null}
-      {kind === "active" ? <path d="M6 2a4 4 0 1 1-4 4" /> : null}
-      {kind === "complete" ? <path d="m2.5 6 2.25 2.25L9.5 3.5" /> : null}
-      {kind === "stopped" || kind === "failed" ? (
-        <path d="m3 3 6 6M9 3 3 9" />
-      ) : null}
-      {kind === "not-requested" ? <path d="M3 6h6" /> : null}
-      {kind === "error" ? (
-        <>
-          <circle cx="6" cy="6" r="4" />
-          <path d="M6 3.5v3M6 8.5h.01" />
-        </>
-      ) : null}
-    </svg>
+    />
   );
 }
 
@@ -373,9 +352,17 @@ export function SimulationTally({
 }: {
   readonly counts: Readonly<Record<SimulationStatusWord, number>>;
 }) {
+  const label: Readonly<Record<SimulationStatusWord, string>> = {
+    queued: "queued",
+    claimed: "claimed",
+    running: "running",
+    completed: "completed",
+    failed: "execution failed",
+    canceled: "canceled",
+  };
   const said = (Object.keys(SIMULATION_STATUS_TONE) as SimulationStatusWord[])
     .filter((word) => (counts[word] ?? 0) > 0)
-    .map((word) => `${String(counts[word] ?? 0)} ${word}`);
+    .map((word) => `${String(counts[word] ?? 0)} ${label[word]}`);
   return (
     <span className="text-sm tabular-nums text-muted-foreground">
       {said.length === 0 ? "No simulations yet" : said.join(" · ")}
