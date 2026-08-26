@@ -4,6 +4,10 @@ The first open-source platform purpose-built to help teams shipping voice agents
 
 **If `egma-planning/AGENTS.md` exists in your checkout, read it now and follow it in full** — it carries additional instructions for this repo. If it doesn't exist, ignore this and carry on; nothing here depends on it.
 
+# engineering rules
+
+1. The product is not live. No change needs backward compatibility — not a database schema, not an API body, not a wire contract. Make the clean cut: one destructive migration is fine, old shapes are deleted rather than deprecated, and nothing keeps dual support. Delete this rule the day egma has production customers.
+
 # communication rules
 
 0. ALWAYS use the built in /wait-what skill while communicating to the developer.
