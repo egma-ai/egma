@@ -2477,10 +2477,10 @@ describe("the complete product, walked in order in a second project", () => {
   /**
    * **The run's own machinery word**, as against any conversation's.
    *
-   * A run's page holds four facts that must never be folded into one another,
+   * A run's page holds five facts that must never be folded into one another,
    * and two of them spell their words the same way: the run is `completed` and
    * so is each conversation that finished. The one this reads is the fact
-   * labelled `Run`, taken by its label rather than by a class a build hashes or
+   * labelled `Status`, taken by its label rather than by a class a build hashes or
    * by a sentence somebody may reword.
    */
   async function machineryOfTheRun(which: Page): Promise<string> {
@@ -3402,7 +3402,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(runAddress);
       await expect
         .poll(() => machineryOfTheRun(walk), { timeout: 30_000 })
-        .toBe("completed");
+        .toBe("Completed");
     },
     SETTLE,
   );
