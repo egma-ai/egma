@@ -16,13 +16,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import type { Answer, Refusal } from "../../../../lib/api.ts";
 import {
   graderDefinitionDisplayName,
-  graderModalitiesLabel,
   graderOwnerLabel,
-  graderTypeLabel,
-  scopeSummary,
+  productionScopeSummary,
+  simulationScopeSummary,
   type GraderLibraryEntry,
   type GraderLibraryPage,
   type ProjectGrader,
@@ -38,7 +38,7 @@ import { canAuthor } from "../../../../lib/roles.ts";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../ui/dialog.tsx";
 import { Refused } from "../../../../ui/form.tsx";
-import { MenuItem } from "../../../../ui/menu.tsx";
+import { MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
 import {
   Empty,
   Failure,
@@ -46,7 +46,7 @@ import {
   NotFound,
 } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
-import { RowMenu } from "../../../../ui/row-menu.tsx";
+import { DestructiveItem, RowMenu } from "../../../../ui/row-menu.tsx";
 import {
   AppShell,
   PageBody,
@@ -57,7 +57,11 @@ import {
 import {
   ActiveGraderSheet,
   CreateCustomGraderSheet,
+  GraderModalityChips,
+  GraderTypeChip,
   LibraryGraderSheet,
+  ProjectUseChip,
+  ScopeValue,
 } from "./grader-sheets.tsx";
 
 async function readAllProjectGraders(
@@ -127,9 +131,59 @@ export default function GradersPage() {
   );
 }
 
+/**
+ * The row's own name, and the thing that opens it.
+ *
+ * **A grader is read and edited in a sheet, so the row's name is a button
+ * rather than a link.** The boards open the sheet from anywhere on the row; a
+ * real control carrying the name is what makes that reachable by keyboard, and
+ * it takes the product's Ember focus ring from `globals.css` without asking.
+ * The name keeps the row's ordinary weight and turns Ember under a pointer,
+ * which is the feedback the shared table already gives a row somebody is
+ * pointing at.
+ *
+ * The row as a whole answers the pointer through the shared table's
+ * `onRowActivate`; this button stays because it is the keyboard path and the
+ * one control the accessibility tree holds for the action.
+ */
+function RowOpener({
+  name,
+  onOpen,
+}: {
+  readonly name: string;
+  readonly onOpen: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "cursor-pointer border-0 bg-transparent p-0",
+        "text-left text-sm text-foreground",
+        /* The cell leaves this button unclipped for its focus ring, so the
+         * truncation the cell gave up is carried here. */
+        "block max-w-full overflow-hidden text-ellipsis whitespace-nowrap",
+        "transition-colors duration-(--duration-hover) ease-out",
+        "pointer-hover:text-brand",
+        "motion-reduce:transition-none",
+      )}
+      onClick={onOpen}
+      type="button"
+    >
+      {name}
+    </button>
+  );
+}
+
+/** The score a simulation has to reach, as a measure: two places, tabular. */
+function PassThreshold({ value }: { readonly value: number }) {
+  return (
+    <span className="block text-right tabular-nums">{value.toFixed(2)}</span>
+  );
+}
+
 function activeColumns(
   mayAuthor: boolean,
   open: (grader: ProjectGrader) => void,
+  remove: (grader: ProjectGrader) => void,
 ): readonly Column<ProjectGrader>[] {
   return [
     {
@@ -137,64 +191,116 @@ function activeColumns(
       header: "Grader",
       primary: true,
       width: "240px",
-      cell: (grader) =>
-        graderDefinitionDisplayName(grader.graderDefinitionId, grader.name),
-    },
-    {
-      key: "owner",
-      header: "Owner",
-      width: "120px",
-      hideOnMobile: true,
-      cell: (grader) => graderOwnerLabel(grader.owner),
+      cell: (grader) => (
+        <RowOpener
+          name={graderDefinitionDisplayName(
+            grader.graderDefinitionId,
+            grader.name,
+          )}
+          onOpen={() => open(grader)}
+        />
+      ),
     },
     {
       key: "type",
       header: "Type",
-      width: "140px",
+      width: "160px",
       hideOnMobile: true,
-      cell: (grader) => graderTypeLabel(grader.type),
+      cell: (grader) => <GraderTypeChip type={grader.type} />,
     },
     {
-      key: "scope",
-      header: "Scope",
-      cell: (grader) => scopeSummary(grader.scope),
+      key: "modalities",
+      header: "Modalities",
+      width: "170px",
+      hideOnMobile: true,
+      cell: (grader) => (
+        <GraderModalityChips modalities={grader.modalities} />
+      ),
+    },
+    /*
+     * **Two evidence sources, two columns.** They were one dot-joined sentence
+     * — "All simulations · Production off" — which cannot be scanned down a
+     * list: the eye has to read past the first half of every row to find the
+     * second. Each has its own lane now, and each says one word where it can.
+     */
+    {
+      key: "simulations",
+      header: "Simulations",
+      cell: (grader) => (
+        <ScopeValue value={simulationScopeSummary(grader.scope)} />
+      ),
+    },
+    {
+      key: "production",
+      header: "Production",
+      width: "130px",
+      cell: (grader) => (
+        <ScopeValue value={productionScopeSummary(grader.scope)} />
+      ),
     },
     {
       key: "threshold",
       header: "Pass threshold",
-      width: "150px",
-      mono: true,
-      cell: (grader) => grader.passThreshold.toFixed(2),
+      width: "140px",
+      cell: (grader) => <PassThreshold value={grader.passThreshold} />,
     },
     {
-      key: "action",
-      header: "Actions",
+      key: "actions",
+      header: "Row actions",
       action: true,
-      cell: (grader) => (
-        <RowMenu
-          label={`Open the menu for ${graderDefinitionDisplayName(
-            grader.graderDefinitionId,
-            grader.name,
-          )}`}
-        >
-          {(close) => (
-            <MenuItem
-              onClick={() => {
-                close();
-                open(grader);
-              }}
-            >
-              {mayAuthor ? "View and edit" : "View details"}
-            </MenuItem>
-          )}
-        </RowMenu>
-      ),
+      cell: (grader) => {
+        const name = graderDefinitionDisplayName(
+          grader.graderDefinitionId,
+          grader.name,
+        );
+        return (
+          <RowMenu label={`Open the menu for ${name}`}>
+            {(close) => (
+              <>
+                <MenuItem
+                  onClick={() => {
+                    close();
+                    open(grader);
+                  }}
+                >
+                  {/* A viewer's sheet is read-only, and the item says so. */}
+                  {mayAuthor ? "Edit" : "View details"}
+                </MenuItem>
+                {/*
+                 * **Only a grader this project may drop offers to be dropped.**
+                 * Expected behaviors is not removable, so its menu is one item
+                 * rather than one item and a refusal.
+                 */}
+                {grader.removable ? (
+                  <>
+                    <MenuDivider />
+                    <DestructiveItem
+                      disabled={!mayAuthor}
+                      onClick={() => {
+                        close();
+                        remove(grader);
+                      }}
+                    >
+                      Remove grader
+                    </DestructiveItem>
+                  </>
+                ) : null}
+              </>
+            )}
+          </RowMenu>
+        );
+      },
     },
   ];
 }
 
 function libraryColumns(
+  mayAuthor: boolean,
   open: (entry: GraderLibraryEntry) => void,
+  use: (entry: GraderLibraryEntry) => void,
+  openActive: (projectGraderId: string) => void,
+  activeGraderOf: (projectGraderId: string) => ProjectGrader | undefined,
+  remove: (grader: ProjectGrader) => void,
 ): readonly Column<GraderLibraryEntry>[] {
   return [
     {
@@ -202,7 +308,12 @@ function libraryColumns(
       header: "Grader",
       primary: true,
       width: "260px",
-      cell: (entry) => graderDefinitionDisplayName(entry.id, entry.name),
+      cell: (entry) => (
+        <RowOpener
+          name={graderDefinitionDisplayName(entry.id, entry.name)}
+          onOpen={() => open(entry)}
+        />
+      ),
     },
     {
       key: "owner",
@@ -214,46 +325,82 @@ function libraryColumns(
     {
       key: "type",
       header: "Type",
-      width: "140px",
+      width: "160px",
       hideOnMobile: true,
-      cell: (entry) => graderTypeLabel(entry.type),
+      cell: (entry) => <GraderTypeChip type={entry.type} />,
     },
     {
       key: "modalities",
       header: "Modalities",
-      width: "150px",
+      width: "170px",
       hideOnMobile: true,
-      cell: (entry) => graderModalitiesLabel(entry.modalities),
+      cell: (entry) => <GraderModalityChips modalities={entry.modalities} />,
     },
     {
       key: "status",
       header: "Project use",
-      cell: (entry) =>
-        entry.activeProjectGraderId === null ? "Available" : "Active",
+      cell: (entry) => (
+        <ProjectUseChip active={entry.activeProjectGraderId !== null} />
+      ),
     },
     {
-      key: "action",
-      header: "Actions",
+      key: "actions",
+      header: "Row actions",
       action: true,
-      cell: (entry) => (
-        <RowMenu
-          label={`Open the menu for ${graderDefinitionDisplayName(
-            entry.id,
-            entry.name,
-          )}`}
-        >
-          {(close) => (
-            <MenuItem
-              onClick={() => {
-                close();
-                open(entry);
-              }}
-            >
-              View details
-            </MenuItem>
-          )}
-        </RowMenu>
-      ),
+      cell: (entry) => {
+        const name = graderDefinitionDisplayName(entry.id, entry.name);
+        const activeId = entry.activeProjectGraderId;
+        const active = activeId === null ? undefined : activeGraderOf(activeId);
+        return (
+          <RowMenu label={`Open the menu for ${name}`}>
+            {(close) =>
+              activeId === null ? (
+                <MenuItem
+                  disabled={!mayAuthor}
+                  onClick={() => {
+                    close();
+                    use(entry);
+                  }}
+                >
+                  Use in project
+                </MenuItem>
+              ) : (
+                <>
+                  <MenuItem
+                    onClick={() => {
+                      close();
+                      openActive(activeId);
+                    }}
+                  >
+                    View active grader
+                  </MenuItem>
+                  {/*
+                   * The library row can drop the grader this project is
+                   * running, and only when that grader is one the project may
+                   * drop. Whether it is, is a fact about the active grader —
+                   * the library entry does not carry it — so the row reads it
+                   * off the active list beside it.
+                   */}
+                  {active !== undefined && active.removable ? (
+                    <>
+                      <MenuDivider />
+                      <DestructiveItem
+                        disabled={!mayAuthor}
+                        onClick={() => {
+                          close();
+                          remove(active);
+                        }}
+                      >
+                        Remove grader
+                      </DestructiveItem>
+                    </>
+                  ) : null}
+                </>
+              )
+            }
+          </RowMenu>
+        );
+      },
     },
   ];
 }
@@ -276,6 +423,8 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     null,
   );
   const [libraryOpen, setLibraryOpen] = useState(false);
+  /** Which half of the library sheet its opener asked for. */
+  const [libraryMode, setLibraryMode] = useState<"details" | "use">("details");
   const [activeGrader, setActiveGrader] = useState<ProjectGrader | null>(null);
   const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState<ProjectGrader | null>(null);
@@ -310,6 +459,42 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     );
   }
 
+  function openGrader(grader: ProjectGrader): void {
+    setSaid(null);
+    setActiveGrader(grader);
+    setActiveOpen(true);
+  }
+
+  function openLibrary(
+    entry: GraderLibraryEntry,
+    mode: "details" | "use",
+  ): void {
+    setSaid(null);
+    setLibraryEntry(entry);
+    setLibraryMode(mode);
+    setLibraryOpen(true);
+  }
+
+  /**
+   * Which active grader a library entry is running as, when the list beside it
+   * has been read. It answers one question the entry cannot: whether the
+   * project may drop it.
+   */
+  function activeGraderOf(projectGraderId: string): ProjectGrader | undefined {
+    const answer = active.answer;
+    return answer?.status === "ready"
+      ? answer.value.graders.find((one) => one.id === projectGraderId)
+      : undefined;
+  }
+
+  /** The one destructive path, opened from a row menu in either list. */
+  function askToRemove(grader: ProjectGrader): void {
+    setSaid(null);
+    setActiveOpen(false);
+    setLibraryOpen(false);
+    setRemoving(grader);
+  }
+
   function activePanel(): ReactNode {
     const answer = active.answer;
     if (answer === null || answer.status === "signed-out") {
@@ -334,13 +519,10 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     return (
       <DataTable
         label="Active graders"
-        columns={activeColumns(mayAuthor, (grader) => {
-          setSaid(null);
-          setActiveGrader(grader);
-          setActiveOpen(true);
-        })}
+        columns={activeColumns(mayAuthor, openGrader, askToRemove)}
         rows={answer.value.graders}
         keyOf={(grader) => grader.id}
+        onRowActivate={openGrader}
         stackWhenConstrained
       />
     );
@@ -370,28 +552,27 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     return (
       <DataTable
         label="Grader library"
-        columns={libraryColumns((entry) => {
-          setSaid(null);
-          setLibraryEntry(entry);
-          setLibraryOpen(true);
-        })}
+        columns={libraryColumns(
+          mayAuthor,
+          (entry) => openLibrary(entry, "details"),
+          (entry) => openLibrary(entry, "use"),
+          openActive,
+          activeGraderOf,
+          askToRemove,
+        )}
         rows={answer.value.graderLibraryEntries}
         keyOf={(entry) => entry.id}
+        onRowActivate={(entry) => openLibrary(entry, "details")}
         stackWhenConstrained
       />
     );
   }
 
   function openActive(projectGraderId: string): void {
-    const answer = active.answer;
-    const grader =
-      answer?.status === "ready"
-        ? answer.value.graders.find((one) => one.id === projectGraderId)
-        : undefined;
+    const grader = activeGraderOf(projectGraderId);
     setLibraryOpen(false);
     if (grader !== undefined) {
-      setActiveGrader(grader);
-      setActiveOpen(true);
+      openGrader(grader);
       return;
     }
     setSaid("This grader is active. Refresh Active graders to open its policy.");
@@ -453,6 +634,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           entry={libraryEntry}
           projectId={projectId}
           open={libraryOpen}
+          mode={libraryMode}
           mayAuthor={mayAuthor}
           onClose={() => setLibraryOpen(false)}
           onUsed={() => {
@@ -474,10 +656,6 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           onSaved={() => {
             setActiveOpen(false);
             refreshAll("Grader changes saved.");
-          }}
-          onRemove={() => {
-            setRemoving(activeGrader);
-            setActiveOpen(false);
           }}
         />
       )}

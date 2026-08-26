@@ -302,16 +302,23 @@ function Navigation({
  *
  * There is one organization per session today, so this panel gives context and
  * does not offer a false switcher. The paired arrows still open a small
- * surface: the organization's mark and its name. Organization settings stay out
- * until that product level exists.
+ * surface: the organization's mark, the quiet word `Organization`, and the name
+ * that word names. Organization settings stay out until that product level
+ * exists.
  *
- * **The bar and the panel say the organization's name, and nothing else.**
- * Both used to carry a "Free" chip and a "Free Plan · Admin" line under the
- * name. Billing is not part of `/api/me`, so that plan was hard-written copy
- * standing where a fact belongs, and the role it sat beside is already said by
- * the account control at the foot of the same sidebar. Two claims, one of them
- * invented and one of them repeated, above the name they were meant to
- * describe.
+ * **Neither the bar nor the panel claims anything about the organization but
+ * its name.** Both used to carry a "Free" chip and a "Free Plan · Admin" line
+ * under the name. Billing is not part of `/api/me`, so that plan was
+ * hard-written copy standing where a fact belongs, and the role it sat beside
+ * is already said by the account control at the foot of the same sidebar. Two
+ * claims, one of them invented and one of them repeated, above the name they
+ * were meant to describe.
+ *
+ * What stands there now is a label rather than a claim. The panel opens on a
+ * name with no page around it, so the grey `Organization` over it says which
+ * kind of name it is — the same thing the word `Project` does for the control
+ * directly below, drawn the same way. (Developer decision, 2026-08-25 on the
+ * Paper canvas.)
  *
  * **The mark is identity, not a control.** It sits beside the menu trigger
  * rather than inside it, so the hover plate, focus indicator and press feedback
@@ -396,8 +403,18 @@ function OrganizationMenu({
             >
               {initial}
             </span>
-            <span className="min-w-0 overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
-              {organization.name}
+            <span className="min-w-0">
+              {/*
+               * The project control's own label, on the row above the name it
+               * names. Same step, same faint colour, same sentence case: two
+               * controls one under the other, each saying what its name is.
+               */}
+              <span className="block overflow-hidden text-2xs leading-(--line-normal) text-ellipsis whitespace-nowrap text-faint">
+                Organization
+              </span>
+              <span className="block overflow-hidden text-sm font-medium text-ellipsis whitespace-nowrap text-foreground">
+                {organization.name}
+              </span>
             </span>
           </div>
         )}

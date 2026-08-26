@@ -1661,11 +1661,19 @@ describe("the role the shell shows", () => {
       screen.getByRole("dialog", { name: "Open organization menu for Acme" }),
     );
     /*
-     * The panel is the mark and the name. The plan was hard-written copy for a
-     * fact `/api/me` does not carry, and the role is already said by the
-     * account control at the foot of this same sidebar.
+     * The panel is the mark, the grey word `Organization` and the name that
+     * word names. The plan was hard-written copy for a fact `/api/me` does not
+     * carry, and the role is already said by the account control at the foot of
+     * this same sidebar.
      */
-    expect(summary.getByText("Acme")).toBeTruthy();
+    const eyebrow = summary.getByText("Organization");
+    const organizationName = summary.getByText("Acme");
+    /* Directly above the name, the way `Project` sits above the project's. */
+    expect(eyebrow.nextElementSibling).toBe(organizationName);
+    /* The `Project` label's own recipe: 12px, faint, and left in sentence case. */
+    expect(eyebrow.className).toContain("text-2xs");
+    expect(eyebrow.className).toContain("text-faint");
+    expect(eyebrow.className).not.toContain("uppercase");
     expect(summary.queryByText("Free Plan")).toBeNull();
     expect(summary.queryByText("Admin")).toBeNull();
     expect(summary.queryByText("Organization settings")).toBeNull();

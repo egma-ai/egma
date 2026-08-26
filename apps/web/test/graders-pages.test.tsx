@@ -176,6 +176,22 @@ const LATENCY: ProjectGrader = {
   ...DATES,
 };
 
+/** A grader scoped to some of the project's work, and a share of production. */
+const SELECTED: ProjectGrader = {
+  ...LATENCY,
+  id: "grd_selected",
+  graderDefinitionId: "grl_selected",
+  name: "Selected scope",
+  scope: {
+    simulations: [
+      { kind: "test_suite", id: "ste_1" },
+      { kind: "test", id: "tst_1" },
+      { kind: "test", id: "tst_2" },
+    ],
+    production: { samplePercent: 25 },
+  },
+};
+
 const EXPECTED_DEFINITION: GraderLibraryEntry = {
   id: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
   name: "expected_behaviors",
@@ -239,11 +255,36 @@ function standardAnswers(
   };
 }
 
-async function openRowMenu(name: string, item: string): Promise<void> {
+async function openRowMenu(name: string): Promise<HTMLElement> {
   fireEvent.click(
     await screen.findByRole("button", { name: `Open the menu for ${name}` }),
   );
+  return await screen.findByRole("menu", { name: `Open the menu for ${name}` });
+}
+
+async function chooseRowMenuItem(name: string, item: string): Promise<void> {
+  await openRowMenu(name);
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+/** The names a row's ⋮ offers, in the order it offers them. */
+async function rowMenuItems(name: string): Promise<readonly string[]> {
+  const menu = await openRowMenu(name);
+  return within(menu)
+    .getAllByRole("menuitem")
+    .map((item) => item.textContent ?? "");
+}
+
+/** Opening a row the way the boards do: by pressing the row's own name. */
+async function openRow(name: string): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name }));
+}
+
+/** The row a named grader is on, so one cell's word is read where it belongs. */
+function rowOf(name: string): HTMLElement {
+  const row = screen.getByRole("button", { name }).closest("tr");
+  if (row === null) throw new Error(`no row for ${name}`);
+  return row;
 }
 
 function ScopeHarness() {
@@ -407,12 +448,20 @@ describe("the project Graders surface", () => {
     expect(screen.getAllByText("Active graders")).toHaveLength(1);
     expect(screen.queryByText(/what active means/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /add predefined grader/i })).toBeNull();
-    expect(screen.getByText("All simulations · Production off")).toBeTruthy();
+    /* The scope is two columns now, never one dot-joined sentence. */
+    expect(screen.queryByText(/·/)).toBeNull();
+    expect(
+      screen.getByRole("columnheader", { name: "Simulations" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("columnheader", { name: "Production" }),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
     expect(await screen.findByText("Response latency")).toBeTruthy();
     expect(screen.getAllByText("Grader library")).toHaveLength(1);
     expect(screen.getByText("Available")).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
     expect(asked.map((one) => one.path)).toEqual(
       expect.arrayContaining([
         "/v1/graders?projectId=prj_1",
@@ -522,7 +571,7 @@ describe("the project Graders surface", () => {
 
     expect(await screen.findByText("Expected behaviors")).toBeTruthy();
     expect(screen.getByText("expected_behaviors")).toBeTruthy();
-    await openRowMenu("expected_behaviors", "View and edit");
+    await chooseRowMenuItem("expected_behaviors", "Edit");
     expect(
       await screen.findByRole("dialog", { name: "expected_behaviors" }),
     ).toBeTruthy();
@@ -568,11 +617,11 @@ describe("the project Graders surface", () => {
     );
     await closeAfterMotion("Create custom grader");
 
-    await openRowMenu("Expected behaviors", "View and edit");
+    await openRow("Expected behaviors");
     await closeAfterMotion("Expected behaviors");
 
     fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-    await openRowMenu("Response latency", "View details");
+    await openRow("Response latency");
     await closeAfterMotion("Response latency");
   });
 
@@ -591,10 +640,15 @@ describe("the project Graders surface", () => {
     });
     render(<GradersPage />);
     fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
-    await openRowMenu("Response latency", "View details");
+    await openRow("Response latency");
 
     const details = await screen.findByRole("dialog", { name: "Response latency" });
-    expect(within(details).getByText("turn response latency")).toBeTruthy();
+    expect(
+      within(details).getByText(
+        "The evidence this grader needs from a simulation.",
+      ),
+    ).toBeTruthy();
+    expect(within(details).getByText("Turn response latency")).toBeTruthy();
     expect(within(details).queryByLabelText("Maximum average response time")).toBeNull();
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
 
@@ -616,7 +670,7 @@ describe("the project Graders surface", () => {
     });
   });
 
-  it("creates only an LLM judge with Grading instructions and no mechanism picker", async () => {
+  it("creates an LLM judge from the chosen segment, under the starred label grammar", async () => {
     const customDefinition: GraderLibraryEntry = {
       ...LATENCY_DEFINITION,
       id: "grl_custom",
@@ -650,14 +704,60 @@ describe("the project Graders surface", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Create custom grader" }));
 
     const sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
-    expect(within(sheet).getByLabelText("Grading instructions")).toBeTruthy();
-    for (const absent of ["Type", "Model", "Output type", "Code"]) {
-      expect(within(sheet).queryByLabelText(absent)).toBeNull();
+    expect(
+      within(sheet).getByText(
+        "Create a grader for this organization and use it in this project.",
+      ),
+    ).toBeTruthy();
+    /* The LLM judge is the segment a person lands on. */
+    expect(
+      within(sheet)
+        .getByRole("radio", { name: "LLM judge" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    /* Every mandatory label ends in a star, and says so to a screen reader. */
+    for (const starred of [
+      "Name*",
+      "Grading instructions*",
+      "Pass threshold*",
+    ]) {
+      const field = within(sheet).getByLabelText(starred);
+      expect(field.getAttribute("aria-required"), starred).toBe("true");
     }
-    fireEvent.change(within(sheet).getByLabelText("Name"), {
+    /*
+     * `aria-required` is not a supported state on a group, so the modalities
+     * star keeps its promise through the described line instead.
+     */
+    const modalitiesGroup = within(sheet).getByRole("group", {
+      name: "Compatible modalities*",
+    });
+    expect(modalitiesGroup.getAttribute("aria-required")).toBeNull();
+    const helpId = modalitiesGroup.getAttribute("aria-describedby");
+    expect(helpId).toBeTruthy();
+    expect(document.getElementById(helpId ?? "")?.textContent).toBe(
+      "Choose at least one.",
+    );
+
+    /* A description is one line, at the height of the name above it. */
+    const description = within(sheet).getByLabelText("Description [optional]");
+    expect(description.tagName).toBe("INPUT");
+
+    expect(
+      within(sheet).getByText(
+        "Describe what the agent must do. The grader returns a score between 0 and 1.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(sheet).getByText(
+        "From 0 to 1. A simulation passes this grader at or above this score.",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.change(within(sheet).getByLabelText("Name*"), {
       target: { value: "Polite resolution" },
     });
-    fireEvent.change(within(sheet).getByLabelText("Grading instructions"), {
+    fireEvent.change(within(sheet).getByLabelText("Grading instructions*"), {
       target: {
         value: "The agent stays polite and resolves the request.",
       },
@@ -732,7 +832,7 @@ describe("the project Graders surface", () => {
       },
     });
     render(<GradersPage />);
-    await openRowMenu("Response latency", "View and edit");
+    await chooseRowMenuItem("Response latency", "Edit");
 
     let sheet = await screen.findByRole("dialog", { name: "Response latency" });
     fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
@@ -746,7 +846,7 @@ describe("the project Graders surface", () => {
         .toBeNull();
     });
 
-    await openRowMenu("Response latency", "View and edit");
+    await chooseRowMenuItem("Response latency", "Edit");
     sheet = await screen.findByRole("dialog", { name: "Response latency" });
     await waitFor(() => {
       expect(
@@ -772,13 +872,20 @@ describe("the project Graders surface", () => {
       "PATCH /v1/graders/grd_expected": { status: 200, body: changed },
     });
     render(<GradersPage />);
-    await openRowMenu("Expected behaviors", "View and edit");
+    await chooseRowMenuItem("Expected behaviors", "Edit");
 
     const sheet = await screen.findByRole("dialog", { name: "Expected behaviors" });
-    expect(within(sheet).getByText("Fixed by Egma")).toBeTruthy();
-    expect(within(sheet).getByText("Grades all simulations")).toBeTruthy();
+    /* The caption that answered a question nobody asked is gone. */
+    expect(within(sheet).queryByText("Fixed by Egma")).toBeNull();
+    expect(within(sheet).getByText("Scope")).toBeTruthy();
+    /* The two read-only rows say what the two columns behind the sheet say. */
+    expect(within(sheet).getByText("Simulations")).toBeTruthy();
+    expect(within(sheet).getByText("All")).toBeTruthy();
+    expect(within(sheet).getByText("Production")).toBeTruthy();
+    expect(within(sheet).getByText("Off")).toBeTruthy();
+    expect(within(sheet).getByText("llm_as_judge")).toBeTruthy();
     expect(within(sheet).queryByRole("button", { name: "Remove grader" })).toBeNull();
-    fireEvent.change(within(sheet).getByLabelText("Pass threshold"), {
+    fireEvent.change(within(sheet).getByLabelText("Pass threshold*"), {
       target: { value: "0.8" },
     });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
@@ -814,9 +921,13 @@ describe("the project Graders surface", () => {
       "DELETE /v1/graders/grd_latency": { status: 204, body: null },
     });
     render(<GradersPage />);
-    await openRowMenu("Response latency", "View and edit");
+    await chooseRowMenuItem("Response latency", "Edit");
 
-    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    const sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    /* Removing left this footer for the row menu, even where removal is allowed. */
+    expect(
+      within(sheet).queryByRole("button", { name: "Remove grader" }),
+    ).toBeNull();
     fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
     fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
@@ -828,9 +939,8 @@ describe("the project Graders surface", () => {
     });
     expect(asked.some((one) => one.method === "DELETE")).toBe(false);
 
-    await openRowMenu("Response latency", "View and edit");
-    sheet = await screen.findByRole("dialog", { name: "Response latency" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Remove grader" }));
+    /* Removing is the row's act now, and it still names what would go. */
+    await chooseRowMenuItem("Response latency", "Remove grader");
     const confirmation = await screen.findByRole("dialog", {
       name: "Remove Response latency?",
     });
@@ -861,7 +971,16 @@ describe("the project Graders surface", () => {
     });
     expect((create as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-    await openRowMenu("Response latency", "View details");
+
+    const menu = await openRowMenu("Response latency");
+    expect(
+      (within(menu).getByRole("menuitem", {
+        name: "Use in project",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.keyDown(menu, { key: "Escape" });
+
+    await openRow("Response latency");
     const details = await screen.findByRole("dialog", { name: "Response latency" });
     expect(within(details).getByText("Grades the average response time for a trace.")).toBeTruthy();
     expect(
@@ -869,5 +988,215 @@ describe("the project Graders surface", () => {
         name: "Use in project",
       }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("reads a grader's type as the API's own word and its modalities as chips", async () => {
+    apiAnswers(standardAnswers("admin", [EXPECTED, LATENCY]));
+    render(<GradersPage />);
+
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    const expected = rowOf("Expected behaviors");
+    expect(within(expected).getByText("llm_as_judge")).toBeTruthy();
+    expect(within(expected).getByText("Chat")).toBeTruthy();
+    expect(within(expected).getByText("Voice")).toBeTruthy();
+    /* The product words the raw value replaced are nowhere on the row. */
+    expect(within(expected).queryByText("LLM judge")).toBeNull();
+    expect(within(expected).queryByText("Chat and voice")).toBeNull();
+    expect(within(rowOf("Response latency")).getByText("code")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
+    expect(await screen.findByText("Response latency")).toBeTruthy();
+    expect(
+      within(rowOf("Response latency")).getByText("code"),
+    ).toBeTruthy();
+  });
+
+  it("says each evidence source in its own column, and says Off quietly", async () => {
+    apiAnswers(standardAnswers("admin", [EXPECTED, SELECTED]));
+    render(<GradersPage />);
+
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    const expected = rowOf("Expected behaviors");
+    expect(within(expected).getByText("All")).toBeTruthy();
+    expect(within(expected).getByText("Off").className).toContain("text-faint");
+    expect(within(expected).getByText("1.00")).toBeTruthy();
+
+    const selected = rowOf("Selected scope");
+    expect(within(selected).getByText("1 test suite, 2 tests")).toBeTruthy();
+    expect(within(selected).getByText("25%")).toBeTruthy();
+  });
+
+  it("opens a grader from its row and offers Remove only where a grader may go", async () => {
+    apiAnswers({
+      ...standardAnswers("admin", [EXPECTED, LATENCY]),
+      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
+        status: 200,
+        body: EXPECTED_DEFINITION,
+      },
+    });
+    render(<GradersPage />);
+
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    expect(await rowMenuItems("Expected behaviors")).toEqual(["Edit"]);
+    fireEvent.keyDown(
+      await screen.findByRole("menu", {
+        name: "Open the menu for Expected behaviors",
+      }),
+      { key: "Escape" },
+    );
+    expect(await rowMenuItems("Response latency")).toEqual([
+      "Edit",
+      "Remove grader",
+    ]);
+    fireEvent.keyDown(
+      await screen.findByRole("menu", {
+        name: "Open the menu for Response latency",
+      }),
+      { key: "Escape" },
+    );
+
+    await openRow("Expected behaviors");
+    expect(
+      await screen.findByRole("dialog", { name: "Expected behaviors" }),
+    ).toBeTruthy();
+  });
+
+  it("opens a grader from anywhere on its row, not only the name", async () => {
+    apiAnswers({
+      ...standardAnswers("admin", [EXPECTED, LATENCY]),
+      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
+        status: 200,
+        body: EXPECTED_DEFINITION,
+      },
+    });
+    render(<GradersPage />);
+
+    const name = await screen.findByText("Expected behaviors");
+    const row = name.closest("tr");
+    if (row === null) throw new Error("the grader name is not in a table row");
+    fireEvent.click(row);
+    expect(
+      await screen.findByRole("dialog", { name: "Expected behaviors" }),
+    ).toBeTruthy();
+  });
+
+  it("offers the library row the active grader, or the way to use it", async () => {
+    const activeLatencyDefinition = {
+      ...LATENCY_DEFINITION,
+      activeProjectGraderId: LATENCY.id,
+    };
+    apiAnswers({
+      ...standardAnswers("admin", [EXPECTED, LATENCY], [
+        EXPECTED_DEFINITION,
+        activeLatencyDefinition,
+      ]),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: activeLatencyDefinition,
+      },
+      "DELETE /v1/graders/grd_latency": { status: 204, body: null },
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
+    expect(await screen.findByText("Response latency")).toBeTruthy();
+
+    /* Egma's own grader is active and cannot be dropped: one item. */
+    expect(await rowMenuItems("Expected behaviors")).toEqual([
+      "View active grader",
+    ]);
+    fireEvent.keyDown(
+      await screen.findByRole("menu", {
+        name: "Open the menu for Expected behaviors",
+      }),
+      { key: "Escape" },
+    );
+
+    expect(await rowMenuItems("Response latency")).toEqual([
+      "View active grader",
+      "Remove grader",
+    ]);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove grader" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Remove Response latency?" }),
+    ).toBeTruthy();
+  });
+
+  it("opens the library sheet on the review, and on the form from Use in project", async () => {
+    apiAnswers({
+      ...standardAnswers(),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: LATENCY_DEFINITION,
+      },
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
+
+    await openRow("Response latency");
+    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    expect(
+      within(sheet).getByText(
+        "Review this grader before choosing it for the project.",
+      ),
+    ).toBeTruthy();
+    expect(within(sheet).getByText("Available")).toBeTruthy();
+    const close = within(sheet).getAllByRole("button", { name: "Close" }).at(-1);
+    if (close === undefined) throw new Error("the sheet has no close button");
+    fireEvent.click(close);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Response latency" }),
+      ).toBeNull();
+    });
+
+    await chooseRowMenuItem("Response latency", "Use in project");
+    sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    expect(
+      within(sheet).getByText("Choose how this project will use the grader."),
+    ).toBeTruthy();
+    expect(
+      within(sheet).getByLabelText("Maximum average response time"),
+    ).toBeTruthy();
+  });
+
+  it("holds a typed LLM judge while the Code segment says what is coming", async () => {
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create custom grader" }),
+    );
+
+    const sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    fireEvent.change(within(sheet).getByLabelText("Name*"), {
+      target: { value: "Polite resolution" },
+    });
+
+    fireEvent.click(within(sheet).getByRole("radio", { name: "Code" }));
+    expect(
+      within(sheet).getByText("Code graders are coming soon"),
+    ).toBeTruthy();
+    expect(
+      within(sheet).getByText(
+        "Write pass rules in code and run them on every simulation. Custom code graders arrive in a later release.",
+      ),
+    ).toBeTruthy();
+    /* Nothing to create in this state, so nothing offers to. */
+    expect(
+      within(sheet).queryByRole("button", { name: "Create grader" }),
+    ).toBeNull();
+    expect(within(sheet).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(within(sheet).queryByLabelText("Name*")).toBeNull();
+
+    fireEvent.click(within(sheet).getByRole("radio", { name: "LLM judge" }));
+    expect(
+      (within(sheet).getByLabelText("Name*") as HTMLInputElement).value,
+    ).toBe("Polite resolution");
+    expect(
+      within(sheet).getByRole("button", { name: "Create grader" }),
+    ).toBeTruthy();
   });
 });
