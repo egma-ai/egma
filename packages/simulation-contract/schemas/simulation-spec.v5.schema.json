@@ -71,7 +71,7 @@
       }
     },
     "persona": {
-      "description": "Who talks on the human side of the transcript: the authored person, flat and whole. Every value here is required, because a simulator that had to decide what an absent one meant would be deciding who the agent heard. Technical voice settings are not authored behavior and live only in models.tts.",
+      "description": "Who talks on the human side of the transcript: the authored person, flat and whole. Every value here is required, because a simulator that had to decide what an absent one meant would be deciding who the agent heard. Each must also carry a non-whitespace character: a name of one space is present by the letter and absent by the reading, and would put \"Your name is  .\" in the prompt — the same ambiguity an absent name would. That is the rule the persona version's own columns keep, non-empty after trim, held here at the wire as well. Technical voice settings are not authored behavior and live only in models.tts.",
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "personality", "language"],
@@ -79,17 +79,20 @@
         "name": {
           "description": "The human name this person gives the agent. It is authored on the pinned persona version and stated in the prompt, never improvised by the model and never the team's own label for the library row — which is what makes the same test hear the same person on every run.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "personality": {
           "description": "Who they are and how they behave, in the author's own words.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "language": {
           "description": "The language the roleplay is conducted in.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         }
       }
     },

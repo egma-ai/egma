@@ -73,6 +73,14 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "model",
     ),
     "spec/phone-carrier-missing.json": ("", "required", "platform"),
+    # The three authored values move together, so each one's absence is a
+    # fixture of its own rather than a case only the other side of the wire
+    # exercises in a clone-and-delete test.
+    "spec/persona-missing-name.json": (
+        "/persona",
+        "required",
+        "name",
+    ),
     "spec/persona-missing-language.json": (
         "/persona",
         "required",
@@ -161,6 +169,39 @@ def test_this_simulator_reads_one_version_and_refuses_the_one_before_it():
         complaint.startswith("/contract_version")
         for complaint in refusal.value.complaints
     ), refusal.value.complaints
+
+
+def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
+    """The one keyword whose meaning could differ between the two readers.
+
+    ``pattern`` is checked by Ajv's ECMA-262 engine where the control plane
+    builds a work order, and by Python's ``re`` here. A blank name that one
+    engine refused and the other accepted is exactly the silent drift these
+    shared schemas exist to prevent, so the refusal is asserted on this side
+    as well: such a name is present by the letter and absent by the reading,
+    and it would put "Your name is  ." in the prompt.
+    """
+    document = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+    )
+    persona = document["persona"]
+
+    for field in ("name", "personality", "language"):
+        for blank in (" ", "   ", "\t", "\n", " \t\n "):
+            with pytest.raises(ContractViolation) as refusal:
+                SimulationSpec.from_document(
+                    {**document, "persona": {**persona, field: blank}}
+                )
+            assert any(
+                complaint.startswith(f"/persona/{field}")
+                for complaint in refusal.value.complaints
+            ), (field, blank, refusal.value.complaints)
+
+        # The rule stops exactly there: whitespace around real content is the
+        # author's own spacing, not an empty field. The wire refuses what says
+        # nothing and does not tidy what somebody wrote.
+        padded = f" {persona[field]} "
+        validate_spec({**document, "persona": {**persona, field: padded}})
 
 
 def test_phone_connection_stays_phone_while_models_select_voice_legs():

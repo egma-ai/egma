@@ -146,6 +146,14 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "required",
     property: "platform",
   },
+  // The three authored values move together, so each one's absence is a
+  // fixture of its own rather than a case one clone-and-delete test covers
+  // on one side of the wire.
+  "spec/persona-missing-name.json": {
+    at: "/persona",
+    keyword: "required",
+    property: "name",
+  },
   "spec/persona-missing-language.json": {
     at: "/persona",
     keyword: "required",
@@ -354,9 +362,13 @@ describe("the two schemas, as one contract", () => {
       true,
     );
 
-    // Whole: none of the three is optional. A simulator handed a persona
-    // without one of them would have to decide what it meant, and deciding
-    // that is deciding who the agent heard.
+    // Whole: none of the three is optional, and none may be present in name
+    // only. A simulator handed a persona without one of them would have to
+    // decide what it meant, and deciding that is deciding who the agent
+    // heard — which a name of one space leaves just as undecided, while
+    // reading "Your name is  ." into the prompt. Absent, empty and blank are
+    // one rule with three diagnostics, and it is the rule the persona
+    // version's own columns keep: non-empty after trim.
     for (const required of ["name", "personality", "language"] as const) {
       const spec = structuredClone(base);
       delete personaOf(spec)[required];
@@ -378,6 +390,31 @@ describe("the two schemas, as one contract", () => {
           keyword: "minLength",
         }),
       );
+
+      for (const blank of [" ", "   ", "\t", "\n", " \t\n "]) {
+        const whitespace = structuredClone(base);
+        personaOf(whitespace)[required] = blank;
+        expect(
+          validators.spec(whitespace),
+          `${required} accepted ${JSON.stringify(blank)}`,
+        ).toBe(false);
+        expect(validators.spec.errors).toContainEqual(
+          expect.objectContaining({
+            instancePath: `/persona/${required}`,
+            keyword: "pattern",
+          }),
+        );
+      }
+
+      // And the rule stops exactly there. Whitespace around real content is
+      // the author's own spacing, not an empty field: the wire refuses what
+      // says nothing, and does not tidy what somebody wrote.
+      const padded = structuredClone(base);
+      personaOf(padded)[required] = ` ${String(personaOf(base)[required])} `;
+      expect(
+        validators.spec(padded),
+        ajv.errorsText(validators.spec.errors),
+      ).toBe(true);
     }
 
     // Closed: the wrapper the block used to have, and the two authored

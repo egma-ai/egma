@@ -275,7 +275,7 @@ which is the only record of a report that never got through. Both survive the
 container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
-Every production simulation carries one contract-v4 work order. Its pinned
+Every production simulation carries one contract-v5 work order. Its pinned
 persona version supplies the LLM, STT, and TTS selections. The model catalog
 resolves each selection to a simulator adapter. The API then adds only the
 provider keys those adapters need. Chat carries only the LLM key; voice carries
@@ -287,8 +287,9 @@ Reasoning effort remains an LLM catalog capability, but this release fixes
 every reasoning-capable model at `none`; persona authors cannot turn reasoning
 on. Non-reasoning models carry no reasoning parameter. The TTS selection also
 owns the voice id and speed. The platform Default Persona v1 selects
-`gpt-5.6-terra` with reasoning effort `none`. Persona traits contain behavior
-only.
+`gpt-5.6-terra` with reasoning effort `none`. The persona block carries who is
+calling — the `name` the persona gives the agent, their `personality`, and the
+roleplay `language`, all three required — and no technical setting of any kind.
 
 Two deployment controls remain:
 

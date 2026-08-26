@@ -94,6 +94,21 @@ def test_the_system_prompt_carries_no_technical_settings():
 
     assert '"voice"' not in prompt
     assert '"models"' not in prompt
+
+
+def test_the_prompt_offers_one_way_to_conclude_and_not_the_retired_marker():
+    """How the persona says it is done, and the way it no longer says it.
+
+    Concluding is the native ``end_call`` tool. ``[CONCLUDED]`` was the text
+    marker that came before it, and the model client already refuses to read
+    one as control — ``test_a_literal_old_marker_has_no_control_meaning`` in
+    the model suite is that half. This is the other: a prompt that still
+    taught the marker would have the model emit a sentinel nothing acts on,
+    and stay in an exchange it believed it had ended.
+    """
+    prompt = compose_system_prompt(AUTHORED, SCENARIO)
+
+    assert "`end_call` tool" in prompt
     assert "[CONCLUDED]" not in prompt
 
 
