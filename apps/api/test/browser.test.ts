@@ -3222,12 +3222,6 @@ describe("the complete product, walked in order in a second project", () => {
   it(
     "opens the run, which lists the simulation it wrote",
     async () => {
-      const simulationsRead = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "GET" &&
-          new URL(response.url()).pathname ===
-            `/v1/runs/${runIdOf(runAddress)}/simulations`,
-      );
       await walk.goto(runAddress);
       // The section heading is present before its request finishes. Wait for
       // the row that proves the simulations response has landed, so every
@@ -3236,9 +3230,21 @@ describe("the complete product, walked in order in a second project", () => {
         .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first();
       await row.waitFor();
-      const simulationsResponse = await simulationsRead;
-      expect(simulationsResponse.status()).toBe(200);
-      const listed = (await simulationsResponse.json()) as {
+      // The visible row proves the browser's simulations read settled. Read
+      // the id needed by the rest of this continuous walk through the same API
+      // route with this browser session: Playwright can discard a response
+      // body when Next replaces a client navigation, even after the row drew.
+      const simulationsResponse = await instance.api.inject({
+        method: "GET",
+        url: `/v1/runs/${runIdOf(runAddress)}/simulations?projectId=${second}`,
+        headers: {
+          cookie: (await walk.context().cookies(origin))
+            .map((cookie) => `${cookie.name}=${cookie.value}`)
+            .join("; "),
+        },
+      });
+      expect(simulationsResponse.statusCode, simulationsResponse.body).toBe(200);
+      const listed = simulationsResponse.json() as {
         simulations: readonly { id: string }[];
       };
       const simulation = listed.simulations[0];
