@@ -94,7 +94,7 @@ The caller missed yesterday's appointment and wants to reschedule this week.
 | `description` | No | A short explanation |
 | `version` | No for a new test | The last synced immutable test-version ID |
 | `identity_revision` | No for a new test | The last synced live identity revision |
-| `personas` | No | Persona IDs and display names; omit to use the default persona |
+| `personas` | Yes | Persona IDs and display names. A test says who calls, so it needs at least one |
 
 Test files do not contain a suite ID. Their containing suite directory owns
 them. A tracked test found under another suite is refused. Tests cannot move

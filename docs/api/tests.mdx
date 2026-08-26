@@ -40,8 +40,8 @@ test object, including the first `versionId` to use in future edits.
   The behaviors the agent must exhibit, as plain sentences, e.g. `["confirms the new time before hanging up", "does not ask for the same information twice"]`. The `{"behavior", "priority"}` object shape is no longer accepted.
 </ParamField>
 
-<ParamField body="personas" type="string[]">
-  Personas to assign to this test, by name or `prs_…` identifier. Each entry calls in separately when the test is run. Omit to use the project's default persona.
+<ParamField body="personas" type="string[]" required>
+  Personas to assign to this test, by name or `prs_…` identifier. Each entry calls in separately when the test is run. A test says who calls, so at least one is required: an omitted or empty list is refused.
 </ParamField>
 
 <ParamField body="mockTools" type="object[]">
@@ -156,7 +156,7 @@ the request changes the scenario, expected behaviors, personas, or Mock Tool
 overrides. If the test has moved on since you read it, Egma returns `409
 Conflict` with both version IDs.
 
-Fields you omit are kept as-is. An explicit empty `personas` array (`[]`) means the project's default persona; omitting `personas` entirely leaves the current persona list unchanged.
+Fields you omit are kept as-is. Omitting `personas` leaves the current persona list unchanged; an explicit empty array (`[]`) is refused, because a test always says who calls.
 
 Sending content byte-identical to the current version mints no new version and
 returns the current version unchanged. Changing only the `name` or `description`
@@ -193,7 +193,7 @@ also mints no new test version because those fields describe the test identity.
 </ParamField>
 
 <ParamField body="personas" type="string[]">
-  Replacement persona list, by name or identifier. An empty array assigns the project default.
+  Replacement persona list, by name or identifier. An empty array is refused.
 </ParamField>
 
 <ParamField body="mockTools" type="object[]">
