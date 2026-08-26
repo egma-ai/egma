@@ -174,8 +174,16 @@ function RowOpener({
 }
 
 /**
- * The score a simulation has to reach, as a measure: two places, tabular. The
- * column says which edge it reads from, so the header stays with the figures.
+ * The score a simulation has to reach, as a measure: two places, tabular.
+ *
+ * **It reads from the lane's left edge, like every other fact in the table.**
+ * The column was right-aligned for a morning, and the figures ended up under
+ * the tail of a header three times their width — an indent, to an eye that
+ * scans this table's five other columns by their shared left edge — welded to
+ * the ⋮ lane across a void of spare paper. Right alignment earns its keep when
+ * values differ in width; every value here is `N.NN` in tabular numerals, so
+ * the digits line up down the column from either edge and the left one is the
+ * edge the rest of the table already reads from.
  */
 function PassThreshold({ value }: { readonly value: number }) {
   return <span className="tabular-nums">{value.toFixed(2)}</span>;
@@ -254,7 +262,6 @@ function activeColumns(
     {
       key: "threshold",
       header: "Pass threshold",
-      align: "end",
       cell: (grader) => <PassThreshold value={grader.passThreshold} />,
     },
     {

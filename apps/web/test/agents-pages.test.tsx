@@ -1176,7 +1176,7 @@ describe("adding a connection", () => {
     render(<NewConnectionPage />);
 
     // The panel names what it is for, and the picker is already on the agent
-    // the address named rather than on "Create a new agent".
+    // the address named rather than on "Connect a new agent".
     expect(
       await screen.findByRole("heading", { name: "Connect an agent" }),
     ).toBeTruthy();
@@ -1200,7 +1200,7 @@ describe("adding a connection", () => {
       .getAllByRole("menuitem")
       .map((one) => one.textContent);
     expect(options[0]).toContain("Front desk");
-    expect(options.at(-1)).toBe("Create a new agent");
+    expect(options.at(-1)).toBe("Connect a new agent");
     expect(
       screen.getByText("The label shown for this connection in Egma."),
     ).toBeTruthy();
