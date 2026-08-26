@@ -934,6 +934,53 @@ describe("one persona's sheet", () => {
     ).toBe("Somebody else");
   });
 
+  /**
+   * **A panel belongs to the project it was opened in.**
+   *
+   * Changing project does not remount this screen — it is the same page with
+   * another id in its address — so a sheet left open would still be holding a
+   * persona the next project has never heard of. Asking for it answers 404 and
+   * fills the panel with "not found" over a list that is perfectly fine, so
+   * the panel is not drawn for another project at all and the request is never
+   * made.
+   */
+  it("closes the panel when the project changes, and asks the next project for nothing of the last one", async () => {
+    const { asked } = ritaOpen({
+      "GET /v1/personas": [
+        {
+          status: 200,
+          body: { personas: [RITA, PREDEFINED], nextPageToken: null },
+        },
+        { status: 200, body: { personas: [PREDEFINED], nextPageToken: null } },
+      ],
+    });
+    const view = render(<PersonasPage />);
+    await openRow("Impatient Rita");
+
+    routed.projectId = "prj_2";
+    view.rerender(<PersonasPage />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Impatient Rita" }),
+      ).toBeNull(),
+    );
+
+    /* The next project's own list, drawn clean. */
+    expect(await screen.findByText("Everyday caller")).toBeTruthy();
+    expect(screen.queryByText("Impatient Rita")).toBeNull();
+    expect(screen.queryByText(/not found/iu)).toBeNull();
+
+    /*
+     * The whole point: the last project's persona was never asked of this one.
+     * A cleanup that only ran in an effect would already have sent this.
+     */
+    expect(
+      asked.filter(
+        (one) => one.path.includes("prs_1") && one.path.includes("prj_2"),
+      ),
+    ).toEqual([]);
+  });
 });
 
 /* ------------------------------------------------------------------------ */

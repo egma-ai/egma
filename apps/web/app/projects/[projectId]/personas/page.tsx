@@ -222,15 +222,60 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
   const [running, setRunning] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
-  /** Which panel is open over the list, and which record it is about. */
+  /**
+   * Which panel is open over the list, and which record it is about — **and
+   * which project that record belongs to.**
+   *
+   * The project travels with it for the reason the page cache above carries
+   * one: changing project does not remount this screen, so a panel opened in
+   * the last project is still in hand on the first render of the next one.
+   */
   const [creating, setCreating] = useState(false);
   const [opened, setOpened] = useState<{
+    readonly project: string;
     readonly persona: Persona;
     readonly editing: boolean;
     readonly focusName: boolean;
   } | null>(null);
   const [openedOpen, setOpenedOpen] = useState(false);
   const [deleting, setDeleting] = useState<Persona | null>(null);
+
+  /**
+   * The open record, and only while it is this project's.
+   *
+   * **It is a rendering rule rather than a cleanup, because cleanup is one
+   * commit too late.** A child's effects run before its parent's, so a sheet
+   * still drawn on the render where the project changed would ask the new
+   * project for the old project's persona before the effect below could close
+   * it — and the new project has never heard of that id, so the panel would
+   * fill with "not found" over a list that is perfectly fine. Not drawing it
+   * is what stops the request from being made at all.
+   */
+  const openedHere = opened !== null && opened.project === projectId ? opened : null;
+
+  /**
+   * Another project, and nothing of the last one carried over.
+   *
+   * Every panel here is about one project's record: a sheet on a persona the
+   * next project does not have, a confirmation about deleting it, or — worst
+   * of the three — a half-typed new persona, which would quietly be created in
+   * whichever project somebody switched to. `running` goes with them because a
+   * fork that was in flight drops its answer on a project change and would
+   * otherwise leave every row menu disabled for good.
+   *
+   * **A dirty editor has already been protected before this runs.** The
+   * project control navigates through `draftNavigation.push`, so somebody with
+   * unsaved work has already been asked and has already answered. Asking again
+   * here would be one decision and two questions.
+   */
+  useEffect(() => {
+    setCreating(false);
+    setOpened(null);
+    setOpenedOpen(false);
+    setDeleting(null);
+    setRunning(null);
+    setRefusal(null);
+  }, [projectId]);
 
   /**
    * One page for every role, and the control that changes data is disabled
@@ -251,7 +296,7 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
 
   function open(persona: Persona, editing = false, focusName = false): void {
     setRefusal(null);
-    setOpened({ persona, editing, focusName });
+    setOpened({ project: projectId, persona, editing, focusName });
     setOpenedOpen(true);
   }
 
@@ -540,8 +585,8 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
           rows={items}
           keyOf={(persona) => persona.id}
           onRowActivate={(persona) => open(persona)}
-          {...(openedOpen && opened !== null
-            ? { currentKey: opened.persona.id }
+          {...(openedOpen && openedHere !== null
+            ? { currentKey: openedHere.persona.id }
             : {})}
           {...(cursor === null
             ? {}
@@ -602,18 +647,18 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
         }}
       />
 
-      {opened === null ? null : (
+      {openedHere === null ? null : (
         <PersonaSheet
-          key={opened.persona.id}
+          key={openedHere.persona.id}
           projectId={projectId}
-          personaId={opened.persona.id}
+          personaId={openedHere.persona.id}
           open={openedOpen}
           form={form?.status === "ready" ? form.value : null}
           role={role}
           mayAuthor={mayAuthor}
           whyNot={mayAuthor ? undefined : whyNot}
-          startEditing={opened.editing}
-          focusName={opened.focusName}
+          startEditing={openedHere.editing}
+          focusName={openedHere.focusName}
           busy={running !== null}
           onClose={() => setOpenedOpen(false)}
           onWritten={refresh}
