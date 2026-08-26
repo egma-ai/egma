@@ -160,25 +160,11 @@ export class LastAdminError extends Error {
   }
 }
 
-/** A test, as a refusal names it: enough to go and find it and fix it. */
+/** A test, as a usage answer names it: enough to go and find it. */
 export type TestNamingPersona = {
   readonly id: string;
   readonly name: string;
 };
-
-/** How many blocking tests the message spells out before it starts counting. */
-const TESTS_NAMED_IN_MESSAGE = 5;
-
-function spelledOutAndCounted(
-  tests: readonly { readonly id: string; readonly name: string }[],
-): string {
-  const named = tests
-    .slice(0, TESTS_NAMED_IN_MESSAGE)
-    .map((test) => `${test.id} "${test.name}"`)
-    .join(", ");
-  const rest = tests.length - TESTS_NAMED_IN_MESSAGE;
-  return rest > 0 ? `${named}, and ${rest} more` : named;
-}
 
 /**
  * An edit named the revision it was written against, and the resource has
@@ -220,31 +206,6 @@ export class IdentityConflictError extends Error {
 }
 
 /**
- * A versioned write named the content version it was written against, and the
- * content has moved since.
- *
- * `TestMovedOnError` is this refusal for tests, and it stays where it is: it
- * carries the test's name so a repository client can say which file in the
- * folder to go and read. This one is the general shape for every other
- * versioned resource, which is reached by identifier rather than by filename.
- */
-export class VersionConflictError extends Error {
-  readonly resource: string;
-  readonly expected: string;
-  readonly current: string;
-
-  constructor(resource: string, expected: string, current: string) {
-    super(
-      `this ${resource} edit was written against version ${expected}, and it has moved on to ${current}`,
-    );
-    this.name = "VersionConflictError";
-    this.resource = resource;
-    this.expected = expected;
-    this.current = current;
-  }
-}
-
-/**
  * Postgres rolled the write back rather than let it wait forever, and it can
  * be sent again unchanged.
  *
@@ -274,37 +235,6 @@ export class WriteAbortedError extends Error {
   }
 }
 
-/**
- * Archiving the project's default persona was refused, because no active
- * replacement was named to take the pointer.
- *
- * **A project always has a default persona, and this is what keeps that
- * true.** A test authored naming nobody is given the project's default; a
- * project pointing at an archived persona, or at nobody, would refuse the
- * commonest create there is — and it would refuse it later, to somebody who
- * did nothing wrong, rather than now, to the person choosing to archive.
- *
- * So the replacement is part of the archive rather than a step after it. Doing
- * it afterwards would leave a window in which every new test fails, and a
- * window nobody would think to close is one that stays open.
- */
-export class DefaultPersonaReplacementError extends Error {
-  readonly personaId: string;
-  /** Why the replacement was not accepted, when one was named at all. */
-  readonly reason: "none_named" | "not_available";
-
-  constructor(personaId: string, reason: "none_named" | "not_available") {
-    super(
-      reason === "none_named"
-        ? `persona ${personaId} is this project's default, so archiving them takes an active replacement in the same write; name one`
-        : `the replacement named for default persona ${personaId} is not an active persona of this project, so the project would be left pointing at nobody`,
-    );
-    this.name = "DefaultPersonaReplacementError";
-    this.personaId = personaId;
-    this.reason = reason;
-  }
-}
-
 /** A customer tried to change a persona definition owned by Egma. */
 export class EgmaProvidedPersonaError extends Error {
   readonly personaId: string;
@@ -317,45 +247,6 @@ export class EgmaProvidedPersonaError extends Error {
     this.name = "EgmaProvidedPersonaError";
     this.personaId = personaId;
     this.personaName = personaName;
-  }
-}
-
-/**
- * A persona's Archive was refused because active tests still name them.
- *
- * A test names the people who call about its scenario, and executing it
- * produces one simulation per person named. Letting the Archive through would
- * leave each of those tests quietly running one simulation fewer than it says
- * it runs — a suite going green while the case somebody wrote it for never
- * ran. So the Archive is refused, and the developer decides what those tests
- * should say instead.
- *
- * **Only a current version of an active test blocks.** A historical version
- * is already frozen and a run that pinned it is already interpretable, so
- * neither can lose anything; a deleted test is not going to run. Blocking on
- * either would make a persona unarchivable for the rest of the project's life
- * on the strength of a test nobody uses.
- *
- * It carries every blocking test, because the fix is to go and edit each one
- * and a refusal that only said "something names them" would send somebody
- * hunting. The message spells out the first few and counts the rest: the
- * persona a project points at by default is named by every test created
- * without naming one, so an uncapped message would be a page long.
- */
-export class PersonaNamedByTestsError extends Error {
-  readonly personaId: string;
-  /** Every active test whose current version names them, oldest first. */
-  readonly tests: readonly TestNamingPersona[];
-
-  constructor(personaId: string, tests: readonly TestNamingPersona[]) {
-    super(
-      `persona ${personaId} is named by ${tests.length} live ${
-        tests.length === 1 ? "test" : "tests"
-      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or archive them, and then archive the persona`,
-    );
-    this.name = "PersonaNamedByTestsError";
-    this.personaId = personaId;
-    this.tests = tests;
   }
 }
 

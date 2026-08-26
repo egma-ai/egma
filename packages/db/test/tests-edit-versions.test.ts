@@ -20,7 +20,7 @@ import {
   seedPersona,
   seedTestFactory,
   STARTER_PERSONA,
-  neutralTraits,
+  neutralBehavior,
 } from "./support/test-factory.ts";
 
 /**
@@ -457,10 +457,7 @@ describe("one frozen version", () => {
     });
 
     const moved = await editPersona(actingAsAcme(), nadia, {
-      traits: {
-        ...neutralTraits,
-        personality: "Now speaks with deliberate precision.",
-      },
+      personality: "Now speaks with deliberate precision.",
     });
     expect(moved?.version).toBe(2);
 

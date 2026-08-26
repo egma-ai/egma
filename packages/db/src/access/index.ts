@@ -24,7 +24,6 @@ export {
   AgentAlreadyBoundError,
   AlreadyBelongsToAnOrganizationError,
   ConnectionRestoreRefusedError,
-  DefaultPersonaReplacementError,
   IdempotencyConflictError,
   IdentityConflictError,
   LastAdminError,
@@ -32,7 +31,6 @@ export {
   NotPermittedError,
   OversizeRecordError,
   PersonaNameAmbiguousError,
-  PersonaNamedByTestsError,
   EgmaProvidedPersonaError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
@@ -42,7 +40,6 @@ export {
   UnprocessableInputError,
   UnreadableTraceQueryError,
   UnstorableInstantError,
-  VersionConflictError,
   WriteAbortedError,
   type AgentWriteRefusal,
   type ConnectionRestoreRefusal,
@@ -267,8 +264,8 @@ export type { MonitoringScanKind } from "../schema/production.ts";
 
 
 export {
-  archivePersona,
   createPersona,
+  deletePersona,
   editPersona,
   forkPersona,
   getPersona,
@@ -276,20 +273,16 @@ export {
   listPersonas,
   listPersonaVersions,
   resolvePersonaNames,
-  restorePersona,
-  setDefaultPersona,
   testsUsingPersona,
-  type ArchiveRequest,
   type NewPersona,
   type Persona,
+  type PersonaBehavior,
   type PersonaChanges,
   type PersonaListRequest,
   type PersonaPage,
   type PersonaOwner,
-  type PersonaTraits,
   type PersonaVersion,
   type PersonaVersionPage,
-  type RestoreRequest,
 } from "./personas.ts";
 
 /**

@@ -630,17 +630,21 @@ function theTest(auth: AuthContext, id: string): SQL {
  *
  * **The read takes a shared lock on every row it finds, and this write's
  * transaction holds it until it commits.** Deleting a persona takes an
- * exclusive lock on the same row before it counts the tests naming them, and
- * the two lock modes conflict, so a delete and a write naming the same persona
- * cannot walk past each other: whichever reaches the row first makes the other
- * wait and then see how it ended. If this write got there first, the delete
- * counts the rows it wrote and refuses. If the delete got there first, this
- * read resumes on the row it left behind and the deleted marker below refuses
- * this write — which is why the marker is selected and judged here rather than
- * filtered out in the `where`, where a re-read would simply find nothing and
- * say the persona never existed. Without the lock both could pass their own
- * check and a live test would end up naming a deleted persona, which is the one
- * state this rule exists to make impossible.
+ * exclusive lock on the same row, and the two lock modes conflict, so a delete
+ * and a write naming the same persona cannot walk past each other: whichever
+ * reaches the row first makes the other wait and then see how it ended. If the
+ * delete got there first, this read resumes on the row it left behind and the
+ * deleted marker below refuses this write — which is why the marker is
+ * selected and judged here rather than filtered out in the `where`, where a
+ * re-read would simply find nothing and say the persona never existed.
+ *
+ * **A test that got there first keeps the persona it named, and the delete
+ * still lands.** That is the deliberate shape: Delete is one honest verb that
+ * only a Predefined persona refuses, so a live test can come to name a deleted
+ * persona. What that costs is bounded and answered elsewhere — the run refuses
+ * to start, and this same rule refuses the test's next write until somebody
+ * alive is named. What the lock buys is that a write never lands on a decision
+ * it could not see.
  */
 async function validateNamedPersonas(
   on: Queryable,
@@ -672,7 +676,7 @@ async function validateNamedPersonas(
     }
     if (found.get(id) !== null) {
       throw new UnprocessableInputError(
-        `persona ${id} is archived, and a test cannot name an archived persona`,
+        `persona ${id} is deleted, and a test cannot name a deleted persona`,
       );
     }
   }

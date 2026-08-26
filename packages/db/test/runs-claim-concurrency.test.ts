@@ -87,7 +87,9 @@ beforeAll(async () => {
   personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: { personality: "Speaks plainly.", language: "en-US" },
+      identityName: "Sam Poole",
+      personality: "Speaks plainly.",
+      language: "en-US",
     })
   ).id;
 

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  archivePersona,
+  deletePersona,
   editTest,
   getTest,
   NotPermittedError,
@@ -21,7 +21,6 @@ import {
   actingAsAcme,
   actingAsGlobex,
   globex,
-  pointProjectAt,
   rescheduling,
   rowCounts,
   seedPersona,
@@ -246,9 +245,9 @@ describe("a test naming a persona it may not have", () => {
     ).rejects.toThrow(/persona id/);
   });
 
-  it("is refused when the persona is archived, and leaves nothing", async () => {
+  it("is refused when the persona is deleted, and leaves nothing", async () => {
     const retired = await seedPersona(actingAsAcme(), "Retired Rex");
-    await archivePersona(actingAsAcme(), retired);
+    await deletePersona(actingAsAcme(), retired);
 
     const before = await rowCounts();
 
@@ -257,7 +256,7 @@ describe("a test naming a persona it may not have", () => {
         ...rescheduling,
         personaIds: [retired],
       }),
-    ).rejects.toThrow(/archived/);
+    ).rejects.toThrow(/deleted/);
 
     expect(await rowCounts()).toEqual(before);
   });
@@ -327,19 +326,6 @@ describe("a test naming no persona", () => {
     ]);
   });
 
-  it("cannot clear the project's required default at the database boundary", async () => {
-    await expect(pointProjectAt(globex.project, null)).rejects.toMatchObject({
-      code: "23502",
-      column: "default_persona_id",
-    });
-  });
-
-  it("refuses a default owned by another project at the stored pointer", async () => {
-    await expect(pointProjectAt(acme.outbound, rita)).rejects.toSatisfy(
-      (error: unknown) =>
-        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
-    );
-  });
 });
 
 describe("a credential for the whole organization", () => {

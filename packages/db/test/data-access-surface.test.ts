@@ -129,10 +129,10 @@ const WORK_DISPATCHING = [
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
-  // Taking a persona out of a project's authoring lists, and putting them
-  // back. Neither removes a row: a run that pinned a version stays
-  // interpretable, and a removal somebody regrets stays undoable.
-  "archivePersona",
+  // Taking a persona out of every list and picker. It removes no row: the
+  // stamp is all it writes, so a run that pinned one of their versions stays
+  // interpretable forever.
+  "deletePersona",
   "archiveProjectGrader",
   "appendSpans",
   "appendGrades",
@@ -176,7 +176,6 @@ const CONTEXT_REQUIRING = [
   "deleteMockTool",
   "deleteTest",
   "deleteTestSuite",
-  "setDefaultPersona",
   "editProjectGrader",
   "editMockTool",
   "editPersona",
@@ -303,9 +302,8 @@ const CONTEXT_REQUIRING = [
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
   "resolvePersonaVersions",
-  "restorePersona",
-  // Which active tests currently name a persona — the same question their
-  // Archive asks, so a page and a refusal can never disagree about it.
+  // Which active tests currently name a persona — what a sheet shows under
+  // *used by*, and what somebody about to press Delete wants to know.
   "testsUsingPersona",
   "traceEvidenceStartedAt",
   "resolveProductionGraders",
@@ -445,7 +443,6 @@ const VALUES = [
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
   // default persona, and this is what keeps that true.
-  "DefaultPersonaReplacementError",
   // An identity write that named the revision it was written against, after
   // somebody else moved the row. `TestMovedOnError` below is the same refusal
   // one level down, about content rather than identity.
@@ -455,7 +452,6 @@ const VALUES = [
   // the one failure the key exists to prevent.
   "IdempotencyConflictError",
   "IdentityConflictError",
-  "PersonaNamedByTestsError",
   "ProductionGradingPlanConflictError",
   "ProjectOutsideOrganizationError",
   // A slug an admin typed that a living project of the same organization
@@ -483,7 +479,6 @@ const VALUES = [
   "UnprocessableInputError",
   // A versioned write that named the version it was written against, for every
   // versioned resource reached by identifier rather than by filename.
-  "VersionConflictError",
   // The store rolling a write back because another one got in its way. Its own
   // class because it is the one refusal about nothing the caller did: the
   // request was valid, nothing was written, and sending it again is the fix.

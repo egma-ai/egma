@@ -5,7 +5,6 @@ import {
   eq,
   ilike,
   inArray,
-  isNotNull,
   isNull,
   lt,
   or,
@@ -16,7 +15,6 @@ import {
 import { db, type Queryable, type Transaction } from "../client.ts";
 import {
   PERSONA_LIBRARY_CATALOG,
-  type PersonaTraits,
   type EgmaProvidedPersona,
 } from "../persona-library/catalog.ts";
 import {
@@ -26,7 +24,6 @@ import {
   validPersonaModels,
   type PersonaModels,
 } from "../models/selections.ts";
-import { newRevision } from "../revisions.ts";
 import {
   persona,
   personaVersion,
@@ -34,14 +31,10 @@ import {
 import { project } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
 import {
-  DefaultPersonaReplacementError,
-  IdentityConflictError,
   EgmaProvidedPersonaError,
-  PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   PersonaNameAmbiguousError,
   UnprocessableInputError,
-  VersionConflictError,
   WriteAbortedError,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -64,53 +57,50 @@ import { within } from "./within.ts";
  * credential — reads the whole customer and creates nothing, because a
  * persona belongs to a project and a credential for the whole customer
  * is acting in none. What already exists it may edit: the row names its own
- * project, so that write has somewhere to land. Archiving it refuses like
+ * project, so that write has somewhere to land. Deleting it refuses like
  * creating, because taking a persona out of a project's authoring lists is an
- * act taken inside one — `archivePersona` says why.
+ * act taken inside one — `deletePersona` says why.
  *
- * **Nothing here deletes anybody.** Archive and Restore are the whole
- * lifecycle: a persona a run pinned has to stay interpretable forever, and a
- * removal somebody regrets at four o'clock has to be undoable at five.
- * Permanent removal is a compliance workflow with its own rules and is not
- * one of these verbs.
+ * **Nothing here removes a row.** Delete is the product word and it is
+ * permanent to whoever presses it: the persona leaves every list and picker
+ * and there is no way back through any surface. Underneath it stamps
+ * `archived_at`, so a run that pinned one of these versions stays
+ * interpretable forever. The two words differ deliberately; see the schema
+ * file.
  */
-
-export type { PersonaTraits };
-
-/** Human traits that can be described but are not required. */
-const DESCRIBED_TRAITS = [
-  "accent",
-  "backgroundNoise",
-] as const;
-
-type DescribedTrait = (typeof DESCRIBED_TRAITS)[number];
 
 /**
- * The traits as they are stored and compared: described fields trimmed, and
- * an empty one dropped rather than kept as an empty string.
+ * The authored content one version pins — everything a change to which mints
+ * the next version, and nothing a change to which does not.
  *
- * **This is what makes a byte-identical save byte-identical.** A field
- * somebody cleared and a field somebody never filled in are the same fact —
- * nothing is stated about it — and storing them as two different values would
- * mint a version for a change nobody made.
+ * The team's `name` and `description` are deliberately not here. They are the
+ * identity row's, they are a label rather than behavior, and relabeling a
+ * library must never pollute the history a result is read against.
  */
-function normalizedTraits(traits: PersonaTraits): PersonaTraits {
-  const described: { [K in DescribedTrait]?: string } = {};
-  for (const field of DESCRIBED_TRAITS) {
-    const written = traits[field]?.trim() ?? "";
-    if (written !== "") described[field] = written;
-  }
+export type PersonaBehavior = {
+  /** The human name this persona gives the agent, spoken on every call. */
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
+  readonly models: PersonaModels;
+};
+
+/** Trimmed exactly the way a stored version is, so a save can be compared. */
+function normalizedBehavior(behavior: PersonaBehavior): PersonaBehavior {
   return {
-    personality: traits.personality.trim(),
-    language: traits.language.trim(),
-    ...described,
+    identityName: behavior.identityName.trim(),
+    personality: behavior.personality.trim(),
+    language: behavior.language.trim(),
+    models: behavior.models,
   };
 }
 
 export type NewPersona = {
   readonly name: string;
   readonly description?: string | undefined;
-  readonly traits: PersonaTraits;
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
   /** Absent means the release's complete recommended selection. */
   readonly models?: PersonaModels | undefined;
 };
@@ -121,50 +111,39 @@ export type Persona = {
   readonly id: string;
   readonly owner: PersonaOwner;
   readonly projectId: string | null;
+  /** The team's word for them, shown in lists and pickers. Never spoken. */
   readonly name: string;
   readonly description: string | null;
   readonly version: number;
   /** The current version's own `prsv_` id — what a run pins. */
   readonly versionId: string;
-  readonly traits: PersonaTraits;
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
   readonly models: PersonaModels;
-  /**
-   * The opaque token an identity write or a lifecycle change has to name.
-   * It changes on every one of them and means nothing on its own.
-   */
-  readonly revision: string;
-  /** When they were archived, or null while they are active. */
+  /** When they were deleted, or null while they are in use. */
   readonly archivedAt: Date | null;
-  /**
-   * Whether the project points at them as the persona a test naming nobody
-   * gets. **A pointer, not a kind**: it may point at a read-only Egma-provided
-   * persona or at a Custom persona.
-   */
-  readonly isDefault: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
 
 /**
  * What an edit may touch. Name and description are identity and version
- * nothing; traits are human behavior and version on a change. Absent means
- * keep.
+ * nothing; the behavior fields version on a change. Absent means keep.
  *
- * **The two expectations are separate because they answer separate
- * questions.** `expectedRevision` says *this persona has not moved* and guards
- * the identity fields and the lifecycle; `expectedVersionId` says *this
- * human behavior has not moved* and guards the authored behavior. An edit that
- * changes both names both. Either may be left out, and then that half is
- * written without a check — which is what the scripts do, and what no browser
- * write is ever allowed to do.
+ * **No expectation fields, on purpose.** A persona write is last-write-wins.
+ * The revision token and the expected version id are gone from this door and
+ * from every door above it — pre-launch, with two authors, the ceremony cost
+ * more than the clobber it prevented. The reopen condition is written down in
+ * the spec: the first real clobber incident.
  */
 export type PersonaChanges = {
   readonly name?: string;
   readonly description?: string | null;
-  readonly traits?: PersonaTraits;
+  readonly identityName?: string;
+  readonly personality?: string;
+  readonly language?: string;
   readonly models?: PersonaModels;
-  readonly expectedRevision?: string | undefined;
-  readonly expectedVersionId?: string | undefined;
 };
 
 /** One version, frozen: the persona exactly as some simulation met them. */
@@ -172,7 +151,9 @@ export type PersonaVersion = {
   readonly id: string;
   readonly personaId: string;
   readonly version: number;
-  readonly traits: PersonaTraits;
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
   readonly models: PersonaModels;
   readonly createdAt: Date;
 };
@@ -186,11 +167,88 @@ const COLUMNS = {
   projectId: persona.projectId,
   name: persona.name,
   description: persona.description,
-  revision: persona.revision,
   archivedAt: persona.archivedAt,
   createdAt: persona.createdAt,
   updatedAt: persona.updatedAt,
 } as const;
+
+/** The stored behavior, column by column. */
+const BEHAVIOR_COLUMNS = {
+  identityName: personaVersion.identityName,
+  personality: personaVersion.personality,
+  language: personaVersion.language,
+  llmProvider: personaVersion.llmProvider,
+  llmModel: personaVersion.llmModel,
+  sttProvider: personaVersion.sttProvider,
+  sttModel: personaVersion.sttModel,
+  ttsProvider: personaVersion.ttsProvider,
+  ttsModel: personaVersion.ttsModel,
+  ttsVoiceId: personaVersion.ttsVoiceId,
+  ttsSpeed: personaVersion.ttsSpeed,
+} as const;
+
+/** One version row's behavior columns, as the value every caller reads. */
+type BehaviorRow = {
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
+  readonly llmProvider: string;
+  readonly llmModel: string;
+  readonly sttProvider: string;
+  readonly sttModel: string;
+  readonly ttsProvider: string;
+  readonly ttsModel: string;
+  readonly ttsVoiceId: string;
+  readonly ttsSpeed: number;
+};
+
+/**
+ * The stored columns as one behavior.
+ *
+ * The models still go through `personaModelsFromRow`, even though the columns
+ * are typed now: the types say the row holds text, and the provider catalog
+ * says whether that text names something this release can execute. A row
+ * somebody hand-edited into naming a model egma cannot run must fail here,
+ * loudly and naming itself, rather than reach a work order.
+ */
+function behaviorFromRow(row: BehaviorRow, versionId: string): PersonaBehavior {
+  return {
+    identityName: row.identityName,
+    personality: row.personality,
+    language: row.language,
+    models: personaModelsFromRow(
+      {
+        llm: { provider: row.llmProvider, model: row.llmModel },
+        stt: { provider: row.sttProvider, model: row.sttModel },
+        tts: {
+          provider: row.ttsProvider,
+          model: row.ttsModel,
+          voiceId: row.ttsVoiceId,
+          speed: row.ttsSpeed,
+        },
+      },
+      versionId,
+    ),
+  };
+}
+
+/** One behavior as the columns a version row is written from. */
+function behaviorColumns(behavior: PersonaBehavior): BehaviorRow {
+  const { models } = behavior;
+  return {
+    identityName: behavior.identityName,
+    personality: behavior.personality,
+    language: behavior.language,
+    llmProvider: models.llm.provider,
+    llmModel: models.llm.model,
+    sttProvider: models.stt.provider,
+    sttModel: models.stt.model,
+    ttsProvider: models.tts.provider,
+    ttsModel: models.tts.model,
+    ttsVoiceId: models.tts.voiceId,
+    ttsSpeed: models.tts.speed,
+  };
+}
 
 /**
  * What the factory will not write, refused as the caller's mistake rather than
@@ -202,54 +260,28 @@ const COLUMNS = {
  * plain errors while nothing but a script called this; the browser's door is
  * the caller that has to relay them.
  */
+function stated(value: unknown, sentence: string): asserts value is string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new UnprocessableInputError(sentence);
+  }
+}
+
+const NEEDS_AN_IDENTITY_NAME =
+  "a persona needs an identity name, because the agent is told who is calling";
+
 function validateName(name: unknown): asserts name is string {
-  if (typeof name !== "string" || name.trim() === "") {
-    throw new UnprocessableInputError("a persona needs a name");
-  }
+  stated(name, "a persona needs a name");
 }
 
-function validateTraits(traits: unknown): asserts traits is PersonaTraits {
-  if (typeof traits !== "object" || traits === null || Array.isArray(traits)) {
-    throw new UnprocessableInputError("persona traits must be an object");
-  }
-  const held = traits as Record<string, unknown>;
-  if (
-    typeof held.personality !== "string" ||
-    held.personality.trim() === ""
-  ) {
-    throw new UnprocessableInputError("a persona needs a personality");
-  }
-  if (typeof held.language !== "string" || held.language.trim() === "") {
-    throw new UnprocessableInputError("a persona needs a language");
-  }
-  const accepted = new Set<string>([
-    "personality",
-    "language",
-    ...DESCRIBED_TRAITS,
-  ]);
-  const unsupported = Object.keys(held).filter((key) => !accepted.has(key));
-  if (unsupported.length > 0) {
-    throw new UnprocessableInputError(
-      `persona traits have unsupported fields ${unsupported.join(", ")}`,
-    );
-  }
-  for (const field of DESCRIBED_TRAITS) {
-    const value = held[field];
-    if (value !== undefined && typeof value !== "string") {
-      throw new UnprocessableInputError(`persona trait ${field} must be text`);
-    }
-  }
-}
-
-const CREATE_FIELDS = ["name", "description", "traits", "models"] as const;
-const EDIT_FIELDS = [
+const CREATE_FIELDS = [
   "name",
   "description",
-  "traits",
+  "identityName",
+  "personality",
+  "language",
   "models",
-  "expectedRevision",
-  "expectedVersionId",
 ] as const;
+const EDIT_FIELDS = CREATE_FIELDS;
 
 /**
  * Reject stale or misspelled authoring fields before reading a required one.
@@ -284,145 +316,67 @@ function validateAuthoringFields(
   );
 }
 
+/** The three authored sentences, checked the way the columns are checked. */
+function validateBehaviorText(input: {
+  readonly identityName: unknown;
+  readonly personality: unknown;
+  readonly language: unknown;
+}): void {
+  stated(input.identityName, NEEDS_AN_IDENTITY_NAME);
+  stated(input.personality, "a persona needs a personality");
+  stated(input.language, "a persona needs a language");
+}
+
 function validateNewPersona(input: NewPersona): void {
   validateAuthoringFields("create", input, CREATE_FIELDS);
   validateName(input.name);
-  validateTraits(input.traits);
+  validateBehaviorText(input);
   if (input.models !== undefined) validPersonaModels(input.models);
 }
 
-function describedTraitsFromRow(
-  value: Record<string, unknown>,
-  malformed: () => Error,
-): { [K in DescribedTrait]?: string } {
-  const described: { [K in DescribedTrait]?: string } = {};
-  for (const field of DESCRIBED_TRAITS) {
-    const held = value[field];
-    if (held === undefined) continue;
-    if (typeof held !== "string" || held.trim() === "") throw malformed();
-    described[field] = held;
-  }
-  return described;
-}
-
 /**
- * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a `PersonaTraits` that isn't one. This guard accepts
- * only human behavior fields. Provider, model, voice, and speed are validated
- * separately as the version's required `models` value.
- */
-function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
-  const malformed = () =>
-    new Error(
-      `version ${versionId} holds traits in a shape Egma never writes; the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw malformed();
-  }
-  const held = value as Record<string, unknown>;
-  const { personality, language } = held;
-  if (typeof personality !== "string" || personality.trim() === "") {
-    throw malformed();
-  }
-  if (typeof language !== "string" || language.trim() === "") throw malformed();
-  const accepted = new Set<string>([
-    "personality",
-    "language",
-    ...DESCRIBED_TRAITS,
-  ]);
-  if (Object.keys(held).some((key) => !accepted.has(key))) throw malformed();
-  return {
-    personality,
-    language,
-    ...describedTraitsFromRow(held, malformed),
-  };
-}
-
-/**
- * Byte-identical or not, decided field by field — the same answer canonical
- * serialization would give, without trusting any serializer to order keys the
- * way jsonb re-ordered them.
+ * Identical or not, decided field by field — one comparator per field, in a
+ * table the compiler holds exhaustive.
  *
- * One comparator per field, in tables the compiler holds exhaustive: a field
- * added to the human traits refuses to build until it is also told how to
- * compare. A hand-maintained comparator that missed a field would call two
- * different traits identical, and an edit would vanish without a version —
- * the one loss this whole file exists to rule out.
+ * A field added to the authored behavior refuses to build until it is also
+ * told how to compare. A hand-maintained comparator that missed a field would
+ * call two different behaviors identical, and an edit would vanish without a
+ * version — the one loss this whole file exists to rule out. The same table
+ * decides whether a seeded catalog row still holds catalog content.
  */
-const sameTraitsField: {
-  readonly [K in keyof PersonaTraits]-?: (
-    a: PersonaTraits,
-    b: PersonaTraits,
+const sameBehaviorField: {
+  readonly [K in keyof PersonaBehavior]-?: (
+    a: PersonaBehavior,
+    b: PersonaBehavior,
   ) => boolean;
 } = {
+  identityName: (a, b) => a.identityName === b.identityName,
   personality: (a, b) => a.personality === b.personality,
   language: (a, b) => a.language === b.language,
-  accent: (a, b) => a.accent === b.accent,
-  backgroundNoise: (a, b) => a.backgroundNoise === b.backgroundNoise,
+  models: (a, b) => samePersonaModels(a.models, b.models),
 };
 
 /**
- * Byte-identical, decided over the **normalized** traits on both sides. The
- * stored side came out of `traitsFromRow`, which drops an empty described
- * trait; the incoming side has to be put through the same door or a cleared
- * field would compare unequal to an absent one forever.
+ * Identical, decided over the **normalized** behavior on both sides. The
+ * stored side was trimmed on the way in, so the incoming side has to be put
+ * through the same door or a trailing space would read as a change.
  */
-function sameTraits(a: PersonaTraits, b: PersonaTraits): boolean {
-  const left = normalizedTraits(a);
-  const right = normalizedTraits(b);
-  return Object.values(sameTraitsField).every((same) => same(left, right));
-}
-
-/**
- * Full JSON equality for a fixed catalog version. Unlike `sameTraits`, this
- * must not parse through today's trait shape: doing so would drop an unknown
- * key and let a corrupted immutable row pass as catalog content. Object key
- * order is not content; every key and nested value is.
- */
-function sameJson(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return (
-      Array.isArray(left) &&
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => sameJson(value, right[index]))
-    );
-  }
-  if (
-    typeof left !== "object" ||
-    left === null ||
-    typeof right !== "object" ||
-    right === null
-  ) {
-    return false;
-  }
-
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftRecord);
-  const rightKeys = Object.keys(rightRecord);
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every(
-      (key) =>
-        Object.hasOwn(rightRecord, key) &&
-        sameJson(leftRecord[key], rightRecord[key]),
-    )
-  );
+function sameBehavior(a: PersonaBehavior, b: PersonaBehavior): boolean {
+  const left = normalizedBehavior(a);
+  const right = normalizedBehavior(b);
+  return Object.values(sameBehaviorField).every((same) => same(left, right));
 }
 
 /**
  * The named persona, within the caller's tenancy and scope, **whatever their
  * lifecycle state**.
  *
- * Archive takes somebody out of the lists an author picks from; it does not
- * take them out of the product. A detail page has to render an archived
- * persona — that is where Restore is — and Restore itself has to find one. A
- * predicate that filtered them out here would make an archived persona
- * unreachable by the one operation that exists to bring them back.
+ * Delete takes somebody out of the lists an author picks from; it does not
+ * take them out of the product. A Delete has to read its own answer back, a
+ * usage question has to be answerable about somebody who has gone, and a run
+ * that pinned one of their versions is still on the record. A predicate that
+ * filtered them out here would make each of those unanswerable. The filtering
+ * belongs to the lists, and `listPersonas` does it.
  */
 function thePersona(auth: AuthContext, id: string): SQL {
   return readablePersona(auth, eq(persona.id, id));
@@ -446,7 +400,7 @@ function currentCatalogVersion(entry: EgmaProvidedPersona) {
         `Egma-provided persona ${entry.id} version ${version.id} must be number ${index + 1}`,
       );
     }
-    validateTraits(version.traits);
+    validateBehaviorText(version);
     validPersonaModels(version.models);
   });
   return current;
@@ -455,7 +409,7 @@ function currentCatalogVersion(entry: EgmaProvidedPersona) {
 /**
  * Put the personas Egma provides in the database without rewriting a version.
  * Identity metadata and the current pointer may move; version rows are insert
- * only and are checked byte for byte when their fixed id already exists.
+ * only and are checked field for field when their fixed id already exists.
  */
 /** @internal Called only by the deployment seeder outside the access surface. */
 export async function seedPersonaLibraryInternal(
@@ -492,7 +446,6 @@ export async function seedPersonaLibraryInternal(
                 name: entry.name,
                 description: entry.description,
                 currentVersionId: current.id,
-                revision: newRevision(),
                 updatedAt: now,
               })
               .where(
@@ -511,8 +464,12 @@ export async function seedPersonaLibraryInternal(
             id: version.id,
             personaId: entry.id,
             version: version.version,
-            traits: normalizedTraits(version.traits),
-            models: validPersonaModels(version.models),
+            ...behaviorColumns(
+              normalizedBehavior({
+                ...version,
+                models: validPersonaModels(version.models),
+              }),
+            ),
             createdBy: null,
             createdAt: version.createdAt,
           })),
@@ -548,8 +505,7 @@ export async function seedPersonaLibraryInternal(
         .select({
           id: personaVersion.id,
           version: personaVersion.version,
-          traits: personaVersion.traits,
-          models: personaVersion.models,
+          ...BEHAVIOR_COLUMNS,
         })
         .from(personaVersion)
         .where(eq(personaVersion.personaId, entry.id));
@@ -558,8 +514,10 @@ export async function seedPersonaLibraryInternal(
         if (
           stored === undefined ||
           stored.version !== expected.version ||
-          !sameJson(stored.traits, normalizedTraits(expected.traits)) ||
-          !sameJson(stored.models, validPersonaModels(expected.models))
+          !sameBehavior(behaviorFromRow(stored, stored.id), {
+            ...expected,
+            models: validPersonaModels(expected.models),
+          })
         ) {
           throw new Error(
             `fixed Egma-provided persona version ${expected.id} already holds different content`,
@@ -580,43 +538,13 @@ export async function seedPersonaLibraryInternal(
   });
 }
 
-async function createPersonaWithTraits(
-  auth: AuthContext,
-  input: Pick<NewPersona, "name" | "description">,
-  traits: PersonaTraits,
-  models: PersonaModels,
-): Promise<Persona> {
-  const projectId = auth.projectId;
-  if (projectId === undefined) {
-    throw new Error(
-      "a persona belongs to a project, and this credential is for the whole organization and acting in none",
-    );
-  }
-  validateName(input.name);
-  validateTraits(traits);
-  const storedModels = validPersonaModels(models);
-
-  return db().transaction(async (tx) => {
-    await lockPersonaProject(tx, auth, projectId);
-    return insertPersonaWithTraits(
-      tx,
-      auth,
-      projectId,
-      input,
-      normalizedTraits(traits),
-      storedModels,
-    );
-  });
-}
-
 /**
  * Hold the project a persona write lands in until that write commits.
  *
- * Project first is the shared lock order for a fork: lifecycle writes also
- * take the project before a persona. A fork that took the source first could
- * deadlock with an Archive that already held the project and was waiting for
- * that same source. The shared lock also makes project deletion wait until the
- * new identity and version either both commit or both roll back.
+ * The shared lock makes project deletion wait until the new identity and
+ * version either both commit or both roll back. Project first is also the lock
+ * order a fork takes, so two writes that want both rows queue rather than
+ * deadlock.
  */
 async function lockPersonaProject(
   tx: Transaction,
@@ -641,13 +569,12 @@ async function lockPersonaProject(
 }
 
 /** Write one complete Custom persona on the caller's transaction. */
-async function insertPersonaWithTraits(
+async function insertPersona(
   tx: Transaction,
   auth: AuthContext,
   projectId: string,
   input: Pick<NewPersona, "name" | "description">,
-  storedTraits: PersonaTraits,
-  storedModels: PersonaModels,
+  behavior: PersonaBehavior,
 ): Promise<Persona> {
   const id = newId("prs");
   const versionId = newId("prsv");
@@ -664,15 +591,13 @@ async function insertPersonaWithTraits(
     id: versionId,
     personaId: id,
     version: 1,
-    traits: storedTraits,
-    models: storedModels,
+    ...behaviorColumns(behavior),
     createdBy: auth.userId,
   });
 
   // Read through the ordinary seam while both rows and the project lock are
-  // still on this transaction. This is the authoritative answer for the
-  // version and project-default pointer; no hand-built return value can drift
-  // from what a following read will see.
+  // still on this transaction. This is the authoritative answer; no hand-built
+  // return value can drift from what a following read will see.
   const inserted = await readPersonaOn(tx, auth, id);
   if (inserted === undefined) {
     throw new Error("the persona was not written");
@@ -687,77 +612,86 @@ export async function createPersona(
   authorize(auth, "author_definitions", here(auth));
 
   validateNewPersona(input);
-  return createPersonaWithTraits(
-    auth,
-    input,
-    input.traits,
-    input.models ?? RECOMMENDED_PERSONA_MODELS,
-  );
+
+  const projectId = auth.projectId;
+  if (projectId === undefined) {
+    throw new Error(
+      "a persona belongs to a project, and this credential is for the whole organization and acting in none",
+    );
+  }
+  const behavior = normalizedBehavior({
+    identityName: input.identityName,
+    personality: input.personality,
+    language: input.language,
+    models: validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS),
+  });
+
+  return db().transaction(async (tx) => {
+    await lockPersonaProject(tx, auth, projectId);
+    return insertPersona(tx, auth, projectId, input, behavior);
+  });
 }
 
 /**
- * The identity row joined to its current version, and to the project whose
- * pointer decides whether it is the default — the shape `get` and `list` both
- * answer with, written once so the two can never drift.
- *
- * The project join is what makes "is this the default?" a fact of the read
- * rather than a second question every caller would have to remember to ask.
+ * The identity row joined to its current version — the shape `get` and `list`
+ * both answer with, written once so the two can never drift.
  */
 function selectWithCurrentVersion(auth: AuthContext, on: Queryable = db()) {
-  const defaultProject =
-    auth.projectId === undefined
-      ? sql`false`
-      : eq(project.id, auth.projectId);
   return on
     .select({
       ...COLUMNS,
       version: personaVersion.version,
       versionId: personaVersion.id,
-      traits: personaVersion.traits,
-      models: personaVersion.models,
-      defaultPersonaId: project.defaultPersonaId,
+      ...BEHAVIOR_COLUMNS,
     })
     .from(persona)
     .innerJoin(
       personaVersion,
       eq(persona.currentVersionId, personaVersion.id),
-    )
-    .leftJoin(
-      project,
-      and(defaultProject, eq(project.defaultPersonaId, persona.id)),
     );
 }
 
 /** One row of that select, as a `Persona`. */
-function personaFrom(row: {
-  readonly id: string;
-  readonly organizationId: string | null;
-  readonly versionId: string;
-  readonly traits: unknown;
-  readonly models: unknown;
-  readonly defaultPersonaId: string | null;
-}): Persona {
-  const { defaultPersonaId, organizationId, ...rest } = row;
+function personaFrom(
+  row: BehaviorRow & {
+    readonly id: string;
+    readonly organizationId: string | null;
+    readonly versionId: string;
+  },
+): Persona {
+  const {
+    organizationId,
+    identityName: _identityName,
+    personality: _personality,
+    language: _language,
+    llmProvider: _llmProvider,
+    llmModel: _llmModel,
+    sttProvider: _sttProvider,
+    sttModel: _sttModel,
+    ttsProvider: _ttsProvider,
+    ttsModel: _ttsModel,
+    ttsVoiceId: _ttsVoiceId,
+    ttsSpeed: _ttsSpeed,
+    ...identity
+  } = row;
   return {
-    ...(rest as unknown as Omit<
+    ...(identity as unknown as Omit<
       Persona,
-      "owner" | "traits" | "models" | "isDefault"
+      "owner" | keyof PersonaBehavior
     >),
     owner: organizationId === null ? "egma" : "organization",
-    traits: traitsFromRow(row.traits, row.versionId),
-    models: personaModelsFromRow(row.models, row.versionId),
-    isDefault: defaultPersonaId === row.id,
+    ...behaviorFromRow(row, row.versionId),
   };
 }
 
 /**
  * The persona as it stands on one connection.
  *
- * **A lifecycle write reads its own answer back through this, on its own
- * transaction.** `getPersona` below asks the pool, which is a different
- * connection and cannot see an uncommitted write — so an Archive that answered
- * through it would hand back the row exactly as it was a moment before, and
- * every caller would believe nothing had happened.
+ * **A write reads its own answer back through this, on its own transaction.**
+ * `getPersona` below asks the pool, which is a different connection and cannot
+ * see an uncommitted write — so a Delete that answered through it would hand
+ * back the row exactly as it was a moment before, and every caller would
+ * believe nothing had happened.
  */
 async function readPersonaOn(
   on: Queryable,
@@ -782,74 +716,14 @@ export async function getPersona(
 }
 
 /**
- * Make one active, available persona the project's default.
- *
- * This moves only the project's pointer. It does not change the persona's
- * type, identity, traits, models, or version. The project is locked first,
- * then the persona, which is the same order Archive uses. That makes Archive
- * and a default change serialize instead of leaving the project pointed at an
- * archived persona, without creating a lock cycle between the two actions.
- */
-export async function setDefaultPersona(
-  auth: AuthContext,
-  id: string,
-): Promise<Persona | undefined> {
-  authorize(auth, "author_definitions", here(auth));
-
-  const projectId = auth.projectId;
-  if (projectId === undefined) {
-    throw new Error(
-      "a project default belongs to a project, and this credential is for the whole organization and acting in none",
-    );
-  }
-
-  return writing(() =>
-    db().transaction(async (tx) => {
-      const [target] = await tx
-        .select({ id: project.id, defaultPersonaId: project.defaultPersonaId })
-        .from(project)
-        .where(within(auth, project, eq(project.id, projectId)))
-        .limit(1)
-        .for("update", { of: project });
-      if (target === undefined) {
-        throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
-      }
-
-      const [available] = await tx
-        .select({ id: persona.id })
-        .from(persona)
-        .where(
-          personaAvailableToProject(
-            auth,
-            target.id,
-            and(eq(persona.id, id), notArchived),
-          ),
-        )
-        .limit(1)
-        .for("share", { of: persona });
-      if (available === undefined) return undefined;
-
-      if (target.defaultPersonaId !== available.id) {
-        await tx
-          .update(project)
-          .set({ defaultPersonaId: available.id, updatedAt: new Date() })
-          .where(eq(project.id, target.id));
-      }
-
-      return readPersonaOn(tx, auth, available.id);
-    }),
-  );
-}
-
-/**
  * One door for every change, so no caller needs the version rules to pick a
  * function — the rules live here. Name and description write in place and
- * version nothing. Human traits that differ from the current version insert
- * the next version and moves the pointer, in one transaction with the identity
- * row locked, so two concurrent edits number one after the other rather than
- * fighting over the same version number. Byte-identical traits are not
- * an edit at all: nothing is written, not even `updated_at`, and the current
- * version comes back.
+ * version nothing. Behavior that differs from the current version inserts the
+ * next version and moves the pointer, in one transaction with the identity row
+ * locked, so two concurrent edits number one after the other rather than
+ * fighting over the same version number. An identical save is not an edit at
+ * all: nothing is written, not even `updated_at`, and the current version
+ * comes back.
  *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
@@ -863,8 +737,15 @@ export async function editPersona(
 
   validateAuthoringFields("edit", changes, EDIT_FIELDS);
   if (changes.name !== undefined) validateName(changes.name);
-  const { traits: askedTraits } = changes;
-  if (askedTraits !== undefined) validateTraits(askedTraits);
+  if (changes.identityName !== undefined) {
+    stated(changes.identityName, NEEDS_AN_IDENTITY_NAME);
+  }
+  if (changes.personality !== undefined) {
+    stated(changes.personality, "a persona needs a personality");
+  }
+  if (changes.language !== undefined) {
+    stated(changes.language, "a persona needs a language");
+  }
   const askedModels =
     changes.models === undefined
       ? undefined
@@ -889,19 +770,8 @@ export async function editPersona(
       if (locked.projectId === null) {
         throw new Error(`Custom persona ${locked.id} has no project`);
       }
-      const currentProjectId = locked.projectId;
       const { currentVersionId, organizationId: _organizationId, ...current } =
         locked;
-      const [pointing] = await tx
-        .select({ defaultPersonaId: project.defaultPersonaId })
-        .from(project)
-        .where(eq(project.id, currentProjectId))
-        .limit(1);
-      const isDefault = pointing?.defaultPersonaId === current.id;
-
-      // Both expectations are checked against the row this transaction has
-      // locked, so nothing can move between the check and the write.
-      expectRevision(current, changes.expectedRevision);
 
       // This select and the update below are the two `where`s in this file that
       // start from a bare `eq` rather than `within`: each names an id that just
@@ -911,8 +781,7 @@ export async function editPersona(
         .select({
           id: personaVersion.id,
           version: personaVersion.version,
-          traits: personaVersion.traits,
-          models: personaVersion.models,
+          ...BEHAVIOR_COLUMNS,
         })
         .from(personaVersion)
         .where(eq(personaVersion.id, currentVersionId))
@@ -921,74 +790,39 @@ export async function editPersona(
         throw new Error("the persona's current version is missing");
       }
 
-      /**
-       * The content expectation, and where it is deliberately **not** applied.
-       *
-       * A traits write names the version it was written against. A save whose
-       * traits are byte-identical to what is stored is not a write
-       * at all — it mints nothing, so there is nothing for a stale expectation
-       * to overwrite — but a stale one is still a caller working from an old
-       * read, and telling them so is what stops the next save silently landing
-       * on top of somebody else's. So it is checked whenever traits were
-       * sent.
-       */
-      if (
-        (askedTraits !== undefined || askedModels !== undefined) &&
-        changes.expectedVersionId !== undefined
-      ) {
-        if (changes.expectedVersionId !== currentVersion.id) {
-          throw new VersionConflictError(
-            "persona",
-            changes.expectedVersionId,
-            currentVersion.id,
-          );
-        }
-      }
-
-      const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
-      const storedModels = personaModelsFromRow(
-        currentVersion.models,
-        currentVersion.id,
-      );
-      const nextTraits =
-        askedTraits !== undefined && !sameTraits(storedTraits, askedTraits)
-          ? normalizedTraits(askedTraits)
-          : undefined;
-      const nextModels =
-        askedModels !== undefined &&
-        !samePersonaModels(storedModels, askedModels)
-          ? askedModels
-          : undefined;
+      const stored = behaviorFromRow(currentVersion, currentVersion.id);
+      const asked: PersonaBehavior = {
+        identityName: changes.identityName ?? stored.identityName,
+        personality: changes.personality ?? stored.personality,
+        language: changes.language ?? stored.language,
+        models: askedModels ?? stored.models,
+      };
+      const next = sameBehavior(stored, asked)
+        ? undefined
+        : normalizedBehavior(asked);
       const identityChanged =
         changes.name !== undefined || changes.description !== undefined;
 
-      if (
-        nextTraits === undefined &&
-        nextModels === undefined &&
-        !identityChanged
-      ) {
+      if (next === undefined && !identityChanged) {
         return {
           ...current,
           owner: "organization" as const,
           version: currentVersion.version,
           versionId: currentVersion.id,
-          traits: storedTraits,
-          models: storedModels,
-          isDefault,
+          ...stored,
         };
       }
 
       let versionId = currentVersion.id;
       let version = currentVersion.version;
-      if (nextTraits !== undefined || nextModels !== undefined) {
+      if (next !== undefined) {
         versionId = newId("prsv");
         version = currentVersion.version + 1;
         await tx.insert(personaVersion).values({
           id: versionId,
           personaId: current.id,
           version,
-          traits: nextTraits ?? storedTraits,
-          models: nextModels ?? storedModels,
+          ...behaviorColumns(next),
           createdBy: auth.userId,
         });
       }
@@ -1000,13 +834,7 @@ export async function editPersona(
           ...(changes.description === undefined
             ? {}
             : { description: changes.description }),
-          ...(nextTraits === undefined && nextModels === undefined
-            ? {}
-            : { currentVersionId: versionId }),
-          // The identity moved, so the token that names it moves too — whichever
-          // half of the edit moved it. A caller holding the old one is holding a
-          // read taken before this write, and that is exactly what it is for.
-          revision: newRevision(),
+          ...(next === undefined ? {} : { currentVersionId: versionId }),
           updatedAt: new Date(),
         })
         .where(eq(persona.id, current.id))
@@ -1023,9 +851,7 @@ export async function editPersona(
         owner: "organization" as const,
         version,
         versionId,
-        traits: nextTraits ?? storedTraits,
-        models: nextModels ?? storedModels,
-        isDefault,
+        ...(next ?? stored),
       };
     }),
   );
@@ -1035,7 +861,7 @@ export async function editPersona(
  * One frozen version, by its own `prsv_` id — the read a run uses to stay
  * interpretable after the persona moves on, and the older-version read a
  * detail page offers. Deliberately no lifecycle filter: a version outlives
- * every change to the persona it belongs to, archiving included, so a run that
+ * every change to the persona it belongs to, a Delete included, so a run that
  * pinned one can always say exactly who the persona was.
  */
 export async function getPersonaVersion(
@@ -1049,8 +875,7 @@ export async function getPersonaVersion(
       id: personaVersion.id,
       personaId: personaVersion.personaId,
       version: personaVersion.version,
-      traits: personaVersion.traits,
-      models: personaVersion.models,
+      ...BEHAVIOR_COLUMNS,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -1065,9 +890,11 @@ export async function getPersonaVersion(
 
   if (row === undefined) return undefined;
   return {
-    ...row,
-    traits: traitsFromRow(row.traits, row.id),
-    models: personaModelsFromRow(row.models, row.id),
+    id: row.id,
+    personaId: row.personaId,
+    version: row.version,
+    createdAt: row.createdAt,
+    ...behaviorFromRow(row, row.id),
   };
 }
 
@@ -1089,13 +916,11 @@ export type PersonaPage = {
 };
 
 /**
- * Which lifecycle state a list is of. **Two lists, never one with a column
- * saying which** — an authoring list mixing archived rows into active ones is
- * a list somebody picks the wrong row out of.
+ * **One list, because there is only one lifecycle worth listing.** A deleted
+ * persona is gone as far as anybody authoring is concerned, so there is no
+ * archived list to ask for and no flag to ask for it with.
  */
 export type PersonaListRequest = PageRequest & {
-  /** `false`, the default, is the authoring list. `true` is the archive. */
-  readonly archived?: boolean | undefined;
   /** Part of the name, matched without regard to case. */
   readonly search?: string | undefined;
 };
@@ -1113,8 +938,6 @@ export async function listPersonas(
   });
   const olderThanCursor =
     cursor === undefined ? undefined : lt(persona.id, cursor);
-  const lifecycle =
-    page?.archived === true ? isNotNull(persona.archivedAt) : notArchived;
   const wanted = page?.search?.trim();
   const named =
     wanted === undefined || wanted === ""
@@ -1123,7 +946,7 @@ export async function listPersonas(
 
   const rows = await selectWithCurrentVersion(auth)
     .where(
-      readablePersona(auth, and(lifecycle, named, olderThanCursor)),
+      readablePersona(auth, and(notArchived, named, olderThanCursor)),
     )
     .orderBy(desc(persona.id))
     .limit(limit + 1);
@@ -1147,21 +970,18 @@ export async function listPersonas(
  * **Naming nobody comes back as nobody.** What an empty list means — that the
  * write is refused, because a test says who calls — is a rule about the write,
  * and the test factory holds it. Answering it here as well would put one rule
- * in two places, where it can come to disagree with itself. Until 2026-08-24
- * the rule read the other way round and an empty list meant the project's
- * default persona; that substitution is gone, and this translation is
- * untouched by the change because it never held the rule.
+ * in two places, where it can come to disagree with itself.
  *
  * **This is a translation, not a promise.** The read is outside whatever
- * transaction the write will open, so a persona can be archived between this
+ * transaction the write will open, so a persona can be deleted between this
  * answer and that write. The factory checks the ids it is handed again inside
  * the write, under the lock that makes a delete and a write over one persona
  * wait for each other; that check is the guarantee this one leans on.
  *
  * Four ways it refuses, each naming what the writer wrote rather than what egma
  * looked up. A name nothing answers to, because a test naming somebody who is
- * not there would run one simulation fewer than it says it runs. A name only an
- * archived persona answers to, which is a different problem with a different fix
+ * not there would run one simulation fewer than it says it runs. A name only a
+ * deleted persona answers to, which is a different problem with a different fix
  * and so gets the factory's own words for it rather than being reported as never
  * having existed. A name two living personas answer to, because there is no
  * uniqueness rule on a persona's name and picking one of the two would put
@@ -1189,7 +1009,7 @@ export async function resolvePersonaNames(
   // entry is an identifier or a name, and which one it is is the writer's
   // choice rather than something to make them declare.
   //
-  // Archived personas are read too, and judged below rather than filtered out
+  // Deleted personas are read too, and judged below rather than filtered out
   // here. Filtered, every one of them would be reported as a persona that never
   // existed — which sends somebody looking for a typo in a name that was right
   // when they wrote it.
@@ -1220,18 +1040,18 @@ export async function resolvePersonaNames(
 
     if (found.length === 0 && answering.length > 0) {
       // The factory's own sentence for this, word for word: a version may not
-      // name an archived persona, and it says so the same way whichever layer
+      // name a deleted persona, and it says so the same way whichever layer
       // catches it.
       const [gone] = answering;
       throw new UnprocessableInputError(
-        `persona ${gone?.id ?? entry} is archived, and a test cannot name an archived persona`,
+        `persona ${gone?.id ?? entry} is deleted, and a test cannot name a deleted persona`,
       );
     }
     if (found.length === 0) {
       throw new UnprocessableInputError(
         isId("prs", entry)
           ? `there is no persona ${entry} in this project`
-          : `Egma has no persona called "${entry}" in this project. Name a persona this project already has, or name none and Egma takes the project's default.`,
+          : `Egma has no persona called "${entry}" in this project. Name a persona this project already has.`,
       );
     }
     if (found.length > 1) {
@@ -1260,39 +1080,41 @@ export async function resolvePersonaNames(
 }
 
 /**
- * A new persona whose version 1 carries the source's current traits.
+ * A new persona whose version 1 carries the source's current behavior.
  *
  * A fork is a create with the retyping saved: fresh `prs_` and `prsv_` ids,
  * version numbering starting over at 1, and no link back — the source's
  * history is the source's, and nothing of it comes along. The source is read
  * through the same tenancy predicate as `getPersona`, so a fork can only be
  * taken from an Egma-provided persona or one available in the acting project.
+ * It is the one path from a read-only Predefined persona to one a project can
+ * edit, and on a Custom persona it is a plain duplicate.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
  * acting in no project is refused right after it, still before the read —
- * the same stance as create and archive, and it keeps `undefined` meaning
+ * the same stance as create and delete, and it keeps `undefined` meaning
  * invisible rather than refused. `getPersona`'s `read` permission applies
- * because the fork hands the source's traits back, which is a read. The
+ * because the fork hands the source's behavior back, which is a read. The
  * independent Custom copy is written on that same transaction. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
  * the source does not exist, which would make Fork the one path that reads
  * without the read permission.
  *
- * **An archived source forks to an active persona, deliberately.** Reaching
- * back into the archive for a starting point is a reasonable thing to want,
- * and the fork is a new identity with its own lifecycle — nothing about the
- * source is disturbed, and nothing archived comes back by the back door.
+ * **A deleted source forks to a live persona, deliberately.** Reaching back
+ * for a starting point is a reasonable thing to want, and the fork is a new
+ * identity with its own lifecycle — nothing about the source is disturbed, and
+ * nothing deleted comes back by the back door.
  *
  * **The project, source pointer, source version, and new copy are one
- * transaction.** The project is locked first, matching Archive's lock order.
- * The source identity is then share-locked before its current-version pointer
- * is read. An Edit or catalog update that moves that pointer therefore happens
- * wholly before or wholly after Fork; Fork never copies a version that stopped
- * being current while the new identity was being written. The source version
- * itself is immutable, so reading it after the pointer lock completes the
- * snapshot without another lock.
+ * transaction.** The project is locked first. The source identity is then
+ * share-locked before its current-version pointer is read. An Edit or catalog
+ * update that moves that pointer therefore happens wholly before or wholly
+ * after Fork; Fork never copies a version that stopped being current while the
+ * new identity was being written. The source version itself is immutable, so
+ * reading it after the pointer lock completes the snapshot without another
+ * lock.
  */
 export async function forkPersona(
   auth: AuthContext,
@@ -1310,9 +1132,8 @@ export async function forkPersona(
   const { projectId } = auth;
 
   return db().transaction(async (tx) => {
-    // Project before persona is the same order as Archive. If either is busy,
-    // this fork waits before it holds the other row, so the two paths cannot
-    // form a lock cycle.
+    // Project before persona. If either is busy, this fork waits before it
+    // holds the other row, so two paths cannot form a lock cycle.
     await lockPersonaProject(tx, auth, projectId);
 
     const [source] = await tx
@@ -1329,11 +1150,7 @@ export async function forkPersona(
     validateName(source.name);
 
     const [current] = await tx
-      .select({
-        id: personaVersion.id,
-        traits: personaVersion.traits,
-        models: personaVersion.models,
-      })
+      .select({ id: personaVersion.id, ...BEHAVIOR_COLUMNS })
       .from(personaVersion)
       .where(eq(personaVersion.id, source.currentVersionId))
       .limit(1);
@@ -1341,7 +1158,7 @@ export async function forkPersona(
       throw new Error("the persona's current version is missing");
     }
 
-    return insertPersonaWithTraits(
+    return insertPersona(
       tx,
       auth,
       projectId,
@@ -1349,32 +1166,10 @@ export async function forkPersona(
         name: source.name,
         description: source.description ?? undefined,
       },
-      normalizedTraits(traitsFromRow(current.traits, current.id)),
-      personaModelsFromRow(current.models, current.id),
+      normalizedBehavior(behaviorFromRow(current, current.id)),
     );
   });
 }
-
-/**
- * What a lifecycle change takes, beyond the persona it names.
- *
- * `expectedRevision` is optional here and required at the browser's door. The
- * scripts and the seeding paths act on a row they read a line earlier and have
- * nobody to race; a person with a page open in a tab they left over lunch has
- * exactly somebody to race, and the door they write through says so.
- */
-export type ArchiveRequest = {
-  readonly expectedRevision?: string | undefined;
-  /**
-   * Who takes the project's default pointer, when the persona being archived
-   * is holding it. Required in that case and meaningless otherwise.
-   */
-  readonly replacementPersonaId?: string | undefined;
-};
-
-export type RestoreRequest = {
-  readonly expectedRevision?: string | undefined;
-};
 
 /**
  * The two ways Postgres ends a transaction because of another one.
@@ -1403,12 +1198,11 @@ function postgresCodeOf(error: unknown): string | undefined {
  * A write, with the store's own abort turned into something a surface can
  * answer with.
  *
- * **The lock order in `archivePersona` is what stops a deadlock happening;
- * this is what happens if one does anyway.** A path added later that takes a
- * lock out of order, or an isolation level somebody raises, would otherwise
- * surface as a driver error on a request that was valid — an internal failure
- * a person cannot act on and cannot reproduce. `WriteAbortedError` says the
- * true thing instead: nothing was written, and sending it again is safe.
+ * A path added later that takes two locks out of order, or an isolation level
+ * somebody raises, would otherwise surface as a driver error on a request that
+ * was valid — an internal failure a person cannot act on and cannot reproduce.
+ * `WriteAbortedError` says the true thing instead: nothing was written, and
+ * sending it again is safe.
  */
 async function writing<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -1422,110 +1216,64 @@ async function writing<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The revision check, written once for the three writes that make it. */
-function expectRevision(
-  current: { readonly id: string; readonly revision: string },
-  expected: string | undefined,
-): void {
-  if (expected === undefined || expected === current.revision) return;
-  throw new IdentityConflictError("persona", current.id, {
-    expected,
-    current: current.revision,
-  });
-}
-
 /**
- * Archive: the persona leaves the lists somebody authors from, and nothing
- * else about them changes.
+ * Delete: the persona leaves every list and picker, and nothing else about
+ * them changes.
  *
  * Every row stays exactly where it was — the identity, every version, every
- * run that pinned one — because Archive is a statement about what should be
- * *offered*, not about what happened. `restorePersona` is therefore an
- * ordinary write rather than a recovery, and that is the whole point of
- * archiving instead of deleting.
+ * run that pinned one — because what the user asked for is that this persona
+ * stop being offered, and a simulation that pinned them still has to read
+ * true. The stamp is `archived_at`, and it is the only mechanism: there is no
+ * restore surface, no deleted list, and no successor to nominate.
  *
- * **Two rules can refuse it, and they are checked under the lock.**
+ * **One rule refuses it, and the database holds that rule.** An Egma-provided
+ * persona has no organization, and `persona_egma_provided_is_active` refuses
+ * the stamp on such a row; this function refuses it a step earlier so the
+ * caller gets a sentence rather than a constraint name.
  *
- * - A current version of an active test names them, which would leave that
- *   test running one simulation fewer than it says it runs.
- *   `PersonaNamedByTestsError` names every test standing in the way.
- * - They are the project's default, and no active replacement was named to
- *   take the pointer. The replacement moves in this same transaction, so
- *   there is never an instant in which a test authored naming nobody has
- *   nobody to be given. `DefaultPersonaReplacementError` says why.
+ * **A live test naming them does not refuse it.** That guard was written when
+ * every test created without naming anybody was silently given the project's
+ * default, so one Delete could quietly empty a page of tests. Tests name their
+ * personas explicitly now, and the protection sits where the loss would
+ * happen: a run for a test naming a deleted persona is refused, and that
+ * test's next write has to name somebody alive. Deleting is therefore one
+ * honest verb with one confirmation, and the working set only ever shows
+ * personas somebody can use.
  *
- * Archiving somebody already archived writes nothing and answers what is
- * there. It is not an error: two tabs pressing Archive is an ordinary thing to
- * happen, and the second one has nothing to complain about.
+ * Deleting somebody already deleted writes nothing and answers what is there.
+ * It is not an error: two tabs pressing Delete is an ordinary thing to happen,
+ * and the second one has nothing to complain about.
  *
  * Like create, this refuses a credential acting in no project. An edit lands
- * on a row that already names its own project; an Archive decides the persona
+ * on a row that already names its own project; a Delete decides the persona
  * should stop being offered in one, and that is an act taken from inside it.
  */
-export async function archivePersona(
+export async function deletePersona(
   auth: AuthContext,
   id: string,
-  request: ArchiveRequest = {},
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
   if (auth.projectId === undefined) {
     throw new Error(
-      "archiving a persona happens inside their project, and this credential is for the whole organization and acting in none",
+      "deleting a persona happens inside their project, and this credential is for the whole organization and acting in none",
     );
   }
 
   const archivedAt = new Date();
-  const { projectId } = auth;
 
   return writing(() =>
     db().transaction(async (tx) => {
-      /**
-       * **The project first, always, and before any persona.**
-       *
-       * An archive can touch three rows: the persona leaving, the project
-       * whose pointer may have to move, and the persona taking that pointer.
-       * Two archives at once will therefore want two of each other's rows —
-       * somebody archives the default and names a colleague as the
-       * replacement while that colleague is being archived from another tab —
-       * and if the two take their locks in different orders, Postgres finds
-       * the cycle and kills one of them. That abort lands on a request that
-       * was valid, which is a fault nobody can reproduce and nobody can act
-       * on. `personas-archive-concurrency.test.ts` produced exactly that.
-       *
-       * So there is one order and every archive takes it. The project row is
-       * the one row both of them are certain to want, so taking it first
-       * leaves the second archive waiting before it holds anything at all —
-       * and a transaction holding nothing cannot be half of a cycle.
-       *
-       * It is locked within the caller's tenancy rather than by bare id: a
-       * predicate that reached any project would take a lock on a row this
-       * caller was never entitled to touch, which is a denial of service
-       * wearing a read's clothes.
-       */
-      const [pointing] = await tx
-        .select({ defaultPersonaId: project.defaultPersonaId })
-        .from(project)
-        .where(within(auth, project, eq(project.id, projectId)))
-        .limit(1)
-        .for("update");
-
-      if (pointing === undefined) return undefined;
-
-      // Locked before the tests naming them are counted, and held until this
-      // transaction ends, so nothing can come to name them between the count
-      // and the write — which a count taken on this transaction's own snapshot
-      // could not promise. The other half is the shared lock a test being
-      // written takes on this same row, which `validateNamedPersonas` in
-      // `tests.ts` explains: the two modes conflict, so one of the two writes
-      // always waits for the other and then sees how it ended.
+      // Locked for the whole transaction. The other half is the shared lock a
+      // test being written takes on this same row, which `validateNamedPersonas`
+      // in `tests.ts` explains: the two modes conflict, so one of the two
+      // writes always waits for the other and then sees how it ended.
       const [locked] = await tx
         .select({
           id: persona.id,
           organizationId: persona.organizationId,
           projectId: persona.projectId,
           name: persona.name,
-          revision: persona.revision,
           archivedAt: persona.archivedAt,
         })
         .from(persona)
@@ -1540,55 +1288,14 @@ export async function archivePersona(
       if (locked.projectId === null) {
         throw new Error(`Custom persona ${locked.id} has no project`);
       }
-      const lockedProjectId = locked.projectId;
-      expectRevision(locked, request.expectedRevision);
       if (locked.archivedAt !== null) return readPersonaOn(tx, auth, locked.id);
-
-      const blocking = await liveTestsNamingPersona(
-        tx,
-        auth,
-        lockedProjectId,
-        locked.id,
-      );
-      if (blocking.length > 0) {
-        throw new PersonaNamedByTestsError(locked.id, blocking);
-      }
-
-      if (pointing.defaultPersonaId === locked.id) {
-        const replacement = request.replacementPersonaId;
-        if (replacement === undefined || replacement === locked.id) {
-          throw new DefaultPersonaReplacementError(locked.id, "none_named");
-        }
-
-        const [taking] = await tx
-          .select({ id: persona.id })
-          .from(persona)
-          .where(
-            personaAvailableToProject(
-              auth,
-              lockedProjectId,
-              and(eq(persona.id, replacement), notArchived),
-            ),
-          )
-          .limit(1)
-          .for("share");
-
-        if (taking === undefined) {
-          throw new DefaultPersonaReplacementError(locked.id, "not_available");
-        }
-
-        await tx
-          .update(project)
-          .set({ defaultPersonaId: taking.id })
-          .where(eq(project.id, lockedProjectId));
-      }
 
       // A bare `eq` on an id that just came off the tenancy-checked row locked
       // above, in this same transaction, so it reaches no further than that
       // check already did — the move `editPersona` makes, for the same reason.
       const [row] = await tx
         .update(persona)
-        .set({ archivedAt, revision: newRevision(), updatedAt: archivedAt })
+        .set({ archivedAt, updatedAt: archivedAt })
         .where(eq(persona.id, locked.id))
         .returning({ id: persona.id });
 
@@ -1599,77 +1306,11 @@ export async function archivePersona(
 }
 
 /**
- * Restore: the persona is offered again.
- *
- * **Nothing refuses this one.** A persona's name is not unique, so there is no
- * name to collide with and no replacement name to ask for; their versions
- * never went anywhere; and a test that named them was never allowed to lose
- * them in the first place. Restoring somebody already active writes nothing.
- *
- * The pointer is not touched. Somebody restoring the persona a project used to
- * default to gets the persona back and not the pointer, because the project
- * has been pointing at somebody else in the meantime and silently taking that
- * back is a decision nobody asked for.
- */
-export async function restorePersona(
-  auth: AuthContext,
-  id: string,
-  request: RestoreRequest = {},
-): Promise<Persona | undefined> {
-  authorize(auth, "author_definitions", here(auth));
-
-  if (auth.projectId === undefined) {
-    throw new Error(
-      "restoring a persona happens inside their project, and this credential is for the whole organization and acting in none",
-    );
-  }
-
-  const restoredAt = new Date();
-  return writing(() =>
-    db().transaction(async (tx) => {
-      // One row, so there is no order to get wrong: Restore never touches the
-      // project, because taking the default pointer back is a decision nobody
-      // asked for.
-      const [locked] = await tx
-        .select({
-          id: persona.id,
-          organizationId: persona.organizationId,
-          name: persona.name,
-          revision: persona.revision,
-          archivedAt: persona.archivedAt,
-        })
-        .from(persona)
-        .where(thePersona(auth, id))
-        .limit(1)
-        .for("update");
-
-      if (locked === undefined) return undefined;
-      if (locked.organizationId === null) {
-        throw new EgmaProvidedPersonaError(locked.id, locked.name);
-      }
-      expectRevision(locked, request.expectedRevision);
-      if (locked.archivedAt === null) return readPersonaOn(tx, auth, locked.id);
-
-      await tx
-        .update(persona)
-        .set({
-          archivedAt: null,
-          revision: newRevision(),
-          updatedAt: restoredAt,
-        })
-        .where(eq(persona.id, locked.id));
-
-      return readPersonaOn(tx, auth, locked.id);
-    }),
-  );
-}
-
-/**
  * Every version of one persona, newest first — the history a detail page
  * shows, and the list an older-version read is chosen from.
  *
- * Deliberately no archive filter on the persona: an archived persona's history
- * is exactly as readable as an active one's, because a run that pinned one of
+ * Deliberately no lifecycle filter on the persona: a deleted persona's history
+ * is exactly as readable as a live one's, because a run that pinned one of
  * these versions is still on the record and still has to be interpretable.
  */
 export async function listPersonaVersions(
@@ -1690,8 +1331,7 @@ export async function listPersonaVersions(
       id: personaVersion.id,
       personaId: personaVersion.personaId,
       version: personaVersion.version,
-      traits: personaVersion.traits,
-      models: personaVersion.models,
+      ...BEHAVIOR_COLUMNS,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -1708,9 +1348,11 @@ export async function listPersonaVersions(
   const { items, nextCursor } = pageOf(rows, limit);
   return {
     items: items.map((row) => ({
-      ...row,
-      traits: traitsFromRow(row.traits, row.id),
-      models: personaModelsFromRow(row.models, row.id),
+      id: row.id,
+      personaId: row.personaId,
+      version: row.version,
+      createdAt: row.createdAt,
+      ...behaviorFromRow(row, row.id),
     })),
     nextCursor,
   };
@@ -1723,12 +1365,12 @@ export type PersonaVersionPage = {
 
 /**
  * Which active tests currently name this persona — what a detail page shows
- * under *used by*, and exactly the set that would refuse their Archive.
+ * under *used by*.
  *
- * **The same question the Archive asks, answered by the same function**, so a
- * page saying "nothing uses them" can never be followed by a refusal saying
- * three tests do. A page that computed usage its own way would drift the first
- * time either rule moved.
+ * It no longer stands between anybody and a Delete: Delete asks nothing and
+ * refuses nothing but a Predefined persona. What this answers is the question
+ * somebody about to press it wants answered — who goes quiet if I do — and
+ * the page shows it beside the button rather than after it.
  */
 export async function testsUsingPersona(
   auth: AuthContext,

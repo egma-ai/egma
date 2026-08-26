@@ -4,7 +4,7 @@ import {
   foreignKey,
   index,
   integer,
-  jsonb,
+  numeric,
   pgTable,
   text,
   unique,
@@ -14,8 +14,14 @@ import {
 
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
-import { createdAt, idText, moment, prefixCheck, updatedAt } from "./columns.ts";
-import { newRevision } from "../revisions.ts";
+import {
+  createdAt,
+  idText,
+  moment,
+  nonEmpty,
+  prefixCheck,
+  updatedAt,
+} from "./columns.ts";
 
 /**
  * A persona is the person an agent gets tested against: synthetic, and
@@ -29,11 +35,21 @@ import { newRevision } from "../revisions.ts";
  * the simulation happened, so editing today never rewrites what an old result
  * meant. Renames touch the identity row only; behavior lives in the version.
  *
- * **A Custom persona is archived, never deleted.** Archive takes it out
- * of the lists somebody authors from and leaves every historical row exactly
- * where it was. Egma-provided personas have null tenancy, stay active and
- * read-only, and can be forked into a Custom persona for customization.
- * Permanent removal is a compliance workflow and is not this table's business.
+ * **Two names, and they answer different questions.** `name` on the identity
+ * row is the team's word for this persona — what a list, a picker and a sheet
+ * header show, and what nobody ever hears. `identity_name` on the version row
+ * is the human name the persona gives the agent on the call, so the same test
+ * hears the same person every time it runs. One is a label a team may relabel
+ * at will; the other is authored behavior and versions like any other.
+ *
+ * **A Custom persona is stamped, never deleted.** The product word is Delete
+ * and it is permanent as far as anybody using egma is concerned; underneath,
+ * `archived_at` is set and every row stays exactly where it was, so a run that
+ * pinned one of these versions still reads true forever. The column keeps the
+ * archive word on purpose — the product word and the storage word differ here,
+ * and that split is a recorded decision rather than something to tidy up.
+ * Egma-provided personas have null tenancy, stay active and read-only, and can
+ * be forked into a Custom persona for customization.
  */
 
 export const persona = pgTable(
@@ -47,6 +63,7 @@ export const persona = pgTable(
     ),
     /** Null together with organizationId for an Egma-provided persona. */
     projectId: idText("project_id"),
+    /** The team's word for this persona. Never spoken to an agent. */
     name: text("name").notNull(),
     description: text("description"),
     /**
@@ -56,13 +73,6 @@ export const persona = pgTable(
     currentVersionId: idText("current_version_id")
       .notNull()
       .references((): AnyPgColumn => personaVersion.id),
-    /**
-     * The opaque token an edit, an Archive or a Restore has to name to be
-     * allowed to land — see `revisions.ts`. Defaulted here rather than at each
-     * call site so that catalog seeding and the Custom factory cannot
-     * come to disagree about filling it.
-     */
-    revision: text("revision").notNull().$defaultFn(newRevision),
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -76,6 +86,8 @@ export const persona = pgTable(
       "persona_tenancy_is_whole_or_egmas",
       sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
     ),
+    // The one check that makes an Egma-provided persona undeletable: Delete
+    // stamps `archived_at`, and this refuses that stamp on a row egma owns.
     check(
       "persona_egma_provided_is_active",
       sql`${table.organizationId} is not null or ${table.archivedAt} is null`,
@@ -98,6 +110,21 @@ export const persona = pgTable(
   ],
 );
 
+/**
+ * One frozen version: who this persona is, and how they execute.
+ *
+ * **Typed columns, and plainly checked.** Behavior was two jsonb bags held
+ * shut by eighty-odd lines of jsonpath, which bought flexibility and then
+ * forbade it. Every field a version can carry is now a column Postgres knows
+ * the type of, and every rule about one is a check a reader can read. A trait
+ * that returns comes back as a column, together with the runtime that consumes
+ * it, in one change.
+ *
+ * The provider catalog, not Postgres, decides which provider, model and
+ * adapter combinations this release can execute; these checks protect the
+ * stored shape only. Credentials are resolved for each claimed work item and
+ * never belong in this immutable authored value.
+ */
 export const personaVersion = pgTable(
   "persona_version",
   {
@@ -106,16 +133,30 @@ export const personaVersion = pgTable(
       .notNull()
       .references(() => persona.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
-    /** Human behavior only. Technical execution choices live in `models`. */
-    traits: jsonb("traits").notNull(),
     /**
-     * The complete LLM, STT and TTS selection pinned by this version.
-     *
-     * Required with no default: a version that cannot say how it executes is
-     * corrupt data. Credentials are resolved for each claimed work item and
-     * never belong in this immutable authored value.
+     * The human name this persona gives the agent. Authored, never invented:
+     * the work order carries it and the prompt frame states it, so the same
+     * test hears the same person on every run.
      */
-    models: jsonb("models").notNull(),
+    identityName: text("identity_name").notNull(),
+    personality: text("personality").notNull(),
+    language: text("language").notNull(),
+    llmProvider: text("llm_provider").notNull(),
+    llmModel: text("llm_model").notNull(),
+    sttProvider: text("stt_provider").notNull(),
+    sttModel: text("stt_model").notNull(),
+    ttsProvider: text("tts_provider").notNull(),
+    ttsModel: text("tts_model").notNull(),
+    ttsVoiceId: text("tts_voice_id").notNull(),
+    /**
+     * How fast they speak, as a multiplier. Numeric rather than a float so the
+     * stored value is the authored value — 0.9 saved is 0.9 read.
+     */
+    ttsSpeed: numeric("tts_speed", {
+      precision: 3,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -123,72 +164,23 @@ export const personaVersion = pgTable(
   },
   (table) => [
     prefixCheck("persona_version_id_prefix", table.id, "prsv"),
-    // These checks protect the stored wire shape. The provider catalog, not
-    // Postgres, decides which provider/model/adapter combinations this release
-    // can execute. Exact keys still keep technical voice out of traits and
-    // prevent a stale writer from putting a second model owner beside models.
+    nonEmpty("persona_version_identity_name_stated", table.identityName),
+    nonEmpty("persona_version_personality_stated", table.personality),
+    nonEmpty("persona_version_language_stated", table.language),
+    nonEmpty("persona_version_llm_provider_stated", table.llmProvider),
+    nonEmpty("persona_version_llm_model_stated", table.llmModel),
+    nonEmpty("persona_version_stt_provider_stated", table.sttProvider),
+    nonEmpty("persona_version_stt_model_stated", table.sttModel),
+    nonEmpty("persona_version_tts_provider_stated", table.ttsProvider),
+    nonEmpty("persona_version_tts_model_stated", table.ttsModel),
+    nonEmpty("persona_version_tts_voice_id_stated", table.ttsVoiceId),
+    // The same range `SPEED_RANGE` in `models/selections.ts` enforces at the
+    // authoring boundary, written here as well because a row a script wrote
+    // has to be as executable as a row a form wrote. `schema-shape.test.ts`
+    // holds the two to the same numbers.
     check(
-      "persona_version_traits_valid",
-      sql`
-        jsonb_typeof(${table.traits}) is not distinct from 'object'
-        and (${table.traits} - array[
-          'personality', 'language', 'accent', 'backgroundNoise'
-        ]::text[]) is not distinct from '{}'::jsonb
-        and jsonb_typeof(${table.traits}->'personality') is not distinct from 'string'
-        and nullif(btrim(${table.traits}->>'personality'), '') is not null
-        and jsonb_typeof(${table.traits}->'language') is not distinct from 'string'
-        and nullif(btrim(${table.traits}->>'language'), '') is not null
-        and (
-          not (${table.traits} ? 'accent')
-          or (
-            jsonb_typeof(${table.traits}->'accent') is not distinct from 'string'
-            and nullif(btrim(${table.traits}->>'accent'), '') is not null
-          )
-        )
-        and (
-          not (${table.traits} ? 'backgroundNoise')
-          or (
-            jsonb_typeof(${table.traits}->'backgroundNoise') is not distinct from 'string'
-            and nullif(btrim(${table.traits}->>'backgroundNoise'), '') is not null
-          )
-        )
-      `,
-    ),
-    check(
-      "persona_version_models_valid",
-      sql`
-        jsonb_typeof(${table.models}) is not distinct from 'object'
-        and (${table.models} - array['llm', 'stt', 'tts']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof(${table.models}->'llm') is not distinct from 'object'
-        and ((${table.models}->'llm') - array['provider', 'model']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof(${table.models}->'llm'->'provider') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'llm'->>'provider'), '') is not null
-        and jsonb_typeof(${table.models}->'llm'->'model') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'llm'->>'model'), '') is not null
-        and jsonb_typeof(${table.models}->'stt') is not distinct from 'object'
-        and ((${table.models}->'stt') - array['provider', 'model']::text[])
-          is not distinct from '{}'::jsonb
-        and jsonb_typeof(${table.models}->'stt'->'provider') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'stt'->>'provider'), '') is not null
-        and jsonb_typeof(${table.models}->'stt'->'model') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'stt'->>'model'), '') is not null
-        and jsonb_typeof(${table.models}->'tts') is not distinct from 'object'
-        and ((${table.models}->'tts') - array[
-          'provider', 'model', 'voiceId', 'speed'
-        ]::text[]) is not distinct from '{}'::jsonb
-        and jsonb_typeof(${table.models}->'tts'->'provider') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'tts'->>'provider'), '') is not null
-        and jsonb_typeof(${table.models}->'tts'->'model') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'tts'->>'model'), '') is not null
-        and jsonb_typeof(${table.models}->'tts'->'voiceId') is not distinct from 'string'
-        and nullif(btrim(${table.models}->'tts'->>'voiceId'), '') is not null
-        and jsonb_path_exists(
-          ${table.models},
-          '$.tts.speed ? (@.type() == "number" && @ >= 0.6 && @ <= 1.5)'::jsonpath
-        )
-      `,
+      "persona_version_tts_speed_in_range",
+      sql`${table.ttsSpeed} >= 0.6 and ${table.ttsSpeed} <= 1.5`,
     ),
     unique("persona_version_persona_id_version_unique").on(
       table.personaId,

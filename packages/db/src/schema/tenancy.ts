@@ -6,11 +6,8 @@ import {
   pgTable,
   text,
   unique,
-  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-import { persona } from "./personas.ts";
-import { EGMA_PROVIDED_PERSONAS } from "../persona-library/ids.ts";
 import { user } from "./identity.ts";
 import {
   API_KEY_SCOPES,
@@ -94,36 +91,6 @@ export const project = pgTable(
      * not silently win.
      */
     revision: idText("revision").notNull(),
-    /**
-     * The persona a test created naming none receives, so authoring a first
-     * test never waits on authoring a persona. New projects point directly at
-     * Egma's shared, read-only default persona. An admin may replace it with
-     * another Egma-provided persona or with a Custom fork. This is
-     * required. The database default also protects direct internal inserts.
-     *
-     * **It lives on the project, and this is the one place the layering
-     * bends.** Every other table below the tenancy tables points *up* at a
-     * project; this column points down at a product table, so this file has to
-     * import one. The default belongs to the project rather than to any test:
-     * it is one answer for the whole product area, changed in one place, and
-     * putting it anywhere else would mean each test carrying a copy of a
-     * decision nobody made per test. A database trigger enforces that the
-     * target is either Egma-provided or owned by this exact project.
-     *
-     * **The resulting import cycle is deliberate and safe**, and it is worth
-     * knowing why before either file is rearranged. `persona` names
-     * `project` for its tenancy and `project` now names `persona` for
-     * this pointer. Neither reads the other while either is still being
-     * evaluated: a column's `references` takes a function rather than a
-     * column, and a table's constraint list is a function the table definition
-     * stores instead of calling. Both are only run later, once every table in
-     * this schema exists. Replace either with a value read at definition time
-     * and the cycle stops being safe.
-     */
-    defaultPersonaId: idText("default_persona_id")
-      .notNull()
-      .default(EGMA_PROVIDED_PERSONAS.defaultPersona)
-      .references((): AnyPgColumn => persona.id, { onDelete: "restrict" }),
     deletedAt: moment("deleted_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",

@@ -76,7 +76,8 @@ function actingAsGlobex(): AuthContext {
   };
 }
 
-const NEUTRAL_TRAITS = {
+const NEUTRAL_BEHAVIOR = {
+  identityName: "Sam Poole",
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
 } as const;
@@ -113,7 +114,7 @@ async function seedCustomer(
   const personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_BEHAVIOR,
     })
   ).id;
 
@@ -281,7 +282,7 @@ describe("the instance-wide claim", () => {
       claim.auth,
       claim.personaVersionId,
     );
-    expect(personaVersion?.traits.personality).toBe(NEUTRAL_TRAITS.personality);
+    expect(personaVersion?.personality).toBe(NEUTRAL_BEHAVIOR.personality);
 
     const testVersion = await getSimulationTestVersion(claim.auth, claim.id);
     expect(testVersion?.scenario).toBe(SCENARIO);
@@ -513,7 +514,7 @@ describe("the dispatch-failure landing", () => {
     // one the platform hands over and one it cannot.
     const rosa = await createPersona(actingAsAcme(), {
       name: "Retired Rosa",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_BEHAVIOR,
     });
     const suite = await createTestSuite(actingAsAcme(), {
       name: "Two-persona dispatch",

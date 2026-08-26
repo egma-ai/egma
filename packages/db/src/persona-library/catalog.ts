@@ -6,21 +6,6 @@ import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
 export { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
-/**
- * Human facts only. Provider, model, voice id and speed live in `models`.
- *
- * The optional facts are absent when nobody stated them. An empty string is
- * normalized to absence at the authoring boundary.
- */
-export type PersonaTraits = {
-  readonly personality: string;
-  readonly language: string;
-  /** Where they sound like they are from. */
-  readonly accent?: string | undefined;
-  /** What is going on around them while they talk. */
-  readonly backgroundNoise?: string | undefined;
-};
-
 export type EgmaProvidedPersonaVersion = {
   /**
    * Fixed after launch. A later catalog edit adds a new id; only an explicit
@@ -28,7 +13,15 @@ export type EgmaProvidedPersonaVersion = {
    */
   readonly id: string;
   readonly version: number;
-  readonly traits: PersonaTraits;
+  /**
+   * The human name this persona gives the agent. Catalog content, not a
+   * fallback: an agent that asked "who am I speaking to?" used to hear
+   * whatever the model invented that morning, and a shelf persona introducing
+   * itself as "Default Persona" would be worse than either.
+   */
+  readonly identityName: string;
+  readonly personality: string;
+  readonly language: string;
   readonly models: PersonaModels;
   readonly createdAt: Date;
 };
@@ -36,6 +29,7 @@ export type EgmaProvidedPersonaVersion = {
 export type EgmaProvidedPersona = {
   /** Fixed for the identity's whole life. */
   readonly id: string;
+  /** The team's word for this persona, shown in lists. Never spoken. */
   readonly name: string;
   readonly description: string;
   readonly versions: readonly EgmaProvidedPersonaVersion[];
@@ -66,13 +60,10 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       {
         id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
         version: 1,
-        traits: {
-          personality:
-            "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
-          language: "en-US",
-          accent: "Neutral American English.",
-          backgroundNoise: "None.",
-        },
+        identityName: "Alex Morgan",
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
         models: DEFAULT_PERSONA_MODELS,
         createdAt: new Date("2026-08-19T23:09:01.674Z"),
       },
