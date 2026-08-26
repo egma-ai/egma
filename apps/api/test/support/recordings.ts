@@ -31,7 +31,7 @@ export type RunningEgma =
 function doorOf(egma: RunningEgma): FastifyInstance {
   return "app" in egma ? egma.app : egma.api;
 }
-import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
+import { mintKey, NEUTRAL_PERSON, request as ask } from "./traces.ts";
 
 /**
  * A run somebody can hear: a real run, over a real voice connection, with a
@@ -388,7 +388,7 @@ export async function aConductedRun(
   for (const name of callers) {
     await createPersona(who.auth, {
       name,
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     });
   }
 

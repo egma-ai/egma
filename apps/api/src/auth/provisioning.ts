@@ -195,9 +195,11 @@ function constraintViolated(error: unknown): string | undefined {
 /**
  * The hook the provider fires once an identity is written.
  *
- * A new project receives its shared default persona and seeded grader in the
- * same database transaction. The grader version owns its model selection;
- * provider credentials belong to the deployment.
+ * A new project receives its seeded grader in the same database transaction.
+ * It receives no persona and points at none: Egma's Predefined personas belong
+ * to no organization and no project, so a new project can name one the moment
+ * it exists. The grader version owns its model selection; provider credentials
+ * belong to the deployment.
  */
 export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
   return async (identity, intent) => {

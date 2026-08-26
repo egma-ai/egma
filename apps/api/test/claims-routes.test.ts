@@ -23,7 +23,7 @@ import {
 } from "./support/api.ts";
 import {
   contextFor,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request as ask,
   signUp,
@@ -114,7 +114,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [4], ...body },
+    payload: { contract_versions: [5], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -160,7 +160,7 @@ async function aCustomerReadyToRun(
   // test then names her, which is what the claimed spec's traits come from.
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
     ...(personaModels === undefined ? {} : { models: personaModels }),
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
@@ -211,7 +211,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Realtime Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
     models: {
       llm: {
         provider: "openai",
@@ -358,7 +358,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(4);
+    expect(spec.contract_version).toBe(5);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -379,8 +379,12 @@ describe("claiming work", () => {
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
+    // Flat and whole, straight off the pinned version. `name` is the name the
+    // agent is told, never the team's label for the library row.
     expect(spec.persona).toEqual({
-      traits: NEUTRAL_TRAITS,
+      name: NEUTRAL_PERSON.identityName,
+      personality: NEUTRAL_PERSON.personality,
+      language: NEUTRAL_PERSON.language,
     });
     expect(spec.models).toEqual({
       llm: {
@@ -439,7 +443,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     });
     const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
       name: "Mock tool branches",
@@ -516,7 +520,7 @@ describe("claiming work", () => {
     const connectionId = (registered.body.connection as { id: string }).id;
     await createPersona(contextFor(ada, "member"), {
       name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
+      ...NEUTRAL_PERSON,
     });
     const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
       name: "Frozen mock tool world",
@@ -1310,7 +1314,7 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
-  it("does not claim work for a worker that cannot read contract version 4", async () => {
+  it("does not claim work for a worker that cannot read contract version 5", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
     );
@@ -1323,7 +1327,7 @@ describe("one source of execution truth", () => {
       contract_versions: [1],
     });
     expect(refused.statusCode).toBe(400);
-    expect(String(refused.body.message)).toContain("version 4");
+    expect(String(refused.body.message)).toContain("version 5");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
   });

@@ -51,7 +51,7 @@ const SURFACE = [
   // the simulator, the one the simulator hands back, and the simulator's own
   // side of the exchange that serves what they carry. A word that slipped into
   // any of them would be read by whoever writes the agent's side.
-  "packages/simulation-contract/schemas/simulation-spec.v4.schema.json",
+  "packages/simulation-contract/schemas/simulation-spec.v5.schema.json",
   "packages/simulation-contract/schemas/simulation-report.v1.schema.json",
   "apps/simulator/src/egma_simulator/mock_tools.py",
   // The half a customer installs and reads in their own repository, and the

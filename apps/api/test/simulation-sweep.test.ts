@@ -12,7 +12,7 @@ import {
 import { createApi, type TestApi, type TestApiOptions } from "./support/api.ts";
 import {
   contextFor,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request as ask,
   signUp,
@@ -87,7 +87,7 @@ async function anOrphan(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
   });
   const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
     name: "Appointment changes",

@@ -16,7 +16,7 @@ import {
 } from "./support/object-storage.ts";
 import {
   contextFor,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request as ask,
   signUp,
@@ -215,7 +215,7 @@ async function aCustomerReadyToRun(
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
@@ -284,7 +284,7 @@ async function aClaimedSimulation(
       claimant: CONDUCTOR,
       capacity: 50,
       wait_seconds: 0,
-      contract_versions: [4],
+      contract_versions: [5],
     },
   });
   expect(claimed.statusCode).toBe(200);

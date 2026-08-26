@@ -260,11 +260,16 @@ export async function simulationRoutes(
               ? null
               : [...testVersion.expectedBehaviors],
         },
+        // The team's label reads live, so a rename shows here. The authored
+        // person comes off the pinned version and never moves — which is how
+        // an old result can still say exactly who the agent heard.
         persona: {
           id: simulation.personaId,
           name: persona?.name ?? null,
           versionId: simulation.personaVersionId,
-          traits: personaVersion?.traits ?? null,
+          identityName: personaVersion?.identityName ?? null,
+          personality: personaVersion?.personality ?? null,
+          language: personaVersion?.language ?? null,
         },
         agent:
           agent === undefined

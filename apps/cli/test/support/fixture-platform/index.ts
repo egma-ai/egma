@@ -110,8 +110,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     });
     suites = suiteGroup.controls;
 
-    // Every project starts pointing at Egma's shared default persona, so the
-    // fixture's project holds one before anybody authors anything.
+    // Egma's Predefined persona belongs to no project, so every project can
+    // name one before anybody authors anything.
     const personaGroup = personaRoutes({ holdsKey, projectId });
     personas = personaGroup.controls;
 

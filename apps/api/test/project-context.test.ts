@@ -228,10 +228,10 @@ describe("a browser working in a project that is not the first", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Made the way the New project page makes one, rather than by calling the
-    // factory: what that page creates is the whole thing — the project, the
-    // default persona a first test gets when it names none, and the protected
-    // Expected behaviors project grader. A project made through this door is
-    // ready for its first run.
+    // factory: what that page creates is the whole thing — the project and its
+    // protected Expected behaviors project grader. Egma's Predefined persona is
+    // shared into it rather than written for it, so a project made through this
+    // door is ready for its first run.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -809,8 +809,8 @@ describe("a key for the whole organization, where the organization holds two pro
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Through the product's own door, so the second project is the whole thing
-    // — default persona and protected project grader included — rather than a
-    // bare row.
+    // — protected project grader included, and Egma's Predefined persona
+    // reachable from it — rather than a bare row.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",

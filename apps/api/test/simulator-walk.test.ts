@@ -25,7 +25,7 @@ import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
-import { NEUTRAL_TRAITS } from "./support/traces.ts";
+import { NEUTRAL_PERSON } from "./support/traces.ts";
 
 /**
  * The whole wire, walked by the shipped simulator: a run started through the
@@ -746,7 +746,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       };
       await createPersona(auth, {
         name: "Impatient Rita",
-        traits: NEUTRAL_TRAITS,
+        ...NEUTRAL_PERSON,
       });
       // No grader is authored here. The project was created with an active
       // expected-behaviors copy; its immutable version owns the model and the

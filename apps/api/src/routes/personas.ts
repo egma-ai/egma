@@ -1,32 +1,25 @@
 import {
-  archivePersona,
   createPersona,
-  DefaultPersonaReplacementError,
+  deletePersona,
   editPersona,
   forkPersona,
   getPersona,
   getPersonaVersion,
-  IdentityConflictError,
   listPersonas,
   listPersonaVersions,
   NotPermittedError,
   permits,
-  PersonaNamedByTestsError,
   PROVIDER_CATALOG,
   EgmaProvidedPersonaError,
   ProjectOutsideOrganizationError,
   RECOMMENDED_PERSONA_MODELS,
-  restorePersona,
-  setDefaultPersona,
   SPEED_RANGE,
   testsUsingPersona,
   UnprocessableInputError,
   validPersonaModels,
-  VersionConflictError,
   WriteAbortedError,
   type AuthContext,
   type Persona,
-  type PersonaTraits,
   type PersonaVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
@@ -39,29 +32,39 @@ import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
-import { identityConflict, sendRefusal } from "../http/refusals.ts";
+import { sendRefusal } from "../http/refusals.ts";
 
 /**
  * The personas available to one project: the shared definitions Egma ships,
  * the Custom definitions a team authors, their history and their uses.
  *
- * A **persona** is the synthetic person who speaks with the agent. Name and
- * Description identify them. Personality is human behavior. Models are the
- * complete technical selection used to bring that behavior to life.
+ * A **persona** is the synthetic person who speaks with the agent.
  *
- * Three shapes here are contract rather than convenience.
+ * Four shapes here are contract rather than convenience.
  *
- * **Identity is live and content is versioned, and the wire says which is
- * which.** Name, description and archive state are written in place. Traits
- * mint an immutable version, and traits byte-identical to the current version
- * mint nothing. So a write names *two* expectations where it touches both:
- * `expectedRevision` for the identity and `expectedVersionId` for the
- * content, refused separately because they are separately recoverable.
+ * **A persona has two names, and they live different lives.** `name` is the
+ * team's word for the library row — shown in lists and pickers, written in
+ * place, never spoken. `identityName` is the human name this persona gives the
+ * agent, it is pinned on the version a simulation records, and changing it
+ * mints the next version. So the same test always hears the same person, and
+ * relabeling a library never pollutes the history a result is read against.
  *
- * **A Custom persona is never deleted.** Archive takes them out of the
- * authoring list and leaves every version in place. Egma-provided personas
- * have no project lifecycle and cannot be changed; Fork is how a team gets a
- * Custom version of one.
+ * **Identity is live and behavior is versioned, and the wire says which is
+ * which.** Name and description write in place. Identity name, personality,
+ * language and models mint an immutable version, and values identical to the
+ * current version mint nothing.
+ *
+ * **No write names an expectation.** A persona write is last-write-wins: there
+ * is no revision token and no expected version id on this surface, and none
+ * underneath it. Pre-launch, with two authors, the ceremony cost more than the
+ * clobber it prevented.
+ *
+ * **Delete is the word and there is no way back.** One route takes a Custom
+ * persona out of every list and picker for good; underneath the row is stamped
+ * rather than removed, so every version stays readable and a simulation that
+ * pinned one still reads true. Predefined personas — Egma's own — cannot be
+ * deleted or changed at all, and Fork is how a team gets a Custom version of
+ * one.
  *
  * **Names are not unique, so nothing here is addressed by one.** Every address
  * and every reference is a stable `prs_` identifier. Two personas called
@@ -79,7 +82,6 @@ type Body = Record<string, unknown>;
 type Query = {
   readonly projectId?: string;
   readonly pageToken?: string;
-  readonly archived?: string;
   readonly search?: string;
 };
 
@@ -107,30 +109,17 @@ const REFUSALS = {
     "This request did not name a project. Choose a project from the selector " +
     "and try again.",
 
-  personaInUse: (personaId: string, tests: string): string =>
-    `Persona ${personaId} is used by active tests ${tests}. Select another ` +
-    `persona on those tests, or delete the tests, then archive this persona.`,
-
-  defaultPersonaRequired: (personaId: string): string =>
-    `Persona ${personaId} is this project's default. Select an active ` +
-    `replacement persona in the Archive action and try again.`,
-
-  egmaProvidedPersona: (personaId: string): string =>
-    `Persona ${personaId} is Egma-provided and cannot be changed. ` +
+  /**
+   * Egma's own shared persona, refused for a project trying to change one.
+   *
+   * **Predefined** is the word here, matching graders and matching every
+   * screen. The tenancy encoding underneath still says "Egma-provided" and the
+   * refusal code still spells it that way, because a code is a promise a client
+   * branches on; the sentence is what a person reads.
+   */
+  predefinedPersona: (personaId: string): string =>
+    `Persona ${personaId} is Predefined and cannot be changed or deleted. ` +
     `Fork it to make a Custom persona you can edit.`,
-
-  // The agent group answers this refusal too, so the sentence is written once
-  // in `http/refusals.ts` and each group names its own resource word.
-  identityConflict,
-
-  versionConflict: (
-    resource: string,
-    expected: string,
-    current: string,
-  ): string =>
-    `this ${resource} edit was written against version ${expected}, and it ` +
-    `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
-    `your edits, and send them with expectedVersionId set to ${current}.`,
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
@@ -184,7 +173,63 @@ function mayAuthor(
 
 /* -------------------------------------------------------------- the shapes */
 
-/** A persona, as every read of one describes it. */
+/**
+ * The keys an authoring body may carry, and no others.
+ *
+ * **A key this surface does not know is refused rather than dropped.** The
+ * shapes this replaced carried a `traits` wrapper, two expectation tokens, an
+ * accent, and a background noise; a body still written that way would otherwise
+ * be answered `200` with nothing of it applied — a client told its edit landed
+ * when the persona never moved. There is no old shape to accept: the sentence
+ * names the offending key and lists what a persona body actually carries.
+ */
+const PERSONA_BODY_FIELDS = [
+  "projectId",
+  "name",
+  "description",
+  "identityName",
+  "personality",
+  "language",
+  "models",
+] as const;
+
+function unknownBody(body: Body, allowed: readonly string[]): string | undefined {
+  const found = Object.keys(body).find((key) => !allowed.includes(key));
+  return found === undefined
+    ? undefined
+    : `a persona has no key "${found}"; a persona body carries ` +
+      `${allowed.join(", ")}.`;
+}
+
+/**
+ * The same rule for a query string, on the two routes that need it.
+ *
+ * **The list needs it because a parameter was taken away.** `archived=true`
+ * used to choose the second list, and there is no second list; ignoring it
+ * would answer somebody's question about deleted personas with the living
+ * ones and call that success. Delete has it because a route addressed by an id
+ * carries one filter and nothing else, which is how every other Delete on this
+ * API reads. The plain reads keep no such check: nothing was removed from them,
+ * so there is nothing they could quietly ignore.
+ */
+function unknownQuery(
+  query: Query,
+  allowed: readonly string[],
+): string | undefined {
+  const found = Object.keys(query).find((key) => !allowed.includes(key));
+  return found === undefined
+    ? undefined
+    : `the persona query has no key "${found}"`;
+}
+
+/**
+ * A persona, as every read of one describes it.
+ *
+ * The authored person is flat: the name they give the agent, who they are, and
+ * the language they speak, each a value of its own beside the team's `name` for
+ * the row. The complete model selection sits on the same immutable version,
+ * with technical voice only under TTS.
+ */
 function describedPersona(one: Persona): Record<string, unknown> {
   return {
     id: one.id,
@@ -193,17 +238,12 @@ function describedPersona(one: Persona): Record<string, unknown> {
     description: one.description,
     version: one.version,
     versionId: one.versionId,
-    // Human behavior and technical execution have one owner each. The complete
-    // model selection is on this same immutable version, with technical voice
-    // only under TTS.
-    traits: one.traits,
+    identityName: one.identityName,
+    personality: one.personality,
+    language: one.language,
     models: one.models,
     owner: one.owner,
-    // The two expectations a write can name, always answered, so that reading
-    // a persona is always enough to edit one.
-    revision: one.revision,
     archivedAt: one.archivedAt?.toISOString() ?? null,
-    isDefault: one.isDefault,
     createdAt: one.createdAt.toISOString(),
     updatedAt: one.updatedAt.toISOString(),
   };
@@ -215,61 +255,12 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     id: one.id,
     personaId: one.personaId,
     version: one.version,
-    traits: one.traits,
+    identityName: one.identityName,
+    personality: one.personality,
+    language: one.language,
     models: one.models,
     createdAt: one.createdAt.toISOString(),
   };
-}
-
-/**
- * The human behavior a body carries, as the factory takes it.
- *
- * Model selection is the adjacent `models` value. Technical voice exists only
- * at `models.tts`. Refusing any other trait is important: silently dropping
- * one would say a control worked when no simulator behavior exists for it.
- */
-type WrittenTraits =
-  | { readonly traits: PersonaTraits }
-  | { readonly refusal: string };
-
-const HUMAN_TRAIT_FIELDS = [
-  "personality",
-  "language",
-  "accent",
-  "backgroundNoise",
-] as const;
-
-function traitsIn(value: unknown): WrittenTraits {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return {
-      refusal:
-        "traits describe who the persona is. Send them as an object with a " +
-        "personality and language.",
-    };
-  }
-  const held = value as Body;
-  const supported = new Set<string>(HUMAN_TRAIT_FIELDS);
-  const unsupported = Object.keys(held).filter((field) => !supported.has(field));
-  if (unsupported.length > 0) {
-    return {
-      refusal:
-        `persona traits have unsupported fields ${unsupported.join(", ")}. ` +
-        "Provider, model, voice id, and speed belong in models.",
-    };
-  }
-
-  const optional = Object.fromEntries(
-    HUMAN_TRAIT_FIELDS.slice(2).flatMap((field) =>
-      Object.hasOwn(held, field) ? [[field, text(held[field])]] : [],
-    ),
-  );
-  return {
-    traits: {
-      personality: text(held.personality),
-      language: text(held.language),
-      ...optional,
-    },
-  } as WrittenTraits;
 }
 
 /* ------------------------------------------------------------ the project */
@@ -308,13 +299,20 @@ export async function personaRoutes(
   /**
    * The project's personas, newest first, one page at a time.
    *
-   * **Two lists, chosen by `archived`, never one with a column saying which.**
-   * An authoring list that mixed archived rows into active ones is a list
-   * somebody picks the wrong row out of.
+   * **One list, because there is only one lifecycle worth listing.** A deleted
+   * persona is gone as far as anybody authoring is concerned, so there is no
+   * archived list to ask for and no flag to ask for it with — and a request
+   * that still asks for one is refused rather than quietly handed the live
+   * list.
    */
   registerPlatformOperation(app, personaOperations.listPersonas, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
+
+    const unexpected = unknownQuery(query, ["projectId", "pageToken", "search"]);
+    if (unexpected !== undefined) {
+      return sendRefusal(reply, "unprocessable", unexpected);
+    }
 
     const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -330,7 +328,6 @@ export async function personaRoutes(
 
     const page = await listPersonas(acting.auth, {
       cursor: pageToken,
-      archived: query.archived === "true",
       search: given(text(query.search)),
     });
 
@@ -372,7 +369,13 @@ export async function personaRoutes(
     });
   });
 
-  /** One persona, active or archived — a detail page has to render both. */
+  /**
+   * One persona, live or deleted.
+   *
+   * A deleted persona reads exactly as a live one does, carrying the stamp that
+   * says they have gone. They are absent from every list and picker, and a
+   * simulation that pinned one still has to be able to say who the agent heard.
+   */
   registerPlatformOperation(app, personaOperations.getPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
@@ -390,7 +393,7 @@ export async function personaRoutes(
   /**
    * Every version of one, newest first.
    *
-   * Readable for an archived persona exactly as for an active one: a run that
+   * Readable for a deleted persona exactly as for a live one: a run that
    * pinned one of these versions is still on the record and still has to be
    * interpretable.
    */
@@ -428,9 +431,10 @@ export async function personaRoutes(
   /**
    * Which active tests currently name them.
    *
-   * **The same question the Archive asks, answered by the same function**, so
-   * a page saying "nothing uses them" can never be followed by a refusal
-   * saying three tests do.
+   * **It no longer stands between anybody and a Delete.** Delete asks nothing
+   * and refuses nothing but a Predefined persona. What this answers is the
+   * question somebody about to press it wants answered — who goes quiet if I do
+   * — and the page shows it beside the button rather than after it.
    */
   registerPlatformOperation(app, personaOperations.getPersonaUsage, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -469,7 +473,15 @@ export async function personaRoutes(
     return reply.send(describedVersion(version));
   });
 
-  /** A new persona, at version 1, active, and nobody's default. */
+  /**
+   * A new persona, at version 1 and live.
+   *
+   * The body is flat: the team's `name`, the `identityName` the agent will
+   * hear, a `personality`, a `language`, and one complete `models` selection,
+   * with `description` the only optional field. Every one of those is required
+   * because a simulator handed an absent one would be deciding who the agent
+   * heard.
+   */
   registerPlatformOperation(app, personaOperations.createPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
@@ -477,10 +489,11 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "create personas");
     if (refused !== undefined) return refused;
 
-    const written = traitsIn(body.traits ?? {});
-    if ("refusal" in written) {
-      return sendRefusal(reply, "unprocessable", written.refusal);
+    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    if (unexpected !== undefined) {
+      return sendRefusal(reply, "unprocessable", unexpected);
     }
+
     if (!("models" in body)) {
       return sendRefusal(
         reply,
@@ -498,7 +511,9 @@ export async function personaRoutes(
       ...(given(text(body.description)) === undefined
         ? {}
         : { description: text(body.description) }),
-      traits: written.traits,
+      identityName: text(body.identityName),
+      personality: text(body.personality),
+      language: text(body.language),
       models,
     });
 
@@ -506,17 +521,18 @@ export async function personaRoutes(
   });
 
   /**
-   * A partial edit, carrying whichever expectations it needs.
+   * A partial edit — the same shape with every field optional.
    *
    * What the body leaves out, the persona keeps. A name or a description is
-   * identity and writes in place; traits mint a version unless they are
-   * byte-identical to the current one, in which case nothing is written at all
-   * and a nervous re-save leaves no history behind.
+   * identity and writes in place; the identity name, personality, language and
+   * models mint a version unless they are identical to the current one, in
+   * which case nothing is written at all and a nervous re-save leaves no
+   * history behind.
    *
-   * Both expectations are **required from a browser** and each guards its own
-   * half. A write that named neither would land on top of whatever somebody
-   * else did in the meantime, which is the one outcome nothing here can
-   * recover from.
+   * **It names no expectation, and that is the decision rather than an
+   * omission.** Persona writes are last-write-wins. A body still carrying an
+   * `expectedRevision` or an `expectedVersionId` is refused as an unknown key,
+   * because a client sending one believes in a guard that is not there.
    */
   registerPlatformOperation(app, personaOperations.updatePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -526,51 +542,28 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "edit personas");
     if (refused !== undefined) return refused;
 
-    const expectedRevision = given(text(body.expectedRevision));
-    if (expectedRevision === undefined) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "an edit says which revision of the persona it was written against, " +
-          "and this one named no expectedRevision. Read the persona again " +
-          "and send the revision it names now.",
-      );
+    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    if (unexpected !== undefined) {
+      return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    const written = "traits" in body ? traitsIn(body.traits) : undefined;
-    if (written !== undefined && "refusal" in written) {
-      return sendRefusal(reply, "unprocessable", written.refusal);
-    }
-    const models =
-      "models" in body
-        ? validPersonaModels(body.models)
-        : undefined;
-
-    const expectedVersionId = given(text(body.expectedVersionId));
-    if (
-      (written !== undefined || models !== undefined) &&
-      expectedVersionId === undefined
-    ) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "a traits or models edit says which version it was written " +
-          "against, and this one named no expectedVersionId. Read the " +
-          "persona again and send the versionId it names now.",
-      );
-    }
+    const models = "models" in body ? validPersonaModels(body.models) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const edited = await editPersona(acting.auth, personaId, {
-      expectedRevision,
-      ...(expectedVersionId === undefined ? {} : { expectedVersionId }),
       ...("name" in body ? { name: text(body.name) } : {}),
       ...("description" in body
         ? { description: given(text(body.description)) ?? null }
         : {}),
-      ...(written === undefined ? {} : { traits: written.traits }),
+      ...("identityName" in body
+        ? { identityName: text(body.identityName) }
+        : {}),
+      ...("personality" in body
+        ? { personality: text(body.personality) }
+        : {}),
+      ...("language" in body ? { language: text(body.language) } : {}),
       ...(models === undefined ? {} : { models }),
     });
 
@@ -579,9 +572,9 @@ export async function personaRoutes(
   });
 
   /**
-   * A Custom persona carrying the source's current name, description,
-   * complete human traits, and model selections. A fork starts its own history
-   * and is editable even when the source is an Egma-provided persona.
+   * A Custom persona carrying the source's current name, description, authored
+   * person, and model selections. A fork starts its own history and is editable
+   * even when the source is a Predefined persona.
    */
   registerPlatformOperation(app, personaOperations.forkPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -601,150 +594,53 @@ export async function personaRoutes(
   });
 
   /**
-   * Make this active persona the project's default.
+   * Delete: they leave every list and picker, and nothing else changes.
    *
-   * This is a project choice, not a persona type. The same action works for an
-   * Egma-provided persona and for a Custom persona, and changes no version.
+   * **One route, one confirmation, and nothing to nominate.** It replaces an
+   * Archive that asked for a revision and sometimes for a successor, and a
+   * Restore that put somebody back. Underneath, the row is stamped rather than
+   * removed, so every version stays readable and a simulation that pinned one
+   * still reads true — but no surface here offers a way back.
+   *
+   * **Only a Predefined persona refuses it.** A live test naming this persona
+   * does not: that protection sits where the loss would happen — a run for such
+   * a test is refused, and the test's next write has to name somebody alive.
+   *
+   * Deleting somebody already deleted answers the same `204`. Two tabs pressing
+   * Delete is an ordinary thing to happen, and the second one has nothing to
+   * complain about.
    */
-  registerPlatformOperation(app, personaOperations.setDefaultPersona, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.deletePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
-    const body = (request.body ?? {}) as Body;
+    const query = (request.query ?? {}) as Query;
 
-    const refused = mayAuthor(reply, auth, "change the project default persona");
+    const refused = mayAuthor(reply, auth, "delete personas");
     if (refused !== undefined) return refused;
 
-    const acting = await projectFor(auth, given(text(body.projectId)));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-
-    const selected = await setDefaultPersona(acting.auth, personaId);
-    if (selected === undefined) return noSuchPersona(reply, personaId);
-    return reply.send(describedPersona(selected));
-  });
-
-  /**
-   * Archive: they leave the authoring lists, and nothing else changes.
-   *
-   * `replacementPersonaId` is the persona who takes the project's default
-   * pointer, and it is required exactly when this persona is holding it. The
-   * pointer moves in the same transaction, so there is never an instant in
-   * which a test authored naming nobody has nobody to be given.
-   */
-  registerPlatformOperation(app, personaOperations.archivePersona, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const { personaId } = request.params as { personaId: string };
-    const body = (request.body ?? {}) as Body;
-
-    const refused = mayAuthor(reply, auth, "archive personas");
-    if (refused !== undefined) return refused;
-
-    const expectedRevision = given(text(body.expectedRevision));
-    if (expectedRevision === undefined) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "Archive says which revision of the persona it was written against, " +
-          "and this one named no expectedRevision. Read the persona again " +
-          "and send the revision it names now.",
-      );
+    const unexpected = unknownQuery(query, ["projectId"]);
+    if (unexpected !== undefined) {
+      return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    const acting = await projectFor(auth, given(text(body.projectId)));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const archived = await archivePersona(acting.auth, personaId, {
-      expectedRevision,
-      ...(given(text(body.replacementPersonaId)) === undefined
-        ? {}
-        : { replacementPersonaId: text(body.replacementPersonaId) }),
-    });
-
-    if (archived === undefined) return noSuchPersona(reply, personaId);
-    return reply.send(describedPersona(archived));
-  });
-
-  /** Restore: they are offered again. Nothing refuses this one. */
-  registerPlatformOperation(app, personaOperations.restorePersona, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const { personaId } = request.params as { personaId: string };
-    const body = (request.body ?? {}) as Body;
-
-    const refused = mayAuthor(reply, auth, "restore personas");
-    if (refused !== undefined) return refused;
-
-    const expectedRevision = given(text(body.expectedRevision));
-    if (expectedRevision === undefined) {
-      return sendRefusal(
-        reply,
-        "unprocessable",
-        "Restore says which revision of the persona it was written against, " +
-          "and this one named no expectedRevision. Read the persona again " +
-          "and send the revision it names now.",
-      );
-    }
-
-    const acting = await projectFor(auth, given(text(body.projectId)));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-
-    const restored = await restorePersona(acting.auth, personaId, {
-      expectedRevision,
-    });
-
-    if (restored === undefined) return noSuchPersona(reply, personaId);
-    return reply.send(describedPersona(restored));
+    const deleted = await deletePersona(acting.auth, personaId);
+    if (deleted === undefined) return noSuchPersona(reply, personaId);
+    return reply.code(204).send();
   });
 
   /**
    * The refusals this group owns, each answered as an answer rather than as a
    * fault.
-   *
-   * The two stale-write refusals are separate codes because the caller's next
-   * move differs: an identity conflict is recovered by reading and retyping a
-   * name, and a version conflict by reading and *reapplying* work that may
-   * have taken an afternoon. A client that could not tell them apart could
-   * offer neither.
    */
   app.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof PersonaNamedByTestsError) {
-      return sendRefusal(
-        reply,
-        "persona_in_use",
-        REFUSALS.personaInUse(
-          error.personaId,
-          error.tests.map((one) => one.id).join(", "),
-        ),
-      );
-    }
-
-    if (error instanceof DefaultPersonaReplacementError) {
-      return sendRefusal(
-        reply,
-        "default_persona_required",
-        REFUSALS.defaultPersonaRequired(error.personaId),
-      );
-    }
-
     if (error instanceof EgmaProvidedPersonaError) {
       return sendRefusal(
         reply,
         "egma_provided_persona",
-        REFUSALS.egmaProvidedPersona(error.personaId),
-      );
-    }
-
-    if (error instanceof IdentityConflictError) {
-      return sendRefusal(
-        reply,
-        "identity_conflict",
-        REFUSALS.identityConflict("Persona", error.resourceId),
-      );
-    }
-
-    if (error instanceof VersionConflictError) {
-      return sendRefusal(
-        reply,
-        "version_conflict",
-        REFUSALS.versionConflict(error.resource, error.expected, error.current),
+        REFUSALS.predefinedPersona(error.personaId),
       );
     }
 
@@ -753,7 +649,7 @@ export async function personaRoutes(
      *
      * **Answered rather than thrown, which is the whole point of it having a
      * class.** A deadlock or a serialization failure escaping here would reach
-     * whoever pressed Archive as an internal failure on a request that was
+     * whoever pressed Delete as an internal failure on a request that was
      * valid — a fault they cannot act on and cannot reproduce. As a refusal it
      * says the true thing: nothing was written, and pressing it again works.
      */
