@@ -1,9 +1,11 @@
 import { newId } from "@egma/ids";
 import {
   createPersona,
+  editPersona,
   getSimulation,
   listRunEvents,
   SPEED_RANGE,
+  type Persona,
   type PersonaModels,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
@@ -133,6 +135,8 @@ async function aCustomerReadyToRun(
   agentId: string;
   connectionId: string;
   versionId: string;
+  /** Version 1 of her, whole — the version every simulation below pins. */
+  persona: Persona;
 }> {
   api = await createApi(label, {
     ...options,
@@ -156,9 +160,12 @@ async function aCustomerReadyToRun(
   expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
   const suiteId = String(suite.body.id);
 
-  // The persona is authored at the seam — no route ships for one — and the
-  // test then names her, which is what the claimed spec's traits come from.
-  await createPersona(contextFor(ada, "member"), {
+  // Authored at the seam rather than over the route, because the seam hands
+  // back the version's own `prsv_` id — which is what the pinning test below
+  // needs to prove that a claim reads the version a simulation froze rather
+  // than the persona as they stand now. The test then names her, and that is
+  // where the claimed spec's persona block comes from.
+  const persona = await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
     ...NEUTRAL_PERSON,
     ...(personaModels === undefined ? {} : { models: personaModels }),
@@ -176,6 +183,7 @@ async function aCustomerReadyToRun(
     agentId,
     connectionId,
     versionId: String(pushed.body.versionId),
+    persona,
   };
 }
 
@@ -425,6 +433,62 @@ describe("claiming work", () => {
 
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("running");
+  });
+
+  /**
+   * **The spec speaks the version the simulation pinned, never the persona as
+   * they stand now — and this is the test that can tell the two apart.**
+   *
+   * Everywhere else in this file the persona is created and never edited, so
+   * the pinned version and the current one are the same row: an assembler that
+   * quietly read `getPersona` instead of `getPersonaVersion` would pass every
+   * one of them. That is the whole guarantee this effort exists for — the same
+   * test hears the same person on every run, and an old result can still say
+   * who the agent actually heard — so it gets a test that fails when it breaks.
+   *
+   * The pin is taken when the run is created, so the edit below lands strictly
+   * after this simulation already names version 1 by its own `prsv_` id. Every
+   * authored field moves at once, because each of the three travels in the work
+   * order and each would be a separate way to leak the current row.
+   */
+  it("speaks the persona version the simulation pinned, not the edit that came after", async () => {
+    const { ada, key, connectionId, versionId, persona } =
+      await aCustomerReadyToRun("claims_pinned_persona");
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const author = contextFor(ada, "member");
+    const pinned = await getSimulation(author, simulationId);
+    expect(pinned?.personaVersionId).toBe(persona.versionId);
+
+    const moved = await editPersona(author, persona.id, {
+      identityName: "Rita Bellweather",
+      personality: "Rita has hung up once already and is out of patience.",
+      language: "en-GB",
+    });
+    // A second version really exists, and it really differs — without this the
+    // assertion below could pass on a persona that never moved.
+    expect(moved?.version).toBe(2);
+    expect(moved?.versionId).not.toBe(persona.versionId);
+    expect(moved?.identityName).toBe("Rita Bellweather");
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    const [spec] = answered.body.specs as Record<string, unknown>[];
+    if (spec === undefined) throw new Error("no spec came back");
+
+    // Version 1, word for word. Nothing of version 2 reaches the simulator.
+    expect(spec.persona).toEqual({
+      name: NEUTRAL_PERSON.identityName,
+      personality: NEUTRAL_PERSON.personality,
+      language: NEUTRAL_PERSON.language,
+    });
+    // And it is still a document the contract accepts, so this cannot be
+    // passing on a spec that is merely stale in the same shape.
+    expect(specComplaints(spec)).toEqual([]);
   });
 
   it("carries the answers this simulation serves, resolved into one world", async () => {

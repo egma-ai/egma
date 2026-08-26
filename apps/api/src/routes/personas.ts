@@ -217,9 +217,17 @@ function unknownQuery(
   allowed: readonly string[],
 ): string | undefined {
   const found = Object.keys(query).find((key) => !allowed.includes(key));
-  return found === undefined
-    ? undefined
-    : `the persona query has no key "${found}"`;
+  if (found === undefined) return undefined;
+
+  const carries = `this query carries ${allowed.join(", ")}.`;
+  // The one retired parameter gets its own next move. Told only that there is
+  // no such key, somebody would go looking for the right spelling of a list
+  // that does not exist — so the sentence says the thing they actually have to
+  // learn: there is nowhere to ask.
+  return found === "archived"
+    ? `the persona query has no key "archived"; ${carries} A deleted persona ` +
+      `leaves every list for good, so there is no archived list to ask for.`
+    : `the persona query has no key "${found}"; ${carries}`;
 }
 
 /**

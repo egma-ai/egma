@@ -110,7 +110,7 @@ describe("which screen is on", () => {
       rows: [
         {
           name: "price-question",
-          persona: "default persona",
+          persona: "Impatient Rita",
           shown: "egma/tests/release/price-question.md",
           file: "/tmp/egma/tests/release/price-question.md",
           overrides: [],
@@ -173,7 +173,7 @@ describe("which screen is on", () => {
     const store = new WizardStore();
     const row = (name: string) => ({
       name,
-      persona: "default persona",
+      persona: "Impatient Rita",
       shown: `egma/tests/release/${name}.md`,
       file: `/tmp/egma/tests/release/${name}.md`,
       overrides: [],

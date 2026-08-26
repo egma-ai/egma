@@ -47,6 +47,21 @@ export type GradingStep = {
   readonly grades?: readonly FixtureGrade[];
   readonly combinedScore?: number | null;
 };
+/**
+ * The authored person every fixture simulation pinned.
+ *
+ * One value for all of them, because no test here reads it: the CLI shows a
+ * persona by the team's `personaName` and never opens the version. What this
+ * exists for is the shape — the simulation read answers the person flat, and a
+ * fixture answering anything else would teach a document the platform can no
+ * longer produce.
+ */
+const FIXTURE_PERSON = {
+  identityName: "Sam Okafor",
+  personality: "Speaks plainly, stays patient, asks one question at a time.",
+  language: "en-US",
+} as const;
+
 export type SeededRun = {
   readonly id: string;
   readonly suiteId: string;
@@ -257,11 +272,19 @@ export function runRoutes(options: {
         scenario: version?.scenario ?? null,
         expectedBehaviors: version?.expectedBehaviors ?? null,
       },
+      // Two names, because the platform has two: `name` is the team's label
+      // for the library row, and `identityName` is the human name the agent
+      // was told — read off the version this simulation pinned, along with the
+      // personality and language beside it.
+      //
+      // Answered whole rather than as nulls. Null here is what a simulation
+      // whose pinned version could not be read at all looks like, and a
+      // fixture must not teach that shape for an ordinary healthy run.
       persona: {
         id: simulation.personaId,
         name: simulation.personaName,
         versionId: simulation.personaId,
-        traits: null,
+        ...FIXTURE_PERSON,
       },
       agent: {
         id: run?.agentId ?? "",

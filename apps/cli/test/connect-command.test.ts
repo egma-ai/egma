@@ -615,7 +615,7 @@ describe("the whole walk, headless", () => {
 
     // And the walk did not stop at connecting: the test the coding agent wrote
     // is a file in the repository and a version on egma.
-    expect(result.stdout).toContain("test: price-question default persona");
+    expect(result.stdout).toContain("test: price-question no persona named");
     expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
     // And it did not stop at pushing either: the run is going, and the line
     // left behind says where to watch it.

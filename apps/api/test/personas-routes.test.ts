@@ -558,7 +558,10 @@ describe("the list", () => {
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
       error: "unprocessable",
-      message: 'the persona query has no key "archived"',
+      message:
+        'the persona query has no key "archived"; this query carries ' +
+        "projectId, pageToken, search. A deleted persona leaves every list " +
+        "for good, so there is no archived list to ask for.",
     });
   });
 
@@ -1084,10 +1087,16 @@ describe("history and usage", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Historic Hana");
 
-    await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+    const moved = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
       projectId: ada.projectId,
       personality: "Hana has waited too long and is now blunt.",
     });
+    // The persona really moved on, so reading version 1 below is reading
+    // something the persona has left behind rather than where they still are.
+    // Without this the whole test would pass if editing stopped minting.
+    expect(moved.statusCode).toBe(200);
+    expect(personaIn(moved).version).toBe(2);
+    expect(personaIn(moved).versionId).not.toBe(made.versionId);
 
     const older = await browse(
       "GET",
