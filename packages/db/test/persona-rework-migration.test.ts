@@ -20,9 +20,11 @@ import {
 import {
   createEmptyDatabase,
   errorCodeOf,
+  openSingleConnection,
   POSTGRES_ERROR,
   TEST_ENCRYPTION_KEY,
   type EmptyDatabase,
+  type SingleConnection,
 } from "./support/database.ts";
 
 /**
@@ -82,10 +84,17 @@ function actingAsAcme(): AuthContext {
 
 let database: EmptyDatabase;
 let baselineOnly: string;
-let sql: (text: string, values?: readonly unknown[]) => Promise<{
-  rows: Record<string, unknown>[];
-}>;
-let closePool: () => Promise<void>;
+/**
+ * The raw handle this file writes and reads through.
+ *
+ * **One connection rather than a pool, and the support module's rather than
+ * this file's.** The fixtures below land inside an explicit transaction, which
+ * a pool would scatter across sessions; and the driver itself belongs to
+ * `support/database.ts`, which is one of the three files the data-access
+ * boundary lets hold one. A test that reached for the driver directly would be
+ * the fourth, silently.
+ */
+let store: SingleConnection;
 
 beforeAll(async () => {
   database = await createEmptyDatabase("persona_rework_migration");
@@ -101,14 +110,7 @@ beforeAll(async () => {
   );
   await runMigrations(database.url, baselineOnly);
 
-  const pg = await import("pg");
-  const pool = new pg.default.Pool({ connectionString: database.url, max: 4 });
-  pool.on("error", () => undefined);
-  sql = (text, values) =>
-    pool.query(text, values as unknown[] | undefined) as Promise<{
-      rows: Record<string, unknown>[];
-    }>;
-  closePool = () => pool.end();
+  store = await openSingleConnection(database.url);
 
   await seedOldShapeRows();
   await runMigrations(database.url);
@@ -118,7 +120,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await disconnect();
-  await closePool?.();
+  await store?.close();
   await database?.drop();
   if (baselineOnly !== undefined) {
     await rm(baselineOnly, { recursive: true, force: true });
@@ -127,11 +129,11 @@ afterAll(async () => {
 
 /** Exactly what the build before this migration wrote, and nothing newer. */
 async function seedOldShapeRows(): Promise<void> {
-  await sql("insert into organization (id, name, slug) values ($1, $2, $2)", [
+  await store.sql("insert into organization (id, name, slug) values ($1, $2, $2)", [
     acme.organization,
     "acme",
   ]);
-  await sql(
+  await store.sql(
     "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
     [acme.project, acme.organization, "default", newId("rev")],
   );
@@ -143,7 +145,7 @@ async function seedOldShapeRows(): Promise<void> {
     currentVersionId: string,
     archived: boolean,
   ) =>
-    sql(
+    store.sql(
       `insert into persona
          (id, organization_id, project_id, name, description,
           current_version_id, revision, archived_at)
@@ -166,7 +168,7 @@ async function seedOldShapeRows(): Promise<void> {
     number: number,
     personality: string,
   ) =>
-    sql(
+    store.sql(
       `insert into persona_version
          (id, persona_id, version, traits, models)
        values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
@@ -187,24 +189,24 @@ async function seedOldShapeRows(): Promise<void> {
   // The deferred pointer constraint lets both halves land in one transaction;
   // separate statements on a pool cannot, so the versions go in first and the
   // identity names the one that will be current.
-  await sql("begin");
+  await store.sql("begin");
   await persona(rita.id, "Impatient Rita", "Books by phone only", rita.v2, false);
   await version(rita.v1, rita.id, 1, "Rita, as she was first written.");
   await version(rita.v2, rita.id, 2, "Rita, after the hearing aid arrived.");
   await persona(gone.id, "Retired Ray", null, gone.v1, true);
   await version(gone.v1, gone.id, 1, "Ray, who nobody calls any more.");
-  await sql("commit");
+  await store.sql("commit");
 
   // A project pointing at one of its own personas, which is the state the two
   // dropped triggers existed to protect.
-  await sql("update project set default_persona_id = $1 where id = $2", [
+  await store.sql("update project set default_persona_id = $1 where id = $2", [
     rita.id,
     acme.project,
   ]);
 }
 
 async function columnsOf(table: string): Promise<string[]> {
-  const { rows } = await sql(
+  const { rows } = await store.sql(
     `select column_name from information_schema.columns
       where table_schema = 'public' and table_name = $1`,
     [table],
@@ -214,7 +216,7 @@ async function columnsOf(table: string): Promise<string[]> {
 
 describe("the rows the old build wrote", () => {
   it("come back whole, with the identity name taken from the team name", async () => {
-    const { rows } = await sql(
+    const { rows } = await store.sql(
       `select version, identity_name, personality, language,
               llm_provider, llm_model, stt_provider, stt_model,
               tts_provider, tts_model, tts_voice_id, tts_speed
@@ -245,7 +247,7 @@ describe("the rows the old build wrote", () => {
   });
 
   it("keep a deleted persona deleted, stamp and all", async () => {
-    const { rows } = await sql(
+    const { rows } = await store.sql(
       "select name, archived_at from persona where id = $1",
       [gone.id],
     );
@@ -254,7 +256,7 @@ describe("the rows the old build wrote", () => {
   });
 
   it("give the seeded catalog version a human identity name", async () => {
-    const { rows } = await sql(
+    const { rows } = await store.sql(
       "select identity_name from persona_version where id = $1",
       [CATALOG.versionId],
     );
@@ -277,7 +279,7 @@ describe("the machinery the rework removes", () => {
   });
 
   it("leaves neither pointer guard nor the archive guard behind", async () => {
-    const { rows } = await sql(
+    const { rows } = await store.sql(
       `select tgname from pg_trigger
         where not tgisinternal
           and tgname in (
@@ -288,7 +290,7 @@ describe("the machinery the rework removes", () => {
     );
     expect(rows).toEqual([]);
 
-    const { rows: functions } = await sql(
+    const { rows: functions } = await store.sql(
       `select proname from pg_proc
         where proname in (
           'guard_project_default_persona_availability',
@@ -300,7 +302,7 @@ describe("the machinery the rework removes", () => {
   });
 
   it("keeps the availability helper the test and simulation guards call", async () => {
-    const { rows } = await sql(
+    const { rows } = await store.sql(
       "select proname from pg_proc where proname = 'persona_is_available_to_project'",
     );
     expect(rows).toHaveLength(1);
@@ -310,7 +312,7 @@ describe("the machinery the rework removes", () => {
 describe("the rewritten immutability guard", () => {
   it("refuses a direct rewrite of a migrated version's identity name", async () => {
     await expect(
-      sql("update persona_version set identity_name = 'Someone Else' where id = $1", [
+      store.sql("update persona_version set identity_name = 'Someone Else' where id = $1", [
         rita.v1,
       ]),
     ).rejects.toSatisfy(
@@ -320,7 +322,7 @@ describe("the rewritten immutability guard", () => {
 
   it("refuses a direct rewrite of a migrated version's speaking speed", async () => {
     await expect(
-      sql("update persona_version set tts_speed = 1.2 where id = $1", [rita.v1]),
+      store.sql("update persona_version set tts_speed = 1.2 where id = $1", [rita.v1]),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
