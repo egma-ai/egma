@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_fixture_chat_carrying_speech_key",
   "modality": "chat",
   "connection": {
@@ -9,7 +9,7 @@
     "config": { "retellAgentId": "agent_fixture" },
     "credentials": null
   },
-  "persona": { "traits": { "personality": "Patient and direct.", "language": "en-US" } },
+  "persona": { "name": "Alex", "personality": "Patient and direct.", "language": "en-US" },
   "scenario": { "instructions": "Ask for an appointment." },
   "limits": { "max_duration_seconds": 300, "max_turns": 20 },
   "models": {

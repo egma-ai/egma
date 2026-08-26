@@ -263,15 +263,14 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         def spec_for(connection, platform=None):
             document = {
-                "contract_version": 4,
+                "contract_version": 5,
                 "simulation_id": "sim-unconfigured",
                 "modality": "voice",
                 "connection": connection,
                 "persona": {
-                    "traits": {
-                        "personality": "Terse.",
-                        "language": "en-US",
-                    }
+                    "name": "Robin",
+                    "personality": "Terse.",
+                    "language": "en-US",
                 },
                 "scenario": {"instructions": "One point."},
                 "limits": {"max_duration_seconds": 30, "max_turns": 8},
@@ -332,7 +331,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         def persona_for(spec):
             return Persona(
-                traits=spec.persona_traits,
+                authored=spec.persona,
                 scenario_instructions=spec.scenario_instructions,
                 model=ScriptedModel(spec.scenario_instructions),
             )

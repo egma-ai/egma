@@ -44,12 +44,17 @@ from egma_simulator.model import (
 )
 from egma_simulator.persona import OPENING_NUDGE, Persona, Turn
 from egma_simulator.spans import SpanEmitter, trace_id_for
+from egma_simulator.spec import AuthoredPersona
 from egma_simulator.speech import (
     PersonaVoice,
     SpeechProviders,
     build_legs,
     decode_speech,
     encode_speech,
+)
+
+AUTHORED = AuthoredPersona(
+    name="Alex", personality="Patient.", language="en-US"
 )
 
 SECRET = "egma-secret-must-not-enter-telemetry"
@@ -273,7 +278,7 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
 ):
     model = SecretModel()
     persona = Persona(
-        traits={"personality": "Patient.", "language": "en-US"},
+        authored=AUTHORED,
         scenario_instructions="Ask one safe question.",
         model=model,
     )
@@ -404,7 +409,7 @@ async def test_a_provider_cannot_echo_its_key_into_the_native_model_span():
     )
     model._session = EchoSession()  # type: ignore[assignment]
     persona = Persona(
-        traits={"personality": "Patient.", "language": "en-US"},
+        authored=AUTHORED,
         scenario_instructions="Ask safely.",
         model=model,
     )
@@ -454,7 +459,7 @@ async def test_a_successful_provider_cannot_echo_its_key_to_voice_or_evidence():
     )
     model._session = SuccessfulEchoSession()  # type: ignore[assignment]
     persona = Persona(
-        traits={"personality": "Patient.", "language": "en-US"},
+        authored=AUTHORED,
         scenario_instructions="Ask safely.",
         model=model,
     )

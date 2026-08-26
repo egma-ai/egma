@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:egma:simulation-contract:spec:v4",
-  "title": "Simulation spec (v4)",
-  "description": "The only simulation work-order contract. The connection type selects the simulator connection adapter, the access variant selects its authority and configuration, and the agent platform records provenance only. The pinned persona version supplies one complete LLM, STT, and TTS selection. The model catalog resolves each selection's runtime adapter, while the control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
+  "$id": "urn:egma:simulation-contract:spec:v5",
+  "title": "Simulation spec (v5)",
+  "description": "The only simulation work-order contract. The connection type selects the simulator connection adapter, the access variant selects its authority and configuration, and the agent platform records provenance only. The pinned persona version supplies the authored person whole — the name they give the agent, their personality, and the roleplay language — and one complete LLM, STT, and TTS selection. The model catalog resolves each selection's runtime adapter, while the control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
     "contract_version": {
       "description": "The one spec version this simulator implements.",
       "type": "integer",
-      "const": 4
+      "const": 5
     },
     "simulation_id": {
       "description": "The simulation this spec conducts. Opaque to the simulator.",
@@ -71,34 +71,25 @@
       }
     },
     "persona": {
-      "description": "Who talks on the human side of the transcript.",
+      "description": "Who talks on the human side of the transcript: the authored person, flat and whole. Every value here is required, because a simulator that had to decide what an absent one meant would be deciding who the agent heard. Technical voice settings are not authored behavior and live only in models.tts.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["traits"],
+      "required": ["name", "personality", "language"],
       "properties": {
-        "traits": {
-          "description": "Authored behavior only. Technical voice settings live only in models.tts.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["personality", "language"],
-          "properties": {
-            "personality": {
-              "type": "string",
-              "minLength": 1
-            },
-            "language": {
-              "type": "string",
-              "minLength": 1
-            },
-            "accent": {
-              "type": "string",
-              "minLength": 1
-            },
-            "backgroundNoise": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
+        "name": {
+          "description": "The human name this person gives the agent. It is authored on the pinned persona version and stated in the prompt, never improvised by the model and never the team's own label for the library row — which is what makes the same test hear the same person on every run.",
+          "type": "string",
+          "minLength": 1
+        },
+        "personality": {
+          "description": "Who they are and how they behave, in the author's own words.",
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "description": "The language the roleplay is conducted in.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

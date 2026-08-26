@@ -566,6 +566,9 @@ A_SCENARIO = "State the first point. State the second point."
 
 A_PERSONALITY = "Terse test person; sticks to the script."
 
+A_NAME = "Robin"
+"""The name this persona gives the agent — authored, never improvised."""
+
 
 def a_spec(
     simulation_id: str,
@@ -575,6 +578,7 @@ def a_spec(
     personality: str,
     max_turns: int,
     max_duration_seconds: int,
+    name: str = A_NAME,
     modality: str = "chat",
     models: dict | None = None,
     mock_tools: list[dict] | None = None,
@@ -590,12 +594,14 @@ def a_spec(
     really sends for a project that mocks nothing, and a spec that said
     ``[]`` would be exercising a shape nothing produces."""
     spec = {
-        "contract_version": 4,
+        "contract_version": 5,
         "simulation_id": simulation_id,
         "modality": modality,
         "connection": connection,
         "persona": {
-            "traits": {"personality": personality, "language": "en-US"}
+            "name": name,
+            "personality": personality,
+            "language": "en-US",
         },
         "scenario": {"instructions": scenario},
         "limits": {
@@ -675,6 +681,7 @@ def scripted_spec(
     *,
     scenario: str = A_SCENARIO,
     personality: str = A_PERSONALITY,
+    name: str = A_NAME,
     greeting: str | None = None,
     replies: list[str | None] | None = None,
     ends_after_replies: bool = False,
@@ -715,6 +722,7 @@ def scripted_spec(
         platform=platform,
         scenario=scenario,
         personality=personality,
+        name=name,
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
         models=models,

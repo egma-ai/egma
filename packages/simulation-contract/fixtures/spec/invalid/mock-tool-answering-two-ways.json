@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
   "modality": "voice",
   "connection": {
@@ -15,9 +15,9 @@
     }
   },
   "persona": {
-    "traits": {
-      "personality": "Terse and to the point; asks one thing and waits.", "language": "en-US"
-    }
+    "name": "Sam",
+    "personality": "Terse and to the point; asks one thing and waits.",
+    "language": "en-US"
   },
   "scenario": {
     "instructions": "Ask whether Thursday morning is free."

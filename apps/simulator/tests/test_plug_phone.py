@@ -196,7 +196,7 @@ async def _conduct_phone(tmp_path: Path, **overrides: object) -> _PhoneRun:
 
     conducted = await conductor.conduct(
         persona=Persona(
-            traits=spec.persona_traits,
+            authored=spec.persona,
             scenario_instructions=spec.scenario_instructions,
             model=ScriptedModel(spec.scenario_instructions),
         ),

@@ -43,6 +43,7 @@ from egma_simulator.conductor import VoiceConductor
 from egma_simulator.media import VoiceMedia
 from egma_simulator.model import ScriptedModel
 from egma_simulator.persona import Persona
+from egma_simulator.spec import AuthoredPersona
 from egma_simulator.speech import (
     SAMPLE_WIDTH_BYTES,
     PersonaVoice,
@@ -177,7 +178,9 @@ async def test_a_real_transcriber_reads_a_real_sentence(tmp_path: Path):
 
     await conductor.conduct(
         persona=Persona(
-            traits={"personality": "Patient.", "language": "en-US"},
+            authored=AuthoredPersona(
+                name="Alex", personality="Patient.", language="en-US"
+            ),
             scenario_instructions="Anything; the line does not listen.",
             model=ScriptedModel("Anything; the line does not listen."),
         ),

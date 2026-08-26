@@ -50,6 +50,34 @@ class MockTool:
 
 
 @dataclass(frozen=True)
+class AuthoredPersona:
+    """Who talks on the human side of the transcript, as the author wrote them.
+
+    Three values, and the contract requires all three, so nothing below has
+    to decide what an absent one would have meant — deciding that would be
+    deciding who the agent heard.
+
+    The name is the persona's own, the one they give the agent when asked.
+    It is not the team's label for the library row, which never crosses this
+    wire, and it is not the model's invention: the prompt states it, so the
+    same test hears the same person on every run.
+    """
+
+    name: str
+    personality: str
+    language: str
+
+    @classmethod
+    def from_document(cls, written: Any) -> AuthoredPersona:
+        """Read the required, already validated persona block."""
+        return cls(
+            name=written["name"],
+            personality=written["personality"],
+            language=written["language"],
+        )
+
+
+@dataclass(frozen=True)
 class PlatformCarrier:
     """The SIP trunk a deployment uses for phone simulations.
 
@@ -191,8 +219,8 @@ class SimulationSpec:
 
     limits: Limits
 
-    persona_traits: dict[str, Any]
-    """The persona version's complete authored human traits."""
+    persona: AuthoredPersona
+    """Who the pinned persona version says is calling, whole."""
 
     agent_platform: str | None
     """What runs the agent. Provenance only; never adapter dispatch."""
@@ -245,7 +273,7 @@ class SimulationSpec:
                 max_duration_seconds=limits["max_duration_seconds"],
                 max_turns=limits["max_turns"],
             ),
-            persona_traits=document["persona"]["traits"],
+            persona=AuthoredPersona.from_document(document["persona"]),
             agent_platform=connection["agent_platform"],
             connection_type=connection["connection_type"],
             access_variant=connection["access_variant"],

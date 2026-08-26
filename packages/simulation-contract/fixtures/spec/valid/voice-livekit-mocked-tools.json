@@ -1,5 +1,5 @@
 {
-  "contract_version": 4,
+  "contract_version": 5,
   "simulation_id": "sim_01K4RE2V6B8N0PZQTM5CHXW7JD",
   "modality": "voice",
   "connection": {
@@ -16,9 +16,9 @@
     }
   },
   "persona": {
-    "traits": {
-      "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.", "language": "en-US"
-    }
+    "name": "Eleanor",
+    "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
+    "language": "en-US"
   },
   "scenario": {
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month. Find out what the practice offers you when the diary turns out to be full."
