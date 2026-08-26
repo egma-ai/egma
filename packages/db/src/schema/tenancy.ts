@@ -85,8 +85,11 @@ export const project = pgTable(
      */
     description: text("description"),
     /**
-     * The opaque token an edit has to name to be allowed to land — see
-     * `revisions.ts`. A project's name, slug and description are live fields
+     * The opaque token an edit has to name to be allowed to land. It is minted
+     * as a `rev_` id and checked by `updateProject` in `access/projects.ts`,
+     * which is the whole of its story: it carries no information, it is never
+     * parsed, and the only correct thing to do with one is hand back the one
+     * you were given. A project's name, slug and description are live fields
      * that two admins can be looking at in two tabs, and the last write must
      * not silently win.
      */

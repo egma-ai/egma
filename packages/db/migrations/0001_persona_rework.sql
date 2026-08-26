@@ -1,9 +1,9 @@
 -- THE ONE DESTRUCTIVE MIGRATION OF THE PERSONA REWORK.
 --
--- It breaks the rule in README.md on purpose, and it is the only file allowed
--- to: egma is not live, so there is no running build to keep working and no
--- rollback to stay bootable. The whole persona cut lands here, in one script,
--- with the code that reads the new shape shipping in the same change.
+-- Destructive on purpose, under the standing pre-launch allowance README.md
+-- sets out in "Before launch". The whole persona cut lands here, in one script,
+-- and the code that reads the new shape ships in the same change, so the two
+-- are never apart.
 --
 -- Existing data survives by the backfill below and by nothing else. Personality,
 -- language and the model fields come out of the two jsonb bags; every persona's
@@ -35,8 +35,16 @@ ALTER TABLE "persona_version"
 	ADD COLUMN "tts_voice_id" text,
 	ADD COLUMN "tts_speed" numeric(3, 2);--> statement-breakpoint
 
--- The backfill. The join is total: a version row cannot exist without the
--- persona it belongs to, so every row gets an identity name.
+-- The backfill. The join is total — a version row cannot exist without the
+-- persona it belongs to — so every row comes out holding a name rather than a
+-- null, which is what the NOT NULL below needs.
+--
+-- Whether that name is a *stated* one is a separate question, and the check
+-- below is deliberately the one that answers it: `persona.name` is not checked
+-- non-empty on the way in, so a row written blank by hand aborts this migration
+-- loudly. That is the intended answer. A fallback here would put a name in a
+-- persona's mouth that nobody authored, and the point of the whole change is
+-- that the spoken name is authored.
 UPDATE "persona_version" AS v
 SET
 	"identity_name" = p."name",

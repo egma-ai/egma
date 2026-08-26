@@ -383,7 +383,7 @@ describe("deleting a persona", () => {
         actingIn(acme.deleting),
         EGMA_PROVIDED_PERSONAS.defaultPersona,
       ),
-    ).rejects.toThrow(/provided by Egma/);
+    ).rejects.toThrow(/is Predefined/);
 
     const listed = await listPersonas(actingIn(acme.deleting));
     expect(listed.items.map((item) => item.name)).toContain("Default Persona");

@@ -439,10 +439,13 @@ const VALUES = [
   // nothing failed and trying again will not help, and it carries the field,
   // the bound and the size so that whoever sent the record is told all three.
   "OversizeRecordError",
+  // The persona factory's one refusal, and it used to have three. Archiving
+  // the persona a project pointed at without naming a successor went with the
+  // pointer itself; refusing to archive one that live tests named went with
+  // the guard, because Delete is one verb with one confirmation now. What is
+  // left is the shelf: Egma builds a Predefined persona and no project edits
+  // or deletes one.
   "EgmaProvidedPersonaError",
-  // The persona factory's other refusal: archiving the persona a project
-  // points at, without saying who takes the pointer. A project always has a
-  // default persona, and this is what keeps that true.
   // An identity write that named the revision it was written against, after
   // somebody else moved the row. `TestMovedOnError` below is the same refusal
   // one level down, about content rather than identity.
@@ -477,8 +480,6 @@ const VALUES = [
   // instruction no browser form would ever be given.
   "PersonaNameAmbiguousError",
   "UnprocessableInputError",
-  // A versioned write that named the version it was written against, for every
-  // versioned resource reached by identifier rather than by filename.
   // The store rolling a write back because another one got in its way. Its own
   // class because it is the one refusal about nothing the caller did: the
   // request was valid, nothing was written, and sending it again is the fix.

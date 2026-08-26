@@ -235,14 +235,20 @@ export class WriteAbortedError extends Error {
   }
 }
 
-/** A customer tried to change a persona definition owned by Egma. */
+/**
+ * A project tried to change or delete a Predefined persona — one of Egma's own.
+ *
+ * The class keeps the storage word and the sentence uses the product one, which
+ * is the split the persona tables record: null tenancy is how a shelf persona
+ * is encoded, **Predefined** is what anybody using egma calls it.
+ */
 export class EgmaProvidedPersonaError extends Error {
   readonly personaId: string;
   readonly personaName: string;
 
   constructor(personaId: string, personaName: string) {
     super(
-      `persona ${personaId} (${personaName}) is provided by Egma and cannot be changed; fork it to make a Custom persona you can edit`,
+      `persona ${personaId} (${personaName}) is Predefined: Egma builds it, and no project can change or delete one; fork it to make a Custom persona you can edit`,
     );
     this.name = "EgmaProvidedPersonaError";
     this.personaId = personaId;
