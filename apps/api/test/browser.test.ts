@@ -2903,8 +2903,17 @@ describe("the complete product, walked in order in a second project", () => {
         .getByRole("button", { name: "Open the menu for Rita, a copy" })
         .click();
       await walk.getByRole("menuitem", { name: "Delete" }).click();
-      await saysWithin(walk, "Delete Rita, a copy?");
-      await walk.getByRole("button", { name: "Delete persona" }).click();
+      /*
+       * The confirmation is a dialog over the page rather than a part of it,
+       * so it is read as a dialog rather than out of `main`. It names who it
+       * is about, which is the whole of what a destructive confirmation owes
+       * the person answering it.
+       */
+      const confirmed = walk.getByRole("dialog", {
+        name: "Delete Rita, a copy?",
+      });
+      await confirmed.waitFor();
+      await confirmed.getByRole("button", { name: "Delete persona" }).click();
 
       await expect
         .poll(
