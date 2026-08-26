@@ -509,11 +509,11 @@ describe("the pages", () => {
     expect(runWorkbench).toContain("Execution failed");
     expect(simulation).toContain("Egma could not conduct this simulation.");
     expect(simulation).toContain("This is an execution problem, not a failed grade");
-    // The run keeps execution state and score as separate facts in each
-    // simulation choice, while the simulation reads its own trace-level grades.
+    // The simulation choice names execution only. The selected evidence keeps
+    // grading progress and score as separate facts in the results summary.
     expect(runWorkbench).toContain("EXECUTION_LABEL");
-    expect(runWorkbench).toContain("row.gradingState");
-    expect(runWorkbench).toContain("row.combinedScore");
+    expect(runWorkbench).toContain("evidence.gradingState");
+    expect(runWorkbench).toContain("selectedEvidence.combinedScore");
     expect(simulation).toContain('evidence.gradingState === "pending"');
     expect(grades).toContain("evidence.grades");
     expect(grades).toContain("evidence.gradeHistory");

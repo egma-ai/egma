@@ -3363,7 +3363,7 @@ describe("the complete product, walked in order in a second project", () => {
       );
       // The combined summary is rounded for scanning. A grader result keeps
       // the exact stored score.
-      expect(await expected.innerText()).toContain("Final score 0.857");
+      expect(await expected.innerText()).toContain("Total Score 0.857");
       expect(
         await expected
           .getByRole("table", { name: "Expected behaviors results" })
@@ -4234,21 +4234,22 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /** The same shared status meaning appears in list and compact detail forms. */
+    /** The same text-first run status appears in list and detail forms. */
     it(
       "keeps one status meaning on a list and on the page it links to",
       async () => {
         const stateOf = async (): Promise<string> =>
           walk
-            .locator('main [data-state-mark="complete"]')
+            .locator('main [data-slot="run-status"][data-status="completed"]')
             .first()
             .evaluate((element) => {
               if (element.getBoundingClientRect().height === 0) return "";
-              const parent = element.parentElement;
               return JSON.stringify({
-                mark: element.getAttribute("data-state-mark"),
-                text: parent?.textContent?.trim().toLowerCase(),
-                moving: element.getAttribute("data-motion") === "active",
+                status: element.getAttribute("data-status"),
+                text: element.textContent?.trim().toLowerCase(),
+                loader:
+                  element.querySelector('[data-slot="run-status-loader"]') !== null,
+                marker: element.querySelector('[data-slot="state-mark"]') !== null,
               });
             })
             .catch(() => "");
