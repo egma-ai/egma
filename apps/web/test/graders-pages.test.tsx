@@ -458,14 +458,15 @@ describe("the project Graders surface", () => {
       `graderDefinition=${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}&definitionVersion=1`;
     const current = {
       ...EXPECTED_DEFINITION,
+      name: "Current renamed grader",
+      description: "The current description was written after this result.",
       currentDefinitionVersion: 2,
       definitionVersion: 2,
     };
     const historical = {
-      ...EXPECTED_DEFINITION,
+      ...current,
       currentDefinitionVersion: 2,
       definitionVersion: 1,
-      description: "The exact definition used by the recorded grade.",
     };
     const { asked } = apiAnswers({
       ...standardAnswers("admin", [], [current]),
@@ -477,14 +478,18 @@ describe("the project Graders surface", () => {
     render(<GradersPage />);
 
     const dialog = await screen.findByRole("dialog", {
-      name: "Expected behaviors",
+      name: "Grader definition v1",
     });
     expect(
-      await within(dialog).findByText(
-        "The exact definition used by the recorded grade.",
-      ),
+      within(dialog).getByText("Definition v1 used for this recorded result."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("v1")).toBeTruthy();
+    expect(within(dialog).queryByText("Current renamed grader")).toBeNull();
+    expect(
+      within(dialog).queryByText(
+        "The current description was written after this result.",
+      ),
+    ).toBeNull();
+    expect(await within(dialog).findByText("v1")).toBeTruthy();
     expect(
       within(dialog).queryByRole("button", { name: "View active grader" }),
     ).toBeNull();

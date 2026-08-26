@@ -379,7 +379,7 @@ function LibraryFacts({
 }) {
   return (
     <Facts>
-      {entry.description === null ? null : (
+      {historical || entry.description === null ? null : (
         <Fact label="Description">{entry.description}</Fact>
       )}
       <Fact label="Owner">{graderOwnerLabel(entry.owner)}</Fact>
@@ -510,11 +510,13 @@ export function LibraryGraderSheet({
       <SheetContent aria-describedby={undefined}>
         <SheetHeader>
           <SheetTitle>
-            {graderDefinitionDisplayName(entry.id, entry.name)}
+            {definitionVersion === undefined
+              ? graderDefinitionDisplayName(entry.id, entry.name)
+              : `Grader definition v${String(definitionVersion)}`}
           </SheetTitle>
           <SheetDescription>
             {definitionVersion !== undefined
-              ? "The immutable grader definition used for this recorded result."
+              ? `Definition v${String(definitionVersion)} used for this recorded result.`
               : mode === "details"
               ? "Review this grader before choosing it for the project."
               : "Choose how this project will use the grader."}
