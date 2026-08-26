@@ -2770,7 +2770,6 @@ export type ListPersonasData = {
     query?: {
         projectId?: string;
         pageToken?: string;
-        archived?: string;
         search?: string;
     };
     url: '/v1/personas';
@@ -2817,12 +2816,9 @@ export type ListPersonasResponses = {
             description: string | null;
             version: number;
             versionId: string;
-            traits: {
-                personality: string;
-                language: string;
-                accent?: string;
-                backgroundNoise?: string;
-            };
+            identityName: string;
+            personality: string;
+            language: string;
             models: {
                 llm: {
                     provider: string;
@@ -2840,9 +2836,7 @@ export type ListPersonasResponses = {
                 };
             };
             owner: 'egma' | 'organization';
-            revision: string;
             archivedAt: string | null;
-            isDefault: boolean;
             createdAt: string;
             updatedAt: string;
         }>;
@@ -2857,12 +2851,9 @@ export type CreatePersonaData = {
         projectId?: string;
         name: string;
         description?: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -2929,12 +2920,9 @@ export type CreatePersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -2952,9 +2940,7 @@ export type CreatePersonaResponses = {
             };
         };
         owner: 'egma' | 'organization';
-        revision: string;
         archivedAt: string | null;
-        isDefault: boolean;
         createdAt: string;
         updatedAt: string;
     };
@@ -3038,6 +3024,59 @@ export type GetPersonaFormResponses = {
 
 export type GetPersonaFormResponse = GetPersonaFormResponses[keyof GetPersonaFormResponses];
 
+export type DeletePersonaData = {
+    body?: never;
+    path: {
+        personaId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/personas/{personaId}';
+};
+
+export type DeletePersonaErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type DeletePersonaError = DeletePersonaErrors[keyof DeletePersonaErrors];
+
+export type DeletePersonaResponses = {
+    /**
+     * The persona was deleted.
+     */
+    204: void;
+};
+
+export type DeletePersonaResponse = DeletePersonaResponses[keyof DeletePersonaResponses];
+
 export type GetPersonaData = {
     body?: never;
     path: {
@@ -3089,12 +3128,9 @@ export type GetPersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -3112,9 +3148,7 @@ export type GetPersonaResponses = {
             };
         };
         owner: 'egma' | 'organization';
-        revision: string;
         archivedAt: string | null;
-        isDefault: boolean;
         createdAt: string;
         updatedAt: string;
     };
@@ -3123,16 +3157,13 @@ export type GetPersonaResponses = {
 export type GetPersonaResponse = GetPersonaResponses[keyof GetPersonaResponses];
 
 export type UpdatePersonaData = {
-    body: {
+    body?: {
         projectId?: string;
         name?: string;
         description?: string | null;
-        traits?: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName?: string;
+        personality?: string;
+        language?: string;
         models?: {
             llm: {
                 provider: string;
@@ -3149,8 +3180,6 @@ export type UpdatePersonaData = {
                 speed: number;
             };
         };
-        expectedRevision: string;
-        expectedVersionId?: string;
     };
     path: {
         personaId: string;
@@ -3203,12 +3232,9 @@ export type UpdatePersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -3226,9 +3252,7 @@ export type UpdatePersonaResponses = {
             };
         };
         owner: 'egma' | 'organization';
-        revision: string;
         archivedAt: string | null;
-        isDefault: boolean;
         createdAt: string;
         updatedAt: string;
     };
@@ -3286,12 +3310,9 @@ export type ListPersonaVersionsResponses = {
             id: string;
             personaId: string;
             version: number;
-            traits: {
-                personality: string;
-                language: string;
-                accent?: string;
-                backgroundNoise?: string;
-            };
+            identityName: string;
+            personality: string;
+            language: string;
             models: {
                 llm: {
                     provider: string;
@@ -3418,12 +3439,9 @@ export type GetPersonaVersionResponses = {
         id: string;
         personaId: string;
         version: number;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -3501,12 +3519,9 @@ export type ForkPersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
+        identityName: string;
+        personality: string;
+        language: string;
         models: {
             llm: {
                 provider: string;
@@ -3524,282 +3539,13 @@ export type ForkPersonaResponses = {
             };
         };
         owner: 'egma' | 'organization';
-        revision: string;
         archivedAt: string | null;
-        isDefault: boolean;
         createdAt: string;
         updatedAt: string;
     };
 };
 
 export type ForkPersonaResponse = ForkPersonaResponses[keyof ForkPersonaResponses];
-
-export type SetDefaultPersonaData = {
-    body?: {
-        projectId?: string;
-    };
-    path: {
-        personaId: string;
-    };
-    query?: never;
-    url: '/v1/personas/{personaId}/default';
-};
-
-export type SetDefaultPersonaErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type SetDefaultPersonaError = SetDefaultPersonaErrors[keyof SetDefaultPersonaErrors];
-
-export type SetDefaultPersonaResponses = {
-    /**
-     * The selected default persona.
-     */
-    200: {
-        id: string;
-        projectId: string | null;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
-        owner: 'egma' | 'organization';
-        revision: string;
-        archivedAt: string | null;
-        isDefault: boolean;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type SetDefaultPersonaResponse = SetDefaultPersonaResponses[keyof SetDefaultPersonaResponses];
-
-export type ArchivePersonaData = {
-    body: {
-        projectId?: string;
-        expectedRevision: string;
-        replacementPersonaId?: string;
-    };
-    path: {
-        personaId: string;
-    };
-    query?: never;
-    url: '/v1/personas/{personaId}/archive';
-};
-
-export type ArchivePersonaErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ArchivePersonaError = ArchivePersonaErrors[keyof ArchivePersonaErrors];
-
-export type ArchivePersonaResponses = {
-    /**
-     * The archived persona.
-     */
-    200: {
-        id: string;
-        projectId: string | null;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
-        owner: 'egma' | 'organization';
-        revision: string;
-        archivedAt: string | null;
-        isDefault: boolean;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type ArchivePersonaResponse = ArchivePersonaResponses[keyof ArchivePersonaResponses];
-
-export type RestorePersonaData = {
-    body: {
-        projectId?: string;
-        expectedRevision: string;
-    };
-    path: {
-        personaId: string;
-    };
-    query?: never;
-    url: '/v1/personas/{personaId}/restore';
-};
-
-export type RestorePersonaErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type RestorePersonaError = RestorePersonaErrors[keyof RestorePersonaErrors];
-
-export type RestorePersonaResponses = {
-    /**
-     * The restored persona.
-     */
-    200: {
-        id: string;
-        projectId: string | null;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        traits: {
-            personality: string;
-            language: string;
-            accent?: string;
-            backgroundNoise?: string;
-        };
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                voiceId: string;
-                speed: number;
-            };
-        };
-        owner: 'egma' | 'organization';
-        revision: string;
-        archivedAt: string | null;
-        isDefault: boolean;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type RestorePersonaResponse = RestorePersonaResponses[keyof RestorePersonaResponses];
 
 export type ListProjectsData = {
     body?: never;
@@ -4839,12 +4585,9 @@ export type GetSimulationResponses = {
             id: string;
             name: string | null;
             versionId: string;
-            traits: {
-                personality: string;
-                language: string;
-                accent?: string;
-                backgroundNoise?: string;
-            } | null;
+            identityName: string | null;
+            personality: string | null;
+            language: string | null;
         };
         agent: {
             id: string;

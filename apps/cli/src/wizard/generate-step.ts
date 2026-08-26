@@ -331,8 +331,13 @@ async function namesInFolder(suiteRoot: string): Promise<readonly string[]> {
  * persona is refused rather than given the default. A wizard that kept writing
  * personas-less files would be a wizard whose folder cannot be pushed.
  *
- * The default comes first, because it is the one every project is guaranteed to
- * hold and the one a first suite should lean on.
+ * **The order is egma's own, and this no longer sorts one entry to the front.**
+ * It used to put the project's default persona first. There is no default
+ * persona any more — the pointer and everything guarding it were removed with
+ * the persona rework — so the list arrives newest first and the wizard leans on
+ * whichever entry that puts at the top. Every project still holds Egma's
+ * Predefined personas, so the list is never empty for a project nobody has
+ * authored in yet.
  */
 async function personasEgmaHolds(
   signedIn: SignedIn,
@@ -349,12 +354,9 @@ async function personasEgmaHolds(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  const held = answer.data.personas
-    .map((one) => ({ name: platformText(one.name), isDefault: one.isDefault }))
-    .filter((one) => one.name !== "");
-  const first = held.filter((one) => one.isDefault);
-  const rest = held.filter((one) => !one.isDefault);
-  return [...first, ...rest].map((one) => one.name);
+  return answer.data.personas
+    .map((one) => platformText(one.name))
+    .filter((name) => name !== "");
 }
 
 /**
@@ -537,10 +539,10 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const ending = (report: ExitReport): GenerateOutcome => ({ report, pushed: [], suite });
 
   /*
-   * **Honest insurance, and it should never fire.** Every project is created
-   * pointing at Egma's shared default persona, that column cannot be null, and
-   * an Egma-provided persona is readable from every project — so a project
-   * holding none is a project the platform cannot make. If one ever answers
+   * **Honest insurance, and it should never fire.** A Predefined persona
+   * belongs to no organization and no project, so every project can name one
+   * from the moment it exists — a project holding none is a project the
+   * platform cannot make. If one ever answers
    * that way, stopping here is the kind ending: a test names at least one
    * persona from birth, so the alternative is a coding agent writing a folder
    * that is refused, file by file, at push time.

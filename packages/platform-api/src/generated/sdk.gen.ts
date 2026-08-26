@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -1136,13 +1136,11 @@ export const updateOrganization = <ThrowOnError extends boolean = false>(paramet
 export const listPersonas = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
     pageToken?: string;
-    archived?: string;
     search?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<ListPersonasResponses, ListPersonasErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'query', key: 'pageToken' },
-                { in: 'query', key: 'archived' },
                 { in: 'query', key: 'search' }
             ] }]);
     return (options?.client ?? client).get<ListPersonasResponses, ListPersonasErrors, ThrowOnError>({
@@ -1164,12 +1162,9 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name: string;
     description?: string;
-    traits: {
-        personality: string;
-        language: string;
-        accent?: string;
-        backgroundNoise?: string;
-    };
+    identityName: string;
+    personality: string;
+    language: string;
     models: {
         llm: {
             provider: string;
@@ -1191,7 +1186,9 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'projectId' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'description' },
-                { in: 'body', key: 'traits' },
+                { in: 'body', key: 'identityName' },
+                { in: 'body', key: 'personality' },
+                { in: 'body', key: 'language' },
                 { in: 'body', key: 'models' }
             ] }]);
     return (options?.client ?? client).post<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError>({
@@ -1231,6 +1228,28 @@ export const getPersonaForm = <ThrowOnError extends boolean = false>(parameters?
 };
 
 /**
+ * Permanently delete a persona from authoring
+ *
+ * The persona leaves every authoring list and picker permanently. Existing run evidence stays readable.
+ */
+export const deletePersona = <ThrowOnError extends boolean = false>(parameters: {
+    personaId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<DeletePersonaResponses, DeletePersonaErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'personaId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).delete<DeletePersonaResponses, DeletePersonaErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/personas/{personaId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
  * Get a persona
  */
 export const getPersona = <ThrowOnError extends boolean = false>(parameters: {
@@ -1258,12 +1277,9 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name?: string;
     description?: string | null;
-    traits?: {
-        personality: string;
-        language: string;
-        accent?: string;
-        backgroundNoise?: string;
-    };
+    identityName?: string;
+    personality?: string;
+    language?: string;
     models?: {
         llm: {
             provider: string;
@@ -1280,18 +1296,16 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
             speed: number;
         };
     };
-    expectedRevision: string;
-    expectedVersionId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'personaId' },
                 { in: 'body', key: 'projectId' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'description' },
-                { in: 'body', key: 'traits' },
-                { in: 'body', key: 'models' },
-                { in: 'body', key: 'expectedRevision' },
-                { in: 'body', key: 'expectedVersionId' }
+                { in: 'body', key: 'identityName' },
+                { in: 'body', key: 'personality' },
+                { in: 'body', key: 'language' },
+                { in: 'body', key: 'models' }
             ] }]);
     return (options?.client ?? client).patch<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1390,93 +1404,6 @@ export const forkPersona = <ThrowOnError extends boolean = false>(parameters: {
                 type: 'apiKey'
             }],
         url: '/v1/personas/{personaId}/fork',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Set the project's default persona
- */
-export const setDefaultPersona = <ThrowOnError extends boolean = false>(parameters: {
-    personaId: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<SetDefaultPersonaResponses, SetDefaultPersonaErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'personaId' }, { in: 'body', key: 'projectId' }] }]);
-    return (options?.client ?? client).post<SetDefaultPersonaResponses, SetDefaultPersonaErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/personas/{personaId}/default',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Archive a persona
- */
-export const archivePersona = <ThrowOnError extends boolean = false>(parameters: {
-    personaId: string;
-    projectId?: string;
-    expectedRevision: string;
-    replacementPersonaId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ArchivePersonaResponses, ArchivePersonaErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'personaId' },
-                { in: 'body', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
-                { in: 'body', key: 'replacementPersonaId' }
-            ] }]);
-    return (options?.client ?? client).post<ArchivePersonaResponses, ArchivePersonaErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/personas/{personaId}/archive',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Restore a persona
- */
-export const restorePersona = <ThrowOnError extends boolean = false>(parameters: {
-    personaId: string;
-    projectId?: string;
-    expectedRevision: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<RestorePersonaResponses, RestorePersonaErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'personaId' },
-                { in: 'body', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
-            ] }]);
-    return (options?.client ?? client).post<RestorePersonaResponses, RestorePersonaErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/personas/{personaId}/restore',
         ...options,
         ...params,
         headers: {

@@ -35,7 +35,7 @@ import {
   readTraceOverHttp,
   signUp,
   syntheticExport,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   type Customer,
   type ListedPage,
 } from "./support/traces.ts";
@@ -903,7 +903,7 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
     const personaId = (
       await createPersona(auth, {
         name: "Patient Pat",
-        traits: NEUTRAL_TRAITS,
+        ...NEUTRAL_PERSON,
       })
     ).id;
 

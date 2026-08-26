@@ -15,7 +15,7 @@ import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
-  NEUTRAL_TRAITS,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request as ask,
   signUp,
@@ -108,7 +108,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,

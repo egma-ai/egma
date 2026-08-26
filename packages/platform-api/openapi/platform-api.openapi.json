@@ -10142,14 +10142,6 @@
             }
           },
           {
-            "name": "archived",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "search",
             "in": "query",
             "required": false,
@@ -10207,27 +10199,14 @@
                             "type": "string",
                             "minLength": 1
                           },
-                          "traits": {
-                            "type": "object",
-                            "properties": {
-                              "personality": {
-                                "type": "string"
-                              },
-                              "language": {
-                                "type": "string"
-                              },
-                              "accent": {
-                                "type": "string"
-                              },
-                              "backgroundNoise": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "personality",
-                              "language"
-                            ],
-                            "additionalProperties": false
+                          "identityName": {
+                            "type": "string"
+                          },
+                          "personality": {
+                            "type": "string"
+                          },
+                          "language": {
+                            "type": "string"
                           },
                           "models": {
                             "type": "object",
@@ -10303,10 +10282,6 @@
                               "organization"
                             ]
                           },
-                          "revision": {
-                            "type": "string",
-                            "minLength": 1
-                          },
                           "archivedAt": {
                             "anyOf": [
                               {
@@ -10317,9 +10292,6 @@
                                 "type": "null"
                               }
                             ]
-                          },
-                          "isDefault": {
-                            "type": "boolean"
                           },
                           "createdAt": {
                             "type": "string",
@@ -10337,12 +10309,12 @@
                           "description",
                           "version",
                           "versionId",
-                          "traits",
+                          "identityName",
+                          "personality",
+                          "language",
                           "models",
                           "owner",
-                          "revision",
                           "archivedAt",
-                          "isDefault",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -10472,27 +10444,14 @@
                   "description": {
                     "type": "string"
                   },
-                  "traits": {
-                    "type": "object",
-                    "properties": {
-                      "personality": {
-                        "type": "string"
-                      },
-                      "language": {
-                        "type": "string"
-                      },
-                      "accent": {
-                        "type": "string"
-                      },
-                      "backgroundNoise": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "personality",
-                      "language"
-                    ],
-                    "additionalProperties": false
+                  "identityName": {
+                    "type": "string"
+                  },
+                  "personality": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
                   },
                   "models": {
                     "type": "object",
@@ -10564,7 +10523,9 @@
                 },
                 "required": [
                   "name",
-                  "traits",
+                  "identityName",
+                  "personality",
+                  "language",
                   "models"
                 ],
                 "additionalProperties": false
@@ -10616,27 +10577,14 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
                     },
                     "models": {
                       "type": "object",
@@ -10712,10 +10660,6 @@
                         "organization"
                       ]
                     },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
                     "archivedAt": {
                       "anyOf": [
                         {
@@ -10726,9 +10670,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
                     },
                     "createdAt": {
                       "type": "string",
@@ -10746,12 +10687,12 @@
                     "description",
                     "version",
                     "versionId",
-                    "traits",
+                    "identityName",
+                    "personality",
+                    "language",
                     "models",
                     "owner",
-                    "revision",
                     "archivedAt",
-                    "isDefault",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -11159,27 +11100,14 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
                     },
                     "models": {
                       "type": "object",
@@ -11255,10 +11183,6 @@
                         "organization"
                       ]
                     },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
                     "archivedAt": {
                       "anyOf": [
                         {
@@ -11269,9 +11193,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
                     },
                     "createdAt": {
                       "type": "string",
@@ -11289,12 +11210,12 @@
                     "description",
                     "version",
                     "versionId",
-                    "traits",
+                    "identityName",
+                    "personality",
+                    "language",
                     "models",
                     "owner",
-                    "revision",
                     "archivedAt",
-                    "isDefault",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -11400,7 +11321,7 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -11423,27 +11344,14 @@
                       }
                     ]
                   },
-                  "traits": {
-                    "type": "object",
-                    "properties": {
-                      "personality": {
-                        "type": "string"
-                      },
-                      "language": {
-                        "type": "string"
-                      },
-                      "accent": {
-                        "type": "string"
-                      },
-                      "backgroundNoise": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "personality",
-                      "language"
-                    ],
-                    "additionalProperties": false
+                  "identityName": {
+                    "type": "string"
+                  },
+                  "personality": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
                   },
                   "models": {
                     "type": "object",
@@ -11511,19 +11419,8 @@
                       "tts"
                     ],
                     "additionalProperties": false
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "expectedVersionId": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
-                "required": [
-                  "expectedRevision"
-                ],
                 "additionalProperties": false
               }
             }
@@ -11573,27 +11470,14 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
                     },
                     "models": {
                       "type": "object",
@@ -11669,10 +11553,6 @@
                         "organization"
                       ]
                     },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
                     "archivedAt": {
                       "anyOf": [
                         {
@@ -11683,9 +11563,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
                     },
                     "createdAt": {
                       "type": "string",
@@ -11703,12 +11580,12 @@
                     "description",
                     "version",
                     "versionId",
-                    "traits",
+                    "identityName",
+                    "personality",
+                    "language",
                     "models",
                     "owner",
-                    "revision",
                     "archivedAt",
-                    "isDefault",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -11716,6 +11593,126 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePersona",
+        "summary": "Permanently delete a persona from authoring",
+        "description": "The persona leaves every authoring list and picker permanently. Existing run evidence stays readable.",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "personaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The persona was deleted."
           },
           "400": {
             "description": "The request was refused.",
@@ -11868,27 +11865,14 @@
                             "type": "integer",
                             "minimum": 1
                           },
-                          "traits": {
-                            "type": "object",
-                            "properties": {
-                              "personality": {
-                                "type": "string"
-                              },
-                              "language": {
-                                "type": "string"
-                              },
-                              "accent": {
-                                "type": "string"
-                              },
-                              "backgroundNoise": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "personality",
-                              "language"
-                            ],
-                            "additionalProperties": false
+                          "identityName": {
+                            "type": "string"
+                          },
+                          "personality": {
+                            "type": "string"
+                          },
+                          "language": {
+                            "type": "string"
                           },
                           "models": {
                             "type": "object",
@@ -11966,7 +11950,9 @@
                           "id",
                           "personaId",
                           "version",
-                          "traits",
+                          "identityName",
+                          "personality",
+                          "language",
                           "models",
                           "createdAt"
                         ],
@@ -12265,27 +12251,14 @@
                       "type": "integer",
                       "minimum": 1
                     },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
+                    "identityName": {
+                      "type": "string"
+                    },
+                    "personality": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string"
                     },
                     "models": {
                       "type": "object",
@@ -12363,7 +12336,9 @@
                     "id",
                     "personaId",
                     "version",
-                    "traits",
+                    "identityName",
+                    "personality",
+                    "language",
                     "models",
                     "createdAt"
                   ],
@@ -12531,985 +12506,15 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "owner": {
-                      "type": "string",
-                      "enum": [
-                        "egma",
-                        "organization"
-                      ]
-                    },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "archivedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "projectId",
-                    "name",
-                    "description",
-                    "version",
-                    "versionId",
-                    "traits",
-                    "models",
-                    "owner",
-                    "revision",
-                    "archivedAt",
-                    "isDefault",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/personas/{personaId}/default": {
-      "post": {
-        "operationId": "setDefaultPersona",
-        "summary": "Set the project's default persona",
-        "tags": [
-          "Personas"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "personaId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The selected default persona.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "projectId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
+                    "identityName": {
                       "type": "string"
                     },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "owner": {
-                      "type": "string",
-                      "enum": [
-                        "egma",
-                        "organization"
-                      ]
-                    },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "archivedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "projectId",
-                    "name",
-                    "description",
-                    "version",
-                    "versionId",
-                    "traits",
-                    "models",
-                    "owner",
-                    "revision",
-                    "archivedAt",
-                    "isDefault",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/personas/{personaId}/archive": {
-      "post": {
-        "operationId": "archivePersona",
-        "summary": "Archive a persona",
-        "tags": [
-          "Personas"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "personaId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "replacementPersonaId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "expectedRevision"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The archived persona.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "projectId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
+                    "personality": {
                       "type": "string"
                     },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "models": {
-                      "type": "object",
-                      "properties": {
-                        "llm": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
-                              "type": "string"
-                            },
-                            "speed": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "owner": {
-                      "type": "string",
-                      "enum": [
-                        "egma",
-                        "organization"
-                      ]
-                    },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "archivedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "projectId",
-                    "name",
-                    "description",
-                    "version",
-                    "versionId",
-                    "traits",
-                    "models",
-                    "owner",
-                    "revision",
-                    "archivedAt",
-                    "isDefault",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/personas/{personaId}/restore": {
-      "post": {
-        "operationId": "restorePersona",
-        "summary": "Restore a persona",
-        "tags": [
-          "Personas"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "personaId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "expectedRevision"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The restored persona.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "projectId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
+                    "language": {
                       "type": "string"
                     },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "traits": {
-                      "type": "object",
-                      "properties": {
-                        "personality": {
-                          "type": "string"
-                        },
-                        "language": {
-                          "type": "string"
-                        },
-                        "accent": {
-                          "type": "string"
-                        },
-                        "backgroundNoise": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "personality",
-                        "language"
-                      ],
-                      "additionalProperties": false
-                    },
                     "models": {
                       "type": "object",
                       "properties": {
@@ -13584,10 +12589,6 @@
                         "organization"
                       ]
                     },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1
-                    },
                     "archivedAt": {
                       "anyOf": [
                         {
@@ -13598,9 +12599,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "isDefault": {
-                      "type": "boolean"
                     },
                     "createdAt": {
                       "type": "string",
@@ -13618,12 +12616,12 @@
                     "description",
                     "version",
                     "versionId",
-                    "traits",
+                    "identityName",
+                    "personality",
+                    "language",
                     "models",
                     "owner",
-                    "revision",
                     "archivedAt",
-                    "isDefault",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -17703,29 +16701,30 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "traits": {
+                        "identityName": {
                           "anyOf": [
                             {
-                              "type": "object",
-                              "properties": {
-                                "personality": {
-                                  "type": "string"
-                                },
-                                "language": {
-                                  "type": "string"
-                                },
-                                "accent": {
-                                  "type": "string"
-                                },
-                                "backgroundNoise": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "personality",
-                                "language"
-                              ],
-                              "additionalProperties": false
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "personality": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "language": {
+                          "anyOf": [
+                            {
+                              "type": "string"
                             },
                             {
                               "type": "null"
@@ -17737,7 +16736,9 @@
                         "id",
                         "name",
                         "versionId",
-                        "traits"
+                        "identityName",
+                        "personality",
+                        "language"
                       ],
                       "additionalProperties": false
                     },

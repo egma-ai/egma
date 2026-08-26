@@ -26,13 +26,21 @@ import type { FolderContents } from "../folder/egma-folder.ts";
 import type { MockToolEntry } from "../folder/mock-tools.ts";
 import type { FilePersona } from "../folder/test-file.ts";
 
-/** What a persona column says for a test that names nobody. */
-export const DEFAULT_PERSONA = "default persona";
+/**
+ * What the persona column says for a file that names nobody.
+ *
+ * **It used to say "default persona", and that was two wrong things.** There is
+ * no default persona — the project pointer and everything guarding it are gone
+ * — and a file naming nobody is not quietly given one: the push refuses it,
+ * because a test says who calls. So the column reports the absence it can see
+ * rather than promising a stand-in that is never coming.
+ */
+const NO_PERSONA_NAMED = "no persona named";
 
 /** One line of the list. */
 export type GateRow = {
   readonly name: string;
-  /** Who is on the other end of it, or the default persona's own words. */
+  /** Who is on the other end of it, or that the file named nobody. */
   readonly persona: string;
   /** `egma/tests/…`, as every report says a path. */
   readonly shown: string;
@@ -164,7 +172,7 @@ function personaColumn(personas: readonly FilePersona[]): string {
   const named = personas
     .map((persona) => (persona.name.trim() === "" ? persona.id.trim() : persona.name.trim()))
     .filter((persona) => persona !== "");
-  return named.length === 0 ? DEFAULT_PERSONA : named.join(", ");
+  return named.length === 0 ? NO_PERSONA_NAMED : named.join(", ");
 }
 
 /**

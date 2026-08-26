@@ -191,25 +191,33 @@ const simulationSchema = {
       ],
       additionalProperties: false,
     },
+    /**
+     * Who called, as this simulation pinned them.
+     *
+     * `name` is the team's label for the library row and reads live, so a
+     * rename shows here. The three beside it are the authored person off the
+     * pinned version and never move — `identityName` being the name the agent
+     * actually heard. Each of those is null only where the pinned version
+     * could not be read at all.
+     */
     persona: {
       type: "object",
       properties: {
         id: stringIdSchema,
         name: nullable(stringSchema),
         versionId: stringIdSchema,
-        traits: nullable({
-          type: "object",
-          properties: {
-            personality: stringSchema,
-            language: stringSchema,
-            accent: stringSchema,
-            backgroundNoise: stringSchema,
-          },
-          required: ["personality", "language"],
-          additionalProperties: false,
-        }),
+        identityName: nullable(stringSchema),
+        personality: nullable(stringSchema),
+        language: nullable(stringSchema),
       },
-      required: ["id", "name", "versionId", "traits"],
+      required: [
+        "id",
+        "name",
+        "versionId",
+        "identityName",
+        "personality",
+        "language",
+      ],
       additionalProperties: false,
     },
     agent: {

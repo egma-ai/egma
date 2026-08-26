@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import { createPersona, type AuthContext } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { NEUTRAL_TRAITS } from "./support/traces.ts";
+import { NEUTRAL_PERSON } from "./support/traces.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 
 /**
@@ -87,7 +87,7 @@ async function claim(
       "content-type": "application/json",
       authorization: `Bearer ${SERVICE_TOKEN}`,
     },
-    body: JSON.stringify({ contract_versions: [4], ...body }),
+    body: JSON.stringify({ contract_versions: [5], ...body }),
   });
   const answered = (await response.json()) as { specs: unknown[] };
   return {
@@ -182,7 +182,7 @@ beforeAll(async () => {
   };
   await createPersona(author, {
     name: "Impatient Rita",
-    traits: NEUTRAL_TRAITS,
+    ...NEUTRAL_PERSON,
   });
 
   const pushed = await api(

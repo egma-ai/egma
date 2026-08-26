@@ -18,6 +18,7 @@ import {
 } from "./support/recordings.ts";
 import {
   contextFor,
+  NEUTRAL_PERSON,
   projectKeyFor,
   request,
   signUp,
@@ -145,6 +146,25 @@ describe("one simulation's grades", () => {
     // column and was never copied into the snapshot.
     expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
     expect(snapshot).not.toHaveProperty("connectionKind");
+
+    /*
+     * **Who the agent actually heard, off the version this simulation
+     * pinned.** `name` is the team's label for the library row and reads live;
+     * the three beside it are the authored person and never move.
+     *
+     * Asserted here because the response is serialized against a schema that
+     * *omits* what it cannot match rather than refusing it — so a block that
+     * regressed to nulls, or back to the retired `traits` wrapper, would leave
+     * this read looking perfectly healthy and say nothing at all.
+     */
+    expect(first.body.persona).toMatchObject({
+      name: expect.stringContaining("Impatient Rita") as unknown as string,
+      identityName: NEUTRAL_PERSON.identityName,
+      personality: NEUTRAL_PERSON.personality,
+      language: NEUTRAL_PERSON.language,
+    });
+    expect(first.body.persona).not.toHaveProperty("traits");
+
     expect(first.body).toMatchObject({
       id: run.heard,
       status: "completed",
