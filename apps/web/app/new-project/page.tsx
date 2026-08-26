@@ -118,8 +118,8 @@ function NewProject() {
     }
 
     // Straight into the new project, at the landing every project has. It is
-    // usable from this moment: it has a default persona and its fixed-scope
-    // Expected behaviors project grader.
+    // usable from this moment: it has the Predefined persona every project can
+    // use and its fixed-scope Expected behaviors project grader.
     includeProject(written.value);
     await refreshSession();
     router.push(projectLanding(written.value.id));

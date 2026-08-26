@@ -111,6 +111,7 @@ export function DataTable<Row>({
   keyOf,
   stretchPrimaryLink = false,
   onRowActivate,
+  currentKey,
   stackWhenConstrained = false,
   more,
   pagination,
@@ -136,6 +137,22 @@ export function DataTable<Row>({
    * is that control's, not the row's.
    */
   readonly onRowActivate?: (row: Row) => void;
+  /**
+   * The row whose record is open in the sheet beside the list.
+   *
+   * **It is the light grey soft surface, not Ember Wash.** `DESIGN.md` gives
+   * an open row the wash, and the developer replaced it for this state on
+   * 2026-08-25 on the Paper canvas — "remove orange hover, I would prefer a
+   * light grey" — because the wash is the primary action's own fill and a row
+   * wearing it reads as something to press rather than something already open.
+   * The design source of truth records the change after the founders' sync;
+   * until then this comment is where it is written down.
+   *
+   * The colour is not the whole of the state: the row also carries
+   * `aria-current`, so a reader who cannot see the grey is still told which
+   * row the open sheet belongs to.
+   */
+  readonly currentKey?: string;
   /**
    * Switches this same semantic table to labelled rows when its own container,
    * rather than the browser viewport, is too narrow for all of its columns.
@@ -234,8 +251,12 @@ export function DataTable<Row>({
             </TableRow>
           </TableHeader>
           <TableBody className="stacked:block">
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const current =
+                currentKey !== undefined && keyOf(row) === currentKey;
+              return (
               <TableRow
+                aria-current={current ? "true" : undefined}
                 className={cn(
                   "[&:first-child>td]:border-t-0",
                   "stacked:flex stacked:flex-col stacked:gap-1",
@@ -243,11 +264,19 @@ export function DataTable<Row>({
                   "stacked:first:border-t-0",
                   onRowActivate !== undefined && [
                     "cursor-pointer transition-colors duration-(--duration-hover) ease-out",
-                    /* The evidence surface's own hover mix; one recipe for a row under the pointer. */
-                    ROW_HOVER,
                     "motion-reduce:transition-none",
                   ],
+                  /*
+                   * The open row keeps its grey under the pointer. The hover
+                   * mix is a lighter wash of the same colour, so letting it
+                   * apply here would make the one row somebody is pointing at
+                   * *and* has open the palest row in the table.
+                   */
+                  current
+                    ? "bg-surface-soft"
+                    : onRowActivate !== undefined && ROW_HOVER,
                 )}
+                data-current={current ? "true" : undefined}
                 data-slot="data-table-row"
                 data-stretch-primary-link={
                   stretchPrimaryLink ? "true" : undefined
@@ -381,7 +410,8 @@ export function DataTable<Row>({
                   </TableCell>
                 ))}
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </TablePanel>

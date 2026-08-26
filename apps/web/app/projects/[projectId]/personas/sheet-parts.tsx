@@ -4,28 +4,31 @@ import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
 
 /**
- * The parts a persona's side sheet is written from.
+ * The parts a persona's side sheet and its list are written from.
  *
  * **They are here rather than in `apps/web/ui/` because they are one screen's
  * arrangement, not a shared behaviour.** The sheet itself, its head, its body,
- * its footer and its motion are ticket 01's `components/ui/sheet.tsx`; what is
- * below is how *a persona* fills one: a labelled group, a read pair, the
- * two-column facts grid, the frozen-version list, and the panel that says what
- * a save will do to the version number.
+ * its footer and its motion are `components/ui/sheet.tsx`; what is below is how
+ * *a persona* fills one: a labelled group, a read pair, the frozen-version
+ * list, and the chip that says which kind of persona a row is.
  *
- * Every measurement is read off page `C-0` of the Paper file
- * (`9UB-0`, `AF0-0`, `B0B-0`, `CDP-0`, `CQ1-0`, `CSF-0`) with
- * `get_computed_styles`, and every value is spent as a theme key rather than
- * as a number: `DESIGN.md` keeps the numbers, this file keeps the shapes.
+ * Every measurement is read off page `L-0` of the Paper file (boards `RA4-0`
+ * through `S6H-0`) with `get_computed_styles`, and every value is spent as a
+ * theme key rather than as a number: `DESIGN.md` keeps the numbers, this file
+ * keeps the shapes.
  *
  * Two board values are deliberately not copied literally, both because
- * `DESIGN.md`'s scale decides and ticket 01 already ruled on them:
+ * `DESIGN.md`'s scale decides:
  *
- * - The boards write a sheet's small print at **13px**. The type scale starts
- *   at 14px and the 12px micro label belongs to the two sidebar labels alone,
- *   so every 13px on these boards is drawn at `text-sm`.
+ * - The boards write a sheet's small print at **12px and 13px**. The type scale
+ *   starts at 14px and the 12px micro label belongs to letter-spaced capitals
+ *   alone, so every one of those is drawn at `text-sm` in the faint colour —
+ *   which is the same instruction the developer's own note asked for, "reduce
+ *   the size and colour of these texts which are of explanatory nature", inside
+ *   the scale the product actually has.
  * - The boards pad a sheet by **28px**. That is off `DESIGN.md`'s spacing list,
  *   and `components/ui/sheet.tsx` already rounds it to the 24px step that is on
  *   it. Nothing here re-pads the panel.
@@ -59,33 +62,27 @@ export type Read = {
   readonly value: ReactNode;
   /** An identifier or a rate, which reads straight in the mono face. */
   readonly mono?: boolean;
-  /** A sentence rather than a word: it takes the whole width of the sheet. */
-  readonly wide?: boolean;
 };
 
 /**
- * A group of facts, as a definition list.
+ * A group of facts, as a definition list — **one item per line**.
  *
  * **A definition list because that is what it is**: a screen reader reads each
  * value with the name of the value, which a stack of `<div>`s does not give.
  *
- * Short facts can share a row, and sentence-length facts take the panel width.
- * That is a two-column grid with a `col-span-2` on the wide ones rather than
- * nested rows — nesting rows inside a
- * `<dl>` is not a shape the element allows, and the grid keeps every label on
- * the same baseline down the column.
+ * The two-column grid these used to sit in is gone by the developer's own
+ * reading of the boards — "can you show each item in one line for MODELS as
+ * well". A 440px panel gives a pair of columns about 190px each, which is
+ * narrower than half the values in it: a model name, a voice id and a sentence
+ * of personality all wrapped, and the eye had to find the second column's
+ * baseline again on every row. One lane down the sheet reads as a list, which
+ * is what it is.
  */
 export function Reads({ reads }: { readonly reads: readonly Read[] }) {
   return (
-    <dl className="m-0 grid min-w-0 grid-cols-2 gap-x-4 gap-y-3 max-[30rem]:grid-cols-1">
+    <dl className="m-0 flex min-w-0 flex-col gap-3">
       {reads.map((read) => (
-        <div
-          className={cn(
-            "flex min-w-0 flex-col gap-1",
-            read.wide === true && "col-span-2 max-[30rem]:col-auto",
-          )}
-          key={read.label}
-        >
+        <div className="flex min-w-0 flex-col gap-1" key={read.label}>
           <dt className="m-0 text-sm text-faint">{read.label}</dt>
           <dd
             className={cn(
@@ -104,52 +101,34 @@ export function Reads({ reads }: { readonly reads: readonly Read[] }) {
 }
 
 /**
- * The chip beside a persona's name, in the two tones the boards draw.
+ * A chip: one hairline and one word.
  *
- * `current` is the wash one — project default, the state a project points at.
- * `quiet` is the neutral one — archived, older version: a fact about this
- * record that is not something anybody chose today.
- *
- * The word is the state and the colour supports it, which is `DESIGN.md`'s
- * rule; neither tone is a verdict colour, because neither of these is a
- * verdict.
+ * `shape="count"` is the 22px chip this product already draws beside a row of
+ * facts, and `bg-transparent` takes the fill off it, because `DESIGN.md` asks
+ * a chip for a hairline and a word. Square, like everything else, because the
+ * one radius in this product is 0.
  */
-export function StateChip({
-  tone = "quiet",
-  children,
-}: {
-  readonly tone?: "current" | "quiet";
-  readonly children: ReactNode;
-}) {
+export function StateChip({ children }: { readonly children: ReactNode }) {
   return (
-    <Badge
-      shape="count"
-      className={cn(
-        "px-1.5 text-sm",
-        tone === "current"
-          ? "bg-surface-active text-foreground"
-          : "text-muted-foreground",
-      )}
-    >
+    <Badge className="bg-transparent" shape="count" variant="neutral">
       {children}
     </Badge>
   );
 }
 
 /**
- * What a save is about to do to the version number, said before the save.
+ * Which kind of persona a row is: `Predefined` or `Custom`.
  *
- * The boards put it at the end of `MODELS`, which is where somebody has just
- * finished changing the two things that mint a version. It is a quiet panel
- * rather than a sentence in the flow because it is about the *whole* group
- * above it and not about the field it follows.
+ * It is a chip rather than plain text by the developer's note on the boards —
+ * "can we move the Type in a square chip" — so the Type column reads as a
+ * label somebody applied rather than as a second name for the row.
  */
-export function NotePanel({ children }: { readonly children: ReactNode }) {
-  return (
-    <p className="m-0 border border-border bg-surface-soft p-3 text-sm leading-(--line-normal) text-muted-foreground">
-      {children}
-    </p>
-  );
+export function PersonaTypeChip({
+  owner,
+}: {
+  readonly owner: Persona["owner"];
+}) {
+  return <StateChip>{ownerSaid(owner)}</StateChip>;
 }
 
 /** One row of the frozen-version list. */
@@ -184,8 +163,14 @@ export function Versions({ rows }: { readonly rows: readonly VersionRow[] }) {
           className={cn(
             "flex min-h-9 min-w-0 flex-wrap items-center justify-between gap-x-3",
             "border-border px-3 py-1 not-first:border-t",
-            row.current && "bg-surface-active",
-            row.reading && "bg-surface-active",
+            /*
+             * The wash stays here, and only here. It is the *current* mark —
+             * the state `DESIGN.md` gives the wash — and this list is the one
+             * place on the surface that still says "this is the one in force".
+             * The open row on the list behind it is grey for the opposite
+             * reason: it is a row somebody opened, not a value in force.
+             */
+            (row.current || row.reading) && "bg-surface-active",
           )}
           key={row.id}
         >
@@ -217,9 +202,4 @@ export function Versions({ rows }: { readonly rows: readonly VersionRow[] }) {
       ))}
     </ol>
   );
-}
-
-/** The line of small print under a sheet's facts: when, and by whom. */
-export function SheetTimestamps({ children }: { readonly children: ReactNode }) {
-  return <p className="m-0 text-sm text-faint">{children}</p>;
 }
