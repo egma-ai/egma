@@ -105,6 +105,35 @@ describe("reading who is signed in", () => {
     const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
     expect((init as RequestInit | undefined)?.signal).toBeUndefined();
   });
+
+  /**
+   * A deadline is only worth anything if every session read goes through it,
+   * and the invitation page is why this is written down: it asked `/api/me`
+   * with a plain fetch of its own, so it kept the exact stall the shell and
+   * the entrance had just been given a bound for — on the one page where the
+   * person waiting has no account yet and nowhere else to go.
+   *
+   * A page that asks this question again with a fetch of its own is that bug
+   * again, and this is what says so while it is being written.
+   */
+  it("is the only way any page asks who is signed in", async () => {
+    const allowed = new Set([
+      // Where the read and its deadline live.
+      "lib/me.ts",
+      // Names the path so this process forwards it, and reads nothing.
+      "next.config.ts",
+    ]);
+
+    for (const [file, source] of await pageSources()) {
+      if (allowed.has(file)) continue;
+      // Comments name the address all over this application. What matters is
+      // that no line of code asks for it.
+      const code = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+      expect(code, `${file} reads the session without a deadline`).not.toContain(
+        "/api/me",
+      );
+    }
+  });
 });
 
 describe("the names the signup form offers", () => {

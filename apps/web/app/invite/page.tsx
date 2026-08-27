@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 
+import { readSession } from "../../lib/me.ts";
 import {
   DEFAULT_SIGNED_IN_PATH,
   withReturnTo,
@@ -90,28 +91,26 @@ export default function InvitePage() {
         return;
       }
 
-      // Somebody already signed in is offered the button rather than the form.
-      // Somebody signed in as a different person is told so by the refusal, and
-      // that is better than this page guessing what they meant.
-      const me = await fetch("/api/me").catch(() => null);
+      /*
+       * Somebody already signed in is offered the button rather than the form.
+       * Somebody signed in as a different person is told so by the refusal, and
+       * that is better than this page guessing what they meant.
+       *
+       * **Through the bounded read, like every other session read.** This one
+       * decides whether the page leaves `loading`, and `loading` now draws the
+       * cover with the document behind it inert — so a server that accepts the
+       * connection and then says nothing would leave the invited colleague on
+       * a page they cannot retry from, navigate away from, or accept on. It
+       * also stops this page hand-checking the shape of an answer the rest of
+       * the product reads through one type.
+       */
+      const me = await readSession();
       if (!current) return;
-      if (me === null || (me.status !== 401 && !me.ok)) {
+      if (me.status !== "ready" && me.status !== "signed-out") {
         setState({ status: "failed" });
         return;
       }
-      let signedInAs: string | null = null;
-      if (me.ok) {
-        signedInAs = await me
-          .json()
-          .then((body: { user?: { email?: unknown } }) =>
-            typeof body.user?.email === "string" ? body.user.email : null,
-          )
-          .catch(() => null);
-        if (signedInAs === null) {
-          setState({ status: "failed" });
-          return;
-        }
-      }
+      const signedInAs = me.status === "ready" ? me.value.user.email : null;
 
       setState({
         status: "ready",
