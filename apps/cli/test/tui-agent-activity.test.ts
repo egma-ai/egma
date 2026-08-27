@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isMouseInput, mousePressesIn } from "../src/ui/tui/mouse.ts";
+import { isMouseInput, mousePressesIn } from "../src/ui/tui/mouse-input.ts";
 import { WizardStore } from "../src/ui/tui/store.ts";
 
 describe("the live coding-agent activity", () => {

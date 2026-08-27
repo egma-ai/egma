@@ -17,7 +17,8 @@ import type {
 import { connectionFieldIssue } from "../../connection-field-validation.ts";
 import { FAILURE_MARK } from "../../../wizard/status.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
-import { isMouseInput, useMousePress, type MousePress } from "../mouse.ts";
+import { isMouseInput, type MousePress } from "../mouse-input.ts";
+import { useMousePress } from "../mouse.ts";
 
 export type ConnectionFieldsScreenProps = {
   readonly ask: ConnectionFieldsAsk;
