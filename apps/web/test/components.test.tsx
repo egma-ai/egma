@@ -420,6 +420,39 @@ describe("nested page navigation", () => {
   });
 
   /**
+   * The trail and the page's name are one line, in one type.
+   *
+   * They used to be two things in one bar: a small underlined "Tests" beside a
+   * larger "Livekit agent suite", with no separator between them. That is the
+   * mismatch the developer read off production on 2026-08-26, and this is the
+   * shape that answers it — one line, one type, the section linked and the
+   * page the last step of its own trail.
+   */
+  it("draws the trail and the page as one line, ending in the page", () => {
+    render(
+      <PageHeader
+        title="Livekit agent suite"
+        breadcrumbs={[
+          { label: "Tests", href: "/projects/prj_1/tests" },
+          { label: "Livekit agent suite" },
+        ]}
+      />,
+    );
+
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const tests = within(trail).getByRole("link", { name: "Tests" });
+    const page = within(trail).getByRole("heading", {
+      name: "Livekit agent suite",
+    });
+
+    expect(tests.getAttribute("href")).toBe("/projects/prj_1/tests");
+    expect(trail.textContent).toBe("Tests/Livekit agent suite");
+    /* The page's own name carries the trail's size, not a heading's. */
+    expect(page.className).toContain("text-sm");
+    expect(page.className).toContain("font-normal");
+  });
+
+  /**
    * The other half of the rule above, and it needs its own case.
    *
    * A page with no trail still says which section it is in, and on one screen
@@ -1424,15 +1457,11 @@ describe("what the router draws while a page is still coming", () => {
       "/projects/prj_1/tests",
     );
     /*
-     * The current page is the `<h1>` beside the trail rather than a second copy
-     * inside it. `PageHeader` draws both in one 56px bar, so a trail that
-     * ended with the page said its name twice — "Tests / Test   Test" — which
-     * is not what `9VT-0` and `B9M-0` draw. The fallback and the page it
-     * stands in for both stop the trail at the parent (ui-refresh ticket 05);
-     * the shape they have to share is what this case is about, and they still
-     * share it.
+     * The current page is the last step of the trail, and that step is the
+     * `<h1>`: one line, one type, one name. The fallback and the page it
+     * stands in for draw the same line, which is the shape this case is about.
      */
-    expect(screen.getByRole("heading", { name: "Test" })).toBeTruthy();
+    expect(within(crumbs).getByRole("heading", { name: "Test" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });
 });

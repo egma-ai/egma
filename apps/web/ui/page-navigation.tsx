@@ -28,31 +28,28 @@ export type PageNavigationItem = ParentNavigationItem | CurrentNavigationItem;
 export type DrawnTrail = readonly [PageNavigationItem, ...PageNavigationItem[]];
 
 /**
- * The trail a page draws, with the page's own name taken off the end.
+ * The trail a page draws, ending with the page's own name.
  *
- * **A trail never repeats the title beside it.** `PageHeader` draws the trail
- * and the `<h1>` side by side in one 56px bar, and a trail's last step *is* the
- * current page — so every record page in the product read its own name twice,
- * a slash apart: "Tests / Default   Default". Two tickets worked around it
- * locally, one by ending the trail with an empty step (which left a dangling
- * "/" wherever the bar wrapped) and one by putting the kind of record there
- * instead of the record ("Runs / Run   Pre-release check").
+ * **The trail and the title are one line.** They used to be two: the trail was
+ * cut short of the record and the record stood beside it as a larger heading,
+ * so "Tests / Livekit agent suite" read as a small underlined link next to a
+ * big title and the slash between them was missing. One line, one type, one
+ * link — "Tests" goes back to the list, and the last step is the page
+ * (developer decision, 2026-08-26).
  *
- * So the rule is here, once: a page passes its real trail, ending with its own
- * name, and this takes that step off. The separator goes with it, because the
- * step it belonged to is gone. What is left says which section the record is
- * in, and the heading beside it says which record.
+ * A page passes its real trail and its title. Where the trail already ends
+ * with the title, that step *is* the page and nothing is added. Where a page
+ * titles itself something the trail does not say, the title joins the line as
+ * its last step, so neither the trail nor the title is lost.
  */
-export function trailWithoutTitle(
+export function trailWithTitle(
   items: PageNavigationItems | undefined,
   title: string,
 ): DrawnTrail | undefined {
   if (items === undefined) return undefined;
-  if (items[items.length - 1]?.label !== title) return items;
-
-  const [first, ...rest] = items.slice(0, -1);
-  /* A trail that was only the page's own name has nothing left to draw. */
-  return first === undefined ? undefined : [first, ...rest];
+  return items[items.length - 1]?.label === title
+    ? items
+    : [...items, { label: title }];
 }
 
 /**
@@ -105,12 +102,18 @@ export function PageNavigation({ items }: { readonly items: DrawnTrail }) {
             key={`${item.href ?? "current"}-${item.label}`}
           >
             {item.href === undefined ? (
-              <span
-                className="text-foreground [overflow-wrap:anywhere]"
+              /*
+               * The last step is the page, so it is the page's `<h1>`. It
+               * carries the line's own type rather than a heading size: the
+               * trail is one line of navigation, and a step in a different
+               * size would say the two halves are different kinds of thing.
+               */
+              <h1
+                className="m-0 text-sm font-normal text-foreground [overflow-wrap:anywhere]"
                 aria-current="page"
               >
                 {item.label}
-              </span>
+              </h1>
             ) : (
               <Link
                 className={cn(

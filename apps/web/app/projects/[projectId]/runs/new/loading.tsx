@@ -27,7 +27,7 @@ export default function NewRunLoading() {
         title="Create a run"
         breadcrumbs={[
           { label: "Simulation runs", href: projectPath(projectId, "runs") },
-          { label: "New run" },
+          { label: "Create a run" },
         ]}
       >
         <Loading what="the test suites and agents in this project" />

@@ -59,7 +59,7 @@ import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import {
   PageNavigation,
-  trailWithoutTitle,
+  trailWithTitle,
   type PageNavigationItems,
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
@@ -906,12 +906,13 @@ export function ProductPage({
  * purpose statement `DESIGN.md` asks for, kept where somebody reads it rather
  * than squeezed into a 56px strip beside the title it explains.
  *
- * **A trail never repeats the title beside it.** A page passes the real trail
- * into its record, ending with the record's own name, and this header takes
- * that last step off before drawing it — because the `<h1>` beside it is that
- * step. Without the rule every record page read its own name twice in one bar
- * ("Tests / Default   Default"), and the two workarounds for it left either a
- * dangling separator or the kind of record where its name belonged.
+ * **A page with a trail draws one line, and the record is the last step of
+ * it.** "Tests / Livekit agent suite", every step in the trail's own type,
+ * with the section linked and the record the `<h1>`. It used to be two things
+ * in one bar — the trail cut short of the record, then the record beside it as
+ * a larger heading — which read as a small link stuck to a big title with no
+ * slash between them (developer decision, 2026-08-26). A page with no trail
+ * keeps its own title bar, because there is no line for it to join.
  *
  * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
  * block. **It is not decoration on every page**: the transcript screen puts the
@@ -952,12 +953,8 @@ export function PageHeader({
    * twice is the thing this suppression has always been for.
    */
   const label = breadcrumbs === undefined ? eyebrow : undefined;
-  /*
-   * The trail, with this page's own name taken off the end. See
-   * `trailWithoutTitle`: the trail and the heading sit in one 56px bar, so a
-   * trail that ended with the page said its name twice.
-   */
-  const trail = trailWithoutTitle(breadcrumbs, title);
+  /* The trail, ending with this page. See `trailWithTitle`. */
+  const trail = trailWithTitle(breadcrumbs, title);
   const hasBlock =
     toolbar !== undefined ||
     action !== undefined ||
@@ -986,9 +983,12 @@ export function PageHeader({
           "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        {trail === undefined ? null : <PageNavigation items={trail} />}
-        {/* A heading carries no size of its own; the class is the size. */}
-        <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+        {trail === undefined ? (
+          /* A heading carries no size of its own; the class is the size. */
+          <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+        ) : (
+          <PageNavigation items={trail} />
+        )}
       </div>
 
       {hasBlock ? (
