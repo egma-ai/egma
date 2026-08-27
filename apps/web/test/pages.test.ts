@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
+  PERSONAL_MAIL as API_PERSONAL_MAIL,
 } from "../../api/src/auth/naming.ts";
 import { safeReturnPath as apiSafeReturnPath } from "../../api/src/auth/password-reset.ts";
 import { CODES } from "../../api/src/http/refusals.ts";
@@ -28,6 +29,7 @@ import {
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
+  PERSONAL_MAIL,
 } from "../lib/signup-defaults.ts";
 
 /**
@@ -58,6 +60,8 @@ describe("the names the signup form offers", () => {
     ["ada@gmail.com", "Ada's organization"],
     ["ada.lovelace@GMAIL.com", "Ada's organization"],
     ["ada+egma@hotmail.co.uk", "Ada's organization"],
+    // An address typed in capitals is the same person, not a shouted one.
+    ["ADA@GMAIL.COM", "Ada's organization"],
     ["-@icloud.com", "My organization"],
   ];
 
@@ -82,6 +86,23 @@ describe("the names the signup form offers", () => {
       );
     }
     expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
+  });
+
+  /**
+   * The cases above sample the rule; this holds the whole of it.
+   *
+   * The two copies decide which addresses are personal from a list of twenty
+   * names, and a sample of three cannot see a nineteenth added on one side
+   * only. Comparing the sets is what makes a one-sided edit fail here rather
+   * than in front of somebody whose organization is called `Fastmail`.
+   */
+  it("knows the same personal mail providers on both sides", () => {
+    expect([...PERSONAL_MAIL].sort()).toEqual([...API_PERSONAL_MAIL].sort());
+    for (const provider of PERSONAL_MAIL) {
+      const email = `ada.lovelace@${provider}.example`;
+      expect(organizationNameFromEmail(email)).toBe("Ada's organization");
+      expect(apiOrganizationNameFromEmail(email)).toBe("Ada's organization");
+    }
   });
 });
 /** Every source file under the web application, excluding what it did not write. */

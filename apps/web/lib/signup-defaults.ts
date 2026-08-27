@@ -14,7 +14,7 @@
 export const DEFAULT_PROJECT_NAME = "Default";
 
 /** The API's copy of this list carries the reasoning for it. */
-const PERSONAL_MAIL = new Set([
+export const PERSONAL_MAIL = new Set([
   "gmail",
   "googlemail",
   "outlook",
@@ -53,7 +53,9 @@ export function organizationNameFromEmail(email: string): string {
   if (cleaned === "") return "My organization";
 
   if (PERSONAL_MAIL.has(cleaned.toLowerCase())) {
-    const first = email.slice(0, at).split(/[^\p{L}\p{N}]+/u)[0] ?? "";
+    // Lowercased first, so a name shouted in the address bar is not
+    // shouted back: ADA@GMAIL.COM is Ada, not ADA.
+    const first = email.slice(0, at).toLowerCase().split(/[^\p{L}\p{N}]+/u)[0] ?? "";
     return first === "" ? "My organization" : `${capitalized(first)}'s organization`;
   }
 
