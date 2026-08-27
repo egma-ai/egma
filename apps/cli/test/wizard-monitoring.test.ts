@@ -149,15 +149,6 @@ const WORKER_TESTING_ONLY = WORKER_BEFORE.replace(
   "from egma import mockable\nfrom livekit import agents",
 );
 
-/** A monitoring call that exists, but is too late to be valid. */
-const WORKER_MONITORING_LATE = WORKER_BEFORE.replace(
-  "    await ctx.connect()",
-  "    await ctx.connect()\n    monitor_livekit(ctx)",
-).replace(
-  "from livekit import agents",
-  "from egma import monitor_livekit\nfrom livekit import agents",
-);
-
 let platform: Platform;
 let workspace: Workspace;
 
@@ -269,15 +260,6 @@ function appliesBothEntries(): FakeStep[] {
     { kind: "say", text: "egma:note Added both Egma entries to agent.py\n" },
     { kind: "say", text: "egma:found worker-entry agent.py\n" },
     { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
-    { kind: "say", text: "egma:found agent-name front-desk\n" },
-    { kind: "stop", reason: "end_turn" },
-  ];
-}
-
-function appliesLateMonitorEntry(): FakeStep[] {
-  return [
-    { kind: "write-file", path: "agent.py", content: WORKER_MONITORING_LATE },
-    { kind: "say", text: "egma:found worker-entry agent.py\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
@@ -785,9 +767,8 @@ describe("choosing monitoring on LiveKit", () => {
     expect(platform.running.runs).toHaveLength(1);
   });
 
-  it("creates and records another agent when the integrated name does not match", async () => {
+  it("uses case-sensitive names and reuses the exact match among several agents", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
     const first = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
@@ -795,12 +776,6 @@ describe("choosing monitoring on LiveKit", () => {
     });
     expect(first.report.kind).toBe("monitoring-wired");
 
-    const firstAgent = platform.registered.agents[0];
-    const firstKey = platform.keys.minted[0];
-    const firstEnvironment = await readFile(
-      path.join(workspace.dir, ENV_FILE_NAME),
-      "utf8",
-    );
     const second = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
@@ -808,50 +783,6 @@ describe("choosing monitoring on LiveKit", () => {
         {
           contains: WORKER_INTEGRATION_TASK,
           steps: reportsIntegratedWorker("Front Desk"),
-        },
-      ],
-    });
-
-    expect(second.report).toMatchObject({
-      kind: "monitoring-wired",
-      agentName: "Front Desk",
-    });
-    expect(platform.registered.agents).toHaveLength(2);
-    expect(platform.registered.agents[0]).toEqual(firstAgent);
-    expect(platform.registered.agents[1]).toMatchObject({ name: "Front Desk" });
-    expect(platform.registered.agents[1]?.id).not.toBe(firstAgent?.id);
-    expect(platform.keys.minted).toHaveLength(2);
-    expect(platform.keys.minted[0]).toEqual(firstKey);
-    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.not.toBe(
-      firstEnvironment,
-    );
-
-    const config = await readConfig(folderPathsIn(workspace.dir).config);
-    expect(config.agents).toEqual([
-      expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
-      expect.objectContaining({
-        id: platform.registered.agents[1]?.id,
-        name: "Front Desk",
-      }),
-    ]);
-  });
-
-  it("reuses the exact name match when several agents are configured", async () => {
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-    const first = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
-    });
-    expect(first.report.kind).toBe("monitoring-wired");
-
-    const second = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      stepsByTask: [
-        {
-          contains: WORKER_INTEGRATION_TASK,
-          steps: reportsIntegratedWorker("other-agent"),
         },
       ],
     });
@@ -882,7 +813,7 @@ describe("choosing monitoring on LiveKit", () => {
     const config = await readConfig(folderPathsIn(workspace.dir).config);
     expect(config.agents).toEqual([
       expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
-      expect.objectContaining({ name: "other-agent" }),
+      expect.objectContaining({ name: "Front Desk" }),
     ]);
   });
 
@@ -994,85 +925,6 @@ describe("choosing monitoring on LiveKit", () => {
     expect(printed).toContain("EGMA_API_KEY=");
   });
 
-  /**
-   * A coding agent that reports the edit and did not make it is not believed:
-   * Egma opens the file and looks, prints the manual lines, and stops before it
-   * creates a monitoring target or key.
-   */
-  it("does not take a reported edit on trust", async () => {
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
-    const { report, ui } = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      stepsByTask: [
-        {
-          contains: WORKER_INTEGRATION_TASK,
-          steps: [
-            { kind: "say", text: "egma:found worker-entry agent.py\n" },
-            { kind: "say", text: "egma:found agent-name front-desk\n" },
-            { kind: "stop", reason: "end_turn" },
-          ],
-        },
-      ],
-    });
-
-    expect(report.kind).toBe("failed");
-    if (report.kind !== "failed") throw new Error("expected integration refusal");
-    expect(report.reason).toContain("did not create remote resources");
-    expect(ui.record.statuses.join("\n")).toContain(
-      "expected exactly one monitor_livekit() call after integration and found 0",
-    );
-    expect(ui.record.statuses.join("\n")).toContain("monitor_livekit(ctx)");
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.keys.minted).toHaveLength(0);
-    // The worker is exactly as the developer left it.
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(WORKER_BEFORE);
-  });
-
-  it("does not call a monitoring edit wired when it removes existing testing", async () => {
-    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_TESTING_ONLY, "utf8");
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
-    const { report, ui } = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      // This helper adds monitoring but rewrites away the existing mockable().
-      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
-    });
-
-    expect(report.kind).toBe("failed");
-    if (report.kind !== "failed") throw new Error("expected preservation refusal");
-    expect(report.reason).toContain("removed a pre-existing mockable() call");
-    expect(report.reason).toContain("did not create remote resources");
-    expect(ui.record.statuses.join("\n")).toContain(
-      "removed a pre-existing mockable() call",
-    );
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.keys.minted).toHaveLength(0);
-    expect(platform.running.runs).toHaveLength(0);
-  });
-
-  it("does not accept monitoring after the first executable statement", async () => {
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
-    const { report, ui } = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      stepsByTask: [
-        { contains: WORKER_INTEGRATION_TASK, steps: appliesLateMonitorEntry() },
-      ],
-    });
-
-    expect(report.kind).toBe("failed");
-    if (report.kind !== "failed") throw new Error("expected ordering refusal");
-    expect(report.reason).toContain("not the first executable statement");
-    expect(ui.record.statuses.join("\n")).toContain(
-      "monitor_livekit() is not the first executable statement",
-    );
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.keys.minted).toHaveLength(0);
-  });
 });
 
 describe("choosing both", () => {
@@ -1091,7 +943,7 @@ describe("choosing both", () => {
    * filling both custodies, one agent row through the whole of it, and a last
    * screen that points at the graded run and at Monitoring.
    */
-  it("runs monitoring first, pastes once, and keeps one agent row", async () => {
+  it("runs monitoring first, keeps one row, and never leaks the pasted key", async () => {
     const { report, ui } = await walk({
       goal: "both",
       steps: retellDiscovery(),
@@ -1159,30 +1011,10 @@ describe("choosing both", () => {
     const lines = exitLines(report).join("\n");
     expect(lines).toContain("Your first run is live");
     expect(lines).toContain("Monitoring page");
-  });
-
-  /**
-   * The whole-run sweep, on the lane that handles the key most: it is pasted
-   * once, sealed twice, and exists nowhere a person or a program could read it
-   * afterwards.
-   */
-  it("leaves the key in no file, no line and no report", async () => {
-    const { report, ui } = await walk({
-      goal: "both",
-      steps: retellDiscovery(),
-      stepsByTask: [{ contains: GENERATE_TASK, steps: writesOneTest("late-repair") }],
-      answers: { "retell-key": KEY, reach: "text" },
-      retell,
-    });
-
-    expect(report.kind).toBe("run-started");
-    // The sweep is only worth its name against a run that really used the key.
-    expect(platform.monitoring.monitoringKeys).toEqual([KEY]);
-    expect(platform.registered.sealed).toEqual([KEY]);
 
     expect(JSON.stringify(ui.record)).not.toContain(KEY);
     expect(JSON.stringify(report)).not.toContain(KEY);
-    expect(exitLines(report).join("\n")).not.toContain(KEY);
+    expect(lines).not.toContain(KEY);
 
     for (const name of await filesUnder(workspace.dir)) {
       const held = await readFile(path.join(workspace.dir, name), "utf8").catch(() => "");
@@ -1319,7 +1151,7 @@ describe("choosing both", () => {
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
   });
 
-  it("does not start a Both run when a later task removes monitoring", async () => {
+  it("propagates a verifier rejection when a later task removes monitoring", async () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
 

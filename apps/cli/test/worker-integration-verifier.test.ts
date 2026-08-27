@@ -9,10 +9,14 @@ import {
   verifyWorkerIntegration,
   verifyWorkerIntegrationClaim,
   type WorkerIntegrationContract,
+  type WorkerIntegrationMode,
   type WorkerIntegrationSnapshot,
+  type WorkerIntegrationVerification,
 } from "../src/wizard/worker-integration-verifier.ts";
 
 const temporary: string[] = [];
+const REQUIREMENTS_BEFORE = "livekit-agents>=1.2\n";
+const REQUIREMENTS_WITH_EGMA = "livekit-agents>=1.2\negma>=0.2\n";
 
 const WORKER_BEFORE = [
   "from livekit.agents import AgentSession",
@@ -96,9 +100,59 @@ const WORKER_WITH_DIRECT_BOTH = [
   "",
 ].join("\n");
 
+const MULTILINE_SESSION_BEFORE = WORKER_BEFORE.replace(
+  "    session = AgentSession()",
+  "    session = AgentSession(\n        stt=object(),\n    )",
+).replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  [
+    "    await session.start(",
+    "        agent=agent,",
+    "        room=ctx.room,",
+    "    )",
+  ].join("\n"),
+);
+
+const MULTILINE_SESSION_AFTER = MULTILINE_SESSION_BEFORE.replace(
+  "from livekit.agents import AgentSession",
+  "from egma import mockable\nfrom livekit.agents import AgentSession",
+).replace(
+  "    await session.start(",
+  "    await mockable(agent, ctx, session)\n    await session.start(",
+);
+
+const MULTILINE_ENTRYPOINT_BEFORE = WORKER_BEFORE.replace(
+  "async def entrypoint(ctx):",
+  ["async def entrypoint(", "    ctx,", "):"].join("\n"),
+);
+
+const MULTILINE_ENTRYPOINT_AFTER = MULTILINE_ENTRYPOINT_BEFORE.replace(
+  "from livekit.agents import AgentSession",
+  "from egma import mockable\nfrom livekit.agents import AgentSession",
+).replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  [
+    "    await mockable(",
+    "        agent,",
+    "        ctx,",
+    "        session,",
+    "    )",
+    "    await session.start(agent=agent, room=ctx.room)",
+  ].join("\n"),
+);
+
 type Workspace = {
   readonly dir: string;
   readonly worker: string;
+};
+
+type WorkerChange = {
+  readonly after: string;
+  readonly before?: string;
+  readonly manifest?: string;
+  readonly manifestAfter?: string;
+  readonly manifestBefore?: string;
+  readonly mode?: WorkerIntegrationMode;
 };
 
 afterEach(async () => {
@@ -107,17 +161,13 @@ afterEach(async () => {
   );
 });
 
-async function workspace(): Promise<Workspace> {
+async function workspace(workerSource = WORKER_BEFORE): Promise<Workspace> {
   const dir = await mkdtemp(path.join(tmpdir(), "egma-worker-verifier-"));
   temporary.push(dir);
   await mkdir(path.join(dir, "src"), { recursive: true });
   const worker = path.join(dir, "src", "agent.py");
-  await writeFile(worker, WORKER_BEFORE, "utf8");
-  await writeFile(
-    path.join(dir, "requirements.txt"),
-    "livekit-agents>=1.2\n",
-    "utf8",
-  );
+  await writeFile(worker, workerSource, "utf8");
+  await writeFile(path.join(dir, "requirements.txt"), REQUIREMENTS_BEFORE, "utf8");
   return { dir, worker };
 }
 
@@ -128,360 +178,323 @@ async function snapshotOf(dir: string): Promise<WorkerIntegrationSnapshot> {
   return result.snapshot;
 }
 
+async function verifyChange({
+  after,
+  before = WORKER_BEFORE,
+  manifest = "requirements.txt",
+  manifestAfter = REQUIREMENTS_WITH_EGMA,
+  manifestBefore = REQUIREMENTS_BEFORE,
+  mode = "testing",
+}: WorkerChange): Promise<WorkerIntegrationVerification> {
+  const made = await workspace(before);
+  if (manifest !== "requirements.txt") {
+    await rm(path.join(made.dir, "requirements.txt"), { force: true });
+  }
+  await mkdir(path.dirname(path.join(made.dir, manifest)), { recursive: true });
+  await writeFile(path.join(made.dir, manifest), manifestBefore, "utf8");
+  const snapshot = await snapshotOf(made.dir);
+  await writeFile(made.worker, after, "utf8");
+  await writeFile(path.join(made.dir, manifest), manifestAfter, "utf8");
+  return verifyWorkerIntegrationClaim(
+    made.dir,
+    snapshot,
+    "src/agent.py",
+    manifest,
+    mode,
+  );
+}
+
 async function claim(
-  made: Workspace,
   workerSource: string,
   manifest: string,
   manifestSource: string,
-) {
-  await mkdir(path.dirname(path.join(made.dir, manifest)), { recursive: true });
+  before = WORKER_BEFORE,
+): Promise<WorkerIntegrationVerification> {
   const manifestBefore = manifest.endsWith(".toml")
     ? manifestSource
     : manifestSource
         .split("\n")
         .filter((line) => !/^\s*egma\b/iu.test(line))
         .join("\n");
-  await writeFile(path.join(made.dir, manifest), manifestBefore, "utf8");
-  if (manifest.endsWith(".toml")) {
-    await rm(path.join(made.dir, "requirements.txt"), { force: true });
-  }
-  const snapshot = await snapshotOf(made.dir);
-  await writeFile(made.worker, workerSource, "utf8");
-  await writeFile(path.join(made.dir, manifest), manifestSource, "utf8");
-  return verifyWorkerIntegrationClaim(
-    made.dir,
-    snapshot,
-    "src/agent.py",
+  return verifyChange({
+    after: workerSource,
+    before,
     manifest,
-    "testing",
-  );
+    manifestAfter: manifestSource,
+    manifestBefore,
+  });
 }
 
-function contractFrom(
-  result: Awaited<ReturnType<typeof verifyWorkerIntegrationClaim>>,
-): WorkerIntegrationContract {
+function expectVerified(
+  result: WorkerIntegrationVerification,
+  expected: Record<string, unknown> = {},
+): void {
+  expect(result).toMatchObject({ kind: "verified", ...expected });
+}
+
+function expectUnverified(
+  result: WorkerIntegrationVerification,
+  reason: string,
+): void {
+  expect(result).toMatchObject({
+    kind: "unverified",
+    reason: expect.stringContaining(reason),
+  });
+}
+
+function contractFrom(result: WorkerIntegrationVerification): WorkerIntegrationContract {
   expect(result.kind).toBe("verified");
   if (result.kind !== "verified") throw new Error(result.reason);
   return result.contract;
 }
 
+async function approvedIntegration(): Promise<{
+  readonly made: Workspace;
+  readonly contract: WorkerIntegrationContract;
+}> {
+  const made = await workspace();
+  const snapshot = await snapshotOf(made.dir);
+  await writeFile(made.worker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
+  await writeFile(
+    path.join(made.dir, "requirements.txt"),
+    REQUIREMENTS_WITH_EGMA,
+    "utf8",
+  );
+  const claimed = await verifyWorkerIntegrationClaim(
+    made.dir,
+    snapshot,
+    "src/agent.py",
+    "requirements.txt",
+    "testing",
+  );
+  return { made, contract: contractFrom(claimed) };
+}
+
 describe("the LiveKit worker integration verifier", () => {
   it("accepts a direct mockable import with a PEP 621 egma dependency", async () => {
-    const made = await workspace();
+    const manifest = [
+      "[project]",
+      'name = "front-desk"',
+      "dependencies = [",
+      '  "livekit-agents>=1.2",',
+      '  "egma>=0.2",',
+      "]",
+      "",
+    ].join("\n");
 
     const result = await claim(
-      made,
       WORKER_WITH_DIRECT_MOCKABLE,
       "pyproject.toml",
-      [
-        "[project]",
-        'name = "front-desk"',
-        "dependencies = [",
-        '  "livekit-agents>=1.2",',
-        '  "egma>=0.2",',
-        "]",
-        "",
-      ].join("\n"),
+      manifest,
     );
 
-    expect(result).toMatchObject({
-      kind: "verified",
+    expectVerified(result, {
       file: "src/agent.py",
       dependencyFile: "pyproject.toml",
     });
   });
 
-  it("accepts multiline AgentSession construction and startup", async () => {
-    const made = await workspace();
-    const before = WORKER_BEFORE
-      .replace(
-        "    session = AgentSession()",
-        "    session = AgentSession(\n        stt=object(),\n    )",
-      )
-      .replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        [
-          "    await session.start(",
-          "        agent=agent,",
-          "        room=ctx.room,",
-          "    )",
-        ].join("\n"),
-      );
-    await writeFile(made.worker, before, "utf8");
-    const multiline = before
-      .replace(
-        "from livekit.agents import AgentSession",
-        "from egma import mockable\nfrom livekit.agents import AgentSession",
-      )
-      .replace(
-        "    await session.start(",
-        "    await mockable(agent, ctx, session)\n    await session.start(",
-      );
-
-    const result = await claim(
-      made,
-      multiline,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result.kind).toBe("verified");
-  });
-
-  it("accepts a multiline entrypoint signature and exact mockable call", async () => {
-    const made = await workspace();
-    const before = WORKER_BEFORE.replace(
-      "async def entrypoint(ctx):",
-      ["async def entrypoint(", "    ctx,", "):"].join("\n"),
-    );
-    await writeFile(made.worker, before, "utf8");
-    const multiline = before
-      .replace(
-        "from livekit.agents import AgentSession",
-        "from egma import mockable\nfrom livekit.agents import AgentSession",
-      )
-      .replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        [
-          "    await mockable(",
-          "        agent,",
-          "        ctx,",
-          "        session,",
-          "    )",
-          "    await session.start(agent=agent, room=ctx.room)",
-        ].join("\n"),
-      );
-
-    const result = await claim(
-      made,
-      multiline,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result.kind).toBe("verified");
-  });
-
-  it("accepts a qualified mockable call with a Poetry egma dependency", async () => {
-    const made = await workspace();
-
-    const result = await claim(
-      made,
-      WORKER_WITH_QUALIFIED_MOCKABLE,
-      "pyproject.toml",
-      [
+  it.each([
+    {
+      name: "multiline AgentSession construction and startup",
+      before: MULTILINE_SESSION_BEFORE,
+      after: MULTILINE_SESSION_AFTER,
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+    },
+    {
+      name: "a multiline entrypoint signature and exact mockable call",
+      before: MULTILINE_ENTRYPOINT_BEFORE,
+      after: MULTILINE_ENTRYPOINT_AFTER,
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+    },
+    {
+      name: "a qualified mockable call with a Poetry egma dependency",
+      after: WORKER_WITH_QUALIFIED_MOCKABLE,
+      manifest: "pyproject.toml",
+      dependency: [
         "[tool.poetry.dependencies]",
         'python = "^3.12"',
         'livekit-agents = "^1.2"',
         'egma = "^0.2"',
         "",
       ].join("\n"),
-    );
-
-    if (result.kind !== "verified") throw new Error(result.reason);
-    expect(result.kind).toBe("verified");
-  });
-
-  it("accepts egma in requirements.txt", async () => {
-    const made = await workspace();
-
-    const result = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      "requirements.txt",
-      ["livekit-agents>=1.2", "egma>=0.2", ""].join("\n"),
-    );
-
-    expect(result.kind).toBe("verified");
+    },
+    {
+      name: "egma in requirements.txt",
+      after: WORKER_WITH_DIRECT_MOCKABLE,
+      manifest: "requirements.txt",
+      dependency: REQUIREMENTS_WITH_EGMA,
+    },
+  ])("accepts $name", async ({ after, before, manifest, dependency }) => {
+    expectVerified(await claim(after, manifest, dependency, before));
   });
 
   it("rejects an Egma SDK version without AgentTask handoff support", async () => {
-    const made = await workspace();
-
     const result = await claim(
-      made,
       WORKER_WITH_DIRECT_MOCKABLE,
       "requirements.txt",
       "livekit-agents>=1.6.7\negma>=0.1.0\n",
     );
 
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("egma>=0.1.1"),
-    });
+    expectUnverified(result, "egma>=0.1.1");
   });
 
-  it("accepts testing integration when the worker relies on session.start to connect", async () => {
-    const made = await workspace();
-    const before = WORKER_BEFORE.replace("    await ctx.connect()\n", "");
-    await writeFile(made.worker, before, "utf8");
-    const snapshot = await snapshotOf(made.dir);
-    const integrated = before
-      .replace(
-        "from livekit.agents import AgentSession",
-        "from egma import mockable\nfrom livekit.agents import AgentSession",
-      )
-      .replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
-      );
-    await writeFile(made.worker, integrated, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
-    );
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({ kind: "verified" });
+  it.each([
+    {
+      name: "testing integration when session.start connects the worker",
+      before: WORKER_BEFORE.replace("    await ctx.connect()\n", ""),
+      after: WORKER_WITH_DIRECT_MOCKABLE.replace("    await ctx.connect()\n", ""),
+      mode: "testing" as const,
+    },
+    {
+      name: "monitor, connect, mockable, and matching session.start in order",
+      before: WORKER_BEFORE,
+      after: WORKER_WITH_DIRECT_BOTH,
+      mode: "both" as const,
+    },
+  ])("accepts $name", async ({ before, after, mode }) => {
+    expectVerified(await verifyChange({ before, after, mode }));
   });
 
-  it("rejects an awaited ctx.connect added only for the Egma integration", async () => {
-    const made = await workspace();
-    const before = WORKER_BEFORE.replace("    await ctx.connect()\n", "");
-    await writeFile(made.worker, before, "utf8");
-    const snapshot = await snapshotOf(made.dir);
-    const integrated = WORKER_WITH_DIRECT_MOCKABLE;
-    await writeFile(made.worker, integrated, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
-    );
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "changed worker code outside the exact Egma imports and entry hooks",
-      ),
-    });
-  });
-
-  it("rejects mockable before the awaited ctx.connect", async () => {
-    const made = await workspace();
-    const snapshot = await snapshotOf(made.dir);
-    const wrongOrder = WORKER_WITH_DIRECT_MOCKABLE
-      .replace("    await ctx.connect()\n", "")
-      .replace(
+  it.each([
+    {
+      name: "an awaited ctx.connect added only for the Egma integration",
+      before: WORKER_BEFORE.replace("    await ctx.connect()\n", ""),
+      after: WORKER_WITH_DIRECT_MOCKABLE,
+      reason: "changed worker code outside the exact Egma imports and entry hooks",
+    },
+    {
+      name: "mockable before the awaited ctx.connect",
+      before: WORKER_BEFORE,
+      after: WORKER_WITH_DIRECT_MOCKABLE.replace("    await ctx.connect()\n", "").replace(
         "    await session.start(agent=agent, room=ctx.room)",
         "    await ctx.connect()\n    await session.start(agent=agent, room=ctx.room)",
-      );
-    await writeFile(made.worker, wrongOrder, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
-    );
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("ctx.connect() runs after mockable"),
-    });
+      ),
+      reason: "ctx.connect() runs after mockable",
+    },
+  ])("rejects $name", async ({ before, after, reason }) => {
+    expectUnverified(await verifyChange({ before, after }), reason);
   });
 
-  it("accepts monitor, connect, mockable, and matching session.start in order", async () => {
-    const made = await workspace();
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, WORKER_WITH_DIRECT_BOTH, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
-    );
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "both",
-    );
-
-    expect(result).toMatchObject({ kind: "verified" });
-  });
-
-  it("rejects a pyproject that does not declare egma", async () => {
-    const made = await workspace();
-
-    const result = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      "pyproject.toml",
-      [
+  it.each([
+    {
+      name: "a pyproject that does not declare egma",
+      source: WORKER_WITH_DIRECT_MOCKABLE,
+      manifest: "pyproject.toml",
+      dependency: [
         "[project]",
         'name = "front-desk"',
         'dependencies = ["livekit-agents>=1.2"]',
         "",
       ].join("\n"),
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("does not declare the Python egma distribution"),
-    });
-  });
-
-  it("rejects egma that appears only in a requirements comment", async () => {
-    const made = await workspace();
-
-    const result = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      "requirements.txt",
-      ["livekit-agents>=1.2", "# egma>=0.2", ""].join("\n"),
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("does not declare the Python egma distribution"),
-    });
-  });
-
-  it("rejects a mockable call after its egma import is removed", async () => {
-    const made = await workspace();
-
-    const result = await claim(
-      made,
-      WORKER_WITH_UNBOUND_MOCKABLE,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("mockable() is not imported from egma"),
-    });
+      reason: "does not declare the Python egma distribution",
+    },
+    {
+      name: "egma that appears only in a requirements comment",
+      source: WORKER_WITH_DIRECT_MOCKABLE,
+      manifest: "requirements.txt",
+      dependency: "livekit-agents>=1.2\n# egma>=0.2\n",
+      reason: "does not declare the Python egma distribution",
+    },
+    {
+      name: "a mockable call after its egma import is removed",
+      source: WORKER_WITH_UNBOUND_MOCKABLE,
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "mockable() is not imported from egma",
+    },
+    {
+      name: "an entrypoint call bound to an import inside another function",
+      source: [
+        "from livekit.agents import AgentSession",
+        "",
+        "def helper():",
+        "    from egma import mockable",
+        "",
+        "async def entrypoint(ctx):",
+        "    await ctx.connect()",
+        "    agent = object()",
+        "    session = AgentSession()",
+        "    await mockable(agent, ctx, session)",
+        "    await session.start(agent=agent, room=ctx.room)",
+        "",
+      ].join("\n"),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "mockable() is not imported from egma",
+    },
+    {
+      name: "a dead mockable call with the wrong arguments",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    await mockable(agent, ctx, session)",
+        "    if False:\n        await mockable(wrong_argument)",
+      ),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "direct job-entrypoint statement",
+    },
+    {
+      name: "mockable before the inline session.start agent is bound",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace("    agent = object()\n", "").replace(
+        "agent=agent",
+        "agent=Assistant()",
+      ),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "agent is not bound before mockable",
+    },
+    {
+      name: "mockable before its session binding exists",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    session = AgentSession()\n    await mockable(agent, ctx, session)",
+        "    await mockable(agent, ctx, session)\n    session = AgentSession()",
+      ),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "session is not bound before mockable",
+    },
+    {
+      name: "session.start with a different agent binding",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    session = AgentSession()",
+        "    other_agent = object()\n    session = AgentSession()",
+      ).replace("agent=agent", "agent=other_agent"),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "same session and agent bindings",
+    },
+    {
+      name: "session.start on a different session binding",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    session = AgentSession()",
+        "    session = AgentSession()\n    other_session = AgentSession()",
+      ).replace("await session.start", "await other_session.start"),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "same session and agent bindings",
+    },
+    {
+      name: "a mocked session that already started before mockable",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    await mockable(agent, ctx, session)",
+        [
+          "    await session.start(agent=agent, room=ctx.room)",
+          "    await mockable(agent, ctx, session)",
+        ].join("\n"),
+      ),
+      manifest: "requirements.txt",
+      dependency: "egma>=0.2\n",
+      reason: "session already starts before mockable",
+    },
+  ])("rejects $name", async ({ source, manifest, dependency, reason }) => {
+    expectUnverified(await claim(source, manifest, dependency), reason);
   });
 
   it("does not snapshot a file with two possible ctx entrypoints", async () => {
-    const made = await workspace();
-    await writeFile(
-      made.worker,
+    const made = await workspace(
       `${WORKER_BEFORE}\nasync def another_entrypoint(ctx):\n    await ctx.connect()\n`,
-      "utf8",
     );
 
     const result = await snapshotWorkerIntegration(made.dir, "src/agent.py");
@@ -492,210 +505,26 @@ describe("the LiveKit worker integration verifier", () => {
     });
   });
 
-  it("does not bind an entrypoint call to an import inside another function", async () => {
-    const made = await workspace();
-    const unrelatedImport = [
-      "from livekit.agents import AgentSession",
-      "",
-      "def helper():",
-      "    from egma import mockable",
-      "",
-      "async def entrypoint(ctx):",
-      "    await ctx.connect()",
-      "    agent = object()",
-      "    session = AgentSession()",
-      "    await mockable(agent, ctx, session)",
-      "    await session.start(agent=agent, room=ctx.room)",
-      "",
-    ].join("\n");
-
-    const result = await claim(
-      made,
-      unrelatedImport,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("mockable() is not imported from egma"),
-    });
-  });
-
-  it("does not accept a dead mockable call with the wrong arguments", async () => {
-    const made = await workspace();
-    const deadCall = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "    await mockable(agent, ctx, session)",
-      "    if False:\n        await mockable(wrong_argument)",
-    );
-
-    const result = await claim(
-      made,
-      deadCall,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("direct job-entrypoint statement"),
-    });
-  });
-
-  it("rejects mockable before the inline session.start agent is bound", async () => {
-    const made = await workspace();
-    const inlineAgent = WORKER_WITH_DIRECT_MOCKABLE
-      .replace("    agent = object()\n", "")
-      .replace("agent=agent", "agent=Assistant()");
-
-    const result = await claim(
-      made,
-      inlineAgent,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("agent is not bound before mockable"),
-    });
-  });
-
-  it("rejects mockable before its session binding exists", async () => {
-    const made = await workspace();
-    const lateSession = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "    session = AgentSession()\n    await mockable(agent, ctx, session)",
-      "    await mockable(agent, ctx, session)\n    session = AgentSession()",
-    );
-
-    const result = await claim(
-      made,
-      lateSession,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("session is not bound before mockable"),
-    });
-  });
-
-  it("requires session.start to receive the mocked agent binding", async () => {
-    const made = await workspace();
-    const differentAgent = WORKER_WITH_DIRECT_MOCKABLE
-      .replace("    session = AgentSession()", "    other_agent = object()\n    session = AgentSession()")
-      .replace("agent=agent", "agent=other_agent");
-
-    const result = await claim(
-      made,
-      differentAgent,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("same session and agent bindings"),
-    });
-  });
-
-  it("requires session.start on the same mocked session binding", async () => {
-    const made = await workspace();
-    const differentSession = WORKER_WITH_DIRECT_MOCKABLE
-      .replace("    session = AgentSession()", "    session = AgentSession()\n    other_session = AgentSession()")
-      .replace("await session.start", "await other_session.start");
-
-    const result = await claim(
-      made,
-      differentSession,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("same session and agent bindings"),
-    });
-  });
-
-  it("rejects the mocked session when it already started before mockable", async () => {
-    const made = await workspace();
-    const startedTwice = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "    await mockable(agent, ctx, session)",
-      [
+  it.each(
+    (["top-level", "nested"] as const).flatMap((placement) =>
+      (["agent", "session"] as const).map((binding) => ({ placement, binding })),
+    ),
+  )(
+    "rejects a $placement $binding rebinding between mockable and session.start",
+    async ({ placement, binding }) => {
+      const replacement =
+        placement === "top-level"
+          ? `    ${binding} = replacement`
+          : `    if True:\n        ${binding} = replacement`;
+      const after = WORKER_WITH_DIRECT_MOCKABLE.replace(
         "    await session.start(agent=agent, room=ctx.room)",
-        "    await mockable(agent, ctx, session)",
-      ].join("\n"),
-    );
-
-    const result = await claim(
-      made,
-      startedTwice,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("session already starts before mockable"),
-    });
-  });
-
-  it.each(["agent", "session"] as const)(
-    "rejects a top-level %s reassignment between mockable and session.start",
-    async (binding) => {
-      const made = await workspace();
-      const reassigned = WORKER_WITH_DIRECT_MOCKABLE.replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        [
-          `    ${binding} = replacement`,
-          "    await session.start(agent=agent, room=ctx.room)",
-        ].join("\n"),
+        `${replacement}\n    await session.start(agent=agent, room=ctx.room)`,
       );
 
-      const result = await claim(
-        made,
-        reassigned,
-        "requirements.txt",
-        "egma>=0.2\n",
+      expectUnverified(
+        await claim(after, "requirements.txt", "egma>=0.2\n"),
+        `${binding} is rebound between mockable() and AgentSession.start()`,
       );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(
-          `${binding} is rebound between mockable() and AgentSession.start()`,
-        ),
-      });
-    },
-  );
-
-  it.each(["agent", "session"] as const)(
-    "rejects a nested %s rebinding between mockable and session.start",
-    async (binding) => {
-      const made = await workspace();
-      const rebound = WORKER_WITH_DIRECT_MOCKABLE.replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        [
-          "    if True:",
-          `        ${binding} = replacement`,
-          "    await session.start(agent=agent, room=ctx.room)",
-        ].join("\n"),
-      );
-
-      const result = await claim(
-        made,
-        rebound,
-        "requirements.txt",
-        "egma>=0.2\n",
-      );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(
-          `${binding} is rebound between mockable() and AgentSession.start()`,
-        ),
-      });
     },
   );
 
@@ -712,10 +541,7 @@ describe("the LiveKit worker integration verifier", () => {
       mode: "testing" as const,
       source: WORKER_WITH_DIRECT_MOCKABLE.replace(
         "    await mockable(agent, ctx, session)",
-        [
-          "    await mockable(agent, ctx, session)",
-          "    await mockable(agent, ctx, session)",
-        ].join("\n"),
+        "    await mockable(agent, ctx, session)\n    await mockable(agent, ctx, session)",
       ),
       hook: "mockable",
     },
@@ -731,172 +557,114 @@ describe("the LiveKit worker integration verifier", () => {
       mode: "both" as const,
       source: WORKER_WITH_ALIASED_BOTH.replace(
         "    await isolate(agent, ctx, session)",
-        [
-          "    await isolate(agent, ctx, session)",
-          "    await isolate(agent, ctx, session)",
-        ].join("\n"),
+        "    await isolate(agent, ctx, session)\n    await isolate(agent, ctx, session)",
       ),
       hook: "mockable",
     },
-  ])(
-    "rejects duplicate $hook calls in $mode mode",
-    async ({ mode, source, hook }) => {
-      const made = await workspace();
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(made.worker, source, "utf8");
-      await writeFile(
-        path.join(made.dir, "requirements.txt"),
-        "livekit-agents>=1.2\negma>=0.2\n",
-        "utf8",
-      );
-
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        mode,
-      );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(`expected exactly one ${hook}() call`),
-      });
-    },
-  );
-
-  it("rejects a new testing hook in monitoring-only mode", async () => {
-    const made = await workspace();
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, WORKER_WITH_ALIASED_BOTH, "utf8");
-    await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "monitoring",
+  ])("rejects duplicate $hook calls in $mode mode", async ({ mode, source, hook }) => {
+    expectUnverified(
+      await verifyChange({ after: source, mode }),
+      `expected exactly one ${hook}() call`,
     );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("monitoring-only integration added mockable"),
-    });
-  });
-
-  it("rejects a new monitoring hook in testing-only mode", async () => {
-    const made = await workspace();
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, WORKER_WITH_ALIASED_BOTH, "utf8");
-    await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("testing-only integration added monitor_livekit"),
-    });
   });
 
   it.each([
     {
+      name: "a new testing hook in monitoring-only mode",
       mode: "monitoring" as const,
-      source: WORKER_WITH_DIRECT_MONITORING
-        .replace(
-          "from egma import monitor_livekit",
-          "from egma import mockable, monitor_livekit",
-        )
-        .replace(
-          "    await session.start(agent=agent, room=ctx.room)",
-          [
-            "    mockable(agent, ctx, session)",
-            "    await session.start(agent=agent, room=ctx.room)",
-          ].join("\n"),
-        ),
+      after: WORKER_WITH_ALIASED_BOTH,
       reason: "monitoring-only integration added mockable",
     },
     {
+      name: "a new monitoring hook in testing-only mode",
       mode: "testing" as const,
-      source: WORKER_WITH_DIRECT_MOCKABLE
-        .replace(
-          "from egma import mockable",
-          "from egma import mockable, monitor_livekit",
-        )
-        .replace(
-          "    agent = object()",
-          "    await monitor_livekit(ctx)\n    agent = object()",
-        ),
+      after: WORKER_WITH_ALIASED_BOTH,
       reason: "testing-only integration added monitor_livekit",
     },
-  ])(
-    "rejects a malformed unrequested hook call in $mode mode",
-    async ({ mode, source, reason }) => {
-      const made = await workspace();
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(made.worker, source, "utf8");
-      await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        mode,
-      );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(reason),
-      });
-    },
-  );
-
-  it.each([
     {
+      name: "a malformed unrequested testing hook in monitoring-only mode",
       mode: "monitoring" as const,
-      source: `${WORKER_WITH_DIRECT_MONITORING.replace(
+      after: WORKER_WITH_DIRECT_MONITORING.replace(
+        "from egma import monitor_livekit",
+        "from egma import mockable, monitor_livekit",
+      ).replace(
+        "    await session.start(agent=agent, room=ctx.room)",
+        "    mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+      ),
+      reason: "monitoring-only integration added mockable",
+    },
+    {
+      name: "a malformed unrequested monitoring hook in testing-only mode",
+      mode: "testing" as const,
+      after: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "from egma import mockable",
+        "from egma import mockable, monitor_livekit",
+      ).replace(
+        "    agent = object()",
+        "    await monitor_livekit(ctx)\n    agent = object()",
+      ),
+      reason: "testing-only integration added monitor_livekit",
+    },
+    {
+      name: "an unrequested testing hook outside the monitoring entrypoint",
+      mode: "monitoring" as const,
+      after: `${WORKER_WITH_DIRECT_MONITORING.replace(
         "from egma import monitor_livekit",
         "from egma import mockable, monitor_livekit",
       )}\ndef helper(agent, ctx, session):\n    mockable(agent, ctx, session)\n`,
       reason: "monitoring-only integration added mockable",
     },
     {
+      name: "an unrequested monitoring hook outside the testing entrypoint",
       mode: "testing" as const,
-      source: `${WORKER_WITH_DIRECT_MOCKABLE.replace(
+      after: `${WORKER_WITH_DIRECT_MOCKABLE.replace(
         "from egma import mockable",
         "from egma import mockable, monitor_livekit",
       )}\ndef helper(ctx):\n    monitor_livekit(ctx)\n`,
       reason: "testing-only integration added monitor_livekit",
     },
-  ])(
-    "rejects an unrequested hook added outside the entrypoint in $mode mode",
-    async ({ mode, source, reason }) => {
-      const made = await workspace();
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(made.worker, source, "utf8");
-      await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        mode,
-      );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(reason),
-      });
+    {
+      name: "an unimported testing hook in monitoring-only mode",
+      mode: "monitoring" as const,
+      after: WORKER_WITH_DIRECT_MONITORING.replace(
+        "    await session.start(agent=agent, room=ctx.room)",
+        "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+      ),
+      reason: "monitoring-only integration added mockable",
     },
-  );
+    {
+      name: "an unimported monitoring hook in testing-only mode",
+      mode: "testing" as const,
+      after: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "    agent = object()",
+        "    monitor_livekit(ctx)\n    agent = object()",
+      ),
+      reason: "testing-only integration added monitor_livekit",
+    },
+    {
+      name: "removal of a pre-existing aliased testing hook while adding monitoring",
+      mode: "monitoring" as const,
+      before: WORKER_WITH_ALIASED_BOTH,
+      after: WORKER_WITH_DIRECT_MONITORING,
+      reason: "removed a pre-existing mockable() call",
+    },
+    {
+      name: "removal of a pre-existing aliased monitoring hook while adding testing",
+      mode: "testing" as const,
+      before: WORKER_WITH_ALIASED_BOTH,
+      after: WORKER_WITH_DIRECT_MOCKABLE,
+      reason: "removed a pre-existing monitor_livekit() call",
+    },
+  ])("rejects $name", async ({ mode, before, after, reason }) => {
+    expectUnverified(
+      await verifyChange({
+        ...(before === undefined ? {} : { before }),
+        after,
+        mode,
+      }),
+      reason,
+    );
+  });
 
   it.each([
     {
@@ -924,158 +692,40 @@ describe("the LiveKit worker integration verifier", () => {
   ])(
     "preserves an unchanged unrequested helper hook in $mode mode",
     async ({ mode, before, after }) => {
-      const made = await workspace();
-      await writeFile(made.worker, before, "utf8");
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(made.worker, after, "utf8");
-      await writeFile(
-        path.join(made.dir, "requirements.txt"),
-        "livekit-agents>=1.2\negma>=0.2\n",
-        "utf8",
-      );
-
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        mode,
-      );
-
-      expect(result.kind).toBe("verified");
+      expectVerified(await verifyChange({ before, after, mode }));
     },
   );
 
   it.each([
     {
-      mode: "monitoring" as const,
-      source: WORKER_WITH_DIRECT_MONITORING.replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
-      ),
-      reason: "monitoring-only integration added mockable",
-    },
-    {
-      mode: "testing" as const,
+      name: "inside the entrypoint",
       source: WORKER_WITH_DIRECT_MOCKABLE.replace(
-        "    agent = object()",
-        "    monitor_livekit(ctx)\n    agent = object()",
+        "    await mockable(agent, ctx, session)",
+        "    mockable = unsafe_mockable\n    await mockable(agent, ctx, session)",
       ),
-      reason: "testing-only integration added monitor_livekit",
-    },
-  ])(
-    "rejects an unimported hook added outside $mode mode",
-    async ({ mode, source, reason }) => {
-      const made = await workspace();
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(made.worker, source, "utf8");
-      await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        mode,
-      );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(reason),
-      });
-    },
-  );
-
-  it.each([
-    {
-      mode: "monitoring" as const,
-      after: WORKER_WITH_DIRECT_MONITORING,
-      removed: "removed a pre-existing mockable() call",
+      reason: "is shadowed inside the job entrypoint",
     },
     {
-      mode: "testing" as const,
-      after: WORKER_WITH_DIRECT_MOCKABLE,
-      removed: "removed a pre-existing monitor_livekit() call",
+      name: "by an entrypoint parameter",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "async def entrypoint(ctx):",
+        "async def entrypoint(ctx, mockable=unsafe_mockable):",
+      ),
+      reason: "is shadowed inside the job entrypoint",
     },
-  ])("preserves aliased existing hooks when adding $mode", async ({ mode, after, removed }) => {
-    const made = await workspace();
-    await writeFile(made.worker, WORKER_WITH_ALIASED_BOTH, "utf8");
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, after, "utf8");
-    await writeFile(path.join(made.dir, "requirements.txt"), "egma>=0.2\n", "utf8");
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      mode,
+    {
+      name: "by a later top-level import",
+      source: WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "from egma import mockable",
+        "from egma import mockable\nfrom project.testing import mockable",
+      ),
+      reason: "rebound after its egma import",
+    },
+  ])("does not accept an Egma hook shadowed $name", async ({ source, reason }) => {
+    expectUnverified(
+      await claim(source, "requirements.txt", "egma>=0.2\n"),
+      reason,
     );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(removed),
-    });
-  });
-
-  it("does not accept an Egma hook shadowed inside the entrypoint", async () => {
-    const made = await workspace();
-    const shadowed = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "    await mockable(agent, ctx, session)",
-      "    mockable = unsafe_mockable\n    await mockable(agent, ctx, session)",
-    );
-
-    const result = await claim(
-      made,
-      shadowed,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("is shadowed inside the job entrypoint"),
-    });
-  });
-
-  it("does not accept an Egma hook shadowed by an entrypoint parameter", async () => {
-    const made = await workspace();
-    const shadowed = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "async def entrypoint(ctx):",
-      "async def entrypoint(ctx, mockable=unsafe_mockable):",
-    );
-
-    const result = await claim(
-      made,
-      shadowed,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("is shadowed inside the job entrypoint"),
-    });
-  });
-
-  it("does not accept an Egma hook rebound by a later top-level import", async () => {
-    const made = await workspace();
-    const shadowed = WORKER_WITH_DIRECT_MOCKABLE.replace(
-      "from egma import mockable",
-      "from egma import mockable\nfrom project.testing import mockable",
-    );
-
-    const result = await claim(
-      made,
-      shadowed,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("rebound after its egma import"),
-    });
   });
 
   it("rejects a dependency manifest reported outside the repository", async () => {
@@ -1091,16 +741,10 @@ describe("the LiveKit worker integration verifier", () => {
       "testing",
     );
 
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("outside this repository"),
-    });
+    expectUnverified(result, "outside this repository");
   });
 
-  it.each([
-    "requirements-dev.txt",
-    "docs/requirements.txt",
-  ])(
+  it.each(["requirements-dev.txt", "docs/requirements.txt"])(
     "rejects dependency manifest %s when it was not on the worker ancestor path before integration",
     async (manifest) => {
       const made = await workspace();
@@ -1122,12 +766,10 @@ describe("the LiveKit worker integration verifier", () => {
         "testing",
       );
 
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(
-          "was not the existing runtime dependency manifest for the worker",
-        ),
-      });
+      expectUnverified(
+        result,
+        "was not the existing runtime dependency manifest for the worker",
+      );
     },
   );
 
@@ -1141,14 +783,14 @@ describe("the LiveKit worker integration verifier", () => {
     await writeFile(path.join(made.dir, "uv.lock"), "version = 1\n", "utf8");
     await writeFile(
       path.join(made.dir, "requirements-dev.txt"),
-      "livekit-agents>=1.2\n",
+      REQUIREMENTS_BEFORE,
       "utf8",
     );
     const snapshot = await snapshotOf(made.dir);
     await writeFile(made.worker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
     await writeFile(
       path.join(made.dir, "requirements-dev.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
+      REQUIREMENTS_WITH_EGMA,
       "utf8",
     );
 
@@ -1160,44 +802,33 @@ describe("the LiveKit worker integration verifier", () => {
       "testing",
     );
 
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "was not the existing runtime dependency manifest for the worker",
-      ),
-    });
+    expectUnverified(
+      result,
+      "was not the existing runtime dependency manifest for the worker",
+    );
   });
 
-  it.each([
-    "requirements-dev.txt",
-    "requirements.in",
-    "requirements/base.txt",
-  ])(
+  it.each(["requirements-dev.txt", "requirements.in", "requirements/base.txt"])(
     "does not treat %s as the LiveKit pip project manifest",
     async (manifest) => {
       const made = await workspace();
       await rm(path.join(made.dir, "requirements.txt"));
       await mkdir(path.dirname(path.join(made.dir, manifest)), { recursive: true });
-      await writeFile(
-        path.join(made.dir, manifest),
-        "livekit-agents>=1.2\n",
-        "utf8",
-      );
+      await writeFile(path.join(made.dir, manifest), REQUIREMENTS_BEFORE, "utf8");
 
       const result = await snapshotWorkerIntegration(made.dir, "src/agent.py");
 
       expect(result).toMatchObject({
         kind: "unverified",
-        reason: expect.stringContaining(
-          "found no existing Python dependency manifest",
-        ),
+        reason: expect.stringContaining("found no existing Python dependency manifest"),
       });
     },
   );
 
   it("uses a nearer requirements project instead of a parent pyproject", async () => {
     const made = await workspace();
-    const serviceWorker = path.join(made.dir, "service", "src", "agent.py");
+    const workerFile = "service/src/agent.py";
+    const serviceWorker = path.join(made.dir, workerFile);
     await mkdir(path.dirname(serviceWorker), { recursive: true });
     await writeFile(serviceWorker, WORKER_BEFORE, "utf8");
     await writeFile(
@@ -1205,22 +836,14 @@ describe("the LiveKit worker integration verifier", () => {
       '[project]\nname = "repository-root"\ndependencies = []\n',
       "utf8",
     );
-    await writeFile(
-      path.join(made.dir, "service", "requirements.txt"),
-      "livekit-agents>=1.2\n",
-      "utf8",
-    );
-    const snapshotted = await snapshotWorkerIntegration(
-      made.dir,
-      "service/src/agent.py",
-    );
+    const dependencyFile = "service/requirements.txt";
+    await writeFile(path.join(made.dir, dependencyFile), REQUIREMENTS_BEFORE, "utf8");
+    const snapshotted = await snapshotWorkerIntegration(made.dir, workerFile);
     expect(snapshotted.kind).toBe("snapshotted");
-    if (snapshotted.kind !== "snapshotted") {
-      throw new Error(snapshotted.reason);
-    }
+    if (snapshotted.kind !== "snapshotted") throw new Error(snapshotted.reason);
     await writeFile(serviceWorker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
     await writeFile(
-      path.join(made.dir, "service", "requirements.txt"),
+      path.join(made.dir, dependencyFile),
       "livekit-agents>=1.2\negma>=0.1.1\n",
       "utf8",
     );
@@ -1228,37 +851,24 @@ describe("the LiveKit worker integration verifier", () => {
     const result = await verifyWorkerIntegrationClaim(
       made.dir,
       snapshotted.snapshot,
-      "service/src/agent.py",
-      "service/requirements.txt",
+      workerFile,
+      dependencyFile,
       "testing",
     );
 
-    expect(result).toMatchObject({
-      kind: "verified",
-      dependencyFile: "service/requirements.txt",
-    });
+    expectVerified(result, { dependencyFile });
   });
 
   it("rejects an unrelated worker rewrite during integration", async () => {
-    const made = await workspace();
-    const rewritten = WORKER_WITH_DIRECT_MOCKABLE.replace(
+    const after = WORKER_WITH_DIRECT_MOCKABLE.replace(
       "await ctx.connect()",
       "await ctx.connect(auto_subscribe=False)",
     );
 
-    const result = await claim(
-      made,
-      rewritten,
-      "requirements.txt",
-      "livekit-agents>=1.2\negma>=0.2\n",
+    expectUnverified(
+      await claim(after, "requirements.txt", REQUIREMENTS_WITH_EGMA),
+      "changed worker code outside the exact Egma imports and entry hooks",
     );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "changed worker code outside the exact Egma imports and entry hooks",
-      ),
-    });
   });
 
   it.each([
@@ -1267,46 +877,23 @@ describe("the LiveKit worker integration verifier", () => {
   ])(
     "rejects an integration that %s an unrelated name in a mixed Egma import",
     async (_change, afterImport) => {
-      const made = await workspace();
       const before = WORKER_WITH_DIRECT_MOCKABLE.replace(
         "from egma import mockable",
         "from egma import other, mockable",
       );
-      await writeFile(made.worker, before, "utf8");
-      const snapshot = await snapshotOf(made.dir);
-      await writeFile(
-        made.worker,
-        WORKER_WITH_DIRECT_MOCKABLE.replace(
-          "from egma import mockable",
-          afterImport,
-        ),
-        "utf8",
-      );
-      await writeFile(
-        path.join(made.dir, "requirements.txt"),
-        "livekit-agents>=1.2\negma>=0.2\n",
-        "utf8",
+      const after = WORKER_WITH_DIRECT_MOCKABLE.replace(
+        "from egma import mockable",
+        afterImport,
       );
 
-      const result = await verifyWorkerIntegrationClaim(
-        made.dir,
-        snapshot,
-        "src/agent.py",
-        "requirements.txt",
-        "testing",
+      expectUnverified(
+        await verifyChange({ before, after }),
+        "changed worker code outside the exact Egma imports and entry hooks",
       );
-
-      expect(result).toMatchObject({
-        kind: "unverified",
-        reason: expect.stringContaining(
-          "changed worker code outside the exact Egma imports and entry hooks",
-        ),
-      });
     },
   );
 
   it("rejects deletion of import egma when another Egma API still uses it", async () => {
-    const made = await workspace();
     const before = WORKER_BEFORE.replace(
       "from livekit.agents import AgentSession",
       "import egma\nfrom livekit.agents import AgentSession",
@@ -1314,39 +901,18 @@ describe("the LiveKit worker integration verifier", () => {
       "async def entrypoint(ctx):\n    await ctx.connect()",
       "async def entrypoint(ctx):\n    egma.configure()\n    await ctx.connect()",
     );
-    const after = before
-      .replace("import egma", "from egma import mockable")
-      .replace(
-        "    await session.start(agent=agent, room=ctx.room)",
-        "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
-      );
-    await writeFile(made.worker, before, "utf8");
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, after, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
+    const after = before.replace("import egma", "from egma import mockable").replace(
+      "    await session.start(agent=agent, room=ctx.room)",
+      "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
     );
 
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
+    expectUnverified(
+      await verifyChange({ before, after }),
+      "changed worker code outside the exact Egma imports and entry hooks",
     );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "changed worker code outside the exact Egma imports and entry hooks",
-      ),
-    });
   });
 
   it("allows a requested hook to join an existing unrelated Egma import", async () => {
-    const made = await workspace();
     const before = WORKER_BEFORE.replace(
       "from livekit.agents import AgentSession",
       "from egma import other\nfrom livekit.agents import AgentSession",
@@ -1355,133 +921,62 @@ describe("the LiveKit worker integration verifier", () => {
       "from egma import mockable",
       "from egma import other, mockable",
     );
-    await writeFile(made.worker, before, "utf8");
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, after, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.2\n",
-      "utf8",
-    );
 
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({ kind: "verified" });
+    expectVerified(await verifyChange({ before, after }));
   });
 
   it("rejects an unrelated runtime dependency rewrite during integration", async () => {
-    const made = await workspace();
-    const snapshot = await snapshotOf(made.dir);
-    await writeFile(made.worker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
-    await writeFile(
-      path.join(made.dir, "requirements.txt"),
-      "livekit-agents>=1.3\negma>=0.2\n",
-      "utf8",
+    expectUnverified(
+      await verifyChange({
+        after: WORKER_WITH_DIRECT_MOCKABLE,
+        manifestAfter: "livekit-agents>=1.3\negma>=0.2\n",
+      }),
+      "changed the runtime manifest beyond one registry egma dependency",
     );
-
-    const result = await verifyWorkerIntegrationClaim(
-      made.dir,
-      snapshot,
-      "src/agent.py",
-      "requirements.txt",
-      "testing",
-    );
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "changed the runtime manifest beyond one registry egma dependency",
-      ),
-    });
-  });
-
-  it("rejects the final integration if a hook loses its egma import", async () => {
-    const made = await workspace();
-    const claimed = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      "requirements.txt",
-      "egma>=0.2\n",
-    );
-    const contract = contractFrom(claimed);
-    await writeFile(made.worker, WORKER_WITH_UNBOUND_MOCKABLE, "utf8");
-
-    const result = await verifyWorkerIntegration(made.dir, contract);
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining("worker changed after integration approval"),
-    });
-  });
-
-  it("rejects the final integration if egma is later removed from its manifest", async () => {
-    const made = await workspace();
-    const manifest = "requirements.txt";
-    const claimed = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      manifest,
-      "egma>=0.2\n",
-    );
-    const contract = contractFrom(claimed);
-    await writeFile(path.join(made.dir, manifest), "livekit-agents>=1.2\n", "utf8");
-
-    const result = await verifyWorkerIntegration(made.dir, contract);
-
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(
-        "runtime dependency manifest changed after integration approval",
-      ),
-    });
   });
 
   it.each([
     {
-      file: "worker" as const,
+      name: "a hook loses its egma import",
       expected: "worker changed after integration approval",
+      mutate: ({ worker }: Workspace) =>
+        writeFile(worker, WORKER_WITH_UNBOUND_MOCKABLE, "utf8"),
     },
     {
-      file: "manifest" as const,
+      name: "egma is removed from its manifest",
       expected: "runtime dependency manifest changed after integration approval",
+      mutate: ({ dir }: Workspace) =>
+        writeFile(path.join(dir, "requirements.txt"), REQUIREMENTS_BEFORE, "utf8"),
     },
-  ])("rejects a later $file rewrite even when Egma remains valid", async ({ file, expected }) => {
-    const made = await workspace();
-    const claimed = await claim(
-      made,
-      WORKER_WITH_DIRECT_MOCKABLE,
-      "requirements.txt",
-      "livekit-agents>=1.2\negma>=0.2\n",
-    );
-    const contract = contractFrom(claimed);
-    if (file === "worker") {
-      await writeFile(
-        made.worker,
-        WORKER_WITH_DIRECT_MOCKABLE.replace(
-          "    agent = object()",
-          "    print('later task')\n    agent = object()",
+    {
+      name: "the worker is later rewritten even though Egma remains valid",
+      expected: "worker changed after integration approval",
+      mutate: ({ worker }: Workspace) =>
+        writeFile(
+          worker,
+          WORKER_WITH_DIRECT_MOCKABLE.replace(
+            "    agent = object()",
+            "    print('later task')\n    agent = object()",
+          ),
+          "utf8",
         ),
-        "utf8",
-      );
-    } else {
-      await writeFile(
-        path.join(made.dir, "requirements.txt"),
-        "livekit-agents>=1.2\negma>=0.2\npytest>=8\n",
-        "utf8",
-      );
-    }
+    },
+    {
+      name: "the manifest is later rewritten even though Egma remains valid",
+      expected: "runtime dependency manifest changed after integration approval",
+      mutate: ({ dir }: Workspace) =>
+        writeFile(
+          path.join(dir, "requirements.txt"),
+          `${REQUIREMENTS_WITH_EGMA}pytest>=8\n`,
+          "utf8",
+        ),
+    },
+  ])("rejects the final integration when $name", async ({ expected, mutate }) => {
+    const { made, contract } = await approvedIntegration();
+    await mutate(made);
 
     const result = await verifyWorkerIntegration(made.dir, contract);
 
-    expect(result).toMatchObject({
-      kind: "unverified",
-      reason: expect.stringContaining(expected),
-    });
+    expectUnverified(result, expected);
   });
 });
