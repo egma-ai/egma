@@ -254,7 +254,13 @@ describe("Egma's instruction content", () => {
     expect(authoring).not.toContain(publicSkill("write-egma-tests"));
     expect(authoring).toContain("egma/mock-tools.md");
     expect(authoring).toContain("egma:found sdk-entry");
-    for (const marker of ["egma:plan", "egma:wrote", "egma:note", "egma:abort"]) {
+    for (const marker of [
+      "egma:plan",
+      "egma:writing",
+      "egma:wrote",
+      "egma:note",
+      "egma:abort",
+    ]) {
       expect(authoring).toContain(marker);
     }
     // And the monitoring entry is never asked for in the testing lane.

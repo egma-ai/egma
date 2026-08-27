@@ -165,10 +165,12 @@ describe("the live activity, while the files land", () => {
         "Writing tests for your voice agent.",
         "Progress: 0/4",
         "This may take a couple of minutes.",
-        "egma:plan",
+        "◆ Planned 4 tests",
       );
       expect(pane).not.toContain("One situation to put your agent");
+      expect(pane).not.toContain("Waiting for coding-agent activity.");
       const drawn = terminal.raw();
+      expect(drawn).not.toContain("egma:plan");
 
       // No rotating lesson or invented progress was painted during the wait.
       expect(drawn).not.toContain("The synthetic person on the");
@@ -219,7 +221,7 @@ describe("the live activity, while the files land", () => {
         "Writing tests for your voice agent.",
         "Progress: 0/4",
         "This may take a couple of minutes.",
-        "egma:plan",
+        "◆ Planned 4 tests",
       );
       expect(narrow).not.toContain("One situation to put your agent");
     } finally {

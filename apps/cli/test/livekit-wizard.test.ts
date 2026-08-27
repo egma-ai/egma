@@ -212,6 +212,7 @@ function cannotFindTheWorker(): FakeStep[] {
 function mockingSteps(): FakeStep[] {
   return [
     { kind: "say", text: "egma:plan check_availability\n" },
+    { kind: "say", text: "egma:writing check_availability\n" },
     { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
     { kind: "say", text: "egma:found sdk-entry agent.py\n" },
     { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
@@ -725,6 +726,13 @@ describe("LiveKit in the wizard", () => {
     expect(worker).toContain("await mockable(agent, ctx, session)");
     expect(worker.indexOf("await mockable")).toBeLessThan(worker.indexOf("await session.start"));
     expect(ui.record.statuses).toContain("◆ Egma's testing entry is in agent.py");
+    expect(ui.record.statuses).toEqual(
+      expect.arrayContaining([
+        "◆ Planned 1 mock tool",
+        "◆ Writing mock tool check_availability",
+        "◆ Wrote mock tool check_availability",
+      ]),
+    );
 
     // The world: one grounded answer per real tool, in the committed file.
     const mocks = await readFile(

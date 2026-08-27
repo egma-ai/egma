@@ -166,7 +166,8 @@ describe("the wizard on a real terminal", () => {
       await showing(
         terminal,
         "Read package.json",
-        "node: egma:found framework retell-sdk",
+        "┊ Framework",
+        "retell-sdk",
       );
 
       // The one question about what Egma is here to do, drawn on the same

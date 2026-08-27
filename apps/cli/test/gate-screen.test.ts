@@ -229,6 +229,7 @@ describe("the files arriving", () => {
       "Writing tests for your voice agent.",
       "This may take a couple of minutes.",
       `Wrote ${TESTS[0]}`,
+      `Writing ${TESTS[1]}`,
       "Progress: 1/4",
     );
     expect(pane).toContain("Coding agent:");

@@ -439,6 +439,7 @@ function mockAuthoringTask(context: MockAuthoringContext): string {
     "",
     "- one `egma:plan <tool>, <tool>, …` line, first, naming every real tool you",
     "  found;",
+    "- an `egma:writing <tool>` line immediately before writing each answer;",
     "- an `egma:wrote <tool>` line after each answer is in the file;",
     "- an `egma:note <what you did>` line for the worker edit and for each test",
     "  you gave an override to;",
@@ -538,16 +539,22 @@ export async function mockAuthoringStep(
       const marker = line.marker;
       log.write(`${JSON.stringify(marker)}\n`);
       switch (marker.kind) {
-        case "plan":
+        case "plan": {
           tally.plan(marker.names);
+          ui.pushStatus(
+            `${ACTION_MARK} Planned ${String(marker.names.length)} ${marker.names.length === 1 ? "mock tool" : "mock tools"}`,
+          );
           moved = true;
           break;
+        }
         case "writing":
           tally.writing(marker.name);
+          ui.pushStatus(`${ACTION_MARK} Writing mock tool ${marker.name}`);
           moved = true;
           break;
         case "wrote":
           tally.wrote(marker.name);
+          ui.pushStatus(`${ACTION_MARK} Wrote mock tool ${marker.name}`);
           moved = true;
           break;
         case "note":

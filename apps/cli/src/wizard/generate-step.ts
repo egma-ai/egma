@@ -233,10 +233,14 @@ async function writeFiles(
       switch (marker.kind) {
         case "plan":
           tally.plan(marker.names);
+          ui.pushStatus(
+            `${ACTION_MARK} Planned ${String(marker.names.length)} ${marker.names.length === 1 ? "test" : "tests"}`,
+          );
           moved = true;
           break;
         case "writing":
           tally.writing(marker.name);
+          ui.pushStatus(`${ACTION_MARK} Writing ${marker.name}`);
           moved = true;
           break;
         case "wrote":
