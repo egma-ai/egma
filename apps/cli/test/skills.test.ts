@@ -168,7 +168,7 @@ describe("Egma's instruction content", () => {
       [
         "skills/write-egma-tests/SKILL.md",
         publicSkill("write-egma-tests"),
-        "## Handle personas carefully",
+        "## Name a persona",
       ],
       [
         "README.md",
@@ -192,14 +192,16 @@ describe("Egma's instruction content", () => {
     expect(driving).toContain("inside that test file under `## Mock tools`");
 
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
-    expect(writing).toContain("Put either `answer` or `error` in its JSON block");
+    expect(writing).toContain(
+      "Put exactly one of `answer` or `error` in its JSON block",
+    );
   });
 
   it("makes every expected behavior judgeable in one execution", () => {
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
 
     expect(writing).toContain(
-      "Write every expected behavior as an unconditional claim that can be judged from one simulation.",
+      "Make each expected behavior judgeable in one simulation: write one observable, unconditional claim per item.",
     );
     expect(writing).toContain(
       "Put the branch condition in `## Scenario`; use a separate test for each other branch.",

@@ -42,7 +42,7 @@ format: 4
 name: missed-appointment-reschedule
 description: The person missed an appointment and needs another time this week.
 personas:
-  - name: Everyday caller
+  - name: Everyday person
 ---
 ## Scenario
 The person missed yesterday's appointment and wants another one this week.
