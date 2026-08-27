@@ -1807,3 +1807,31 @@ describe("the suite-first Tests route", () => {
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
   });
 });
+
+/**
+ * One left edge per column, in the one table not drawn from the shared kit.
+ *
+ * `tests-grid.tsx` is a raw `<table>`, so it inherits nothing and had been
+ * reading from 10px where every other list in the product reads from
+ * `--row-padding-x`. This asserts the token on the header and on the cell's
+ * own padded box, which is what stops the grid drifting off the lane again.
+ */
+describe("the suite grid's columns", () => {
+  const LANE = "px-(--row-padding-x)";
+
+  it("reads from the same edge as every other table in the product", async () => {
+    gridAnswers();
+
+    render(<TestSuitePage />);
+
+    const name = await screen.findByText("Books service");
+    for (const header of screen.getAllByRole("columnheader")) {
+      expect(header.className, header.textContent ?? "").toContain(LANE);
+    }
+    const padded = name.closest("td")?.firstElementChild;
+    /* Named rather than cast: a missing box should say which box is missing,
+     * not read a property off `undefined` three lines later. */
+    expect(padded, "the name cell's padded box").toBeInstanceOf(HTMLElement);
+    expect((padded as HTMLElement).className).toContain(LANE);
+  });
+});

@@ -91,9 +91,16 @@ const WHOLE_ORGANIZATION = "";
  * wider than the slot and grows it, and with no padding of its own the button
  * then sits against the panel's own hairline. This puts the row's padding back
  * inside the cell, where the width is the caller's problem rather than the
- * table's.
+ * table's. It is the row's padding by name rather than a bare `px-4`, so it
+ * reads the same declaration the cells beside it do.
+ *
+ * **And it stops at the narrow layout, because there the row already pays
+ * it.** A stacked row is a padded block — `stacked:px-(--row-padding-x)` on
+ * the row, `stacked:p-0` on every cell — so a control cell keeping its own
+ * would stand at 32px while every value above it sat at 16.
  */
-const ROW_ACTIONS = "flex items-center justify-end gap-2 px-4";
+const ROW_ACTIONS =
+  "flex items-center justify-end gap-2 px-(--row-padding-x) stacked:px-0";
 
 /**
  * The only copy of a newly minted secret.

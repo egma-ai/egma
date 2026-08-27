@@ -25,6 +25,32 @@ import { cn } from "@/lib/utils";
  * row heights it lines up with.
  */
 
+/**
+ * The edge every column reads from, written once.
+ *
+ * **A header and the cells under it are one column, so they share one
+ * declaration.** Two copies of the same padding are two things that can be
+ * changed apart, and a header that drifts off its own figures is the defect
+ * this names away. The rule is the wide layout's column alignment: one left
+ * edge per lane, header and value on it, in every table.
+ *
+ * It is exported because one table in the product is not built from these
+ * parts — the inline-editing suite grid in `tests/tests-grid.tsx` — and an
+ * edge two files declare apart is an edge that drifts. What is still written
+ * out by hand is the side padding the two settings tables put back inside
+ * their own control cells, where the class list is a caller's rather than
+ * this file's, and the stacked row's own copy in `ui/data-table.tsx`, which
+ * pads a different layout and cannot drift this one.
+ *
+ * Two things align some other way, and both are deliberate:
+ *
+ * - The row's own control lane, centred in a slot of fixed width.
+ * - Every non-primary value in the **stacked** layout, which `ui/data-table`
+ *   right-aligns against its label. A narrow row is a label-and-value list
+ *   rather than a set of columns, so it has no shared edge to keep.
+ */
+export const LANE_X = "px-(--row-padding-x)";
+
 /** The bordered surface a table is drawn on. */
 function TablePanel({ className, ...props }: ComponentProps<"div">) {
   return (
@@ -83,7 +109,8 @@ function TableHead({ className, ...props }: ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-(--row-height) border-b border-border px-(--row-padding-x)",
+        "h-(--row-height) border-b border-border",
+        LANE_X,
         "text-left font-normal whitespace-nowrap text-faint",
         className,
       )}
@@ -105,7 +132,8 @@ function TableCell({ className, ...props }: ComponentProps<"td">) {
       data-slot="table-cell"
       className={cn(
         "border-t border-border align-middle",
-        "px-(--row-padding-x) py-(--row-padding-y)",
+        LANE_X,
+        "py-(--row-padding-y)",
         className,
       )}
       {...props}

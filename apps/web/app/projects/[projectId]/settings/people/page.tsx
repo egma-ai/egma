@@ -111,15 +111,22 @@ type Tab = "people" | "invitations";
  * pair afterwards. The sentence also has to be told it may wrap: the shared
  * cell keeps every other fact on one line, and a row control's cell inherits
  * that.
+ *
+ * **The side padding stops at the narrow layout, because there the row already
+ * pays it.** A stacked row is a padded block — `stacked:px-(--row-padding-x)`
+ * on the row, `stacked:p-0` on every cell — so a control cell keeping its own
+ * would stand at 32px while every value above it sat at 16.
  */
 const ROW_ACTIONS = [
-  "grid grid-cols-[max-content_max-content] items-center gap-2 px-4",
+  "grid grid-cols-[max-content_max-content] items-center gap-2",
+  "px-(--row-padding-x) stacked:px-0",
   "[&>span]:col-span-2 [&>span]:row-start-2 [&>span]:text-left",
   "[&>span]:w-0 [&>span]:min-w-full [&>span]:whitespace-normal",
 ].join(" ");
 
 /** The same lane, for a row that offers one control and no reason. */
-const ROW_ACTION = "flex items-center justify-end gap-2 px-4";
+const ROW_ACTION =
+  "flex items-center justify-end gap-2 px-(--row-padding-x) stacked:px-0";
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
