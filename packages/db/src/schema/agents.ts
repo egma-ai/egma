@@ -11,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import { apiKey, organization, project } from "./tenancy.ts";
+import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import {
   createdAt,
@@ -37,10 +37,7 @@ import {
  * is what production monitoring
  * needs: the platform, that platform's identity for this agent, and the
  * sealed monitoring key egma pulls its finished production conversations
- * with. A LiveKit agent never gets a pull switch; its row keeps only the
- * non-secret id of the current Egma project key exporting its evidence. That
- * is credential ownership for recovery, not a claim that traffic is flowing.
- * See ADR-0015.
+ * with. See ADR-0015.
  *
  * Deliberately unversioned, both tables. egma versions what egma authors, and
  * an agent's real content — prompt, model, tools — lives on the provider's
@@ -119,8 +116,6 @@ export const agent = pgTable(
     monitoringApiKey: text("monitoring_api_key"),
     /** The last characters of the key, kept so a person can tell keys apart. */
     monitoringApiKeyHint: text("monitoring_api_key_hint"),
-    /** The current Egma project key exporting this LiveKit agent's evidence. */
-    monitoringExportApiKeyId: idText("monitoring_export_api_key_id"),
     /**
      * The declared switch: egma asks this agent's platform for its finished
      * production conversations, on a clock. Off by default, and the only
@@ -155,10 +150,6 @@ export const agent = pgTable(
       "agent_monitoring_key_needs_platform",
       sql`${table.monitoringApiKey} is null or ${table.agentPlatform} is not null`,
     ),
-    check(
-      "agent_monitoring_export_key_needs_livekit",
-      sql`${table.monitoringExportApiKeyId} is null or ${table.agentPlatform} = 'livekit'`,
-    ),
     // The switch is a promise the poller has to be able to keep: it can only
     // be on when there is a platform to ask, an id to ask about, and a key to
     // ask with.
@@ -173,11 +164,6 @@ export const agent = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
-    foreignKey({
-      name: "agent_monitoring_export_api_key_project_fk",
-      columns: [table.monitoringExportApiKeyId, table.projectId],
-      foreignColumns: [apiKey.id, apiKey.projectId],
-    }),
     // Looks redundant next to the primary key; it is the composite-foreign-key
     // target that makes an agent/connection project mismatch unrepresentable.
     unique("agent_id_project_id_unique").on(table.id, table.projectId),
@@ -185,9 +171,6 @@ export const agent = pgTable(
     uniqueIndex("agent_project_id_name_unique")
       .on(table.projectId, table.name)
       .where(sql`${table.archivedAt} is null`),
-    uniqueIndex("agent_monitoring_export_api_key_unique")
-      .on(table.monitoringExportApiKeyId)
-      .where(sql`${table.monitoringExportApiKeyId} is not null`),
     index("agent_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.archivedAt} is null`),

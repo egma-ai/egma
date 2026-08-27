@@ -12,9 +12,10 @@ every requested entry is present and preserve every existing Egma entry. An
 integration task adds capabilities; it removes one only when the developer asks
 for that removal explicitly.
 
-The Python package is named `egma`. Add it through the dependency file the
-repository already uses. The Egma SDK does not yet support a worker built with
-`@livekit/agents`; report that boundary and leave a Node worker unchanged.
+The Python package is named `egma`. Require `egma>=0.1.1` and add it through the
+dependency file the repository already uses. The Egma SDK does not yet support
+a worker built with `@livekit/agents`; report that boundary and leave a Node
+worker unchanged.
 
 ## Find the job entrypoint
 
@@ -50,6 +51,10 @@ LiveKit room RPC.
 The SDK installs the selected couriers through LiveKit's session-scoped
 `mock_tools(..., session=session)` API. Do not replace the agent's tool list or
 change how the session starts.
+
+Keep this one `mockable` call on the initial agent. The SDK follows LiveKit
+handoffs and prepares each selected `Agent` or `AgentTask` before it starts, so
+the integration needs no extra calls inside task classes.
 
 ## Monitoring entry
 

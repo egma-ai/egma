@@ -100,9 +100,29 @@ function mockAuthoringTask(context: MockAuthoringContext): string {
     "",
     "## 1. Write the mocked world",
     "",
-    "Read the agent's real tool definitions in this repository. For **each real",
-    "tool**, write one answer into `egma/mock-tools.md` under the `## Mock tools`",
-    "heading that is already in that file:",
+    "Read the agent's real tool definitions in this repository. First separate",
+    "external dependencies from the agent's own workflow. Only mock a tool when",
+    "its real implementation crosses a boundary outside the agent process, such",
+    "as an HTTP API, database, calendar, CRM, or other changing external system.",
+    "A decorated function is not automatically an external dependency.",
+    "",
+    "Never mock a tool whose real implementation only controls the agent itself.",
+    "This includes a tool that calls `AgentTask.complete`, advances a `TaskGroup`,",
+    "hands off to another agent, ends the session, validates or records conversation",
+    "data, or updates in-memory state. Those tools are part of the agent runtime and",
+    "must run their real implementation. Replacing one can stop the workflow even",
+    "when the mock answer looks valid.",
+    "",
+    "If one tool mixes an external effect with agent-runtime control, stop with",
+    "`egma:abort Tool <name> mixes an external effect with agent-runtime control.`",
+    "A mock replaces the complete tool body, so Egma cannot safely run only half",
+    "of its implementation. Do not hide the problem by mocking it or by running",
+    "its real implementation behind a mock.",
+    "",
+    "For each external-dependency tool, write one answer into",
+    "`egma/mock-tools.md` under the `## Mock tools` heading that is already in that",
+    "file. If there are no external-dependency tools, leave that heading with no",
+    "tool blocks:",
     "",
     "````markdown",
     "### check_availability",
@@ -141,18 +161,19 @@ function mockAuthoringTask(context: MockAuthoringContext): string {
     "line of its own, at the very start of the line, with no bullet and no code",
     "fence:",
     "",
-    "- one `egma:plan <tool>, <tool>, …` line, first, naming every real tool you",
-    "  found;",
+    "- one `egma:plan <tool>, <tool>, …` line, first, naming only the external",
+    "  dependency tools you will mock; if there are none, write",
+    "  `egma:none no external dependency tools to mock` instead;",
     "- an `egma:writing <tool>` line immediately before writing each answer;",
     "- an `egma:wrote <tool>` line after each answer is in the file;",
     "- an `egma:note <what you did>` line for each test you gave an override to;",
-    "- an `egma:abort <reason>` line only when something prevents the work; stop",
-    "  after it.",
+    "- an `egma:abort <reason>` line when a mixed tool or another problem makes a",
+    "  safe mocked world impossible; stop after it.",
     "",
     "## When you are done",
     "",
-    "Stop once every real tool has an answer and every test that needed an",
-    "override has one. Report nothing else.",
+    "Stop once every external-dependency tool has an answer and every test that",
+    "needed an override has one. Report nothing else.",
   ].join("\n");
 }
 
@@ -232,9 +253,9 @@ export async function mockAuthoringStep(
         case "none":
           break;
         case "abort":
-          // Said on the screen, and never fatal here: whatever was written
-          // before the agent stopped is on disk, and the folder is read either
-          // way.
+          // A partial mocked world can let an uncovered external dependency
+          // run for real. End this turn and stop the wizard before it pushes or
+          // starts a simulation.
           abort = marker.reason;
           ui.pushStatus(
             `${FAILURE_MARK} ${marker.reason === "" ? `${drivenAgent.name} stopped, and did not say why.` : marker.reason}`,
@@ -274,8 +295,15 @@ export async function mockAuthoringStep(
         ui.pushStatus(`What ${drivenAgent.name} printed is in ${log.file}`);
         return { kind: "failed", reason: result.reason };
       case "done":
-      case "aborted":
         return null;
+      case "aborted":
+        return {
+          kind: "failed",
+          reason:
+            result.reason === ""
+              ? `${drivenAgent.name} stopped while writing the mocked world, and did not say why.`
+              : result.reason,
+        };
     }
   })();
 

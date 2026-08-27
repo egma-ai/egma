@@ -18,7 +18,7 @@ The process requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 arguments and output.
 
 Before the worker starts, the helper checks the same Python environment that
-LiveKit will use for Egma SDK 0.1.0 or newer. When it is missing, the helper
+LiveKit will use for Egma SDK 0.1.1 or newer. When it is missing, the helper
 installs the dependency through the verified project manifest without changing
 the manifest or its lock file, then checks the import again. The helper runs
 from that manifest's project directory, which must also contain the worker.

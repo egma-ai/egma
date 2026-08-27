@@ -2,8 +2,9 @@
  * Minting a key, as the fixture platform answers it.
  *
  * The mint route's whole secret is in its answer: it exists exactly once, in
- * the 201 body, and no read ever says it again. The revoke route proves that a
- * failed local setup can retire that exact key without knowing its secret.
+ * the 201 body, and no read ever says it again. List returns only safe key
+ * metadata, and revoke proves that a failed local setup can retire the exact
+ * key without knowing its secret.
  * A key minted for a project is scoped to that project — the request names the
  * project and the scope is derived, because there is no scope field to send.
  *
@@ -38,17 +39,6 @@ export function apiKeyRoutes(options: {
   readonly accept: (key: string) => void;
   /** Removes a revoked secret from the keys this instance will authorize. */
   readonly reject: (key: string) => void;
-  readonly bindMonitoringExportKey: (
-    agentId: string,
-    projectId: string,
-    apiKeyId: string,
-  ) =>
-    | { readonly kind: "bound"; readonly previous: string | null }
-    | { readonly kind: "already-bound"; readonly apiKeyId: string }
-    | undefined;
-  readonly unbindMonitoringExportKey: (apiKeyId: string) => void;
-  /** Model an older platform that accepts but ignores monitoringAgentId. */
-  readonly ignoreMonitoringAgentId?: boolean;
   readonly organizationId: string;
   readonly projectId: string;
 }): { readonly group: RouteGroup; readonly controls: ApiKeyControls } {
@@ -59,7 +49,6 @@ export function apiKeyRoutes(options: {
     if (held === undefined || held.revokedAt !== null) return undefined;
     held.revokedAt = new Date().toISOString();
     options.reject(held.secret);
-    options.unbindMonitoringExportKey(apiKeyId);
     return held;
   };
 
@@ -76,6 +65,31 @@ export function apiKeyRoutes(options: {
   const group: RouteGroup = {
     name: "api-keys",
     routes: [
+      {
+        method: "GET",
+        path: "/v1/keys",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          return {
+            status: 200,
+            body: {
+              keys: minted.map((key) => ({
+                id: key.id,
+                name: key.name,
+                scope: key.scope,
+                organizationId: options.organizationId,
+                projectId: key.projectId,
+                looksLike: `egma_sk_…${key.secret.slice(-4)}`,
+                createdByUserId: newId("usr"),
+                createdByEmail: "developer@example.com",
+                createdAt: new Date().toISOString(),
+                lastUsedAt: null,
+                revokedAt: key.revokedAt,
+              })),
+            },
+          };
+        },
+      },
       {
         method: "POST",
         path: "/v1/keys",
@@ -96,55 +110,61 @@ export function apiKeyRoutes(options: {
             };
           }
 
+          const name = given(text(body["name"])) ?? null;
+          const monitoringAgentId = body["monitoringAgentId"] === undefined
+            ? null
+            : given(text(body["monitoringAgentId"])) ?? "";
+          const activeNamePrefix = monitoringAgentId === null
+            ? null
+            : `Egma monitoring ${monitoringAgentId} — `;
+          if (
+            body["activeNamePrefix"] !== undefined ||
+            (monitoringAgentId !== null &&
+              (monitoringAgentId === "" ||
+              named === null ||
+              name === null ||
+              activeNamePrefix === null ||
+              !name.startsWith(activeNamePrefix)))
+          ) {
+            return {
+              status: 422,
+              body: {
+                error: "invalid_monitoring_agent",
+                message:
+                  "monitoringAgentId needs a projectId and Egma's key name for that agent",
+              },
+            };
+          }
+          if (
+            activeNamePrefix !== null &&
+            minted.some(
+              (key) =>
+                key.projectId === named &&
+                key.revokedAt === null &&
+                key.name?.startsWith(activeNamePrefix),
+            )
+          ) {
+            return {
+              status: 409,
+              body: {
+                error: "active_key_name_conflict",
+                message:
+                  "an active project key already has the requested name prefix",
+              },
+            };
+          }
+
           const id = newId("key");
           // The one time this string exists outside the terminal that holds it.
           const secret = `egma_sk_${id.slice(-20)}`;
           const key: MintedKey = {
             id,
-            name: given(text(body["name"])) ?? null,
+            name,
             scope: named === null ? "organization" : "project",
             projectId: named,
             secret,
             revokedAt: null,
           };
-          const monitoringAgentId = given(text(body["monitoringAgentId"])) ?? null;
-          if (monitoringAgentId !== null && options.ignoreMonitoringAgentId !== true) {
-            if (named === null) {
-              return {
-                status: 422,
-                body: {
-                  error: "invalid_monitoring_agent",
-                  message:
-                    "monitoringAgentId must name a living LiveKit agent in the key's project",
-                },
-              };
-            }
-            const binding = options.bindMonitoringExportKey(
-              monitoringAgentId,
-              named,
-              key.id,
-            );
-            if (binding === undefined) {
-              return {
-                status: 422,
-                body: {
-                  error: "invalid_monitoring_agent",
-                  message:
-                    "monitoringAgentId must name a living LiveKit agent in the key's project",
-                },
-              };
-            }
-            if (binding.kind === "already-bound") {
-              return {
-                status: 409,
-                body: {
-                  error: "monitoring_key_already_bound",
-                  message:
-                    "this LiveKit agent already has an active monitoring key; no key was rotated",
-                },
-              };
-            }
-          }
           minted.push(key);
           options.accept(secret);
 

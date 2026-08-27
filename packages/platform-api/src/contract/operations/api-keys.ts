@@ -81,13 +81,30 @@ export const apiKeyOperations = {
     security: "credentialed",
     request: {
       body: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          projectId: nullable(stringIdSchema),
-          monitoringAgentId: nullable(stringIdSchema),
-        },
-        additionalProperties: false,
+        oneOf: [
+          {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              projectId: nullable(stringIdSchema),
+            },
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1 },
+              projectId: stringIdSchema,
+              monitoringAgentId: {
+                ...stringIdSchema,
+                description:
+                  "The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.",
+              },
+            },
+            required: ["name", "projectId", "monitoringAgentId"],
+            additionalProperties: false,
+          },
+        ],
       },
     },
     responses: {

@@ -25,35 +25,23 @@ export class ProjectOutsideOrganizationError extends Error {
   }
 }
 
-/** A project key tried to bind monitoring to no living LiveKit agent there. */
-export class MonitoringAgentUnavailableError extends Error {
-  readonly agentId: string;
-  readonly projectId: string | null;
-
-  constructor(agentId: string, projectId: string | null) {
+/**
+ * A guarded key creation found an active key whose name already starts with
+ * the caller's reserved prefix.
+ *
+ * The conflicting row stays private. This refusal carries no key id, creator,
+ * or full name because the person creating the replacement might not be
+ * allowed to list that key.
+ */
+export class ActiveApiKeyNameConflictError extends Error {
+  constructor() {
     super(
-      projectId === null
-        ? "a monitoring export key must name the LiveKit agent's project"
-        : `agent ${agentId} is not a living LiveKit agent in project ${projectId}`,
+      "an active API key already reserves this name prefix in this project; revoke it before creating a replacement",
     );
-    this.name = "MonitoringAgentUnavailableError";
-    this.agentId = agentId;
-    this.projectId = projectId;
+    this.name = "ActiveApiKeyNameConflictError";
   }
 }
 
-/** Ordinary enable found a working exporter and must not rotate it silently. */
-export class MonitoringExportKeyAlreadyBoundError extends Error {
-  readonly agentId: string;
-  readonly apiKeyId: string;
-
-  constructor(agentId: string, apiKeyId: string) {
-    super(`agent ${agentId} already has active monitoring key ${apiKeyId}`);
-    this.name = "MonitoringExportKeyAlreadyBoundError";
-    this.agentId = agentId;
-    this.apiKeyId = apiKeyId;
-  }
-}
 /**
  * The agent factory turned a write away, and which rule turned it away is
  * carried beside the sentence rather than hidden inside it.

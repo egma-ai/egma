@@ -445,16 +445,12 @@ function monitoringRecordFailure(
       : [`monitoring_key_id: ${monitored.monitoringKeyId}`]),
     "status: repository-record-failed",
   ];
-  const recoveryProof =
-    monitored.monitoringKeyId === null
-      ? ""
-      : ` --monitoring-key-id ${monitored.monitoringKeyId}`;
   return {
     kind: "monitoring-record-failed",
     receipt,
     reason:
       `remote monitoring is ready for agent ${monitored.agentId}, but ${failure.detail} The remote setup remains active. ` +
-      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId}${recoveryProof} --url ${platformUrl}. ` +
+      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId} --url ${platformUrl}. ` +
       "That recovery command does not create an agent or mint a key.",
   };
 }
@@ -464,14 +460,11 @@ type ConfiguredMonitoringAgent =
   | { readonly kind: "none" }
   | { readonly kind: "failed"; readonly reason: string };
 
-/**
- * Resolve monitoring identity without treating a model-written display name
- * as a stable key. One committed agent is unambiguous; several require an
- * explicit stable id outside this promptless wizard.
- */
+/** Resolve the configured agent whose display name exactly matches this worker. */
 async function configuredMonitoringAgent(
   cwd: string,
   platformUrl: string,
+  agentName: string | null,
 ): Promise<ConfiguredMonitoringAgent> {
   let config: Awaited<ReturnType<typeof readConfig>>;
   try {
@@ -495,14 +488,15 @@ async function configuredMonitoringAgent(
     };
   }
 
-  if (config.agents.length === 1) {
-    return { kind: "found", id: config.agents[0]!.id };
+  const matches = config.agents.filter((agent) => agent.name === agentName);
+  if (matches.length === 1) {
+    return { kind: "found", id: matches[0]!.id };
   }
-  if (config.agents.length > 1) {
+  if (matches.length > 1) {
     return {
       kind: "failed",
       reason:
-        `egma/config.yaml names ${String(config.agents.length)} agents, so the wizard cannot safely choose one from a coding agent's display name. ` +
+        `egma/config.yaml names ${String(matches.length)} agents called ${JSON.stringify(agentName)}, so the wizard cannot safely choose one. ` +
         "Use a stable agent id with egma monitoring enable --agent <id>. Egma did not create an agent or mint a key.",
     };
   }
@@ -620,9 +614,11 @@ async function runWizardWithAgent(
    */
   let monitored: MonitoringSetup["monitored"] = null;
   if (goal !== "testing") {
+    const monitoringAgentName =
+      workerIntegration?.agentName ?? found.facts.get("agent-name") ?? null;
     const configured =
       agentPlatform === "livekit"
-        ? await configuredMonitoringAgent(cwd, platform.url)
+        ? await configuredMonitoringAgent(cwd, platform.url, monitoringAgentName)
         : ({ kind: "none" } as const);
     if (configured.kind === "failed") {
       const report: ExitReport = { kind: "failed", reason: configured.reason };
@@ -637,7 +633,7 @@ async function runWizardWithAgent(
       agentPlatform,
       goal,
       facts: found.facts,
-      integratedAgentName: workerIntegration?.agentName ?? null,
+      integratedAgentName: monitoringAgentName,
       configuredAgentId: configured.kind === "found" ? configured.id : null,
       workerWired: workerIntegration?.entry !== null,
       ...(options.connectionFetchImpl === undefined
@@ -655,7 +651,12 @@ async function runWizardWithAgent(
       return setUp.report;
     }
     monitored = setUp.monitored;
-    const localRecordFailure = await recordMonitoredTarget(options, platform, monitored);
+    // LiveKit saved this stable target before it minted the worker key. Retell
+    // finishes remote setup first, so only that lane still needs this write.
+    const localRecordFailure =
+      agentPlatform === "livekit"
+        ? null
+        : await recordMonitoredTarget(options, platform, monitored);
     if (localRecordFailure !== null) {
       const report = monitoringRecordFailure(
         setUp,

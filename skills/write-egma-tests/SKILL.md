@@ -66,6 +66,13 @@ Apply these rules:
 - Add `## Mock tools` when this test depends on a specific backend state — an
   empty calendar, a lookup that fails, an answer that takes three seconds.
   Otherwise leave the section out.
+  - A mock tool represents an external dependency. Keep agent-runtime tools
+    real: tools that complete a task, advance or hand off a workflow, stop the
+    voice agent, validate data already held by the agent, or update in-memory
+    state. In LiveKit, this includes tools whose body invokes
+    `AgentTask.complete` or
+    advances a `TaskGroup`. Replacing their implementation can stop the
+    workflow.
   - Where the project already has a mocked world in `egma/mock-tools.md`, a
     block here replaces that world's answer for this test alone. Do not repeat
     an answer the project file already gives.
@@ -100,6 +107,11 @@ smallest edit that completes the developer's request.
 
 ## Write strong expected behaviors
 
+- For a generated test, write three expected behaviors by default. Add a fourth
+  only for a distinct critical safety or completion requirement. Never write
+  more than four expected behaviors in one generated test.
+- Keep the behaviors specific to this test situation. Put a general requirement in
+  its own focused test instead of repeating it across every test in a suite.
 - Write one observable statement per item.
 - Write every expected behavior as an unconditional claim that can be judged
   from one simulation.

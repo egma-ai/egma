@@ -43,7 +43,6 @@ import {
   IdentityConflictError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
-import { ingestCapableApiKeyId } from "./memberships.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { stopWorkOverConnections } from "./runs.ts";
@@ -178,8 +177,6 @@ export type Agent = {
   readonly platformAgentId: string | null;
   /** The last characters of the sealed monitoring key, or null. */
   readonly monitoringApiKeyHint: string | null;
-  /** The active Egma project key exporting LiveKit evidence, or null. */
-  readonly monitoringExportApiKeyId: string | null;
   /** The declared pull switch. Off until somebody turns it on. */
   readonly pullProductionCalls: boolean;
   /**
@@ -257,7 +254,6 @@ type AgentRow = {
   readonly agentPlatform: string;
   readonly platformAgentId: string | null;
   readonly monitoringApiKeyHint: string | null;
-  readonly monitoringExportApiKeyId: string | null;
   readonly pullProductionCalls: boolean;
   readonly lastReceivedAt: Date | null;
   readonly archivedAt: Date | null;
@@ -299,12 +295,6 @@ const LAST_RECEIVED_AT = sql`(
        = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
 )`.mapWith(monitoringState.lastReceivedAt);
 
-/** The bound LiveKit export key only while that credential can ingest now. */
-const MONITORING_EXPORT_API_KEY_ID = ingestCapableApiKeyId(
-  agent,
-  agent.monitoringExportApiKeyId,
-);
-
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
   id: agent.id,
@@ -313,7 +303,6 @@ const COLUMNS = {
   agentPlatform: agent.agentPlatform,
   platformAgentId: agent.platformAgentId,
   monitoringApiKeyHint: agent.monitoringApiKeyHint,
-  monitoringExportApiKeyId: MONITORING_EXPORT_API_KEY_ID,
   pullProductionCalls: agent.pullProductionCalls,
   lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,

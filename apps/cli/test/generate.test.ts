@@ -13,6 +13,7 @@ import {
 } from "../src/folder/egma-folder.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
+import { MAX_GENERATED_EXPECTED_BEHAVIORS } from "../src/wizard/test-generation.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
@@ -295,6 +296,26 @@ describe("generated suite", () => {
         (record) => record.method === "POST" && record.path === "/v1/repository/change-set",
       ),
     ).toBe(false);
+  });
+
+  it("does not push a generated test with too many grader assertions", async () => {
+    const behaviors = Array.from(
+      { length: MAX_GENERATED_EXPECTED_BEHAVIORS + 1 },
+      (_, index) => `The agent satisfies requirement ${String(index + 1)}.`,
+    );
+    const result = await walk(writes("too-broad", behaviors), 1);
+
+    expect(result.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        `more than ${String(MAX_GENERATED_EXPECTED_BEHAVIORS)} expected behaviors`,
+      ),
+    });
+    expect(result.report).toMatchObject({
+      reason: expect.stringContaining(`egma/tests/${SUITE_DIRECTORY}/too-broad.md`),
+    });
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
   });
 
   it.each([

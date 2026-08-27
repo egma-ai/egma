@@ -1,12 +1,12 @@
 """The exchange, in bytes: what this side says and how it reads a reply.
 
-Two methods and no more. **``egma.hello``** is sent once when the session
-starts and carries the census — every tool the agent has, by name, with
-its schema. egma writes the census down and answers with the names it
-will be answering for, so this side stands couriers in front of exactly
-those and leaves every other tool alone. **``egma.tool``** carries one
-call: the tool's name and the arguments. egma answers with what the mock
-tool holds.
+Two methods and no more. **``egma.hello``** is sent when the session starts
+and again when a LiveKit handoff discovers more tools. Each message carries
+the cumulative census — every tool found in the session so far, by name,
+with its schema. egma replaces the stored census and answers with the fixed
+names it will answer for, so this side stands couriers in front of exactly
+those and leaves every other tool alone. **``egma.tool``** carries one call:
+the tool's name and the arguments. egma answers with what the mock tool holds.
 
 Both directions are JSON objects in a string, because that is what the
 transport carries, and an answer arrives **tagged** — ``{"answer": …}``

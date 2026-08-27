@@ -74,8 +74,6 @@ export type Platform = FixturePlatform & {
 export type StartPlatformOptions = {
   /** A synchronous race seam after remote creation and before the CLI writes. */
   readonly afterSuiteCreate?: (suite: import("./suites.ts").SeededSuite) => void;
-  /** Model an older platform that accepts but ignores monitoringAgentId. */
-  readonly ignoreMonitoringAgentId?: boolean;
 };
 
 export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
@@ -136,13 +134,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       holdsKey,
       accept: (key) => device.accept(key),
       reject: (key) => device.reject(key),
-      bindMonitoringExportKey: (agentId, keyProjectId, apiKeyId) =>
-        registered.bindMonitoringExportKey(agentId, keyProjectId, apiKeyId),
-      unbindMonitoringExportKey: (apiKeyId) =>
-        registered.unbindMonitoringExportKey(apiKeyId),
-      ...(options.ignoreMonitoringAgentId === undefined
-        ? {}
-        : { ignoreMonitoringAgentId: options.ignoreMonitoringAgentId }),
       organizationId,
       projectId,
     });
@@ -183,10 +174,13 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     running = runGroup.controls;
 
     return [
+      // The full key-list route must win over the device-flow fixture's older
+      // login probe at the same path. A login probe needs only a 200; the CLI
+      // recovery flow needs the real safe metadata list.
+      apiKeyGroup.group,
       deviceGroup.group,
       agentGroup.group,
       monitoringGroup.group,
-      apiKeyGroup.group,
       suiteGroup.group,
       personaGroup.group,
       testGroup.group,

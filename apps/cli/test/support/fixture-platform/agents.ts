@@ -778,7 +778,6 @@ export type StoredAgent = {
   /** Sealed. Only its hint ever leaves this file through a route. */
   monitoringApiKey: string | null;
   monitoringApiKeyHint: string | null;
-  monitoringExportApiKeyId: string | null;
   pullProductionCalls: boolean;
   /** When a production call last arrived, as the drainer would stamp it. */
   lastReceivedAt: string | null;
@@ -819,7 +818,6 @@ export function blankAgent(
     platformAgentId: null,
     monitoringApiKey: null,
     monitoringApiKeyHint: null,
-    monitoringExportApiKeyId: null,
     pullProductionCalls: false,
     lastReceivedAt: null,
     createdAt: now,
@@ -837,7 +835,6 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     platformAgentId: agent.platformAgentId,
     monitoringKeyPresent: agent.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: agent.monitoringApiKeyHint,
-    monitoringExportApiKeyId: agent.monitoringExportApiKeyId,
     pullProductionCalls: agent.pullProductionCalls,
     lastReceivedAt: agent.lastReceivedAt,
     archived: false,
@@ -897,17 +894,6 @@ export type AgentControls = {
   readonly sealed: readonly string[];
   /** The project a write named, or `null`, per write. */
   readonly projectsNamed: readonly (string | null)[];
-  /** Bind a newly minted project key to one living LiveKit agent. */
-  bindMonitoringExportKey(
-    agentId: string,
-    projectId: string,
-    apiKeyId: string,
-  ):
-    | { readonly kind: "bound"; readonly previous: string | null }
-    | { readonly kind: "already-bound"; readonly apiKeyId: string }
-    | undefined;
-  /** Drop the active association when its project key is revoked. */
-  unbindMonitoringExportKey(apiKeyId: string): void;
 };
 
 /**
@@ -1444,27 +1430,6 @@ export function agentRoutes(options: {
         const held = agents.find((one) => one.id === agentId);
         if (held === undefined) return;
         held.lastReceivedAt = at.toISOString();
-      },
-      bindMonitoringExportKey(agentId, projectId, apiKeyId) {
-        const held = agents.find(
-          (one) =>
-            one.id === agentId &&
-            one.projectId === projectId &&
-            one.agentPlatform === "livekit",
-        );
-        if (held === undefined) return undefined;
-        const previous = held.monitoringExportApiKeyId;
-        if (previous !== null) {
-          return { kind: "already-bound", apiKeyId: previous };
-        }
-        held.monitoringExportApiKeyId = apiKeyId;
-        return { kind: "bound", previous };
-      },
-      unbindMonitoringExportKey(apiKeyId) {
-        const held = agents.find(
-          (one) => one.monitoringExportApiKeyId === apiKeyId,
-        );
-        if (held !== undefined) held.monitoringExportApiKeyId = null;
       },
     },
     connectionById,

@@ -169,9 +169,11 @@ After the agent object exists and before `session.start`. The report of
 your tools is the first thing said, so an Egma that is not in the room is
 discovered before any tool call rather than half way through a test.
 
-`mockable` covers the exact `Agent` class you hand it. If your app hands
-off between several agent classes, call it once per class you want
-covered.
+Keep one `mockable` call for the initial agent. The SDK follows LiveKit's
+public handoff events and installs the same simulation couriers for each
+selected `Agent` or `AgentTask` before that activity starts. Each handoff
+also extends one cumulative tool census, so Egma's coverage record keeps
+the tools found on earlier agents.
 
 ### What a call to a mocked tool does
 

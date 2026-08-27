@@ -41,7 +41,7 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
     await mkdir(bin);
     await writeFile(path.join(repository, "src", "agent.py"), "# fixture\n", "utf8");
     const requirements = path.join(repository, "requirements.txt");
-    await writeFile(requirements, "livekit-agents>=1.6.7\negma>=0.1.0\n", "utf8");
+    await writeFile(requirements, "livekit-agents>=1.6.7\negma>=0.1.1\n", "utf8");
 
     const fakePython = path.join(repository, ".venv", "bin", "python");
     await writeFile(
@@ -62,7 +62,7 @@ appendFileSync(process.env.OBSERVED_PYTHON_FILE, JSON.stringify({
 }) + "\\n");
 if (args[0] === "-c") process.exit(existsSync(process.env.FIXTURE_INSTALLED_MARKER) ? 0 : 1);
 if (args[0] === "-m" && args[1] === "pip" && args[2] === "install" && args[3] === "-r") {
-  writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.0\\n");
+  writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.1\\n");
   process.exit(0);
 }
 process.exit(2);
@@ -286,9 +286,11 @@ setInterval(() => {}, 1_000);
       }).status;
     };
     expect(await probeVersion("0.1.0.dev1")).toBe(1);
-    expect(await probeVersion("0.1.0")).toBe(0);
-    expect(await probeVersion("0.1.0.post1")).toBe(0);
-    expect(await probeVersion("0.1.0+local.1")).toBe(0);
+    expect(await probeVersion("0.1.0")).toBe(1);
+    expect(await probeVersion("0.1.1.dev1")).toBe(1);
+    expect(await probeVersion("0.1.1")).toBe(0);
+    expect(await probeVersion("0.1.1.post1")).toBe(0);
+    expect(await probeVersion("0.1.1+local.1")).toBe(0);
 
     const mismatched = spawn(
       process.execPath,
@@ -363,7 +365,7 @@ setInterval(() => {}, 1_000);
     await writeFile(path.join(project, "src", "agent.py"), "# fixture\n", "utf8");
     await writeFile(
       path.join(project, "pyproject.toml"),
-      '[project]\nname = "fixture-agent"\nversion = "0.0.0"\ndependencies = ["livekit-agents>=1.6.7", "egma>=0.1.0"]\n' +
+      '[project]\nname = "fixture-agent"\nversion = "0.0.0"\ndependencies = ["livekit-agents>=1.6.7", "egma>=0.1.1"]\n' +
         (hasLock ? "" : "\n[tool.uv]\n"),
       "utf8",
     );
@@ -406,7 +408,7 @@ writeFileSync(process.env.OBSERVED_UV_FILE, JSON.stringify({
   key: process.env.LIVEKIT_API_KEY ?? null,
   secret: process.env.LIVEKIT_API_SECRET ?? null,
 }));
-writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.0\\n");
+writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.1\\n");
 `,
       { mode: 0o755 },
     );

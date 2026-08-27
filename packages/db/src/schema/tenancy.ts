@@ -217,8 +217,6 @@ export const apiKey = pgTable(
       sql`(${table.scope} = 'project') = (${table.projectId} is not null)`,
     ),
     unique("api_key_hash_unique").on(table.hash),
-    // Project API keys may be bound to one monitoring agent by this pair.
-    unique("api_key_id_project_id_unique").on(table.id, table.projectId),
     // The pairing, not each column on its own: a key cannot name one
     // organization and another organization's project.
     foreignKey({

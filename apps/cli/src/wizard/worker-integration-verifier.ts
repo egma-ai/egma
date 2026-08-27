@@ -83,8 +83,6 @@ const ANY_MONITOR_CALL =
   /(?:^|[^A-Za-z0-9_.])(?:egma\s*\.\s*)?monitor_livekit\s*\(/u;
 const ANY_MOCKABLE_CALL =
   /(?:^|[^A-Za-z0-9_.])(?:egma\s*\.\s*)?mockable\s*\(/u;
-const AWAITED_CONNECT =
-  /\bawait\s+(?:[A-Za-z_]\w*\s*\.\s*)*ctx\s*\.\s*connect\s*\(/u;
 const AWAITED_SESSION_START =
   /\bawait\s+(?:[A-Za-z_]\w*\s*\.\s*)*session\s*\.\s*start\s*\(/u;
 const AWAITED_ANY_START =
@@ -609,6 +607,14 @@ function topLevelHookOffset(
   );
 }
 
+function awaitedConnectOffset(entrypoint: ContextEntrypoint): number {
+  return (
+    directStatements(entrypoint).find((statement) =>
+      /^await\s+ctx\s*\.\s*connect\s*\(/u.test(statement.text),
+    )?.offset ?? -1
+  );
+}
+
 function bindingIsBoundBefore(
   entrypoint: ContextEntrypoint,
   binding: "agent" | "session",
@@ -907,7 +913,7 @@ function verifyWorkerSource(
     "monitor_livekit",
   );
   const testing = topLevelHookOffset(entrypoint, testingBindings, "mockable");
-  const connects = entrypoint.code.search(AWAITED_CONNECT);
+  const connects = awaitedConnectOffset(entrypoint);
   const sessionStarts = entrypoint.code.search(AWAITED_SESSION_START);
   const anyStarts = entrypoint.code.search(AWAITED_ANY_START);
   const calls = hookCallCounts(code);
@@ -1192,7 +1198,7 @@ function registryEgmaAtLeastMinimum(requirement: string): boolean {
   );
   if (match === null) return false;
   const version = [Number(match[2]), Number(match[3] ?? 0), Number(match[4] ?? 0)];
-  const minimum = [0, 1, 0];
+  const minimum = [0, 1, 1];
   for (let at = 0; at < minimum.length; at += 1) {
     if ((version[at] ?? 0) === (minimum[at] ?? 0)) continue;
     return (version[at] ?? 0) > (minimum[at] ?? 0);
@@ -1275,7 +1281,7 @@ function manifestPreservationReason(
     declarations.length !== 1 ||
     !registryEgmaAtLeastMinimum(declarations[0] ?? "")
   ) {
-    return `Egma read ${after.shown}, but expected one registry egma>=0.1.0 dependency.`;
+    return `Egma read ${after.shown}, but expected one registry egma>=0.1.1 dependency.`;
   }
   return manifestWithoutEgma(before) === manifestWithoutEgma(after)
     ? null

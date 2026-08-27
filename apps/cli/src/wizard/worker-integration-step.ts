@@ -122,7 +122,7 @@ function workerIntegrationTask(
     "",
     "## Report the dependency manifest",
     "",
-    "After you have confirmed that the registry dependency `egma>=0.1.0` is declared,",
+    "After you have confirmed that the registry dependency `egma>=0.1.1` is declared,",
     "report the existing manifest you verified on one line:",
     "",
     "```text",
@@ -175,7 +175,7 @@ export function workerEntryInstructions(
     "Egma could not verify the requested entries in your LiveKit worker.",
     "Add the following to the worker before starting a run:",
     "",
-    '  1. Add the registry dependency "egma>=0.1.0" to your Python dependencies.',
+    '  1. Add the registry dependency "egma>=0.1.1" to your Python dependencies.',
     ...(monitoring
       ? [
           "  2. Make monitor_livekit(ctx) the first statement of the job entrypoint.",

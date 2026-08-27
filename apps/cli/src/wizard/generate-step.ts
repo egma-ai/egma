@@ -73,6 +73,7 @@ import {
   DEFAULT_TEST_COUNT,
   generateInstructions,
   GenerationTally,
+  MAX_GENERATED_EXPECTED_BEHAVIORS,
   type GenerationContext,
 } from "./test-generation.ts";
 
@@ -664,6 +665,17 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
       reason:
         `${options.drivenAgent.name} left ${String(writtenCount)} ${writtenCount === 1 ? "test" : "tests"} in the first suite, ` +
         `but this setup requires exactly ${String(howMany)}. Keep exactly ${String(howMany)} test files there, then run the wizard again.`,
+    });
+  }
+  const tooBroad = written.found.filter(
+    (file) => file.test.expectedBehaviors.length > MAX_GENERATED_EXPECTED_BEHAVIORS,
+  );
+  if (tooBroad.length > 0) {
+    return ending({
+      kind: "failed",
+      reason:
+        `${options.drivenAgent.name} wrote more than ${String(MAX_GENERATED_EXPECTED_BEHAVIORS)} expected behaviors in ` +
+        `${tooBroad.map((file) => file.shown).join(", ")}. Keep only the distinct requirements for each scenario, then run the wizard again.`,
     });
   }
   const usable = written.found.filter(

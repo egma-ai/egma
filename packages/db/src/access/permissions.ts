@@ -96,11 +96,6 @@ export type Action = keyof typeof PERMISSIONS;
 
 export const ACTIONS = Object.keys(PERMISSIONS) as readonly Action[];
 
-/** The roles that may take one action, for reads of effective access. */
-export function rolesPermittedFor(action: Action): readonly Role[] {
-  return PERMISSIONS[action];
-}
-
 /**
  * Where an action is being taken. Both are named on every call.
  *

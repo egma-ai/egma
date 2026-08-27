@@ -33,6 +33,9 @@ export const CODES = {
    * person can change.
    */
   project_slug_taken: 409,
+  // A guarded API-key mint found an active project key whose name already
+  // starts with the requested prefix. The response never describes that row.
+  active_key_name_conflict: 409,
   // A stale write, told apart from a plain conflict by which of the two things
   // moved: the resource's identity, or the content of its current version.
   // The caller's next move differs — one is retyped, the other is reapplied —

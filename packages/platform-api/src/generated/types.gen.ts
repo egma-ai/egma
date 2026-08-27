@@ -205,7 +205,6 @@ export type ListAgentsResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -335,7 +334,6 @@ export type RegisterAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -379,7 +377,6 @@ export type RegisterAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -464,7 +461,6 @@ export type GetAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -562,7 +558,6 @@ export type UpdateAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -748,7 +743,6 @@ export type ArchiveAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -826,7 +820,6 @@ export type RestoreAgentResponses = {
             platformAgentId: string | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
-            monitoringExportApiKeyId: string | null;
             pullProductionCalls: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -1220,7 +1213,13 @@ export type CreateApiKeyData = {
     body?: {
         name?: string;
         projectId?: string | null;
-        monitoringAgentId?: string | null;
+    } | {
+        name: string;
+        projectId: string;
+        /**
+         * The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.
+         */
+        monitoringAgentId: string;
     };
     path?: never;
     query?: never;

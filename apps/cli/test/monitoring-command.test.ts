@@ -338,6 +338,44 @@ describe("egma monitoring enable, on Retell", () => {
 });
 
 describe("egma monitoring enable, on LiveKit", () => {
+  it("records the stable agent before it mints through the hosted key contract", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+    let keyBody: Record<string, unknown> | null = null;
+    let recordedBeforeMint = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && new URL(request.url).pathname === "/v1/keys") {
+        keyBody = (await request.clone().json()) as Record<string, unknown>;
+        const config = await readConfig(folderPathsIn(workspace.dir).config);
+        recordedBeforeMint =
+          config.agents.length === 1 &&
+          config.agents[0]?.id === platform.registered.agents[0]?.id;
+      }
+      return fetch(input, init);
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentName: "hosted-contract",
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({ kind: "wired" });
+    expect(recordedBeforeMint).toBe(true);
+    expect(keyBody).toMatchObject({
+      projectId: platform.projectId,
+      monitoringAgentId: platform.registered.agents[0]?.id,
+      name: expect.stringMatching(/\[[a-f0-9]{16}\]$/u),
+    });
+    expect(keyBody).not.toHaveProperty("activeNamePrefix");
+  });
+
   it("reports an artificial mint transport failure without claiming cleanup", async () => {
     const agent = await unmonitoredAgent("livekit", "interruptible-livekit-agent");
     const controller = new AbortController();
@@ -551,40 +589,6 @@ describe("egma monitoring enable, on LiveKit", () => {
     ]);
   });
 
-  it("revokes an unbound key when an older platform ignores the binding", async () => {
-    await platform.close();
-    platform = await startPlatform({ ignoreMonitoringAgentId: true });
-    await workspace.signIn(platform.url, platform.device.mint());
-
-    const agent = await unmonitoredAgent("livekit", "older-platform-agent");
-    await onboarded(agent);
-    await gitRepository([ENV_FILE_NAME]);
-    const envFile = path.join(workspace.dir, ENV_FILE_NAME);
-    await writeFile(envFile, "OTHER=kept\n", "utf8");
-    const configFile = folderPathsIn(workspace.dir).config;
-    const configBefore = await readFile(configFile, "utf8");
-
-    const result = await egma(["monitoring", "enable", "--platform", "livekit"]);
-
-    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(
-      MONITORING_EXIT.unreachable,
-    );
-    expect(facts(result.stdout).status).toBe("failed");
-    expect(result.stderr).toContain("did not bind the new monitoring key");
-    expect(result.stderr).toContain("Update the Egma platform");
-    expect(every(result.stdout, "env")).toHaveLength(0);
-    expect(await readFile(envFile, "utf8")).toBe("OTHER=kept\n");
-    expect(await readFile(configFile, "utf8")).toBe(configBefore);
-
-    expect(platform.keys.minted).toHaveLength(1);
-    const minted = platform.keys.minted[0]!;
-    expect(minted.revokedAt).not.toBeNull();
-    expect(platform.device.keys).not.toContain(minted.secret);
-    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
-    expect(result.stdout).not.toContain(minted.secret);
-    expect(result.stderr).not.toContain(minted.secret);
-  });
-
   it("revokes a response-confirmed key whose one-time secret is missing", async () => {
     const agent = await unmonitoredAgent("livekit", "missing-secret");
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -620,7 +624,6 @@ describe("egma monitoring enable, on LiveKit", () => {
       reason: expect.stringContaining(`minted key ${minted.id}`),
     });
     expect(minted.revokedAt).not.toBeNull();
-    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
     expect(JSON.stringify(outcome)).not.toContain(minted.secret);
     await expect(
       readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
@@ -660,13 +663,68 @@ describe("egma monitoring enable, on LiveKit", () => {
     if (outcome.kind !== "failed") throw new Error("expected uncertain mint");
     expect(outcome.reason).toContain(minted.name ?? "");
     expect(outcome.reason).toContain(agent.id);
-    expect(minted.revokedAt).toBeNull();
-    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBe(
-      minted.id,
-    );
+    expect(minted.revokedAt).not.toBeNull();
     await expect(
       readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not revoke a concurrent setup when its own mint never committed", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+    const agent = await unmonitoredAgent("livekit", "concurrent-uncertain-mint");
+    let competing: Awaited<ReturnType<typeof wireLiveKitMonitoring>> | null = null;
+    let intercepted = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (
+        !intercepted &&
+        request.method === "POST" &&
+        new URL(request.url).pathname === "/v1/keys"
+      ) {
+        intercepted = true;
+        competing = await wireLiveKitMonitoring({
+          platform: {
+            url: platform.url,
+            key: platform.device.keys[0] ?? "",
+          },
+          cwd: workspace.dir,
+          signal: new AbortController().signal,
+          agentId: agent.id,
+          agentName: agent.name,
+          say: () => undefined,
+        });
+        throw new TypeError("fixture dropped the request before commit");
+      }
+      return fetch(input, init);
+    };
+
+    const uncertain = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    expect(competing).toMatchObject({ kind: "wired" });
+    expect(uncertain).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("found no active key from this attempt"),
+    });
+    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.keys.minted[0]?.revokedAt).toBeNull();
+    const environment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+    expect(environment).toContain(
+      `EGMA_API_KEY=${platform.keys.minted[0]?.secret ?? ""}`,
+    );
   });
 
   it("revokes a bound key when the parent command is stopped after mint", async () => {
@@ -710,31 +768,27 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(outcome).toEqual({ kind: "interrupted" });
     expect(platform.keys.minted).toHaveLength(1);
     expect(platform.keys.minted[0]?.revokedAt).not.toBeNull();
-    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
     await expect(
       readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("prints the non-secret key id when unbound-key cleanup cannot finish", async () => {
-    await platform.close();
-    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+  it("prints the non-secret key id when unusable-key cleanup cannot finish", async () => {
     const terminalKey = platform.device.mint();
     const agent = await unmonitoredAgent("livekit", "cleanup-refused");
-    let agentReads = 0;
     const fetchImpl: typeof fetch = async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const response = await fetch(input, init);
       if (
-        request.method !== "GET" ||
-        new URL(request.url).pathname !== `/v1/agents/${agent.id}` ||
-        (agentReads += 1) !== 2
+        request.method !== "POST" ||
+        new URL(request.url).pathname !== "/v1/keys"
       ) {
         return response;
       }
-      const body = await response.arrayBuffer();
+      const body = (await response.json()) as Record<string, unknown>;
+      delete body["secret"];
       platform.device.reject(terminalKey);
-      return new Response(body, {
+      return new Response(JSON.stringify(body), {
         status: response.status,
         statusText: response.statusText,
         headers: response.headers,
@@ -783,12 +837,22 @@ describe("egma monitoring enable, on LiveKit", () => {
       caseName: "a malformed 200",
     },
   ])("does not call $caseName confirmed key cleanup", async ({ answer }) => {
-    await platform.close();
-    platform = await startPlatform({ ignoreMonitoringAgentId: true });
     const terminalKey = platform.device.mint();
     const agent = await unmonitoredAgent("livekit", "cleanup-not-confirmed");
     const fetchImpl: typeof fetch = async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
+      if (
+        request.method === "POST" &&
+        new URL(request.url).pathname === "/v1/keys"
+      ) {
+        const response = await fetch(input, init);
+        const body = (await response.json()) as Record<string, unknown>;
+        delete body["secret"];
+        return new Response(JSON.stringify(body), {
+          status: response.status,
+          headers: response.headers,
+        });
+      }
       if (
         request.method === "POST" &&
         new URL(request.url).pathname.endsWith("/revoke")
@@ -819,40 +883,6 @@ describe("egma monitoring enable, on LiveKit", () => {
     });
     expect(minted.revokedAt).toBeNull();
     expect(platform.device.keys).toContain(minted.secret);
-  });
-
-  it("does not call a failed binding read an outdated platform", async () => {
-    const terminalKey = platform.device.keys[0] ?? "";
-    const agent = await unmonitoredAgent("livekit", "verification-unreachable");
-    let agentReads = 0;
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      if (
-        request.method === "GET" &&
-        new URL(request.url).pathname === `/v1/agents/${agent.id}` &&
-        (agentReads += 1) === 2
-      ) {
-        throw new TypeError("fixture connection dropped");
-      }
-      return fetch(input, init);
-    };
-
-    const outcome = await wireLiveKitMonitoring({
-      platform: { url: platform.url, key: terminalKey, fetchImpl },
-      cwd: workspace.dir,
-      signal: new AbortController().signal,
-      agentId: agent.id,
-      agentName: agent.name,
-      say: () => undefined,
-    });
-
-    expect(outcome).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("could not confirm the new monitoring key"),
-    });
-    if (outcome.kind !== "failed") throw new Error("expected failed verification");
-    expect(outcome.reason).not.toContain("Update the Egma platform");
-    expect(platform.keys.minted[0]?.revokedAt).not.toBeNull();
   });
 
   it("mints a project key, writes the two lines, and prints them", async () => {
@@ -897,7 +927,7 @@ describe("egma monitoring enable, on LiveKit", () => {
     ]);
   });
 
-  it("prints the worker configuration when the local target record fails", async () => {
+  it("stops before minting when the local target record fails", async () => {
     const unlock = await lockEgmaFolder();
     let result: Result;
     try {
@@ -907,43 +937,25 @@ describe("egma monitoring enable, on LiveKit", () => {
     }
 
     expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(
-      MONITORING_EXIT.repositoryRecordFailed,
+      MONITORING_EXIT.unreachable,
     );
     const said = facts(result.stdout);
-    const secret = platform.keys.minted[0]?.secret ?? "";
-    expect(said.agent_id).toBe(platform.registered.agents[0]?.id);
-    expect(said.monitoring_key_id).toBe(platform.keys.minted[0]?.id);
-    expect(said.api_key).toBe(`egma_sk_…${secret.slice(-4)}`);
-    expect(every(result.stdout, "env")).toEqual([
-      `export EGMA_URL=${platform.url}`,
-      `export EGMA_API_KEY=${secret}`,
-    ]);
-    expect(said.status).toBe("repository-record-failed");
-    expect(said.reason).toContain(`--url ${platform.url}`);
-    expect(said.reason).toContain(
-      `--monitoring-key-id ${said.monitoring_key_id ?? ""}`,
-    );
-    expect(result.stderr).toContain("The remote setup remains active.");
-    expect(result.stdout.indexOf("env: export EGMA_API_KEY=")).toBeLessThan(
-      result.stdout.indexOf("status: repository-record-failed"),
-    );
+    expect(said.status).toBe("failed");
+    expect(said.reason).toContain("No worker key was created");
+    expect(result.stderr).toContain("egma monitoring record --agent");
+    expect(every(result.stdout, "env")).toHaveLength(0);
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.keys.minted[0]).toMatchObject({
-      name: `${said.agent_name ?? ""} production monitoring`,
-      projectId: said.project_id,
-    });
+    expect(platform.keys.minted).toHaveLength(0);
 
     const agent = platform.registered.agents[0];
-    if (agent === undefined) throw new Error("expected the wired agent");
+    if (agent === undefined) throw new Error("expected the registered agent");
     agent.name = "renamed-after-receipt";
 
     const recovered = await egma([
       "monitoring",
       "record",
       "--agent",
-      said.agent_id ?? "",
-      "--monitoring-key-id",
-      said.monitoring_key_id ?? "",
+      agent.id,
     ]);
     expect(recovered.code, `${recovered.stdout}\n${recovered.stderr}`).toBe(
       MONITORING_EXIT.done,
@@ -951,7 +963,7 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(facts(recovered.stdout).status).toBe("recorded");
     expect(facts(recovered.stdout).agent_name).toBe("renamed-after-receipt");
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(0);
   });
 
   it("does not rotate an already configured worker during ordinary enable", async () => {
@@ -984,7 +996,84 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(env[2]).toBe(`EGMA_API_KEY=${platform.keys.minted[0]?.secret ?? ""}`);
     expect(platform.keys.minted).toHaveLength(1);
     expect(platform.keys.minted[0]?.revokedAt).toBeNull();
-    expect(agent.monitoringExportApiKeyId).toBe(platform.keys.minted[0]?.id);
+  });
+
+  it("honors a project-wide active key even when this member cannot list it", async () => {
+    const agent = await unmonitoredAgent("livekit", "another-members-worker-key");
+    await onboarded({ id: agent.id, name: agent.name });
+    const terminalKey = platform.device.keys[0] ?? "";
+    const activeNamePrefix = `Egma monitoring ${agent.id} — `;
+    const seeded = await fetch(`${platform.url}/v1/keys`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${terminalKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name: `${activeNamePrefix}${agent.name} [another-member]`,
+        projectId: platform.projectId,
+      }),
+    });
+    expect(seeded.status).toBe(201);
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET" && new URL(request.url).pathname === "/v1/keys") {
+        return new Response(JSON.stringify({ keys: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return fetch(input, init);
+    };
+    const outcome = await wireLiveKitMonitoring({
+      platform: { url: platform.url, key: terminalKey, fetchImpl },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "already-configured",
+      keyId: null,
+      reason: expect.stringContaining("another project member"),
+    });
+    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.keys.minted[0]?.revokedAt).toBeNull();
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses an unsafe duplicate-key state instead of choosing one", async () => {
+    const agent = await unmonitoredAgent("livekit", "duplicate-worker-keys");
+    await onboarded({ id: agent.id, name: agent.name });
+    const terminalKey = platform.device.keys[0] ?? "";
+    const prefix = `Egma monitoring ${agent.id} — `;
+    for (const attempt of ["first", "second"]) {
+      const response = await fetch(`${platform.url}/v1/keys`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${terminalKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: `${prefix}${agent.name} [${attempt}]`,
+          projectId: platform.projectId,
+        }),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const result = await egma(["monitoring", "enable", "--platform", "livekit"]);
+
+    expect(result.code).toBe(MONITORING_EXIT.unreachable);
+    expect(facts(result.stdout).status).toBe("failed");
+    expect(facts(result.stdout).reason).toContain("2 active project keys");
+    expect(platform.keys.minted).toHaveLength(2);
+    expect(platform.keys.minted.every((key) => key.revokedAt === null)).toBe(true);
   });
 
   /**
@@ -1089,92 +1178,19 @@ describe("egma monitoring status and disable", () => {
     expect(platform.keys.minted).toHaveLength(0);
   });
 
-  it("requires the key id from a failed LiveKit setup receipt", async () => {
+  it("records a stable LiveKit target before any worker key exists", async () => {
     const agent = await unmonitoredAgent("livekit", "ordinary-livekit-agent");
 
     const result = await egma(["monitoring", "record", "--agent", agent.id]);
 
-    expect(result.code).toBe(MONITORING_EXIT.refused);
-    expect(facts(result.stdout).status).toBe("no-monitoring-setup");
-    expect(result.stderr).toContain("--monitoring-key-id");
-    await expect(
-      readFile(folderPathsIn(workspace.dir).config, "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(result.code).toBe(MONITORING_EXIT.done);
+    expect(facts(result.stdout).status).toBe("recorded");
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({ id: agent.id, name: agent.name }),
+    ]);
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.keys.minted).toHaveLength(0);
-  });
-
-  it("refuses a same-named project key that is not bound to the agent", async () => {
-    const agent = await unmonitoredAgent("livekit", "ordinary-livekit-agent");
-    const minted = await fetch(`${platform.url}/v1/keys`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        name: `${agent.name} production monitoring`,
-        projectId: platform.projectId,
-      }),
-    });
-    const key = (await minted.json()) as { readonly id: string };
-
-    const result = await egma([
-      "monitoring",
-      "record",
-      "--agent",
-      agent.id,
-      "--monitoring-key-id",
-      key.id,
-    ]);
-
-    expect(result.code).toBe(MONITORING_EXIT.refused);
-    expect(facts(result.stdout).status).toBe("no-monitoring-setup");
-    expect(result.stderr).toContain("active LiveKit monitoring key");
-    await expect(
-      readFile(folderPathsIn(workspace.dir).config, "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
-    expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.keys.minted).toHaveLength(1);
-  });
-
-  it("refuses the genuine LiveKit monitoring key after it is revoked", async () => {
-    const agent = await unmonitoredAgent("livekit", "revoked-livekit-agent");
-    const minted = await fetch(`${platform.url}/v1/keys`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        name: `${agent.name} production monitoring`,
-        projectId: platform.projectId,
-        monitoringAgentId: agent.id,
-      }),
-    });
-    const key = (await minted.json()) as { readonly id: string };
-    platform.keys.revoke(key.id);
-
-    const rejected = await fetch(`${platform.url}/v1/keys`, {
-      headers: { authorization: `Bearer ${platform.keys.minted[0]?.secret ?? ""}` },
-    });
-    expect(rejected.status).toBe(401);
-
-    const result = await egma([
-      "monitoring",
-      "record",
-      "--agent",
-      agent.id,
-      "--monitoring-key-id",
-      key.id,
-    ]);
-
-    expect(result.code).toBe(MONITORING_EXIT.refused);
-    expect(facts(result.stdout).status).toBe("no-monitoring-setup");
-    expect(result.stderr).toContain("active LiveKit monitoring key");
-    await expect(
-      readFile(folderPathsIn(workspace.dir).config, "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   /**

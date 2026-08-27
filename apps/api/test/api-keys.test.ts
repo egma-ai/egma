@@ -1,11 +1,8 @@
 import {
   changeRole,
-  createAgent,
   createApiKey,
   createProject,
   deactivateUser,
-  getAgent,
-  listApiKeys,
   resolveApiKey,
   type AuthContext,
   type Role,
@@ -158,6 +155,18 @@ async function mint(
   };
 }
 
+/** A living LiveKit agent whose id may reserve one worker-key namespace. */
+async function liveKitAgent(person: Person, name: string): Promise<string> {
+  const response = await api.app.inject({
+    method: "POST",
+    url: "/v1/agents",
+    headers: { cookie: person.cookie },
+    payload: { name, agentPlatform: "livekit" },
+  });
+  expect(response.statusCode, response.body).toBe(201);
+  return (response.json() as { agent: { id: string } }).agent.id;
+}
+
 describe("minting a key", () => {
   it("shows the secret exactly once and stores something that is not it", async () => {
     api = await createApi("keys_mint");
@@ -234,244 +243,238 @@ describe("minting a key", () => {
       payload: { name: "second machine" },
     });
     expect(another.statusCode).toBe(201);
+  });
 
-    const agent = await api.app.inject({
+  it("accepts only a living LiveKit agent for a reserved worker key", async () => {
+    api = await createApi("keys_monitoring_agent_validation");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const agentId = await liveKitAgent(ada, "appointment agent");
+    const prefix = `Egma monitoring ${agentId} — `;
+
+    for (const payload of [
+      { monitoringAgentId: agentId },
+      { monitoringAgentId: agentId, projectId: ada.projectId },
+      {
+        monitoringAgentId: agentId,
+        projectId: ada.projectId,
+        name: "another kind of key",
+      },
+      {
+        activeNamePrefix: prefix,
+        projectId: ada.projectId,
+        name: `${prefix}legacy client-controlled prefix`,
+      },
+      {
+        projectId: ada.projectId,
+        name: `${prefix}ordinary key in the reserved namespace`,
+      },
+    ]) {
+      const refused = await api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: ada.cookie },
+        payload,
+      });
+
+      expect(refused.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(refused.json()).toMatchObject({ error: "invalid_request" });
+    }
+
+    const missing = await api.app.inject({
       method: "POST",
-      url: "/v1/agents",
+      url: "/v1/keys",
       headers: { cookie: ada.cookie },
       payload: {
+        monitoringAgentId: newId("agt"),
         projectId: ada.projectId,
-        name: "viewer cannot bind this",
-        agentPlatform: "livekit",
+        name: `Egma monitoring ${newId("agt")} — missing agent`,
       },
     });
-    expect(agent.statusCode, agent.body).toBe(201);
-    const agentId = (agent.json() as { agent: { id: string } }).agent.id;
-    const refusedBinding = await api.app.inject({
+    expect(missing.statusCode).toBe(422);
+    expect(missing.json()).toMatchObject({ error: "unprocessable" });
+  });
+
+  it("keeps guarded monitoring keys out of a viewer's read-only role", async () => {
+    api = await createApi("keys_monitoring_viewer_refused");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const vic = await colleagueOf(ada, "vic-monitoring@acme.example", "viewer");
+    const agentId = await liveKitAgent(ada, "appointment agent");
+
+    const ordinary = await api.app.inject({
       method: "POST",
       url: "/v1/keys",
       headers: { cookie: vic.cookie },
       payload: {
-        name: "monitoring exporter",
-        projectId: ada.projectId,
-        monitoringAgentId: agentId,
+        projectId: vic.projectId,
+        name: `Egma monitoring ${agentId} — ordinary viewer key`,
       },
     });
-    expect(refusedBinding.statusCode).toBe(403);
+    expect(ordinary.statusCode).toBe(400);
+    expect(ordinary.json()).toMatchObject({ error: "invalid_request" });
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: vic.cookie },
+      payload: {
+        monitoringAgentId: agentId,
+        projectId: vic.projectId,
+        name: `Egma monitoring ${agentId} — appointment agent [viewer]`,
+      },
+    });
+
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ error: "not_permitted" });
   });
 
-  it("binds one active monitoring export key to an immutable LiveKit agent id", async () => {
-    api = await createApi("keys_livekit_monitoring_binding");
+  it("reserves one active project key prefix across creators and reveals no foreign key", async () => {
+    api = await createApi("keys_active_prefix_members");
     const ada = await signUp("ada@acme.example", "Acme");
-    const created = await api.app.inject({
+    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const monitoringAgentId = await liveKitAgent(ada, "appointment agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+
+    const first = await api.app.inject({
       method: "POST",
-      url: "/v1/agents",
-      headers: { cookie: ada.cookie },
-      payload: {
-        projectId: ada.projectId,
-        name: "front desk",
-        agentPlatform: "livekit",
-      },
-    });
-    expect(created.statusCode, created.body).toBe(201);
-    const agentId = (created.json() as { agent: { id: string } }).agent.id;
-
-    const minted = await mint(ada, {
-      name: "front desk production monitoring",
-      projectId: ada.projectId,
-      monitoringAgentId: agentId,
-    });
-    expect(minted.status).toBe(201);
-
-    const readAgent = async (): Promise<Record<string, unknown>> => {
-      const response = await api.app.inject({
-        method: "GET",
-        url: `/v1/agents/${agentId}`,
-        headers: { cookie: ada.cookie },
-      });
-      expect(response.statusCode, response.body).toBe(200);
-      return (response.json() as { agent: Record<string, unknown> }).agent;
-    };
-    expect((await readAgent()).monitoringExportApiKeyId).toBe(minted.id);
-
-    const renamed = await api.app.inject({
-      method: "PATCH",
-      url: `/v1/agents/${agentId}`,
-      headers: { cookie: ada.cookie },
-      payload: { name: "renamed front desk" },
-    });
-    expect(renamed.statusCode, renamed.body).toBe(200);
-    expect((await readAgent()).monitoringExportApiKeyId).toBe(minted.id);
-
-    const repeated = await mint(ada, {
-      name: "renamed front desk production monitoring",
-      projectId: ada.projectId,
-      monitoringAgentId: agentId,
-    });
-    expect(repeated.status).toBe(409);
-    expect((await readAgent()).monitoringExportApiKeyId).toBe(minted.id);
-
-    const listed = await api.app.inject({
-      method: "GET",
       url: "/v1/keys",
       headers: { cookie: ada.cookie },
+      payload: {
+        monitoringAgentId,
+        projectId: ada.projectId,
+        name: `${activeNamePrefix} - appointment agent`,
+      },
     });
-    const keys = (listed.json() as {
-      keys: { id: string; revokedAt: string | null }[];
-    }).keys;
-    expect(keys).toHaveLength(1);
-    expect(keys.find((key) => key.id === minted.id)?.revokedAt).toBeNull();
+    expect(first.statusCode, first.body).toBe(201);
+
+    const miasList = await api.app.inject({
+      method: "GET",
+      url: "/v1/keys",
+      headers: { cookie: mia.cookie },
+    });
+    expect(miasList.statusCode).toBe(200);
+    expect((miasList.json() as { keys: unknown[] }).keys).toEqual([]);
+
+    const second = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: mia.cookie },
+      payload: {
+        monitoringAgentId,
+        projectId: mia.projectId,
+        name: `${activeNamePrefix} - another machine`,
+      },
+    });
+    expect(second.statusCode, second.body).toBe(409);
+    expect(second.json()).toEqual({
+      error: "active_key_name_conflict",
+      message:
+        "an active API key already reserves this name prefix in this project; revoke it before creating a replacement",
+    });
+  });
+
+  it("permits a reserved prefix again after its key is revoked", async () => {
+    api = await createApi("keys_active_prefix_replacement");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const monitoringAgentId = await liveKitAgent(ada, "replacement agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+    const first = await mint(ada, {
+      monitoringAgentId,
+      projectId: ada.projectId,
+      name: `${activeNamePrefix} - first`,
+    });
+    expect(first.status).toBe(201);
 
     const revoked = await api.app.inject({
       method: "POST",
-      url: `/v1/keys/${minted.id}/revoke`,
+      url: `/v1/keys/${first.id}/revoke`,
       headers: { cookie: ada.cookie },
     });
-    expect(revoked.statusCode, revoked.body).toBe(200);
-    expect((await readAgent()).monitoringExportApiKeyId).toBeNull();
+    expect(revoked.statusCode).toBe(200);
 
     const replacement = await mint(ada, {
-      name: "replacement after deliberate revocation",
+      monitoringAgentId,
       projectId: ada.projectId,
-      monitoringAgentId: agentId,
+      name: `${activeNamePrefix} - replacement`,
     });
     expect(replacement.status).toBe(201);
-    expect((await readAgent()).monitoringExportApiKeyId).toBe(replacement.id);
   });
 
-  it("does not call a monitoring key active after its creator loses ingest access", async () => {
-    api = await createApi("keys_monitoring_binding_follows_creator_access");
+  it("creates exactly one key when two requests reserve the same prefix together", async () => {
+    api = await createApi("keys_active_prefix_concurrent");
     const ada = await signUp("ada@acme.example", "Acme");
     const mia = await colleagueOf(ada, "mia@acme.example", "member");
-    const context = contextFor(ada, "admin");
-    const agent = await createAgent(context, {
-      name: "member-owned exporter",
-      agentPlatform: "livekit",
-    });
-    const minted = await mint(mia, {
-      name: "member-owned monitoring key",
-      projectId: mia.projectId,
-      monitoringAgentId: agent.id,
-    });
-    expect(minted.status).toBe(201);
+    const monitoringAgentId = await liveKitAgent(ada, "racing agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
 
-    expect((await getAgent(context, agent.id))?.monitoringExportApiKeyId).toBe(
-      minted.id,
+    const responses = await Promise.all(
+      [ada, mia].map((person, index) =>
+        api.app.inject({
+          method: "POST",
+          url: "/v1/keys",
+          headers: { cookie: person.cookie },
+          payload: {
+            monitoringAgentId,
+            projectId: person.projectId,
+            name: `${activeNamePrefix} - contender ${index + 1}`,
+          },
+        }),
+      ),
     );
-    await changeRole(context, mia.userId, "viewer");
-    expect((await getAgent(context, agent.id))?.monitoringExportApiKeyId).toBeNull();
 
-    await changeRole(context, mia.userId, "member");
-    expect((await getAgent(context, agent.id))?.monitoringExportApiKeyId).toBe(
-      minted.id,
-    );
-    await deactivateUser(context, mia.userId);
-    expect((await getAgent(context, agent.id))?.monitoringExportApiKeyId).toBeNull();
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      201,
+      409,
+    ]);
   });
 
-  it("cannot bind one organization's key to another organization's agent", async () => {
-    api = await createApi("keys_monitoring_binding_tenant_boundary");
+  it("cannot race an ordinary key into a monitoring agent's reserved namespace", async () => {
+    api = await createApi("keys_monitoring_namespace_race");
     const ada = await signUp("ada@acme.example", "Acme");
-    const grace = await signUp("grace@globex.example", "Globex");
-    const foreignAgent = await createAgent(contextFor(grace, "admin"), {
-      name: "globex exporter",
-      agentPlatform: "livekit",
-    });
+    const mia = await colleagueOf(ada, "mia-race@acme.example", "member");
+    const monitoringAgentId = await liveKitAgent(ada, "guarded agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
 
-    const refused = await mint(ada, {
-      name: "must remain in Acme",
-      projectId: ada.projectId,
-      monitoringAgentId: foreignAgent.id,
-    });
-
-    expect(refused.status).toBe(422);
-    expect(await listApiKeys(contextFor(ada, "admin"))).toHaveLength(0);
-    expect(
-      (await getAgent(contextFor(grace, "admin"), foreignAgent.id))
-        ?.monitoringExportApiKeyId,
-    ).toBeNull();
-  });
-
-  it("refuses to bind a monitoring key to a Retell agent", async () => {
-    api = await createApi("keys_monitoring_binding_requires_livekit");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const created = await api.app.inject({
-      method: "POST",
-      url: "/v1/agents",
-      headers: { cookie: ada.cookie },
-      payload: {
-        projectId: ada.projectId,
-        name: "retell agent",
-        agentPlatform: "retell",
-      },
-    });
-    expect(created.statusCode, created.body).toBe(201);
-    const agentId = (created.json() as { agent: { id: string } }).agent.id;
-
-    const refused = await mint(ada, {
-      name: "must not exist",
-      projectId: ada.projectId,
-      monitoringAgentId: agentId,
-    });
-
-    expect(refused.status).toBe(422);
-    const listed = await api.app.inject({
-      method: "GET",
-      url: "/v1/keys",
-      headers: { cookie: ada.cookie },
-    });
-    expect((listed.json() as { keys: unknown[] }).keys).toHaveLength(0);
-  });
-
-  it("serializes concurrent enable calls so only one key is created", async () => {
-    api = await createApi("keys_monitoring_enable_concurrent");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const created = await api.app.inject({
-      method: "POST",
-      url: "/v1/agents",
-      headers: { cookie: ada.cookie },
-      payload: {
-        projectId: ada.projectId,
-        name: "concurrent agent",
-        agentPlatform: "livekit",
-      },
-    });
-    expect(created.statusCode, created.body).toBe(201);
-    const agentId = (created.json() as { agent: { id: string } }).agent.id;
-
-    const [first, second] = await Promise.all([
-      mint(ada, {
-        name: "concurrent monitoring A",
-        projectId: ada.projectId,
-        monitoringAgentId: agentId,
+    const [guarded, ordinary] = await Promise.all([
+      api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: ada.cookie },
+        payload: {
+          monitoringAgentId,
+          projectId: ada.projectId,
+          name: `${activeNamePrefix}guarded`,
+        },
       }),
-      mint(ada, {
-        name: "concurrent monitoring B",
-        projectId: ada.projectId,
-        monitoringAgentId: agentId,
+      api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: mia.cookie },
+        payload: {
+          projectId: mia.projectId,
+          name: `${activeNamePrefix}ordinary`,
+        },
       }),
     ]);
-    expect([first.status, second.status].sort()).toEqual([201, 409]);
 
-    const read = await api.app.inject({
-      method: "GET",
-      url: `/v1/agents/${agentId}`,
-      headers: { cookie: ada.cookie },
+    expect(guarded.statusCode, guarded.body).toBe(201);
+    expect(ordinary.statusCode, ordinary.body).toBe(400);
+    expect(ordinary.json()).toMatchObject({ error: "invalid_request" });
+  });
+
+  it("keeps ordinary duplicate names when no active prefix was requested", async () => {
+    api = await createApi("keys_duplicate_names_stay_ordinary");
+    const ada = await signUp("ada@acme.example", "Acme");
+
+    const first = await mint(ada, {
+      name: "same ordinary name",
+      projectId: ada.projectId,
     });
-    const activeId = (read.json() as {
-      agent: { monitoringExportApiKeyId: string };
-    }).agent.monitoringExportApiKeyId;
-    const listed = await api.app.inject({
-      method: "GET",
-      url: "/v1/keys",
-      headers: { cookie: ada.cookie },
+    const second = await mint(ada, {
+      name: "same ordinary name",
+      projectId: ada.projectId,
     });
-    const keys = (listed.json() as {
-      keys: { id: string; revokedAt: string | null }[];
-    }).keys;
-    expect(keys).toEqual([
-      expect.objectContaining({ id: activeId, revokedAt: null }),
-    ]);
+
+    expect([first.status, second.status]).toEqual([201, 201]);
   });
 });
 

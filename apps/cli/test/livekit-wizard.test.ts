@@ -111,14 +111,17 @@ const WORKER_MONITORED_BEFORE = WORKER_BEFORE.replace(
   "from egma import monitor_livekit\nfrom livekit import agents",
 );
 
-/** Testing added without deleting a pre-existing monitoring hook or adding connect. */
+/** Testing added without deleting the existing monitoring entry. */
 const WORKER_TESTING_PRESERVES_MONITORING = WORKER_AFTER.replace(
   "from egma import mockable",
   "from egma import mockable, monitor_livekit",
 ).replace(
   "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
-  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)",
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)\n    await ctx.connect()",
 );
+
+const WORKER_TESTING_PRESERVES_MONITORING_WITHOUT_CONNECT =
+  WORKER_TESTING_PRESERVES_MONITORING.replace("    await ctx.connect()\n", "");
 
 /** The project's mocked world, as the driven agent would write the file. */
 const MOCK_TOOLS_FILE = [
@@ -137,7 +140,7 @@ const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mock-authoring task and nothing else. */
 const MOCK_AUTHORING_TASK = "Write the mocked world for";
 const REQUIREMENTS_BEFORE = "livekit-agents\n";
-const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.0\n`;
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.1\n`;
 
 /**
  * A scripted agent that reports the edit and does not make it.
@@ -261,7 +264,7 @@ function integrationPreservingMonitoringWithoutConnect(): FakeStep[] {
     {
       kind: "write-file",
       path: "agent.py",
-      content: WORKER_TESTING_PRESERVES_MONITORING,
+      content: WORKER_TESTING_PRESERVES_MONITORING_WITHOUT_CONNECT,
     },
     {
       kind: "write-file",
@@ -317,6 +320,22 @@ function mockingSteps(): FakeStep[] {
     { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
     { kind: "say", text: "egma:wrote check_availability\n" },
     { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function noMockingSteps(): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:none no external dependency tools to mock\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function mixedToolAbortSteps(): FakeStep[] {
+  return [
+    {
+      kind: "say",
+      text: "egma:abort Tool book mixes an external effect with agent-runtime control.\n",
+    },
   ];
 }
 
@@ -873,7 +892,40 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.gate?.changed).toEqual(["agent.py", "requirements.txt"]);
   });
 
-  it("preserves existing monitoring in Testing mode and accepts no explicit connect", async () => {
+  it("runs with no mocked world when the agent has no external dependency tools", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationSteps(),
+      mocking: noMockingSteps(),
+    });
+
+    expect(report.kind).toBe("run-started");
+    expect(platform.mocking.mockTools).toEqual([]);
+    expect(ui.record.gate?.mocks).toEqual([]);
+    expect(ui.record.statuses).toContain(
+      "┊ No mock tools were written, so every tool this agent has runs for real.",
+    );
+  });
+
+  it("does not run when one tool mixes an external effect with workflow control", async () => {
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationSteps(),
+      mocking: mixedToolAbortSteps(),
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        "Tool book mixes an external effect with agent-runtime control.",
+      ),
+    });
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("preserves existing monitoring without adding a connection call in Testing mode", async () => {
     await writeFile(
       path.join(workspace.dir, "agent.py"),
       WORKER_MONITORED_BEFORE.replace("    await ctx.connect()\n", ""),
@@ -887,8 +939,11 @@ describe("LiveKit in the wizard", () => {
     expect(report.kind).toBe("run-started");
     const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
     expect(worker).toContain("monitor_livekit(ctx)");
-    expect(worker).toContain("await mockable(agent, ctx, session)");
     expect(worker).not.toContain("await ctx.connect()");
+    expect(worker).toContain("await mockable(agent, ctx, session)");
+    expect(worker.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+      worker.indexOf("await mockable(agent, ctx, session)"),
+    );
     expect(platform.keys.minted).toHaveLength(0);
 
     const driven = JSON.parse(
@@ -902,6 +957,9 @@ describe("LiveKit in the wizard", () => {
     );
     expect(integration).toContain(
       "including an\nEgma entry that was already there before this task",
+    );
+    expect(integration.replace(/\s+/gu, " ")).toContain(
+      "When the worker relies on `AgentSession.start` to connect, do not add another connection call",
     );
     expect(integration).not.toContain(
       "this repository has not asked for production monitoring",

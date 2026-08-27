@@ -2,8 +2,8 @@ name: Release Python SDK
 
 # Publishing is one deliberate tag push. Merging does not publish.
 #
-#   git tag python-sdk-v0.1.0
-#   git push origin python-sdk-v0.1.0
+#   git tag python-sdk-v0.1.1
+#   git push origin python-sdk-v0.1.1
 #
 # PyPI must trust this repository, workflow, and `pypi` environment. GitHub
 # then supplies one short-lived OIDC credential. No long-lived PyPI token is

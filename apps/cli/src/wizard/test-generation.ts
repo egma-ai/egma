@@ -24,6 +24,9 @@ import { FACTS, LABEL_WIDTH } from "./facts.ts";
 /** The exact number of tests the first suite must contain. */
 export const DEFAULT_TEST_COUNT = 4;
 
+/** The most independent judgments one generated first-suite test may ask for. */
+export const MAX_GENERATED_EXPECTED_BEHAVIORS = 4;
+
 /** What the walk knows about the agent by the time tests are written. */
 export type GenerationContext = {
   /** The folder the agent works in, and the whole of what it may touch. */
@@ -194,6 +197,20 @@ function reportingBlock(): readonly string[] {
   ];
 }
 
+/** Keep one generated test about one situation rather than the whole agent. */
+function expectedBehaviorBlock(): readonly string[] {
+  return [
+    "## Keep each test focused",
+    "",
+    "Write three expected behaviors per generated test. Add a fourth only for",
+    "a distinct critical safety or completion requirement. Never write more",
+    `than ${String(MAX_GENERATED_EXPECTED_BEHAVIORS)} expected behaviors in one test. Each expected behavior becomes one`,
+    "independent grader assertion, so include only requirements that distinguish",
+    "this scenario. Put a general requirement in its own focused test instead",
+    "of repeating it across every test in the suite.",
+  ];
+}
+
 /** What egma asks the coding agent to write, from what the walk found. */
 export function generateTask(context: GenerationContext, howMany: number): string {
   return [
@@ -223,6 +240,8 @@ export function generateTask(context: GenerationContext, howMany: number): strin
     "",
     ...personaBlock(context.personas),
     ...takenBlock(context.taken),
+    "",
+    ...expectedBehaviorBlock(),
     "",
     ...reportingBlock(),
     "",
@@ -271,6 +290,10 @@ export function convertTask(options: ConvertContext): string {
     "",
     ...personaBlock(options.personas),
     ...takenBlock(options.taken),
+    "",
+    ...expectedBehaviorBlock(),
+    "When the source material states fewer than three distinct requirements,",
+    "keep only those requirements. Do not invent another to reach a count.",
     "",
     "## The material",
     "",

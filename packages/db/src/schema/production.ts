@@ -32,15 +32,12 @@ import {
  * nothing is configured, nothing is stamped, and nobody can know in advance
  * when a customer starts.
  *
- * So there is no monitoring setup object here and no health surface. The
- * agent row may point at the current LiveKit export key so a failed local CLI
- * write can recover by immutable ids; that is credential ownership, not an
- * assertion that a worker is sending traffic. What remains in this file is
- * machinery, and only for pull: one notebook per pulled agent, and one
- * short-lived retry record per call that could not be turned into evidence.
- * Once a call arrives it belongs to the ingestion boundary: write-ahead log,
- * object store, drainer, and exactly-once by committed span identity. See
- * ADR-0014 and ADR-0015.
+ * So there is no monitoring setup object here and no health surface. What
+ * remains is machinery, and only for pull: one notebook per pulled agent, and
+ * one short-lived retry record per call that could not be turned into
+ * evidence. There is no receipt book — once a call arrives it belongs to the
+ * ingestion boundary: write-ahead log, object store, drainer, and exactly-once
+ * by committed span identity. See ADR-0014 and ADR-0015.
  */
 
 /**

@@ -126,8 +126,6 @@ export type MonitoringCommandOptions = {
   readonly platform: string | null;
   /** `--platform-agent`, when the account holds more than one. */
   readonly platformAgentId: string | null;
-  /** The non-secret key id printed by a failed LiveKit monitoring setup. */
-  readonly monitoringKeyId: string | null;
   /** `--name`: what to call the agent row, when Egma writes one. */
   readonly name: string | null;
   readonly signal: AbortSignal;
@@ -292,7 +290,6 @@ async function recordMonitoringReceipt(
   options: MonitoringCommandOptions,
   platform: RegisterOptions,
   target: MonitoredTarget,
-  proof?: { readonly monitoringKeyId: string },
 ): Promise<number | null> {
   try {
     await recordMonitoringTarget({
@@ -307,11 +304,9 @@ async function recordMonitoringReceipt(
       cause instanceof MonitoringTargetRecordError
         ? cause.message
         : `could not finish the repository record: ${cause instanceof Error ? cause.message : String(cause)}`;
-    const recoveryProof =
-      proof === undefined ? "" : ` --monitoring-key-id ${proof.monitoringKeyId}`;
     const reason =
       `Egma finished remote monitoring setup for agent ${target.id}, but ${detail} The remote setup remains active. ` +
-      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${target.id}${recoveryProof} --url ${platform.url}. ` +
+      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${target.id} --url ${platform.url}. ` +
       "That recovery command does not create an agent or mint a key.";
     options.out("status: repository-record-failed");
     options.out(`reason: ${reason}`);
@@ -342,7 +337,7 @@ async function proveMonitoringSetup(
       monitoring.pullProductionCalls &&
       monitoring.platformAgentId !== null &&
       monitoring.platformAgentId !== "" &&
-      monitoring.monitoringKeyPresent
+      monitoring.monitoringApiKeyHint !== null
     ) {
       return null;
     }
@@ -359,19 +354,12 @@ async function proveMonitoringSetup(
     );
   }
 
-  const keyId = (options.monitoringKeyId ?? "").trim();
-  if (keyId === "") {
-    return refuseMissingMonitoring(
-      options,
-      "LiveKit monitoring recovery needs --monitoring-key-id <id> from the earlier failed setup receipt. Nothing was recorded.",
-    );
-  }
-
-  if (monitoring.monitoringExportApiKeyId === keyId) return null;
-  return refuseMissingMonitoring(
-    options,
-    `Key ${keyId} is not the active LiveKit monitoring key for agent ${monitoring.agentId}. Nothing was recorded.`,
-  );
+  return monitoring.agentPlatform === "livekit"
+    ? null
+    : refuseMissingMonitoring(
+        options,
+        `Agent ${monitoring.agentId} is not bound to LiveKit. Nothing was recorded.`,
+      );
 }
 
 /** Recover only the local catalog entry for an already-created Egma agent. */
@@ -699,17 +687,6 @@ async function enableLiveKit(
       // The deliverable, whether the file was written or not: wherever this
       // worker really runs, these two lines are what it needs.
       for (const line of wired.lines) options.out(`env: ${line}`);
-      const localFailure = await recordMonitoringReceipt(
-        options,
-        platform,
-        {
-          id: wired.agent.id,
-          name: wired.agent.name,
-          projectId: wired.agent.projectId,
-        },
-        { monitoringKeyId: wired.keyId },
-      );
-      if (localFailure !== null) return localFailure;
       options.out("status: wired");
       return MONITORING_EXIT.done;
     }
@@ -718,7 +695,7 @@ async function enableLiveKit(
       options.out(`agent_name: ${wired.agent.name}`);
       options.out(`project_id: ${wired.agent.projectId}`);
       options.out("agent_registration: reused");
-      options.out(`monitoring_key_id: ${wired.keyId}`);
+      if (wired.keyId !== null) options.out(`monitoring_key_id: ${wired.keyId}`);
       options.out("status: already-configured");
       options.out(`reason: ${wired.reason}`);
       options.fail(wired.reason);

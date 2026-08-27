@@ -2,11 +2,11 @@
  * Project keys used by monitored workers.
  *
  * Minting returns the secret once, and the only place it is written down is
- * the file the developer agreed to. The mint also binds the key's non-secret
- * id to the stable agent id, which is what makes a failed local write
- * recoverable without trusting a display name. The worker never receives the
- * terminal's own login credential — that one is this machine's identity, and
- * revoking it would also sign this laptop out.
+ * the file the developer agreed to. The stable agent id in the key name lets
+ * the CLI find its own keys through the existing key list; no monitoring-only
+ * database relationship is needed. The worker never receives the terminal's
+ * own login credential — that one is this machine's identity, and revoking it
+ * would also sign this laptop out.
  *
  * The key is scoped by naming a project. There is no scope field to send: the
  * request names the project and the scope is derived, which is what makes a
@@ -15,6 +15,7 @@
 
 import {
   createApiKey as createApiKeyRequest,
+  listApiKeys as listApiKeysRequest,
   revokeApiKey as revokeApiKeyRequest,
 } from "@egma/platform-api/client";
 
@@ -81,10 +82,21 @@ export type Minted =
       readonly reason: string;
     }
   | { readonly kind: "uncertain"; readonly reason: string }
-  | { readonly kind: "already-bound" }
+  | { readonly kind: "active-name-conflict" }
   | CommonFailure;
 
 export type Revoked = { readonly kind: "revoked" } | CommonFailure;
+
+export type ActiveProjectKey = {
+  readonly id: string;
+  readonly name: string;
+  readonly projectId: string;
+  readonly looksLike: string;
+};
+
+export type ListedProjectKeys =
+  | { readonly kind: "listed"; readonly keys: readonly ActiveProjectKey[] }
+  | CommonFailure;
 
 function apiErrorCode(error: unknown): string {
   return typeof error === "object" && error !== null && "error" in error
@@ -109,19 +121,14 @@ export async function mintProjectKey(
 ): Promise<Minted> {
   const answer = await createApiKeyRequest(
     {
-      name: input.name,
-      projectId: input.projectId,
-      monitoringAgentId: input.monitoringAgentId,
+      body: {
+        name: input.name,
+        projectId: input.projectId,
+        monitoringAgentId: input.monitoringAgentId,
+      },
     },
     requestOptions(options),
   );
-
-  if (
-    answer.response?.status === 409 &&
-    apiErrorCode(answer.error) === "monitoring_key_already_bound"
-  ) {
-    return { kind: "already-bound" };
-  }
 
   if (answer.response === undefined) {
     return {
@@ -130,6 +137,13 @@ export async function mintProjectKey(
         `${platformUnreachableMessage(options.url)} The key request may still ` +
         "have completed before its response was lost.",
     };
+  }
+
+  if (
+    answer.response.status === 409 &&
+    apiErrorCode(answer.error) === "active_key_name_conflict"
+  ) {
+    return { kind: "active-name-conflict" };
   }
 
   const failed = commonFailure(answer, options);
@@ -177,6 +191,57 @@ export async function mintProjectKey(
       // door, so nothing here may quietly take a character out of it.
       secret: new MintedSecret(secret),
     },
+  };
+}
+
+/**
+ * Find live project keys made for one stable agent.
+ *
+ * Names are the recovery ledger already exposed by the hosted platform. The
+ * prefix contains the immutable agent id, so another agent with a similar
+ * display name cannot be mistaken for this one. Revoked keys are history and
+ * never block a safe retry.
+ */
+export async function listActiveProjectKeys(
+  input: { readonly projectId: string; readonly namePrefix: string },
+  options: RegisterOptions,
+): Promise<ListedProjectKeys> {
+  const answer = await listApiKeysRequest(requestOptions(options));
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+
+  const rows = answer.data?.keys;
+  if (!Array.isArray(rows)) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without the API-key list. No key was created and no environment file was changed.",
+    };
+  }
+
+  return {
+    kind: "listed",
+    keys: rows.flatMap((row) => {
+      const id = platformText(row.id);
+      const name = row.name === null ? "" : platformText(row.name);
+      const projectId = row.projectId === null ? "" : platformText(row.projectId);
+      if (
+        id === "" ||
+        projectId !== input.projectId ||
+        row.revokedAt !== null ||
+        !name.startsWith(input.namePrefix)
+      ) {
+        return [];
+      }
+      return [
+        {
+          id,
+          name,
+          projectId,
+          looksLike: platformText(row.looksLike),
+        },
+      ];
+    }),
   };
 }
 

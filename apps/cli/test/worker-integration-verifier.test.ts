@@ -81,6 +81,21 @@ const WORKER_WITH_DIRECT_MONITORING = WORKER_BEFORE.replace(
   "async def entrypoint(ctx):\n    monitor_livekit(ctx)\n    await ctx.connect()",
 );
 
+const WORKER_WITH_DIRECT_BOTH = [
+  "from egma import mockable, monitor_livekit",
+  "from livekit.agents import AgentSession",
+  "",
+  "",
+  "async def entrypoint(ctx):",
+  "    monitor_livekit(ctx)",
+  "    await ctx.connect()",
+  "    agent = object()",
+  "    session = AgentSession()",
+  "    await mockable(agent, ctx, session)",
+  "    await session.start(agent=agent, room=ctx.room)",
+  "",
+].join("\n");
+
 type Workspace = {
   readonly dir: string;
   readonly worker: string;
@@ -278,6 +293,134 @@ describe("the LiveKit worker integration verifier", () => {
     );
 
     expect(result.kind).toBe("verified");
+  });
+
+  it("rejects an Egma SDK version without AgentTask handoff support", async () => {
+    const made = await workspace();
+
+    const result = await claim(
+      made,
+      WORKER_WITH_DIRECT_MOCKABLE,
+      "requirements.txt",
+      "livekit-agents>=1.6.7\negma>=0.1.0\n",
+    );
+
+    expect(result).toMatchObject({
+      kind: "unverified",
+      reason: expect.stringContaining("egma>=0.1.1"),
+    });
+  });
+
+  it("accepts testing integration when the worker relies on session.start to connect", async () => {
+    const made = await workspace();
+    const before = WORKER_BEFORE.replace("    await ctx.connect()\n", "");
+    await writeFile(made.worker, before, "utf8");
+    const snapshot = await snapshotOf(made.dir);
+    const integrated = before
+      .replace(
+        "from livekit.agents import AgentSession",
+        "from egma import mockable\nfrom livekit.agents import AgentSession",
+      )
+      .replace(
+        "    await session.start(agent=agent, room=ctx.room)",
+        "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+      );
+    await writeFile(made.worker, integrated, "utf8");
+    await writeFile(
+      path.join(made.dir, "requirements.txt"),
+      "livekit-agents>=1.2\negma>=0.2\n",
+      "utf8",
+    );
+
+    const result = await verifyWorkerIntegrationClaim(
+      made.dir,
+      snapshot,
+      "src/agent.py",
+      "requirements.txt",
+      "testing",
+    );
+
+    expect(result).toMatchObject({ kind: "verified" });
+  });
+
+  it("rejects an awaited ctx.connect added only for the Egma integration", async () => {
+    const made = await workspace();
+    const before = WORKER_BEFORE.replace("    await ctx.connect()\n", "");
+    await writeFile(made.worker, before, "utf8");
+    const snapshot = await snapshotOf(made.dir);
+    const integrated = WORKER_WITH_DIRECT_MOCKABLE;
+    await writeFile(made.worker, integrated, "utf8");
+    await writeFile(
+      path.join(made.dir, "requirements.txt"),
+      "livekit-agents>=1.2\negma>=0.2\n",
+      "utf8",
+    );
+
+    const result = await verifyWorkerIntegrationClaim(
+      made.dir,
+      snapshot,
+      "src/agent.py",
+      "requirements.txt",
+      "testing",
+    );
+
+    expect(result).toMatchObject({
+      kind: "unverified",
+      reason: expect.stringContaining(
+        "changed worker code outside the exact Egma imports and entry hooks",
+      ),
+    });
+  });
+
+  it("rejects mockable before the awaited ctx.connect", async () => {
+    const made = await workspace();
+    const snapshot = await snapshotOf(made.dir);
+    const wrongOrder = WORKER_WITH_DIRECT_MOCKABLE
+      .replace("    await ctx.connect()\n", "")
+      .replace(
+        "    await session.start(agent=agent, room=ctx.room)",
+        "    await ctx.connect()\n    await session.start(agent=agent, room=ctx.room)",
+      );
+    await writeFile(made.worker, wrongOrder, "utf8");
+    await writeFile(
+      path.join(made.dir, "requirements.txt"),
+      "livekit-agents>=1.2\negma>=0.2\n",
+      "utf8",
+    );
+
+    const result = await verifyWorkerIntegrationClaim(
+      made.dir,
+      snapshot,
+      "src/agent.py",
+      "requirements.txt",
+      "testing",
+    );
+
+    expect(result).toMatchObject({
+      kind: "unverified",
+      reason: expect.stringContaining("ctx.connect() runs after mockable"),
+    });
+  });
+
+  it("accepts monitor, connect, mockable, and matching session.start in order", async () => {
+    const made = await workspace();
+    const snapshot = await snapshotOf(made.dir);
+    await writeFile(made.worker, WORKER_WITH_DIRECT_BOTH, "utf8");
+    await writeFile(
+      path.join(made.dir, "requirements.txt"),
+      "livekit-agents>=1.2\negma>=0.2\n",
+      "utf8",
+    );
+
+    const result = await verifyWorkerIntegrationClaim(
+      made.dir,
+      snapshot,
+      "src/agent.py",
+      "requirements.txt",
+      "both",
+    );
+
+    expect(result).toMatchObject({ kind: "verified" });
   });
 
   it("rejects a pyproject that does not declare egma", async () => {
@@ -1078,7 +1221,7 @@ describe("the LiveKit worker integration verifier", () => {
     await writeFile(serviceWorker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
     await writeFile(
       path.join(made.dir, "service", "requirements.txt"),
-      "livekit-agents>=1.2\negma>=0.1.0\n",
+      "livekit-agents>=1.2\negma>=0.1.1\n",
       "utf8",
     );
 

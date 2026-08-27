@@ -28,7 +28,10 @@ import {
 import { discoveryInstructions } from "../src/wizard/discovery.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
-import { generateInstructions } from "../src/wizard/test-generation.ts";
+import {
+  generateInstructions,
+  MAX_GENERATED_EXPECTED_BEHAVIORS,
+} from "../src/wizard/test-generation.ts";
 import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
 import { workerIntegrationInstructions } from "../src/wizard/worker-integration-step.ts";
 import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
@@ -203,6 +206,33 @@ describe("Egma's instruction content", () => {
     );
   });
 
+  it("keeps generated tests focused on at most four grader assertions", () => {
+    const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
+    const instructions = generateInstructions(
+      {
+        cwd: "/repo",
+        suiteDirectory: "release-contract",
+        facts: new Map(),
+        prompt: null,
+        toolCount: 0,
+        agentName: "agent",
+        taken: [],
+        personas: ["Everyday caller"],
+      },
+      4,
+    ).replace(/\s+/gu, " ");
+
+    expect(MAX_GENERATED_EXPECTED_BEHAVIORS).toBe(4);
+    expect(writing).toContain("write three expected behaviors by default");
+    expect(writing).toContain("Never write more than four expected behaviors");
+    expect(instructions).toContain(
+      "Each expected behavior becomes one independent grader assertion",
+    );
+    expect(instructions).toContain(
+      "Put a general requirement in its own focused test instead of repeating it",
+    );
+  });
+
   /**
    * The rule has to stand on its own where the project's mocked world is
    * empty, which is every Retell repository: mock tools are not served there
@@ -237,6 +267,23 @@ describe("Egma's instruction content", () => {
     // The testing entry, where it goes and why the wait is structural.
     expect(sdk).toContain("await mockable(agent, ctx, session)");
     expect(sdk).toContain("AgentSession.start");
+    expect(sdk).toContain("do not add another\nconnection call");
+    const testingExample = /## Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+      sdk,
+    )?.[1];
+    const bothExample = /## Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+      sdk,
+    )?.[1];
+    expect(testingExample).toBeDefined();
+    expect(bothExample).toBeDefined();
+    expect(testingExample).not.toContain("await ctx.connect()");
+    expect(bothExample?.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+      bothExample?.indexOf("await mockable(agent, ctx, session)") ?? -1,
+    );
+    expect(bothExample).not.toContain("await ctx.connect()");
+    expect(bothExample?.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+      bothExample?.indexOf("await session.start") ?? -1,
+    );
     // The monitoring entry, which ticket 02 reuses and this lane never adds.
     expect(sdk).toContain("monitor_livekit(ctx)");
     expect(sdk).toContain("ctx.connect()");
@@ -247,6 +294,12 @@ describe("Egma's instruction content", () => {
     expect(sdk).not.toContain(".env");
     expect(sdk).toContain("When the entrypoint is unknown");
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
+  });
+
+  it("requires the first Python SDK release that follows LiveKit handoffs", () => {
+    const sdk = integrateEgmaReference("integrate-egma-sdk");
+
+    expect(sdk).toContain("`egma>=0.1.1`");
   });
 
   /** The mock-world task owns no worker file or SDK instructions. */
@@ -275,6 +328,28 @@ describe("Egma's instruction content", () => {
     ]) {
       expect(authoring).toContain(marker);
     }
+  });
+
+  it("mocks external dependencies without replacing the agent's own workflow", () => {
+    const authoring = mockAuthoringInstructions({
+      cwd: "/repo",
+      suiteDirectory: "generated",
+      facts: new Map([["framework", "livekit-agents"]]),
+      agentName: "front-desk",
+      tests: ["books-an-appointment"],
+    }).replace(/\s+/gu, " ");
+
+    expect(authoring).toContain(
+      "Only mock a tool when its real implementation crosses a boundary outside the agent process",
+    );
+    expect(authoring).toContain("AgentTask.complete");
+    expect(authoring).toContain("TaskGroup");
+    expect(authoring).toContain("in-memory state");
+    expect(authoring).toContain("egma:none");
+    expect(authoring).toContain("mixes an external effect with agent-runtime control");
+    expect(authoring).toContain("egma:abort");
+    expect(authoring).toContain("cannot safely run only half of its implementation");
+    expect(authoring).not.toContain("For **each real tool**");
   });
 
   it("gives one worker owner the selected SDK reference and final mode", () => {

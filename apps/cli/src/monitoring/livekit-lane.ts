@@ -11,11 +11,12 @@
  * Nothing here flips a switch on the platform. Push is observed, never declared
  * (ADR-0015): the worker exports and the evidence is the whole record. What
  * this does write is the agent's identity in the roster, bound to LiveKit, so
- * the agent exists in Egma even though no switch says so. The agent row keeps
- * only the non-secret id of its current monitoring key. The secret lives in
- * the customer's `.env`; the full key record lives in Egma, where it can be
- * rotated or revoked.
+ * the agent exists in Egma even though no switch says so. The worker key is an
+ * ordinary project key. Its stable name is the recovery receipt already held
+ * by Egma's key list; no monitoring-only database relationship is required.
  */
+
+import { randomBytes } from "node:crypto";
 
 import {
   registerBoundAgent,
@@ -23,18 +24,16 @@ import {
   type RegisterOptions,
 } from "../platform/agents.ts";
 import {
+  listActiveProjectKeys,
   mintProjectKey,
   revokeProjectKey,
   type MintedKey,
 } from "../platform/api-keys.ts";
-import {
-  readAgentMonitoring,
-  type ReadMonitoring,
-} from "../platform/monitoring.ts";
+import { readAgentMonitoring } from "../platform/monitoring.ts";
 import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
 import { recordMonitoringTarget } from "./record-target.ts";
 
-/** The platform binding a LiveKit worker's agent row carries. */
+/** The LiveKit identity saved in the repository before a worker key is minted. */
 const LIVEKIT = "livekit";
 
 /** Cleanup must finish even when the developer stops the parent command. */
@@ -47,8 +46,17 @@ const COMMIT_TIMEOUT_MS = 30_000;
  * What Egma calls the key it mints, so a person reading the key list a year
  * later can tell what revoking it would break.
  */
-export function monitoringKeyName(agentName: string): string {
-  return `${agentName} production monitoring`;
+/** Stable across display-name changes, and readable in the project key list. */
+function monitoringKeyPrefix(agentId: string): string {
+  return `Egma monitoring ${agentId} — `;
+}
+
+export function monitoringKeyName(
+  agentName: string,
+  agentId: string,
+  attempt: string,
+): string {
+  return `${monitoringKeyPrefix(agentId)}${agentName} [${attempt}]`;
 }
 
 /** The closing sentence, which promises nothing Egma cannot see. */
@@ -81,7 +89,8 @@ export type LiveKitOutcome =
   | {
       readonly kind: "already-configured";
       readonly agent: RegisteredAgent;
-      readonly keyId: string;
+      /** Null when another member's key is deliberately not visible here. */
+      readonly keyId: string | null;
       readonly reason: string;
     }
   | {
@@ -140,17 +149,39 @@ function cleanupResult(
   );
 }
 
-/** Keep a fresh remote agent's stable id so a retry cannot create a duplicate. */
-async function keepRetryTarget(
+/** Finish a Ctrl-C after mint without leaving this invocation's key behind. */
+async function interruptedAfterMint(
+  options: LiveKitOptions,
+  agent: RegisteredAgent,
+  created: boolean,
+  keyId: string,
+): Promise<LiveKitOutcome> {
+  const keyRevoked = await rollbackUncommittedKey(keyId, options.platform);
+  return keyRevoked
+    ? interruptedAfterRecord(agent, created)
+    : {
+        kind: "failed",
+        reason:
+          "The monitoring command was stopped after Egma minted a key. " +
+          cleanupResult(keyRevoked, keyId),
+      };
+}
+
+/**
+ * Commit the stable agent before any key can exist.
+ *
+ * This is the retry boundary. If the local write fails, the command stops
+ * before minting. A later run can recover the exact remote row by its printed
+ * id without any monitoring-only state on that row.
+ */
+async function recordTargetBeforeKey(
   options: LiveKitOptions,
   agent: RegisteredAgent,
   created: boolean,
 ): Promise<
-  | { readonly kind: "not-needed" }
-  | { readonly kind: "kept"; readonly agentId: string; readonly reason: string }
+  | { readonly kind: "recorded" }
   | { readonly kind: "failed"; readonly reason: string }
 > {
-  if (!created) return { kind: "not-needed" };
   try {
     await recordMonitoringTarget({
       cwd: options.cwd,
@@ -161,69 +192,32 @@ async function keepRetryTarget(
         : { fetchImpl: options.platform.fetchImpl }),
       signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
     });
-    options.say(
-      `Kept agent ${agent.id} in egma/config.yaml so the next run reuses it.`,
-      "action",
-    );
-    return {
-      kind: "kept",
-      agentId: agent.id,
-      reason: `The repository now keeps agent ${agent.id}, so the next run will reuse it.`,
-    };
+    if (created) {
+      options.say(
+        `Saved agent ${agent.id} in egma/config.yaml before creating its worker key.`,
+        "action",
+      );
+    }
+    return { kind: "recorded" };
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     return {
       kind: "failed",
       reason:
-        `Agent ${agent.id} remains in Egma, but Egma could not write its retry record: ${detail} ` +
-        `Keep this stable id and add it to egma/config.yaml before retrying.`,
+        `Agent ${agent.id} remains in Egma, but Egma could not save it in egma/config.yaml: ${detail} ` +
+        `No worker key was created. After the repository is writable, run egma monitoring record --agent ${agent.id} --url ${options.platform.url}.`,
     };
   }
 }
 
-/** Preserve the recovery fact after the alternate screen disappears. */
-function interruptedAfter(
-  retry: Awaited<ReturnType<typeof keepRetryTarget>>,
+/** Preserve the stable fresh-agent receipt after the alternate screen closes. */
+function interruptedAfterRecord(
+  agent: RegisteredAgent,
+  created: boolean,
 ): Extract<LiveKitOutcome, { readonly kind: "interrupted" }> {
-  return retry.kind === "kept"
-    ? { kind: "interrupted", retryTarget: { agentId: retry.agentId } }
+  return created
+    ? { kind: "interrupted", retryTarget: { agentId: agent.id } }
     : { kind: "interrupted" };
-}
-
-function bindingFailure(
-  checked: ReadMonitoring,
-  agentId: string,
-): { readonly reason: string; readonly retry: string } {
-  switch (checked.kind) {
-    case "monitoring":
-      return checked.monitoring.monitoringExportApiKeyId === null
-        ? {
-            reason: `This Egma platform did not bind the new monitoring key to agent ${JSON.stringify(agentId)}.`,
-            retry: "Update the Egma platform, then run this command again.",
-          }
-        : {
-            reason: `Agent ${JSON.stringify(agentId)} reported a different active monitoring key after Egma minted the new one.`,
-            retry:
-              "Check the agent's active monitoring key, then run this command again.",
-          };
-    case "not-found":
-      return {
-        reason: `Egma could not confirm the new monitoring key because agent ${JSON.stringify(agentId)} was not found after minting it.`,
-        retry: "Check that the agent still exists, then run this command again.",
-      };
-    case "not-authenticated":
-      return {
-        reason:
-          "Egma could not confirm the new monitoring key because this machine's credential was refused.",
-        retry: "Run egma login, then run this command again.",
-      };
-    case "refused":
-    case "unreachable":
-      return {
-        reason: `Egma could not confirm the new monitoring key. ${checked.reason}`,
-        retry: "Fix the platform connection, then run this command again.",
-      };
-  }
 }
 
 /**
@@ -241,7 +235,6 @@ async function theAgent(
       readonly kind: "agent";
       readonly agent: RegisteredAgent;
       readonly created: boolean;
-      readonly monitoringKeyId: string | null;
     }
   | {
       readonly kind: "failed";
@@ -262,7 +255,6 @@ async function theAgent(
             projectId: read.monitoring.projectId,
           },
           created: false,
-          monitoringKeyId: read.monitoring.monitoringExportApiKeyId,
         };
       case "not-found":
         return {
@@ -294,7 +286,6 @@ async function theAgent(
         kind: "agent",
         agent: written.agent,
         created: written.result === "created",
-        monitoringKeyId: null,
       };
     case "name-taken":
       return {
@@ -346,32 +337,58 @@ export async function wireLiveKitMonitoring(
       ? { kind: "interrupted" }
       : { kind: "failed", reason: resolved.reason };
   }
-  const { agent, created, monitoringKeyId } = resolved;
+  const { agent, created } = resolved;
   if (created) {
     options.say(`${agent.name} is on Egma, bound to LiveKit Agents.`, "action");
   }
-  if (monitoringKeyId !== null) {
+
+  const recorded = await recordTargetBeforeKey(options, agent, created);
+  if (recorded.kind === "failed") {
+    return { kind: "failed", reason: recorded.reason };
+  }
+  if (options.signal.aborted) return interruptedAfterRecord(agent, created);
+
+  const namePrefix = monitoringKeyPrefix(agent.id);
+  const before = await listActiveProjectKeys(
+    { projectId: agent.projectId, namePrefix },
+    {
+      ...options.platform,
+      signal: AbortSignal.any([
+        options.signal,
+        AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+      ]),
+    },
+  );
+  if (options.signal.aborted) return interruptedAfterRecord(agent, created);
+  if (before.kind !== "listed") {
+    return {
+      kind: "failed",
+      reason:
+        before.kind === "not-authenticated"
+          ? NOT_SIGNED_IN
+          : `${before.reason} No key was created and no environment file was changed.`,
+    };
+  }
+  if (before.keys.length > 0) {
+    if (before.keys.length > 1) {
+      return {
+        kind: "failed",
+        reason:
+          `Egma found ${String(before.keys.length)} active project keys for ${agent.name}. ` +
+          "It cannot safely choose one. Revoke the duplicate worker keys in Egma, then run enable again. " +
+          "No key was created and no file was changed.",
+      };
+    }
+    const current = before.keys[0]!;
     return {
       kind: "already-configured",
       agent,
-      keyId: monitoringKeyId,
+      keyId: current.id,
       reason:
-        `LiveKit monitoring is already configured for ${agent.name}. ` +
-        "No key was rotated and no file was changed. Revoke the current " +
-        "monitoring key in Egma before running enable to replace it.",
+        `LiveKit monitoring already has an active project key for ${agent.name} ` +
+        `(${current.looksLike || current.id}). No key was rotated and no file was changed. ` +
+        "Revoke that key in Egma before running enable to replace it.",
     };
-  }
-
-  if (options.signal.aborted) {
-    const retry = await keepRetryTarget(options, agent, created);
-    return retry.kind === "failed"
-      ? {
-          kind: "failed",
-          reason:
-            "The monitoring command was stopped after Egma created an agent. " +
-            `${retry.reason} No environment file was changed.`,
-        }
-      : interruptedAfter(retry);
   }
 
   /*
@@ -379,10 +396,14 @@ export async function wireLiveKitMonitoring(
    *
    * The terminal's credential is this machine's identity. A worker in a
    * deployment holding it would be this laptop everywhere, and revoking it
-   * later would sign the laptop out — so what the worker gets is minted for
-   * this project, named for the job, and revocable on its own.
+   * later would sign the laptop out. The worker gets a normal project key with
+   * a stable agent-id name, so the existing key list can make retries safe.
    */
-  const keyName = monitoringKeyName(agent.name);
+  const keyName = monitoringKeyName(
+    agent.name,
+    agent.id,
+    randomBytes(8).toString("hex"),
+  );
   const minted = await mintProjectKey(
     {
       name: keyName,
@@ -405,145 +426,127 @@ export async function wireLiveKitMonitoring(
         minted.keyId,
         options.platform,
       );
-      const retry = await keepRetryTarget(options, agent, created);
       return {
         kind: "failed",
-        reason:
-          `${minted.reason} ${cleanupResult(keyRevoked, minted.keyId)}` +
-          (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
+        reason: `${minted.reason} ${cleanupResult(keyRevoked, minted.keyId)}`,
       };
     }
     case "uncertain":
     case "unreachable": {
-      const retry = await keepRetryTarget(options, agent, created);
-      return {
-        kind: "failed",
-        reason:
-          `${minted.reason} Check for an active key named ${JSON.stringify(keyName)} ` +
-          `and check the monitoring key on agent ${agent.id} before retrying. ` +
-          "Revoke any key from this attempt. No environment file was changed." +
-          (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
-      };
-    }
-    case "already-bound": {
-      const current = await readAgentMonitoring(agent.id, {
-        ...options.platform,
-        signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
-      });
-      const retry = await keepRetryTarget(options, agent, created);
-      const keyId = current.kind === "monitoring"
-        ? current.monitoring.monitoringExportApiKeyId
-        : null;
-      if (keyId === null || retry.kind === "failed") {
-        const failure = bindingFailure(current, agent.id);
+      const found = await listActiveProjectKeys(
+        { projectId: agent.projectId, namePrefix },
+        {
+          ...options.platform,
+          signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
+        },
+      );
+      if (found.kind !== "listed") {
+        const detail =
+          found.kind === "not-authenticated" ? NOT_SIGNED_IN : found.reason;
         return {
           kind: "failed",
           reason:
-            `${failure.reason} No key was minted and no environment file was changed.` +
-            (retry.kind === "not-needed" ? " " : ` ${retry.reason} `) +
-            failure.retry,
+            `${minted.reason} Egma could not reconcile the request by its exact key name: ${detail} ` +
+            `Check for an active key named ${JSON.stringify(keyName)} before retrying. ` +
+            "No environment file was changed.",
         };
       }
+      const exact = found.keys.filter((candidate) => candidate.name === keyName);
+      if (exact.length === 0) {
+        return {
+          kind: "failed",
+          reason:
+            `${minted.reason} Egma found no active key from this attempt. ` +
+            "No environment file was changed.",
+        };
+      }
+      if (exact.length > 1) {
+        return {
+          kind: "failed",
+          reason:
+            `${minted.reason} Egma found ${String(exact.length)} active keys named ` +
+            `${JSON.stringify(keyName)} and cannot tell which concurrent request created each one. ` +
+            "Check those keys before retrying. No environment file was changed.",
+        };
+      }
+      const uncertainKey = exact[0]!;
+      const keyRevoked = await rollbackUncommittedKey(
+        uncertainKey.id,
+        options.platform,
+      );
+      return {
+        kind: "failed",
+        reason:
+          `${minted.reason} Reconciled ${JSON.stringify(keyName)} for agent ${agent.id}. ` +
+          cleanupResult(keyRevoked, uncertainKey.id),
+      };
+    }
+    case "not-authenticated":
+      return {
+        kind: "failed",
+        reason: `${NOT_SIGNED_IN} No environment file was changed.`,
+      };
+    case "active-name-conflict":
       return {
         kind: "already-configured",
         agent,
-        keyId,
+        keyId: null,
         reason:
-          `LiveKit monitoring became configured for ${agent.name} while this command was running. ` +
-          "No key was rotated and no file was changed.",
+          `LiveKit monitoring already has an active project key for ${agent.name}. ` +
+          "It may belong to another project member, so Egma does not show its details here. " +
+          "No key was minted and no file was changed. Revoke that worker key in Egma before running enable to replace it.",
       };
-    }
-    case "not-authenticated": {
-      const retry = await keepRetryTarget(options, agent, created);
+    case "refused":
       return {
         kind: "failed",
-        reason:
-          `${NOT_SIGNED_IN} No environment file was changed.` +
-          (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
+        reason: `${minted.reason} No environment file was changed.`,
       };
-    }
-    case "refused": {
-      const retry = await keepRetryTarget(options, agent, created);
-      return {
-        kind: "failed",
-        reason:
-          `${minted.reason} No environment file was changed.` +
-          (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
-      };
-    }
+  }
+
+  if (options.signal.aborted) {
+    return interruptedAfterMint(options, agent, created, key.id);
   }
 
   /*
-   * Do not trust a successful create response by itself. Older Egma versions
-   * accepted `monitoringAgentId` as an unknown field, minted an ordinary key,
-   * and answered 201 without binding it. Read the agent back before the one-
-   * time secret crosses the local-write boundary.
+   * The list is also the concurrency check. If another enable passed the empty
+   * preflight at the same time, this invocation revokes only its own returned
+   * key and asks the developer to retry after the competing setup settles.
    */
-  const checked = await readAgentMonitoring(agent.id, {
-    ...options.platform,
-    signal: AbortSignal.any([
-      options.signal,
-      AbortSignal.timeout(COMMIT_TIMEOUT_MS),
-    ]),
-  });
-  const bound =
-    checked.kind === "monitoring" &&
-    checked.monitoring.monitoringExportApiKeyId === key.id;
-  const differentActiveKey =
-    checked.kind === "monitoring" &&
-    checked.monitoring.monitoringExportApiKeyId !== null &&
-    checked.monitoring.monitoringExportApiKeyId !== key.id;
-
-  // A stop after mint is not permission to leave a new worker credential or
-  // finish writing it. Cleanup gets its own signal so the stop cannot cancel
-  // the rollback itself.
-  if (options.signal.aborted) {
+  const after = await listActiveProjectKeys(
+    { projectId: agent.projectId, namePrefix },
+    {
+      ...options.platform,
+      signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+    },
+  );
+  if (after.kind !== "listed") {
     const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
-    const retry = await keepRetryTarget(options, agent, created);
-    return keyRevoked && retry.kind !== "failed"
-      ? interruptedAfter(retry)
-      : {
-          kind: "failed",
-          reason:
-            "The monitoring command was stopped after Egma minted a key. " +
-            cleanupResult(keyRevoked, key.id) +
-            (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
-        };
-  }
-
-  if (differentActiveKey) {
-    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
-    const retry = await keepRetryTarget(options, agent, created);
-    if (!keyRevoked || retry.kind === "failed") {
-      return {
-        kind: "failed",
-        reason:
-          `Agent ${JSON.stringify(agent.id)} reported a different active monitoring key after Egma minted the new one. ` +
-          cleanupResult(keyRevoked, key.id) +
-          (retry.kind === "not-needed" ? "" : ` ${retry.reason}`),
-      };
-    }
-    return {
-      kind: "already-configured",
-      agent,
-      keyId: checked.monitoring.monitoringExportApiKeyId as string,
-      reason:
-        `LiveKit monitoring became configured for ${agent.name} while this command was running. ` +
-        "The unused key was revoked and no environment file was changed.",
-    };
-  }
-
-  if (!bound) {
-    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
-    const retry = await keepRetryTarget(options, agent, created);
-    const failure = bindingFailure(checked, agent.id);
+    const detail =
+      after.kind === "not-authenticated" ? NOT_SIGNED_IN : after.reason;
     return {
       kind: "failed",
       reason:
-        `${failure.reason} ${cleanupResult(keyRevoked, key.id)}` +
-        (retry.kind === "not-needed" ? " " : ` ${retry.reason} `) +
-        failure.retry,
+        `Egma could not verify the new key in the project key list: ${detail} ` +
+        cleanupResult(keyRevoked, key.id),
     };
+  }
+  const ownIsActive = after.keys.some((candidate) => candidate.id === key.id);
+  const competing = after.keys.filter((candidate) => candidate.id !== key.id);
+  if (!ownIsActive || competing.length > 0) {
+    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
+    const why = ownIsActive
+      ? "Another LiveKit monitoring setup ran for this agent at the same time."
+      : `Egma did not find key ${key.id} in the active project key list.`;
+    return {
+      kind: "failed",
+      reason:
+        `${why} ${cleanupResult(keyRevoked, key.id)} ` +
+        "Check the agent's project keys, then run enable again.",
+    };
+  }
+
+  if (options.signal.aborted) {
+    return interruptedAfterMint(options, agent, created, key.id);
   }
 
   const values = { url: options.platform.url, key: key.secret };
