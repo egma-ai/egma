@@ -42,16 +42,53 @@ import { createPortal } from "react-dom";
  * worse than one that is simply there. That is the trade a dialog already
  * makes.
  */
+/**
+ * The marks, owned by all the covers together rather than by each of them.
+ *
+ * **Two covers can stand at once, and each holding its own list is a hole.**
+ * The second one to mount skips everything the first already marked — that is
+ * what keeps a surface Radix made inert from being taken over — so its list is
+ * empty, and the first one to unmount then hands the document back while the
+ * second is still standing opaque in front of it. A keyboard or a screen reader
+ * reaches controls nobody can see.
+ *
+ * Nothing today produces that overlap: the shell leaves the entrance to cover
+ * itself, signing out needs a settled session, and React runs a fallback's
+ * cleanup before the page that replaces it mounts. All three are true and none
+ * of them is written down anywhere near this file, which is the kind of
+ * invariant that survives exactly until somebody adds a fifth mount point. So
+ * the count decides instead: the first cover takes the marks, the last one
+ * gives them back, and what is given back is what was taken.
+ */
+let covers = 0;
+let marked: readonly Element[] = [];
+
+function takeCover(): void {
+  covers += 1;
+  if (covers > 1) return;
+
+  // Read before the caller's host joins the document, so a cover's own node is
+  // never in the list — and anything already inert for a reason of its own is
+  // left exactly as it was.
+  marked = [...document.body.children].filter(
+    (one) => !one.hasAttribute("inert"),
+  );
+  for (const one of marked) one.setAttribute("inert", "");
+}
+
+function releaseCover(): void {
+  covers -= 1;
+  if (covers > 0) return;
+
+  for (const one of marked) one.removeAttribute("inert");
+  marked = [];
+}
+
 export function SessionLoading({ label }: { readonly label: string }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    // Read before appending, so the cover's own host is never in the list, and
-    // anything already inert for another reason is left exactly as it was.
-    const covered = [...document.body.children].filter(
-      (one) => !one.hasAttribute("inert"),
-    );
-    for (const one of covered) one.setAttribute("inert", "");
+    takeCover();
 
     const node = document.createElement("div");
     node.dataset.slot = "session-loading-host";
@@ -59,8 +96,8 @@ export function SessionLoading({ label }: { readonly label: string }) {
     setHost(node);
 
     return () => {
-      for (const one of covered) one.removeAttribute("inert");
       node.remove();
+      releaseCover();
     };
   }, []);
 

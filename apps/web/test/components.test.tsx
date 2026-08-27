@@ -29,6 +29,7 @@ import { Failure, Loading, NotFound } from "../ui/page-state.tsx";
 import { PageNavigation } from "../ui/page-navigation.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
 import { RunProgress } from "../ui/run-status.tsx";
+import { SessionLoading } from "../ui/session-loading.tsx";
 import { useUnsavedChanges } from "../ui/settings-read.ts";
 import {
   AppShell,
@@ -2255,5 +2256,64 @@ describe("the Agents page", () => {
     expect((refused as HTMLButtonElement).disabled).toBe(true);
     expect(refused.getAttribute("title")).toContain("viewer role cannot");
     expect(screen.queryByRole("link", { name: "Connect an agent" })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Who owns the `inert` marks the session cover puts on the document.
+ *
+ * The cover hides the application from eyes; `inert` is what takes it out of
+ * reach of a Tab step and a screen reader as well, and the two have to end
+ * together. Each cover holding its own list of what it marked does not end them
+ * together: the second cover to mount skips everything the first already
+ * marked — which is what keeps a surface Radix made inert from being taken over
+ * — so the first cover to leave hands the whole document back while the second
+ * is still standing opaque in front of it.
+ *
+ * Nothing produces that overlap today, and every reason is a timing invariant
+ * written nowhere near the component. These hold the guarantee itself instead.
+ */
+describe("the session cover's hold on the document", () => {
+  /** The application's own container, rather than a cover's portal host. */
+  function appRoot(): Element {
+    const root = [...document.body.children].find(
+      (one) => one.getAttribute("data-slot") !== "session-loading-host",
+    );
+    expect(root, "nothing in the body for a cover to cover").toBeDefined();
+    return root!;
+  }
+
+  it("hands the document back only when the last cover leaves", () => {
+    const first = render(<SessionLoading label="Opening Egma" />);
+    const root = appRoot();
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    const second = render(<SessionLoading label="Signing out" />);
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    first.unmount();
+    // The whole of it: a cover is still there, opaque, in front of a document
+    // that would otherwise have just become reachable again.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    second.unmount();
+    expect(root.hasAttribute("inert")).toBe(false);
+  });
+
+  it("gives back what it took, and nothing else", () => {
+    const theirs = document.createElement("div");
+    theirs.setAttribute("inert", "");
+    document.body.append(theirs);
+
+    const cover = render(<SessionLoading label="Opening Egma" />);
+    cover.unmount();
+
+    // Somebody else's, made inert for a reason of their own before the cover
+    // arrived. It was never the cover's to hand back.
+    expect(theirs.hasAttribute("inert")).toBe(true);
+    theirs.remove();
   });
 });
