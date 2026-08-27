@@ -39,7 +39,8 @@ import { cn } from "@/lib/utils";
  * edge two files declare apart is an edge that drifts. What is still written
  * out by hand is the side padding the two settings tables put back inside
  * their own control cells, where the class list is a caller's rather than
- * this file's.
+ * this file's, and the stacked row's own copy in `ui/data-table.tsx`, which
+ * pads a different layout and cannot drift this one.
  *
  * Two things align some other way, and both are deliberate:
  *

@@ -101,12 +101,14 @@ describe("DataTable row links", () => {
  *
  * The rule is written once in `components/ui/table.tsx` and every table in the
  * product inherits it, so this asserts the token rather than a pixel: a header
- * and the cells under it name the same padding, and the only cell that aligns
- * its content any other way is the row's own control lane.
+ * and the cells under it name the same padding, and the two deliberate
+ * exceptions — the row's own control lane, and the stacked layout's
+ * right-aligned values — are the ones `components/ui/table.tsx` names.
  *
  * The lane's own `px-0` is written unconditionally and applied by the
- * `data-action` attribute, so the attribute is what this asserts. Reading the
- * class back would pass on every cell in the table and prove nothing.
+ * `data-action` attribute, so the attribute is what proves which cell is the
+ * lane. The class is still read back once, on the lane itself, because the
+ * mark strips nothing unless the rule stays written on the shared parts.
  */
 describe("DataTable column alignment", () => {
   const LANE = "px-(--row-padding-x)";
@@ -135,6 +137,11 @@ describe("DataTable column alignment", () => {
      * is what takes the side padding off both. */
     expect(headers[2]!.dataset.action).toBe("true");
     expect(cells[2]!.dataset.action).toBe("true");
+
+    /* And the rule the mark applies. Without this pair the attribute could
+     * stand while the padding it strips quietly returns. */
+    expect(headers[2]!.className).toContain("data-[action=true]:px-0");
+    expect(cells[2]!.className).toContain("data-[action=true]:px-0");
   });
 });
 

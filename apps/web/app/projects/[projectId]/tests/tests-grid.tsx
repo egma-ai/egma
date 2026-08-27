@@ -1403,8 +1403,9 @@ export function TestsGrid(props: GridProps) {
         clips exactly that. `overflow-x: auto` also computes `overflow-y` to
         `auto`, so the naive wrapper would have cut a 240px picker off at the
         table's own bottom edge. The choice is one class or the other, never
-        both: while a picker is open the grid may overflow, which costs a
-        person nothing, and when it is shut the grid scrolls.
+        both: while a picker is open the grid may overflow, and when it shuts
+        the grid scrolls again. On a phone the toggle also resets the sideways
+        scroll — the price of this grid having no narrow layout yet.
       */}
       <div className={picking === null ? "overflow-x-auto" : "overflow-visible"}>
       <table className="w-full min-w-(--tests-grid-min-width) table-fixed border-collapse border border-border bg-surface text-sm">
