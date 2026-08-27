@@ -1407,19 +1407,14 @@ export function TestsGrid(props: GridProps) {
           </tr>
         </thead>
         <tbody>
-          {tests.length === 0 && entry === null ? (
-            <tr>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                One situation to put the agent in…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                …what should happen…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>…and who calls.</td>
-              <td className={cn(CELL, PAD)} />
-              <td className={ACTION} />
-            </tr>
-          ) : null}
+          {/*
+            An empty suite draws no teaching row. The faint "One situation to
+            put the agent in…" row looked like a row to type in, so the first
+            thing a person did on an empty suite was click it and get nothing:
+            it was a picture of a test, and the way in was the line under it.
+            The way in is now the only thing there (developer decision,
+            2026-08-26).
+          */}
           {tests.map((test) => (
             <tr key={test.id}>
               {COLUMNS.map((column) => cell(test, column.field))}
