@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
@@ -10,6 +10,8 @@ import {
 } from "../../api/src/auth/naming.ts";
 import { safeReturnPath as apiSafeReturnPath } from "../../api/src/auth/password-reset.ts";
 import { CODES } from "../../api/src/http/refusals.ts";
+import { readJson } from "../lib/api.ts";
+import { readSession, SESSION_READ_TIMEOUT_MS } from "../lib/me.ts";
 import {
   NOTHING_TO_HEAR,
   offersNothing,
@@ -42,6 +44,68 @@ const WEB = path.join(import.meta.dirname, "..");
 /** One conversation, inside the project's monitoring section. */
 const TRANSCRIPT_PAGE =
   "app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
+
+/**
+ * The one read in this application with a deadline on it.
+ *
+ * While it is in flight the whole document is covered and everything behind
+ * the cover is inert, so this read failing to answer is not the same kind of
+ * event as any other read failing to answer: it is a page nobody can touch.
+ * A refused or dropped connection rejects and always ended the wait. A server
+ * that accepts the connection and then says nothing does neither, and that is
+ * the one these hold.
+ */
+describe("reading who is signed in", () => {
+  /** A connection that is open and silent: no response, and no error either. */
+  function stalls(): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_path: string, init?: RequestInit) =>
+          new Promise<Response>((_keep, give) => {
+            init?.signal?.addEventListener("abort", () => {
+              give((init.signal as AbortSignal).reason);
+            });
+          }),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("gives up on a server that accepts the connection and then says nothing", async () => {
+    stalls();
+
+    const answer = await readSession(5);
+
+    // The ordinary failure every page already answers: the shell settles on
+    // it and lifts the cover, and the entrance offers a way to try again.
+    expect(answer.status).toBe("failed");
+    expect(answer).toMatchObject({ refusal: { error: "unreachable" } });
+  });
+
+  it("waits long enough that a slow answer is still an answer", () => {
+    expect(SESSION_READ_TIMEOUT_MS).toBeGreaterThanOrEqual(8_000);
+    expect(SESSION_READ_TIMEOUT_MS).toBeLessThanOrEqual(15_000);
+  });
+
+  /**
+   * The deadline belongs to this read and not to reading JSON. Every other
+   * request in the product fails into a page that is already drawn and stays
+   * usable around it, and a deadline in the shared helper would be one they
+   * all silently inherited.
+   */
+  it("puts no deadline on any other read", async () => {
+    stalls();
+
+    void readJson("/v1/agents");
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect((init as RequestInit | undefined)?.signal).toBeUndefined();
+  });
+});
 
 describe("the names the signup form offers", () => {
   const cases: readonly [string, string][] = [

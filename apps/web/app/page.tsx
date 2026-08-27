@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { readJson, type Answer } from "../lib/api.ts";
-import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
+import type { Answer } from "../lib/api.ts";
+import { firstProjectOf, readSession, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { Actions } from "../ui/section.tsx";
@@ -37,7 +37,14 @@ export default function RootPage() {
     let current = true;
     setAnswer(null);
 
-    void readJson<Me>("/api/me").then((next) => {
+    /*
+     * Bounded, for the reason the shell's own read is: the branch below
+     * covers the whole document and makes it inert, so a read that never
+     * answers would be a page nobody can touch rather than one saying it
+     * could not reach egma. Running out lands on the failure state, which
+     * has a way to try again.
+     */
+    void readSession().then((next) => {
       if (!current) return;
 
       if (next.status === "signed-out") {

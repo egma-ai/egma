@@ -40,9 +40,9 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 
-import { readJson } from "../lib/api.ts";
 import {
   organizationOf,
+  readSession,
   roleOf,
   type Me,
   type Organization,
@@ -126,7 +126,14 @@ export function useSession(initial?: Me): Session {
   const refresh = useCallback(async () => {
     const thisRequest = request.current + 1;
     request.current = thisRequest;
-    const answer = await readJson<Me>("/api/me");
+    /*
+     * Bounded, and `settled` below is why. A read that never answers used to
+     * leave a shell with empty slots in it; it now leaves a cover with the
+     * document behind it inert, so a server that accepts the connection and
+     * then says nothing would freeze the page rather than degrade it. The
+     * deadline turns that into an ordinary failure, and this line runs.
+     */
+    const answer = await readSession();
     if (!mounted.current || request.current !== thisRequest) return;
 
     if (answer.status === "ready") setMe(answer.value);
