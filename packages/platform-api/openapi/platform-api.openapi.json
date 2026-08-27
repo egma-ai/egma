@@ -16617,17 +16617,6 @@
                     "hasRecording": {
                       "type": "boolean"
                     },
-                    "recordingStartedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "measures": {
                       "type": "object",
                       "properties": {
@@ -17235,7 +17224,6 @@
                     "endedAt",
                     "providerReference",
                     "hasRecording",
-                    "recordingStartedAt",
                     "measures",
                     "metrics",
                     "test",

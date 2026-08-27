@@ -546,7 +546,6 @@ describe("the lifecycle lands", () => {
       terminalEvent("completed", "agent_ended", {
         audio: {
           recording: `${simulationId}/dual-channel.wav`,
-          started_at: "2026-08-05T09:00:17.123456789Z",
         },
         provider_reference: "CA7e2b9c1d4f6a8e0b",
         turn_count: 22,
@@ -556,9 +555,6 @@ describe("the lifecycle lands", () => {
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
-    expect(row?.recordingStartedAt?.toISOString()).toBe(
-      "2026-08-05T09:00:17.123Z",
-    );
     expect(row?.turnCount).toBe(22);
     expect(row?.providerReference).toBe("CA7e2b9c1d4f6a8e0b");
   });

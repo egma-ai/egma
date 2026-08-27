@@ -369,18 +369,6 @@ describe("the platform API operation registry", () => {
     });
   });
 
-  it("serves a nullable recording clock origin on simulation evidence", () => {
-    const simulation = platformOperations.getSimulation.responses[200].schema;
-
-    expect(simulation.properties.recordingStartedAt).toEqual({
-      anyOf: [
-        { type: "string", format: "date-time" },
-        { type: "null" },
-      ],
-    });
-    expect(simulation.required).toContain("recordingStartedAt");
-  });
-
   it("freezes shared grader identity, version and threshold in a simulation plan", () => {
     const simulation = platformOperations.getSimulation.responses[200].schema;
     const gradingPlan = simulation.properties.gradingPlan.anyOf[0];

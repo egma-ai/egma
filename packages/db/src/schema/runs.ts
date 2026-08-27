@@ -360,12 +360,6 @@ export const simulation = pgTable(
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
-     * Sample zero of that recording on the same wall clock as the transcript
-     * spans. Null for simulations without audio and for historical recordings
-     * written before the simulator reported this origin.
-     */
-    recordingStartedAt: moment("recording_started_at"),
-    /**
      * How many transcript turns the conversation reached, both speakers
      * counted — a terminal fact off the report, kept on the row because it is
      * read alone to answer for one simulation. Null until a landing carries
@@ -484,16 +478,6 @@ export const simulation = pgTable(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
         or ${table.recordingReference} is null`,
-    ),
-    // Added separately from the older recording checks so this remains an
-    // additive migration. A historical recording may have no origin, but an
-    // origin can never stand without the recording whose sample zero it names.
-    check(
-      "simulation_recording_origin_agrees",
-      sql`${table.recordingStartedAt} is null
-        or (${table.endedAt} is not null
-          and ${table.modality} = 'voice'
-          and ${table.recordingReference} is not null)`,
     ),
     // The two summary facts are terminal facts too; a check of their own
     // beside the report's rather than a rewrite of it, because they arrived

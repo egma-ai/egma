@@ -1,5 +1,5 @@
 {
-  "id": "ff248645-8d29-437d-8578-acec3225044d",
+  "id": "74e95a14-bdb6-4ee1-93fd-962be80d0e9e",
   "prevId": "1eef6403-b42a-47f7-a1c9-4d7a44eb8d28",
   "version": "7",
   "dialect": "postgresql",
@@ -4577,12 +4577,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "recording_started_at": {
-          "name": "recording_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "turn_count": {
           "name": "turn_count",
           "type": "integer",
@@ -4938,10 +4932,6 @@
         "simulation_report_only_when_ended": {
           "name": "simulation_report_only_when_ended",
           "value": "\"simulation\".\"ended_at\" is not null\n        or \"simulation\".\"recording_reference\" is null"
-        },
-        "simulation_recording_origin_agrees": {
-          "name": "simulation_recording_origin_agrees",
-          "value": "\"simulation\".\"recording_started_at\" is null\n        or (\"simulation\".\"ended_at\" is not null\n          and \"simulation\".\"modality\" = 'voice'\n          and \"simulation\".\"recording_reference\" is not null)"
         },
         "simulation_summary_facts_only_when_ended": {
           "name": "simulation_summary_facts_only_when_ended",

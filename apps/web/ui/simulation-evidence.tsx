@@ -55,6 +55,27 @@ type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
 export type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
 
+/** Audio sample zero, read from trace evidence instead of a simulation row. */
+export function recordingOriginOf(
+  transcript: EvidenceTranscript,
+): string | null {
+  const recordings: EvidenceStep[] = [];
+  const audioRoots: EvidenceStep[] = [];
+  const visit = (step: EvidenceStep): void => {
+    if (step.kind === "recording") recordings.push(step);
+    else if (step.parentSpanId === "" && step.audioUrl.trim() !== "") {
+      audioRoots.push(step);
+    }
+    for (const nested of step.spans) visit(nested);
+  };
+  for (const step of transcript.spans) visit(step);
+  const candidates = recordings.length > 0 ? recordings : audioRoots;
+  candidates.sort(
+    (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
+  );
+  return candidates[0]?.startedAt ?? null;
+}
+
 export type RecordingSpeakerTimeline = {
   /** The instant the first audio sample represents. */
   readonly startedAt: string;
@@ -2049,7 +2070,9 @@ function SimulationEvidencePanel({
                   evidence.transcript === null
                     ? null
                     : {
-                        startedAt: evidence.transcript.startedAt,
+                        startedAt:
+                          recordingOriginOf(evidence.transcript) ??
+                          evidence.transcript.startedAt,
                         endedAt: evidence.transcript.endedAt,
                         turns: evidence.transcript.turns,
                       }
@@ -2083,7 +2106,7 @@ function SimulationEvidencePanel({
                   <ChatTranscript
                     transcript={evidence.transcript}
                     toolCalls={toolCalls}
-                    recordingStartedAt={evidence.recordingStartedAt}
+                    recordingStartedAt={recordingOriginOf(evidence.transcript)}
                     {...(recording.status === "ready"
                       ? {
                           currentTime: recording.currentTime,

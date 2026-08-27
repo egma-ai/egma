@@ -36,6 +36,7 @@ const SIMULATION_ID_ATTRIBUTE = "egma.simulation_id";
 /** The conversation's own span names — everything that is not a measure. */
 const CONVERSATION_SPAN_NAMES = [
   "simulation",
+  "recording",
   "human_turn",
   "agent_turn",
   "tool_call",

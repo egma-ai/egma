@@ -155,7 +155,6 @@ export type Simulation = {
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
   readonly recordingReference: string | null;
-  readonly recordingStartedAt: Date | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly mockToolCoverage: MockToolCoverage | null;
@@ -174,7 +173,6 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
-  readonly recordingStartedAt?: Date | undefined;
   readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
@@ -231,7 +229,6 @@ const SIMULATION_COLUMNS = {
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
   recordingReference: simulation.recordingReference,
-  recordingStartedAt: simulation.recordingStartedAt,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
@@ -287,9 +284,6 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
-  }
-  if (facts.recordingStartedAt !== undefined) {
-    write.recordingStartedAt = facts.recordingStartedAt;
   }
   if (facts.mockToolCoverage !== undefined) {
     write.mockToolCoverage = {

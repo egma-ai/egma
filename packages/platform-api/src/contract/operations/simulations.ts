@@ -161,7 +161,6 @@ const simulationSchema = {
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
-    recordingStartedAt: nullable(dateTimeSchema),
     measures: {
       type: "object",
       properties: {
@@ -294,7 +293,6 @@ const simulationSchema = {
     "endedAt",
     "providerReference",
     "hasRecording",
-    "recordingStartedAt",
     "measures",
     "metrics",
     "test",

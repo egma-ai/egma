@@ -528,41 +528,6 @@ describe("a simulation's shape", () => {
     ).resolves.toBeDefined();
   });
 
-  it("keeps the recording origin with its recording, while older recordings stay valid", async () => {
-    const origin = new Date("2026-08-05T09:00:17.123Z");
-
-    // An origin alone names sample zero of no recording and cannot be true.
-    await expect(
-      insertSimulation("completed", {
-        modality: "voice",
-        recording_started_at: origin,
-      }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-
-    // New reports carry the pair.
-    await expect(
-      insertSimulation("completed", {
-        modality: "voice",
-        recording_reference: "recordings/with-origin.wav",
-        recording_started_at: origin,
-      }),
-    ).resolves.toBeDefined();
-
-    // Historical rows have the recording but not this later fact. There is no
-    // guessed backfill and the nullable column keeps those rows readable.
-    const historical = await insertSimulation("completed", {
-      modality: "voice",
-      recording_reference: "recordings/before-origins.wav",
-    });
-    const { rows } = await db.sql<{ recording_started_at: Date | null }>(
-      "select recording_started_at from simulation where id = $1",
-      [historical],
-    );
-    expect(rows[0]?.recording_started_at).toBeNull();
-  });
-
   it("refuses an identifier carrying the wrong prefix", async () => {
     await expect(insertSimulation("queued", { id: newId("tst") })).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,

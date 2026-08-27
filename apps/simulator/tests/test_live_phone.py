@@ -250,7 +250,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     # carries the playback rate; the report stores no second rate.
     audio = facts["audio"]
     assert audio is not None, "a phone call with no audio on the record"
-    assert set(audio) == {"recording", "started_at"}
+    assert set(audio) == {"recording"}
     recording = simulator.blob(audio["recording"])
     persona_audio, agent_audio, recording_rate_hz = channels_of(recording)
     assert recording_rate_hz > 0

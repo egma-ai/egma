@@ -131,8 +131,8 @@ class Reporter:
         """The platform's own identifier for the exchange, once the plug
         offers one; rides the terminal facts."""
         self.audio: dict | None = None
-        """The recording reference and its clock origin for a voice
-        simulation; ``None`` for chat, which has no simulator recording."""
+        """The recording reference for a voice simulation; ``None`` for
+        chat, which has no simulator recording."""
         self.mock_tool_coverage: dict | None = None
         """Which of the agent's tools mock tools answered for, and which
         ran their own implementations.

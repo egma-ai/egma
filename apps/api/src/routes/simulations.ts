@@ -244,11 +244,6 @@ export async function simulationRoutes(
         endedAt: simulation.endedAt?.toISOString() ?? null,
         providerReference: simulation.providerReference,
         hasRecording: simulation.recordingReference !== null,
-        // Sample zero of the recording on the transcript's own clock. Null is
-        // truthful for recordings written before the simulator reported it;
-        // this door does not guess from a provider event or the first span.
-        recordingStartedAt:
-          simulation.recordingStartedAt?.toISOString() ?? null,
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
         // answers with — so the strip on a simulation's evidence and the strip

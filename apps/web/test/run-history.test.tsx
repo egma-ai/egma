@@ -252,7 +252,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
     endedAt: "2026-08-21T10:01:00.000Z",
     providerReference: null,
     hasRecording: false,
-    recordingStartedAt: null,
     measures: { durationMs: 59_000, turnCount: 2, toolCallCount: 1 },
     metrics: [],
     test: {

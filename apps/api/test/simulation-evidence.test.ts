@@ -10,6 +10,7 @@ import {
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { normaliseOtlpExport } from "../src/otlp/normalise.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   aConductedRun,
@@ -119,61 +120,49 @@ async function writeGrade(
   await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
 }
 
-describe("one simulation's recording clock", () => {
-  it("returns the captured origin and leaves historical or absent origins null", async () => {
-    api = await createApi("simulation_recording_origin", { traceStore: true });
-    const customer = await signUp(
-      api.app,
-      "simulation-recording-origin@acme.example",
-      "Acme",
+describe("one simulation's recording trace evidence", () => {
+  it("normalizes the simulator's recording origin as trace evidence", () => {
+    const origin = "1785920417500000000";
+    const normalized = normaliseOtlpExport(
+      {
+        resourceSpans: [
+          {
+            resource: { attributes: [] },
+            scopeSpans: [
+              {
+                scope: { name: "egma-simulator", version: "1" },
+                spans: [
+                  {
+                    traceId: "112233445566778899aabbccddeeff00",
+                    spanId: "0011223344556677",
+                    parentSpanId: "8899aabbccddeeff",
+                    name: "recording",
+                    startTimeUnixNano: origin,
+                    endTimeUnixNano: origin,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      () => ({
+        source: "simulation",
+        emitter: "egma-runtime",
+        runId: "run_01M0XHE0SHE1SAC1DMVSWJ8NRD",
+        agentId: "agt_01M0X51RF9EDVSKDP615YJ9830",
+        testVersionId: "tstver_01M0X51RF9EDVSKDP615YJ9830",
+        personaVersionId: "prsver_01M0X51RF9EDVSKDP615YJ9830",
+      }),
     );
-    const standing = {
-      key: await projectKeyFor(api.app, customer),
-      auth: contextFor(customer, "admin"),
-    };
-    const origin = new Date("2026-08-05T09:00:17.123Z");
-    const run = await aConductedRun(api.app, standing, {
-      reference: "recordings/clock-origin.wav",
-      recordingStartedAt: origin,
-    });
 
-    const heard = await request(
-      api.app,
-      "GET",
-      `/v1/simulations/${run.heard}`,
-      standing.key,
-    );
-    expect(heard.statusCode, JSON.stringify(heard.body)).toBe(200);
-    expect(heard.body).toMatchObject({
-      hasRecording: true,
-      recordingStartedAt: origin.toISOString(),
-    });
-
-    const silent = await request(
-      api.app,
-      "GET",
-      `/v1/simulations/${run.silent}`,
-      standing.key,
-    );
-    expect(silent.statusCode, JSON.stringify(silent.body)).toBe(200);
-    expect(silent.body).toMatchObject({
-      hasRecording: false,
-      recordingStartedAt: null,
-    });
-
-    const historical = await aConductedRun(api.app, standing, {
-      reference: "recordings/before-clock-origins.wav",
-    });
-    const olderEvidence = await request(
-      api.app,
-      "GET",
-      `/v1/simulations/${historical.heard}`,
-      standing.key,
-    );
-    expect(olderEvidence.statusCode, JSON.stringify(olderEvidence.body)).toBe(200);
-    expect(olderEvidence.body).toMatchObject({
-      hasRecording: true,
-      recordingStartedAt: null,
+    expect(normalized.rejected).toEqual([]);
+    expect(normalized.spans).toHaveLength(1);
+    expect(normalized.spans[0]).toMatchObject({
+      name: "recording",
+      kind: "recording",
+      startedAtMicroseconds: 1_785_920_417_500_000n,
+      durationNanoseconds: 0n,
     });
   });
 });

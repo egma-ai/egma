@@ -16,6 +16,7 @@ import type { Me } from "../lib/me.ts";
 import {
   ChatTranscript,
   RecordingEvidence,
+  recordingOriginOf,
   simulationToolCalls,
   transcriptToolCalls,
   type SimulationEvidenceRecording,
@@ -171,7 +172,6 @@ function evidence(overrides: Record<string, unknown> = {}) {
     endedAt: "2026-08-15T10:00:40.000Z",
     providerReference: "call_abc123",
     hasRecording: false,
-    recordingStartedAt: null,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
     metrics: [
       {
@@ -585,43 +585,65 @@ describe("the transcript time rail", () => {
     expect(screen.getByText(/Status not recorded ·/u)).toBeTruthy();
   });
 
-  it("uses the recorded media origin for timestamps, seeking, and the active row", () => {
+  it("uses the recording span for transcript timestamps and seeking", () => {
     const read = evidence();
-    const tool = {
-      spanId: "span_tool_origin",
-      parentSpanId: "span_agent",
-      name: "lookup_appointment",
-      kind: "tool" as const,
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const recording = {
+      spanId: "span_recording",
+      parentSpanId: "root",
+      name: "recording",
+      kind: "recording" as const,
       status: "ok" as const,
-      startedAt: "2026-08-15T10:00:06.000000Z",
-      durationNs: "250000000",
+      startedAt: "2026-08-15T10:00:00.500000Z",
+      durationNs: "0",
       text: "",
       audioUrl: "",
-      toolName: "lookup_appointment",
-      toolArguments: "{}",
-      toolResult: "{}",
+      toolName: "",
+      toolArguments: "",
+      toolResult: "",
       spans: [],
+    };
+    const root = {
+      spanId: "root",
+      parentSpanId: "",
+      name: "simulation",
+      kind: "root" as const,
+      status: "ok" as const,
+      startedAt: transcript.startedAt,
+      durationNs: transcript.durationNs,
+      text: "",
+      // A provider may put audio on the root. The simulator's explicit marker
+      // still wins because the root began before its recorder.
+      audioUrl: "https://recordings.example/root.wav",
+      toolName: "",
+      toolArguments: "",
+      toolResult: "",
+      spans: [recording],
+    };
+    const withRecording = {
+      ...transcript,
+      spans: [root],
     };
     const seek = vi.fn();
 
     render(
       <ChatTranscript
-        transcript={read.transcript as never}
-        toolCalls={[tool as never]}
-        recordingStartedAt="2026-08-15T10:00:00.500000Z"
-        currentTime={5.75}
+        transcript={withRecording as never}
+        toolCalls={[]}
+        recordingStartedAt={recordingOriginOf(withRecording as never)}
+        currentTime={0.75}
         onSeek={seek}
       />,
     );
 
-    const toolRow = screen.getByLabelText("Tool call, lookup_appointment");
-    expect(toolRow.getAttribute("aria-current")).toBe("true");
-    fireEvent.click(
-      within(toolRow).getByRole("button", {
-        name: "Seek recording to tool call lookup_appointment at 0:05",
-      }),
-    );
-    expect(seek).toHaveBeenCalledWith(5.5);
+    const firstTurn = screen.getByRole("button", {
+      name: /Move Thursday's clean/u,
+    });
+    expect(firstTurn.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(firstTurn);
+    expect(seek).toHaveBeenCalledWith(0.5);
   });
 
   it("can name monitoring speakers and keeps one shared tool-call walk", () => {

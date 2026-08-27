@@ -4562,7 +4562,6 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
-        recordingStartedAt: string | null;
         measures: {
             durationMs?: number;
             turnCount?: number;

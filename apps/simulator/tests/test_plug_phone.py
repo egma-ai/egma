@@ -244,7 +244,7 @@ async def test_a_phone_spec_dials_converses_records_and_tears_down(tmp_path: Pat
 
     audio = run.assembled.audio
     assert audio is not None
-    assert set(audio) == {"recording", "started_at"}
+    assert set(audio) == {"recording"}
     assert "://" not in audio["recording"]
     recording = (tmp_path / audio["recording"]).read_bytes()
     assert channels_of(recording)[2] > 0

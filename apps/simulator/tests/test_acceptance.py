@@ -785,7 +785,7 @@ async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     assert facts["provider_reference"] == "loopback-voice-hurried-1"
 
     audio = facts["audio"]
-    assert set(audio) == {"recording", "started_at"}
+    assert set(audio) == {"recording"}
 
     # The reference is a reference: no bytes on the wire, and it resolves.
     assert "://" not in audio["recording"]
@@ -883,7 +883,7 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
     for simulation_id in ids:
         facts = terminal_event_for(records, simulation_id)["facts"]
         assert facts["audio"] is not None, simulation_id
-        assert set(facts["audio"]) == {"recording", "started_at"}
+        assert set(facts["audio"]) == {"recording"}
         references[simulation_id] = facts["audio"]["recording"]
         recording = simulator.blob(references[simulation_id])
         assert_one_speaker_to_a_channel(
@@ -939,7 +939,7 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
     chat = terminal_event_for(records, "sim-same-chat")["facts"]
     voice = terminal_event_for(records, "sim-same-voice")["facts"]
     assert chat["audio"] is None
-    assert set(voice["audio"]) == {"recording", "started_at"}
+    assert set(voice["audio"]) == {"recording"}
 
 
 async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
@@ -1038,7 +1038,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     )
 
     audio = facts["audio"]
-    assert set(audio) == {"recording", "started_at"}
+    assert set(audio) == {"recording"}
 
     # The reference is a reference: no bytes on the wire, and it resolves
     # to a recording with one speaker to a channel.
@@ -1395,6 +1395,7 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     # The same shapes chat produces, named identically.
     assert names.count("human_turn") == 3
     assert names.count("agent_turn") == 3
+    assert names.count("recording") == 1
     assert names.count("first_response_latency") == 1
     assert names.count("turn_response_latency") == 2
     assert names[-1] == "simulation"

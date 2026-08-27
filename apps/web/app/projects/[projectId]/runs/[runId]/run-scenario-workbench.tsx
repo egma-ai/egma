@@ -53,6 +53,7 @@ import { shownScore } from "../../../../../ui/run-status.tsx";
 import {
   ChatTranscript,
   RecordingEvidence,
+  recordingOriginOf,
   SimulationEvidenceSummary,
   simulationToolCalls,
   useSimulationEvidenceRecording,
@@ -541,6 +542,8 @@ function TranscriptAndAudio({
   const active = ["queued", "claimed", "running"].includes(evidence.status);
   const recording = useSimulationEvidenceRecording(evidence, evidence.projectId);
   const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
+  const recordingStartedAt =
+    evidence.transcript === null ? null : recordingOriginOf(evidence.transcript);
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -548,7 +551,20 @@ function TranscriptAndAudio({
         <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-recording">
           Recording
         </h3>
-        <RecordingEvidence active={active} recording={recording} />
+        <RecordingEvidence
+          active={active}
+          recording={recording}
+          speakerTimeline={
+            evidence.transcript === null
+              ? null
+              : {
+                  startedAt:
+                    recordingStartedAt ?? evidence.transcript.startedAt,
+                  endedAt: evidence.transcript.endedAt,
+                  turns: evidence.transcript.turns,
+                }
+          }
+        />
       </section>
       <section aria-labelledby="run-evidence-conversation">
         <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-conversation">
@@ -573,7 +589,7 @@ function TranscriptAndAudio({
             <ChatTranscript
               transcript={evidence.transcript}
               toolCalls={toolCalls}
-              recordingStartedAt={evidence.recordingStartedAt}
+              recordingStartedAt={recordingStartedAt}
               {...(recording.status === "ready"
                 ? {
                     currentTime: recording.currentTime,
