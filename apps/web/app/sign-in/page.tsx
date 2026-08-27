@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { Field } from "../../ui/form.tsx";
+import { SessionLoading } from "../../ui/session-loading.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice } from "../ui.tsx";
 
 function PasswordVisibilityIcon({ visible }: { readonly visible: boolean }) {
@@ -51,6 +52,14 @@ export default function SignInPage() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * The password was accepted and the browser is on its way out of this page.
+   *
+   * A whole document load stands between the answer and the product, and a form
+   * sitting there with a greyed-out button is the page pretending nothing has
+   * happened. This is the same screen the entrance and signing out show.
+   */
+  const [leaving, setLeaving] = useState(false);
   /** Somebody sent here by a terminal's approval page goes back to it. */
   const [returnTo, setReturnTo] = useState<string | null>(null);
 
@@ -68,6 +77,7 @@ export default function SignInPage() {
         body: JSON.stringify({ email, password }),
       });
       if (response.ok) {
+        setLeaving(true);
         window.location.assign(returnTo ?? DEFAULT_SIGNED_IN_PATH);
         return;
       }
@@ -81,6 +91,8 @@ export default function SignInPage() {
       setSubmitting(false);
     }
   }
+
+  if (leaving) return <SessionLoading label="Signing in" />;
 
   return (
     <AuthShell

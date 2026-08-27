@@ -35,15 +35,26 @@ import { observeRequest, type FetchInput } from "./platform-request.ts";
  * it is not about the project the selector is showing.
  */
 
-const routed = vi.hoisted(() => ({
-  push: vi.fn(),
-  pathname: "/projects/prj_1/settings",
-  projectId: "prj_1",
-}));
+const routed = vi.hoisted(() => {
+  const push = vi.fn();
+  return {
+    push,
+    /*
+     * One router object for the whole run, because that is what Next hands
+     * back. A fresh one on every call is not a harmless test convenience: an
+     * effect that names the router among its dependencies re-runs on every
+     * render, and the entrance's does — so the mock by itself turned reading
+     * the session into a loop that never settled.
+     */
+    router: { push, replace: vi.fn(), back: vi.fn() },
+    pathname: "/projects/prj_1/settings",
+    projectId: "prj_1",
+  };
+});
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
-  useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => routed.router,
   useParams: () => ({ projectId: routed.projectId }),
 }));
 

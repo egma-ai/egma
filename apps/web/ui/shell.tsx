@@ -64,6 +64,7 @@ import {
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { Toolbar } from "./section.tsx";
+import { SessionLoading } from "./session-loading.tsx";
 import { settingsPath } from "./settings-nav.tsx";
 import { useTheme } from "./theme.tsx";
 
@@ -482,80 +483,89 @@ function AccountMenu({
   }
 
   return (
-    <Menu
-      label={`Account ${standing}. Open the account menu`}
-      triggerClassName={cn(
-        "grid w-full min-w-0 items-center gap-3",
-        /*
-         * **7px, and the missing pixel is the plate's own hairline.** This
-         * trigger reserves its hover border as a transparent one so hovering
-         * shifts nothing, and `box-sizing: border-box` means that border spends
-         * a pixel of the inset before the padding starts. Written as 8px it put
-         * the avatar on 17 while every nav icon stood on 16 — the one thing
-         * still out of the bar's lane. Written as 8 minus the hairline it lands
-         * on 16 exactly, and the gap from the plate's visible edge to the
-         * avatar is a true 8px, which is what a borderless nav row already
-         * draws between its plate and its icon.
-         */
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
-        "px-[calc(var(--space-2)-1px)]",
-        "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
-        "transition-transform duration-(--duration-press) ease-out",
-        "pointer-coarse:min-h-(--tap-target)",
-        "pointer-hover:border-border pointer-hover:bg-surface",
-        "[&:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:transition-none",
-        "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-        compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
-      )}
-      openClassName="border-border bg-surface"
-      placement={placement}
-      trigger={
-        <>
-          <span
-            className={cn(
-              "grid size-(--control-md) flex-none place-items-center",
-              "rounded-none border border-border bg-surface-soft text-sm",
-              compact && "size-(--tap-target)",
-            )}
-            data-slot="account-avatar"
-            aria-hidden="true"
-          >
-            {initial}
-          </span>
-          {compact ? null : (
-            <span className="min-w-0">
-              <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
-                {standing}
-              </span>
-              {role === null ? null : (
-                /* 12px: the micro label the boards give the role line (`720-0`). */
-                <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
-                  {canAuthor(role) ? role : VIEW_ONLY}
-                </span>
+    <>
+      {/*
+       * Signing out is a document load away from the sign-in page, and until
+       * this cover existed the whole of it was a menu item that said
+       * "Signing out…" behind a shell still showing the session being ended.
+       * It is the entrance's own screen, so the two ends of a visit look alike.
+       */}
+      {signingOut ? <SessionLoading label="Signing out" /> : null}
+      <Menu
+        label={`Account ${standing}. Open the account menu`}
+        triggerClassName={cn(
+          "grid w-full min-w-0 items-center gap-3",
+          /*
+           * **7px, and the missing pixel is the plate's own hairline.** This
+           * trigger reserves its hover border as a transparent one so hovering
+           * shifts nothing, and `box-sizing: border-box` means that border spends
+           * a pixel of the inset before the padding starts. Written as 8px it put
+           * the avatar on 17 while every nav icon stood on 16 — the one thing
+           * still out of the bar's lane. Written as 8 minus the hairline it lands
+           * on 16 exactly, and the gap from the plate's visible edge to the
+           * avatar is a true 8px, which is what a borderless nav row already
+           * draws between its plate and its icon.
+           */
+          "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
+          "px-[calc(var(--space-2)-1px)]",
+          "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          "transition-transform duration-(--duration-press) ease-out",
+          "pointer-coarse:min-h-(--tap-target)",
+          "pointer-hover:border-border pointer-hover:bg-surface",
+          "[&:active:not(:focus-visible)]:scale-97",
+          "motion-reduce:transition-none",
+          "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+          compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
+        )}
+        openClassName="border-border bg-surface"
+        placement={placement}
+        trigger={
+          <>
+            <span
+              className={cn(
+                "grid size-(--control-md) flex-none place-items-center",
+                "rounded-none border border-border bg-surface-soft text-sm",
+                compact && "size-(--tap-target)",
               )}
+              data-slot="account-avatar"
+              aria-hidden="true"
+            >
+              {initial}
             </span>
-          )}
-        </>
-      }
-    >
-      {(close) => (
-        <>
-          <MenuLabel>{standing}</MenuLabel>
-          <MenuItem
-            {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
-            onClick={close}
-          >
-            Settings
-          </MenuItem>
-          <MenuDivider />
-          <ThemeItem />
-          <MenuItem disabled={signingOut} onClick={() => void signOut()}>
-            {signingOut ? "Signing out…" : "Sign out"}
-          </MenuItem>
-        </>
-      )}
-    </Menu>
+            {compact ? null : (
+              <span className="min-w-0">
+                <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
+                  {standing}
+                </span>
+                {role === null ? null : (
+                  /* 12px: the micro label the boards give the role line (`720-0`). */
+                  <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
+                    {canAuthor(role) ? role : VIEW_ONLY}
+                  </span>
+                )}
+              </span>
+            )}
+          </>
+        }
+      >
+        {(close) => (
+          <>
+            <MenuLabel>{standing}</MenuLabel>
+            <MenuItem
+              {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
+              onClick={close}
+            >
+              Settings
+            </MenuItem>
+            <MenuDivider />
+            <ThemeItem />
+            <MenuItem disabled={signingOut} onClick={() => void signOut()}>
+              {signingOut ? "Signing out…" : "Sign out"}
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+    </>
   );
 }
 

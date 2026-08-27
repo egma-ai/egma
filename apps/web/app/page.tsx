@@ -10,6 +10,7 @@ import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { Actions } from "../ui/section.tsx";
+import { SessionLoading } from "../ui/session-loading.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
@@ -60,13 +61,14 @@ export default function RootPage() {
     };
   }, [attempt, router]);
 
+  /*
+   * Nothing is guessed while the session read is in flight, and nothing is
+   * guessed once it comes back signed out either — that branch is already on
+   * its way to `/sign-in`, and the product shell it used to draw in the
+   * meantime was a dashboard shown to somebody who has no account open.
+   */
   if (answer === null || answer.status === "signed-out") {
-    return (
-      <ProductStatePage
-        title="Opening Egma"
-        lead="Checking your session."
-      />
-    );
+    return <SessionLoading label="Opening Egma" />;
   }
 
   /**
