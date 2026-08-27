@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readFile } from "node:fs/promises";
@@ -450,6 +450,53 @@ describe("nested page navigation", () => {
     /* The page's own name carries the trail's size, not a heading's. */
     expect(page.className).toContain("text-sm");
     expect(page.className).toContain("font-normal");
+  });
+
+  /**
+   * One page, one name — the invariant the first cut of this line broke.
+   *
+   * A header that appended its title whenever the trail's last step said
+   * something else drew two steps with no address, and this file draws every
+   * addressless step as an `<h1 aria-current="page">`. Three real pages ended
+   * up with two headings and two current steps, the settled simulation among
+   * them. The trail's type now allows one current step, and this holds the
+   * render to it: a deep trail, a short one, and a page with no trail at all.
+   */
+  it("names itself once, whatever shape of page it is", () => {
+    /* `steps` is 1 for a page inside a trail and 0 for a page with none. */
+    function namesItselfOnce(page: ReactElement, steps: 0 | 1): void {
+      const { container, unmount } = render(page);
+      expect(container.querySelectorAll("h1")).toHaveLength(1);
+      expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(steps);
+      unmount();
+    }
+
+    // The settled simulation: Runs, the run, then the test it executed.
+    namesItselfOnce(
+      <PageHeader
+        eyebrow="Simulation runs"
+        title="Reschedules a booked appointment"
+        breadcrumbs={[
+          { label: "Runs", href: "/projects/prj_1/runs" },
+          { label: "Nightly smoke", href: "/projects/prj_1/runs/run_1" },
+          { label: "Reschedules a booked appointment" },
+        ]}
+      />,
+      1,
+    );
+    // A transcript state page, whose heading is the state it is in.
+    namesItselfOnce(
+      <PageHeader
+        title="Open this from the list"
+        breadcrumbs={[
+          { label: "Traces", href: "/projects/prj_1/monitoring/transcripts" },
+          { label: "Open this from the list" },
+        ]}
+      />,
+      1,
+    );
+    // A list page: one name, and no trail for a current step to sit in.
+    namesItselfOnce(<PageHeader title="Tests" />, 0);
   });
 
   /**

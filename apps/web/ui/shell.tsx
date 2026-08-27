@@ -59,7 +59,6 @@ import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import {
   PageNavigation,
-  trailWithTitle,
   type PageNavigationItems,
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
@@ -914,6 +913,12 @@ export function ProductPage({
  * slash between them (developer decision, 2026-08-26). A page with no trail
  * keeps its own title bar, because there is no line for it to join.
  *
+ * **So a page with a trail names itself in that trail's last step**, and
+ * `title` is what a page without one draws. The two must say the same thing:
+ * a page whose last step and `title` differ shows the step and hides the
+ * title, which is why the transcript's two state pages carry their state
+ * sentence in the trail rather than beside it.
+ *
  * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
  * block. **It is not decoration on every page**: the transcript screen puts the
  * trace's source and environment there — "production / default" — which is a
@@ -953,8 +958,6 @@ export function PageHeader({
    * twice is the thing this suppression has always been for.
    */
   const label = breadcrumbs === undefined ? eyebrow : undefined;
-  /* The trail, ending with this page. See `trailWithTitle`. */
-  const trail = trailWithTitle(breadcrumbs, title);
   const hasBlock =
     toolbar !== undefined ||
     action !== undefined ||
@@ -983,11 +986,11 @@ export function PageHeader({
           "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        {trail === undefined ? (
+        {breadcrumbs === undefined ? (
           /* A heading carries no size of its own; the class is the size. */
           <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
         ) : (
-          <PageNavigation items={trail} />
+          <PageNavigation items={breadcrumbs} />
         )}
       </div>
 

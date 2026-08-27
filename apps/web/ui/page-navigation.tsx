@@ -14,43 +14,19 @@ type CurrentNavigationItem = {
   readonly href?: never;
 };
 
-/** At least one linked parent, followed by the current page. */
+/**
+ * At least one linked parent, followed by the current page.
+ *
+ * **Exactly one step has no address, and it is the last one.** That step is
+ * the page: this file draws it as the page's `<h1>` and the one
+ * `aria-current="page"`, so a trail carrying two of them would be a page with
+ * two names. The type is what stops that, at every call site.
+ */
 export type PageNavigationItems = readonly [
   ParentNavigationItem,
   ...ParentNavigationItem[],
   CurrentNavigationItem,
 ];
-
-/** One step of a trail, whichever kind it is. */
-export type PageNavigationItem = ParentNavigationItem | CurrentNavigationItem;
-
-/** A trail with at least one step left in it. */
-export type DrawnTrail = readonly [PageNavigationItem, ...PageNavigationItem[]];
-
-/**
- * The trail a page draws, ending with the page's own name.
- *
- * **The trail and the title are one line.** They used to be two: the trail was
- * cut short of the record and the record stood beside it as a larger heading,
- * so "Tests / Livekit agent suite" read as a small underlined link next to a
- * big title and the slash between them was missing. One line, one type, one
- * link — "Tests" goes back to the list, and the last step is the page
- * (developer decision, 2026-08-26).
- *
- * A page passes its real trail and its title. Where the trail already ends
- * with the title, that step *is* the page and nothing is added. Where a page
- * titles itself something the trail does not say, the title joins the line as
- * its last step, so neither the trail nor the title is lost.
- */
-export function trailWithTitle(
-  items: PageNavigationItems | undefined,
-  title: string,
-): DrawnTrail | undefined {
-  if (items === undefined) return undefined;
-  return items[items.length - 1]?.label === title
-    ? items
-    : [...items, { label: title }];
-}
 
 /**
  * The one navigation model for a page below a product section.
@@ -76,17 +52,14 @@ export function trailWithTitle(
  * pointer target — and carries no motion, which is what `DESIGN.md` asks of a
  * navigation row. Rewriting it would have been churn with a diff attached.
  */
-export function PageNavigation({ items }: { readonly items: DrawnTrail }) {
+export function PageNavigation({ items }: { readonly items: PageNavigationItems }) {
   return (
     <nav
       /*
        * **The room under the trail is for the width where it wraps.** In the
-       * 56px bar the trail and the heading are one centred row, and a bottom
-       * margin there lifts the trail off the heading's line by half of it —
-       * which nobody could see while the trail ended with the page's own name
-       * and ran the width of the bar. Under 900px the bar becomes the page's
-       * first lines and the trail takes a line of its own, which is where the
-       * 12px belongs.
+       * 56px bar the trail is the whole line and needs no room under it. Under
+       * 900px the bar becomes the page's first lines and the trail takes a
+       * line of its own, which is where the 12px belongs.
        */
       className="mb-0 min-w-0 max-[900px]:mb-3"
       data-slot="page-navigation"
@@ -107,9 +80,11 @@ export function PageNavigation({ items }: { readonly items: DrawnTrail }) {
                * carries the line's own type rather than a heading size: the
                * trail is one line of navigation, and a step in a different
                * size would say the two halves are different kinds of thing.
+               * It truncates, because the bar it sits in is one 56px line and
+               * a record's name is as long as somebody typed it.
                */
               <h1
-                className="m-0 text-sm font-normal text-foreground [overflow-wrap:anywhere]"
+                className="m-0 min-w-0 truncate text-sm font-normal text-foreground"
                 aria-current="page"
               >
                 {item.label}
