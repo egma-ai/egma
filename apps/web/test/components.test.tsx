@@ -1757,6 +1757,15 @@ describe("the role the shell shows", () => {
     );
   });
 
+  /**
+   * A cold load of a product address: a bookmark opened, or reload pressed.
+   *
+   * The frame mounts with nobody in it, and what used to stand in the two slots
+   * that had no value yet was the sentence "Checking your session…" — the
+   * application's own news, said twice, by two controls that cannot act on it.
+   * The cover says it once now, and each slot draws the shape of the value it
+   * is waiting for.
+   */
   it("claims nothing at all while the session read is in flight", async () => {
     apiAnswers({ "/api/me": "never", "/v1/agents": "never" });
     render(
@@ -1767,7 +1776,17 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
     expect(screen.queryByText(/view only/i)).toBeNull();
-    expect(screen.getAllByText(/Checking your session/).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/Checking your session/)).toHaveLength(0);
+
+    // One cover, and nothing behind it left in reach of a Tab step.
+    const covering = screen.getByRole("status");
+    expect(covering.dataset.slot).toBe("session-loading");
+    expect(covering.getAttribute("aria-busy")).toBe("true");
+    expect(
+      [...document.body.children]
+        .filter((one) => !one.contains(covering))
+        .filter((one) => !one.hasAttribute("inert")),
+    ).toEqual([]);
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
     const settings = screen.getByRole("menuitem", { name: "Settings" });

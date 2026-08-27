@@ -25,6 +25,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { SheetHost } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   SidebarBrand,
@@ -352,9 +353,23 @@ function OrganizationMenu({
           className="flex min-h-(--control-lg) min-w-0 flex-1 items-center px-2"
           data-slot="organization-status"
         >
-          <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
-            {settled ? "No organization" : "Checking your session…"}
-          </span>
+          {/*
+           * **A bar, not a sentence, while nobody has answered.** This slot
+           * used to say "Checking your session…" — the sentence the developer
+           * met on opening the product, one control down. It is also a claim
+           * this bar has no business making: the session is the whole
+           * application's business, `SessionLoading` is what says it, and a
+           * sidebar row saying it too is the same news twice from a place that
+           * cannot act on it. What belongs here is what belongs in any slot
+           * whose value has not arrived: the shape of the value.
+           */}
+          {settled ? (
+            <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
+              No organization
+            </span>
+          ) : (
+            <Skeleton className="h-3 w-28" />
+          )}
         </div>
       </>
     );
@@ -469,7 +484,17 @@ function AccountMenu({
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
-  const standing = me !== null ? email : settled ? "Session unavailable" : "Checking your session…";
+  /**
+   * The control's own name for whoever it stands for.
+   *
+   * Three states, and the middle one used to be "Checking your session…" —
+   * the application's news, said by a control that is not the application. It
+   * is "Loading account" now: this control is loading this account, which is
+   * both true and the only part of it this control knows. The visible slot
+   * draws a bar rather than the words, because a sentence in a name slot is a
+   * value that is not a name.
+   */
+  const standing = me !== null ? email : settled ? "Session unavailable" : "Loading account";
   const initial = me !== null ? (email.trim().slice(0, 1).toUpperCase() || "E") : "·";
 
   async function signOut(): Promise<void> {
@@ -534,9 +559,13 @@ function AccountMenu({
             </span>
             {compact ? null : (
               <span className="min-w-0">
-                <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
-                  {standing}
-                </span>
+                {me === null && !settled ? (
+                  <Skeleton className="h-3 w-24" />
+                ) : (
+                  <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
+                    {standing}
+                  </span>
+                )}
                 {role === null ? null : (
                   /* 12px: the micro label the boards give the role line (`720-0`). */
                   <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
@@ -708,9 +737,26 @@ function ShellFrame({
     />
   );
 
+  /**
+   * A cold load of a product address, before the session read has answered.
+   *
+   * Opening `/projects/…` from a bookmark, or pressing reload on one, mounts
+   * this whole frame with nobody in it — an organization bar, a project
+   * selector and an account control all standing there with no facts behind
+   * them. That is the same guessed screen the entrance used to draw, on every
+   * other address in the product, so it takes the same cover.
+   *
+   * **The entrance is left to draw its own**, and that is the one exception. It
+   * has to stay covered past the moment the session settles, because `/` never
+   * stops there: it is on its way to a project or to sign-in, and a shell
+   * uncovered between those two moments is the flash all of this removes.
+   */
+  const unresolved = !session.settled && pathname !== "/";
+
   return (
     <SessionContext.Provider value={session}>
     <DraftNavigationProvider>
+    {unresolved ? <SessionLoading label="Opening Egma" /> : null}
     <div
       className={cn(
         "grid min-h-svh bg-background",
