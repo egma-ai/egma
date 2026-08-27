@@ -56,8 +56,8 @@ export const SKILLS_CLI_PACKAGE = "skills";
  * The file the installer writes at the repository root at project scope.
  *
  * It is the second thing a project install puts in somebody's repository, and
- * the only one that is not a skill. A developer who is told about four skill
- * directories and then finds a fifth file in their diff has been told most of
+ * the only one that is not a skill. A developer who is told about three skill
+ * directories and then finds a fourth file in their diff has been told most of
  * the truth, so both the offer and the line the offer leaves behind name it.
  */
 export const SKILLS_LOCK_FILE = "skills-lock.json";
@@ -195,13 +195,20 @@ export function skillsCliEntry(): string | null {
 
 /** The arguments the installer is given, so one place decides them. */
 export function installArguments(options: InstallOptions): readonly string[] {
+  // Claude Code still reads `.claude/skills`. Naming `universal` as a second
+  // target makes the standard installer keep the real files in the canonical
+  // `.agents/skills` store and create Claude's entries as symlinks to it.
+  const agents =
+    options.places.skillsAgentId === "claude-code"
+      ? ["universal", "claude-code"]
+      : [options.places.skillsAgentId];
   return [
     "add",
     publicSkillsDirectory(),
     "--skill",
     "*",
     "--agent",
-    options.places.skillsAgentId,
+    ...agents,
     ...(options.scope === "global" ? ["--global"] : []),
     "--yes",
   ];
@@ -209,6 +216,8 @@ export function installArguments(options: InstallOptions): readonly string[] {
 
 /** The one thing in the installer's own output that Egma has to relay. */
 const LANDED_MARK = "\u2192 ";
+const CANONICAL_MARK = "\u2713 ";
+const PATH_START = /^(?:\.{1,2}[\\/]|~[\\/]|[\\/]|[A-Za-z]:[\\/])/u;
 
 /** Terminal control sequences, which are not part of any line. */
 const CONTROL = /\u001b?\[[0-9;?]*[A-Za-z]/gu;
@@ -232,6 +241,14 @@ export function landedLines(output: string): readonly string[] {
     const line = raw.replaceAll(CONTROL, "").replace(BOX_LEFT, "").replace(BOX_RIGHT, "");
     if (line.startsWith(LANDED_MARK) && line.length > LANDED_MARK.length) {
       landed.push(line.slice(LANDED_MARK.length).trim());
+      continue;
+    }
+    // In symlink mode the installer prints the canonical store as the checked
+    // item, then names the agents whose folders point at it. A checked skill
+    // name in copy mode is not a path and is deliberately ignored here.
+    if (line.startsWith(CANONICAL_MARK)) {
+      const candidate = line.slice(CANONICAL_MARK.length).trim();
+      if (PATH_START.test(candidate)) landed.push(candidate);
     }
   }
   return landed;

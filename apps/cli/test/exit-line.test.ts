@@ -107,11 +107,25 @@ const EVERY_ENDING: readonly ExitReport[] = [
     platformUrl: null,
   },
   {
+    kind: "monitoring-already-configured",
+    agentName: "front-desk",
+    platformUrl: "https://egma.example",
+  },
+  {
+    kind: "monitoring-record-failed",
+    receipt: [
+      "agent_id: agt_01K",
+      "export EGMA_URL=https://egma.example",
+      "export EGMA_API_KEY=egma_sk_x",
+      "status: repository-record-failed",
+    ],
+    reason:
+      "remote monitoring is ready, but Egma could not write the repository record. Run egma monitoring record --agent agt_01K.",
+  },
+  {
     kind: "monitoring-refused",
     lines: ["Another Egma agent is already watching that agent.", "agent_1 is already watched."],
   },
-  { kind: "already-onboarded", folder: "egma/", hasSuites: true },
-  { kind: "already-onboarded", folder: "egma/", hasSuites: false },
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
@@ -128,6 +142,11 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "quit" },
   { kind: "interrupted", drivenAgentName: "Claude Agent" },
   { kind: "interrupted", drivenAgentName: null },
+  {
+    kind: "interrupted",
+    drivenAgentName: null,
+    monitoringAgentCreated: "agt_01K",
+  },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 1 },
   { kind: "failed", reason: "the agent stopped talking" },
@@ -172,6 +191,16 @@ describe("the exit line", () => {
       buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 }),
     ).toBe(
       "Egma stopped before the task finished, and shut Claude Agent down. Your 12 tests are in egma/tests/.",
+    );
+
+    expect(
+      buildExitLine({
+        kind: "interrupted",
+        drivenAgentName: null,
+        monitoringAgentCreated: "agt_01K",
+      }),
+    ).toBe(
+      "Egma stopped before the task finished. Agent agt_01K exists on Egma, but no worker key was created. Run Egma again to resume setup.",
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");
@@ -299,6 +328,36 @@ describe("the exit line", () => {
     expect(refused).toContain("Git does not ignore .env here.");
   });
 
+  it("says an existing LiveKit setup was kept unchanged", () => {
+    const line = buildExitLine({
+      kind: "monitoring-already-configured",
+      agentName: "front-desk",
+      platformUrl: "https://egma.example",
+    });
+    expect(line).toContain("already pushes its production evidence");
+    expect(line).toContain("No key or environment file changed");
+  });
+
+  it("prints a partial-success receipt before its failure and safe recovery", () => {
+    const said = exitLines({
+      kind: "monitoring-record-failed",
+      receipt: [
+        "agent_id: agt_01K",
+        "export EGMA_API_KEY=egma_sk_x",
+        "status: repository-record-failed",
+      ],
+      reason:
+        "remote monitoring is ready. Run egma monitoring record --agent agt_01K; it does not mint a key.",
+    });
+
+    expect(said.slice(0, 3)).toEqual([
+      "agent_id: agt_01K",
+      "export EGMA_API_KEY=egma_sk_x",
+      "status: repository-record-failed",
+    ]);
+    expect(said.at(-1)).toContain("egma monitoring record --agent agt_01K");
+  });
+
   /**
    * A refusal says two things and keeps them apart: Egma's own sentence about
    * what to do, and the platform's own for whatever is reading rather than
@@ -314,36 +373,6 @@ describe("the exit line", () => {
     });
     expect(said[0]).toContain("Another Egma agent is already watching");
     expect(said).toContain("agent_1 is already watched by “order-line”.");
-  });
-
-  /**
-   * A repository that has been through the wizard is refused politely, and the
-   * refusal has to carry the one thing that redoes setup on purpose.
-   *
-   * The second way forward is only a way forward when there is something to
-   * push. A folder holding a binding and no suite — which is what a walk that
-   * stopped between binding and registering leaves behind — is refused by
-   * `egma push` for the contract it does not have yet, so the line does not
-   * send anybody there.
-   */
-  it("says how to redo setup, and names push and run only when there is a suite", () => {
-    const withTests = buildExitLine({
-      kind: "already-onboarded",
-      folder: "egma/",
-      hasSuites: true,
-    });
-    expect(withTests).toContain("already set up");
-    expect(withTests).toContain("only works with new repositories");
-    expect(withTests).toContain("Delete or rename egma/");
-    expect(withTests).toContain("egma push and egma run on the tests that are already there");
-
-    const empty = buildExitLine({
-      kind: "already-onboarded",
-      folder: "egma/",
-      hasSuites: false,
-    });
-    expect(empty).toContain("Delete or rename egma/ and run egma again to redo setup.");
-    expect(empty).not.toContain("egma push");
   });
 
   it("prints something to copy when the developer has to copy something", () => {
@@ -505,14 +534,19 @@ describe("the exit line", () => {
   });
 
   /**
-   * Four endings carry more than a sentence, and each carries it for a reason
+   * Five endings carry more than a sentence, and each carries it for a reason
    * a developer can name: the walk's own ending has three things to copy, a
    * wired worker has the two lines it exports with, a refusal has the
    * platform's own sentence, and a failure may arrive with a block. Every
    * other ending is one line, and stays one line.
    */
   it("is one line for every ending that is one thing", () => {
-    const carriesMore = new Set(["run-started", "monitoring-wired", "monitoring-refused"]);
+    const carriesMore = new Set([
+      "run-started",
+      "monitoring-wired",
+      "monitoring-record-failed",
+      "monitoring-refused",
+    ]);
     for (const report of EVERY_ENDING) {
       if (carriesMore.has(report.kind)) continue;
       expect(exitLines(report)).toEqual([buildExitLine(report)]);

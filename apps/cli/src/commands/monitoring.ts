@@ -1,6 +1,6 @@
 /**
- * `egma monitoring enable | disable | status`: the wizard's monitoring work,
- * with nobody watching.
+ * `egma monitoring enable | disable | status | record`: the wizard's
+ * monitoring work, plus a record-only recovery, with nobody watching.
  *
  * It asks nothing. What it prints is one fact per line, `name: value`, in a
  * shape that does not move, and the exit code is the branch — so a coding agent
@@ -23,8 +23,21 @@
 
 import path from "node:path";
 
-import { folderPathsIn, readConfig } from "../folder/egma-folder.ts";
-import { wireLiveKitMonitoring } from "../monitoring/livekit-lane.ts";
+import {
+  folderPathsIn,
+  readConfig,
+  type FolderAgent,
+} from "../folder/egma-folder.ts";
+import { selectFolderAgent } from "../folder/target-selection.ts";
+import {
+  monitoringKeyPrefix,
+  wireLiveKitMonitoring,
+} from "../monitoring/livekit-lane.ts";
+import {
+  MonitoringTargetRecordError,
+  recordMonitoringTarget,
+  type MonitoredTarget,
+} from "../monitoring/record-target.ts";
 import { refusalLines } from "../monitoring/refusals.ts";
 import {
   MONITORING_CUSTODY_LINE,
@@ -32,6 +45,7 @@ import {
   watchRetellAgent,
 } from "../monitoring/retell-lane.ts";
 import type { RegisterOptions } from "../platform/agents.ts";
+import { listActiveProjectKeys } from "../platform/api-keys.ts";
 import type { PlatformAccess } from "../platform/credentials.ts";
 import {
   readAgentMonitoring,
@@ -65,12 +79,14 @@ export const MONITORING_EXIT = {
   notSignedIn: 7,
   /** Egma would not start watching, and said which rule refused it. */
   refused: 8,
+  /** Remote monitoring is ready, but its repository record did not finish. */
+  repositoryRecordFailed: 9,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
 
-/** The three things this verb does, and no fourth. */
-export const MONITORING_ACTIONS = ["enable", "disable", "status"] as const;
+/** The ordinary controls and the record-only recovery for a partial setup. */
+export const MONITORING_ACTIONS = ["enable", "disable", "status", "record"] as const;
 export type MonitoringAction = (typeof MONITORING_ACTIONS)[number];
 
 /** What a developer is told when they named something else. */
@@ -108,10 +124,14 @@ export type MonitoringCommandOptions = {
   readonly access: PlatformAccess;
   readonly cwd: string;
   readonly action: MonitoringAction;
+  /** Exact committed agent name or stable id. Required when several are configured. */
+  readonly agent: string | null;
   /** `--platform`, when one was named. */
   readonly platform: string | null;
   /** `--platform-agent`, when the account holds more than one. */
   readonly platformAgentId: string | null;
+  /** The non-secret worker-key id printed by LiveKit setup. */
+  readonly monitoringKeyId?: string | null;
   /** `--name`: what to call the agent row, when Egma writes one. */
   readonly name: string | null;
   readonly signal: AbortSignal;
@@ -190,12 +210,47 @@ async function theRepositoryAgent(
       /** The word the `status:` line says, so each refusal is its own. */
       readonly status: string;
       readonly reason: string;
+      readonly choices?: readonly FolderAgent[];
     }
 > {
   const config = await readConfig(folderPathsIn(options.cwd).config).catch(
     () => null,
   );
-  const named = config?.agent ?? null;
+  const agents = config?.agents ?? [];
+  const choice = selectFolderAgent(agents, options.agent);
+  let named: FolderAgent | null;
+  switch (choice.kind) {
+    case "selected":
+      named = choice.agent;
+      break;
+    case "none":
+      named = null;
+      break;
+    case "unknown":
+      return {
+        kind: "refused",
+        code: MONITORING_EXIT.unchosen,
+        status: "unknown-agent",
+        reason: `No configured voice agent exactly matches ${JSON.stringify((options.agent ?? "").trim())}. Choose one with --agent <name-or-id>. Nothing was changed.`,
+        choices: choice.choices,
+      };
+    case "ambiguous":
+      return {
+        kind: "refused",
+        code: MONITORING_EXIT.unchosen,
+        status: "ambiguous-agent",
+        reason: `${JSON.stringify((options.agent ?? "").trim())} matches more than one configured voice agent. Use its stable id with --agent. Nothing was changed.`,
+        choices: choice.choices,
+      };
+    case "unchosen":
+      return {
+        kind: "refused",
+        code: MONITORING_EXIT.unchosen,
+        status: "unchosen-agent",
+        reason: `This folder names ${String(choice.choices.length)} voice agents. Choose one with --agent <name-or-id>. Nothing was changed.`,
+        choices: choice.choices,
+      };
+  }
   const agentId = named?.id ?? null;
   if (agentId === null || agentId === "") {
     return { kind: "none", name: named?.name ?? null };
@@ -232,6 +287,206 @@ async function theRepositoryAgent(
   }
 }
 
+/**
+ * Record a completed remote setup without hiding its receipt when this final
+ * local step fails. Callers print the stable agent facts, and LiveKit's worker
+ * configuration, before reaching this boundary.
+ */
+async function recordMonitoringReceipt(
+  options: MonitoringCommandOptions,
+  platform: RegisterOptions,
+  target: MonitoredTarget,
+  recovery?:
+    | { readonly kind: "record"; readonly monitoringKeyId: string }
+    | { readonly kind: "repeat-livekit-enable" },
+): Promise<number | null> {
+  try {
+    await recordMonitoringTarget({
+      cwd: options.cwd,
+      signedIn: platform,
+      target,
+      fetchImpl: options.fetchImpl,
+    });
+    return null;
+  } catch (cause) {
+    const detail =
+      cause instanceof MonitoringTargetRecordError
+        ? cause.message
+        : `could not finish the repository record: ${cause instanceof Error ? cause.message : String(cause)}`;
+    const recoveryInstruction =
+      recovery?.kind === "repeat-livekit-enable"
+        ? "After the repository issue is fixed, run the same egma monitoring enable command again. That retry rechecks the existing worker key and retries this repository record without minting or rotating a key."
+        : `After the repository or Egma connection is fixed, run egma monitoring record --agent ${target.id}${recovery === undefined ? "" : ` --monitoring-key-id ${recovery.monitoringKeyId}`} --url ${platform.url}. That recovery command does not create an agent or mint a key.`;
+    const reason =
+      `Egma finished remote monitoring setup for agent ${target.id}, but ${detail} The remote setup remains active. ` +
+      `Keep the receipt above. ${recoveryInstruction}`;
+    options.out("status: repository-record-failed");
+    options.out(`reason: ${reason}`);
+    options.fail(reason);
+    return MONITORING_EXIT.repositoryRecordFailed;
+  }
+}
+
+function refuseMissingMonitoring(
+  options: MonitoringCommandOptions,
+  reason: string,
+): number {
+  options.out("status: no-monitoring-setup");
+  options.out(`reason: ${reason}`);
+  options.fail(reason);
+  return MONITORING_EXIT.refused;
+}
+
+/** Prove the earlier remote setup before the record-only command writes locally. */
+async function proveMonitoringSetup(
+  options: MonitoringCommandOptions,
+  monitoring: AgentMonitoring,
+  platform: RegisterOptions,
+): Promise<number | null> {
+  if (monitoring.archived) {
+    return refuseMissingMonitoring(
+      options,
+      `Agent ${monitoring.agentId} is archived and cannot be recorded for monitoring. Nothing was recorded.`,
+    );
+  }
+
+  const agentPlatform = inferredPlatform(monitoring);
+  if (agentPlatform === "retell") {
+    if (
+      monitoring.agentPlatform === "retell" &&
+      monitoring.pullProductionCalls &&
+      monitoring.platformAgentId !== null &&
+      monitoring.platformAgentId !== "" &&
+      monitoring.monitoringApiKeyHint !== null
+    ) {
+      return null;
+    }
+    return refuseMissingMonitoring(
+      options,
+      `Agent ${monitoring.agentId} has no active Retell monitoring setup. Nothing was recorded.`,
+    );
+  }
+
+  if (agentPlatform !== "livekit") {
+    return refuseMissingMonitoring(
+      options,
+      `Agent ${monitoring.agentId} does not identify a supported monitoring platform. Nothing was recorded.`,
+    );
+  }
+
+  if (monitoring.agentPlatform !== "livekit") {
+    return refuseMissingMonitoring(
+      options,
+      `Agent ${monitoring.agentId} is not bound to LiveKit. Nothing was recorded.`,
+    );
+  }
+
+  const keyId = (options.monitoringKeyId ?? "").trim();
+  if (keyId === "") {
+    return refuseMissingMonitoring(
+      options,
+      "LiveKit monitoring recovery needs --monitoring-key-id <id> from the earlier setup receipt. Nothing was recorded.",
+    );
+  }
+
+  const active = await listActiveProjectKeys(
+    {
+      projectId: monitoring.projectId,
+      namePrefix: monitoringKeyPrefix(monitoring.agentId),
+    },
+    platform,
+  );
+  if (active.kind === "listed") {
+    return active.keys.some((key) => key.id === keyId)
+      ? null
+      : refuseMissingMonitoring(
+          options,
+          `Key ${keyId} is not an active LiveKit monitoring key for agent ${monitoring.agentId}. Nothing was recorded.`,
+        );
+  }
+  const reason =
+    active.kind === "not-authenticated"
+      ? `This machine holds no usable Egma key for ${platform.url}. Run egma login, then try again.`
+      : active.reason;
+  options.out(`status: ${active.kind === "not-authenticated" ? "not-signed-in" : "failed"}`);
+  options.out(`reason: ${reason}`);
+  options.fail(reason);
+  return active.kind === "not-authenticated"
+    ? MONITORING_EXIT.notSignedIn
+    : MONITORING_EXIT.unreachable;
+}
+
+/** Recover only the local catalog entry for an already-created Egma agent. */
+async function recordExistingMonitoringTarget(
+  options: MonitoringCommandOptions,
+  platform: RegisterOptions,
+): Promise<number> {
+  const agentId = (options.agent ?? "").trim();
+  if (agentId === "") {
+    options.out("status: unchosen-agent");
+    options.fail(
+      "Name the stable Egma agent id from the earlier receipt with --agent. Nothing was changed.",
+    );
+    return MONITORING_EXIT.unchosen;
+  }
+
+  const read = await readAgentMonitoring(agentId, platform);
+  switch (read.kind) {
+    case "monitoring": {
+      options.out(`agent_id: ${read.monitoring.agentId}`);
+      options.out(`agent_name: ${read.monitoring.agentName}`);
+      options.out(`project_id: ${read.monitoring.projectId}`);
+      const refused = await proveMonitoringSetup(options, read.monitoring, platform);
+      if (refused !== null) return refused;
+      try {
+        await recordMonitoringTarget({
+          cwd: options.cwd,
+          signedIn: platform,
+          target: {
+            id: read.monitoring.agentId,
+            name: read.monitoring.agentName,
+            projectId: read.monitoring.projectId,
+          },
+          fetchImpl: options.fetchImpl,
+        });
+      } catch (cause) {
+        const detail =
+          cause instanceof MonitoringTargetRecordError
+            ? cause.message
+            : cause instanceof Error
+              ? cause.message
+              : String(cause);
+        options.out("status: repository-record-failed");
+        options.out(`reason: ${detail}`);
+        options.fail(
+          `Egma changed no remote monitoring setup, but the repository record still failed: ${detail}`,
+        );
+        return MONITORING_EXIT.repositoryRecordFailed;
+      }
+      options.out("status: recorded");
+      return MONITORING_EXIT.done;
+    }
+    case "not-found":
+      options.out("status: no-agent");
+      options.fail(
+        `Egma has no agent ${agentId} in this project. Copy the stable agent id from the earlier receipt and try again.`,
+      );
+      return MONITORING_EXIT.nothingHere;
+    case "not-authenticated":
+      options.out("status: not-signed-in");
+      options.fail(
+        `This machine holds no Egma key for ${options.access.url}. Run egma login, then try again.`,
+      );
+      return MONITORING_EXIT.notSignedIn;
+    case "refused":
+    case "unreachable":
+      options.out("status: failed");
+      options.out(`reason: ${read.reason}`);
+      options.fail(read.reason);
+      return MONITORING_EXIT.unreachable;
+  }
+}
+
 export async function runMonitoringCommand(
   options: MonitoringCommandOptions,
 ): Promise<number> {
@@ -260,8 +515,15 @@ export async function runMonitoringCommand(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   };
 
+  if (options.action === "record") {
+    return recordExistingMonitoringTarget(options, platform);
+  }
+
   const held = await theRepositoryAgent(options, platform);
   if (held.kind === "refused") {
+    for (const agent of held.choices ?? []) {
+      options.out(`agent-option: ${agent.id} ${agent.name}`);
+    }
     options.out(`status: ${held.status}`);
     options.out(`reason: ${held.reason}`);
     options.fail(held.reason);
@@ -382,16 +644,24 @@ async function enableRetell(
   });
 
   switch (outcome.kind) {
-    case "watching":
+    case "watching": {
       options.out(`agent_id: ${outcome.agentId}`);
       options.out(`agent_name: ${outcome.agentName}`);
+      options.out(`project_id: ${outcome.projectId}`);
       options.out(`platform_agent_id: ${outcome.platformAgentId}`);
       options.out(`agent_registration: ${outcome.created ? "created" : "reused"}`);
       options.out("pull_production_calls: on");
       // Proof rather than a promise, and an empty account is not a failure.
       options.out(`first_conversation: ${outcome.arrived ? "arrived" : "none-yet"}`);
+      const localFailure = await recordMonitoringReceipt(options, platform, {
+        id: outcome.agentId,
+        name: outcome.agentName,
+        projectId: outcome.projectId,
+      });
+      if (localFailure !== null) return localFailure;
       options.out("status: watching");
       return MONITORING_EXIT.done;
+    }
     case "no-key":
       options.out("status: no-key");
       options.fail(
@@ -459,18 +729,60 @@ async function enableLiveKit(
   });
 
   switch (wired.kind) {
-    case "wired":
+    case "refused":
+      return refuseMissingMonitoring(options, wired.reason);
+    case "wired": {
       options.out(`agent_id: ${wired.agent.id}`);
       options.out(`agent_name: ${wired.agent.name}`);
+      options.out(`project_id: ${wired.agent.projectId}`);
       options.out(`agent_registration: ${wired.created ? "created" : "reused"}`);
+      options.out(`monitoring_key_id: ${wired.keyId}`);
       options.out(`api_key: ${wired.keyLooksLike}`);
       options.out(`env_file: ${wired.env.kind === "written" ? wired.env.file : "none"}`);
       if (wired.env.kind === "refused") options.out(`reason: ${wired.env.reason}`);
       // The deliverable, whether the file was written or not: wherever this
       // worker really runs, these two lines are what it needs.
       for (const line of wired.lines) options.out(`env: ${line}`);
+      const localFailure = await recordMonitoringReceipt(
+        options,
+        platform,
+        {
+          id: wired.agent.id,
+          name: wired.agent.name,
+          projectId: wired.agent.projectId,
+        },
+        { kind: "record", monitoringKeyId: wired.keyId },
+      );
+      if (localFailure !== null) return localFailure;
       options.out("status: wired");
       return MONITORING_EXIT.done;
+    }
+    case "already-configured":
+      options.out(`agent_id: ${wired.agent.id}`);
+      options.out(`agent_name: ${wired.agent.name}`);
+      options.out(`project_id: ${wired.agent.projectId}`);
+      options.out("agent_registration: reused");
+      if (wired.keyId !== null) options.out(`monitoring_key_id: ${wired.keyId}`);
+      {
+        const localFailure = await recordMonitoringReceipt(
+          options,
+          platform,
+          {
+            id: wired.agent.id,
+            name: wired.agent.name,
+            projectId: wired.agent.projectId,
+          },
+          wired.keyId === null
+            ? { kind: "repeat-livekit-enable" }
+            : { kind: "record", monitoringKeyId: wired.keyId },
+        );
+        if (localFailure !== null) return localFailure;
+      }
+      options.out("repository_record: recorded");
+      options.out("status: already-configured");
+      options.out(`reason: ${wired.reason}`);
+      options.fail(wired.reason);
+      return MONITORING_EXIT.refused;
     case "interrupted":
       options.out("status: interrupted");
       options.fail("The egma monitoring command was stopped before it finished.");

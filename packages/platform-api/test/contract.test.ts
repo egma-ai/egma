@@ -67,6 +67,21 @@ describe("the platform API operation registry", () => {
       .toBe(operations.length);
   });
 
+  it("lets a LiveKit agent reserve one active worker key inside one project", () => {
+    const guarded = platformOperations.createApiKey.request.body.oneOf[1];
+    expect(guarded).toMatchObject({
+      properties: {
+        monitoringAgentId: {
+          type: "string",
+          minLength: 1,
+          description: expect.stringContaining("server"),
+        },
+      },
+      required: ["name", "projectId", "monitoringAgentId"],
+    });
+    expect(platformOperations.createApiKey.responses).toHaveProperty("409");
+  });
+
   it("activates library definitions instead of creating project-owned copies", () => {
     expect(platformOperations).not.toHaveProperty("createGrader");
     expect(platformOperations).not.toHaveProperty("deleteGrader");

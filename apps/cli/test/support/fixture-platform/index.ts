@@ -133,6 +133,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     const apiKeyGroup = apiKeyRoutes({
       holdsKey,
       accept: (key) => device.accept(key),
+      reject: (key) => device.reject(key),
       organizationId,
       projectId,
     });
@@ -173,10 +174,13 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     running = runGroup.controls;
 
     return [
+      // The full key-list route must win over the device-flow fixture's older
+      // login probe at the same path. A login probe needs only a 200; the CLI
+      // recovery flow needs the real safe metadata list.
+      apiKeyGroup.group,
       deviceGroup.group,
       agentGroup.group,
       monitoringGroup.group,
-      apiKeyGroup.group,
       suiteGroup.group,
       personaGroup.group,
       testGroup.group,

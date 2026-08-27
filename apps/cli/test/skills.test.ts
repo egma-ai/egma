@@ -1,9 +1,9 @@
 /**
  * The instruction content that ships with the CLI.
  *
- * Public Agent Skills are usable on their own. The finder discloses provider
- * references only when repository evidence selects them. The wizard adds its
- * marker protocol and the projected reference root at dispatch time. These
+ * Public Agent Skills are usable on their own. The integration skill routes
+ * each phase to one short reference. The wizard adds its marker protocol and
+ * the projected reference root at dispatch time. These
  * checks keep those layers separate while proving the npm package carries
  * everything the public skill can read.
  */
@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   PUBLIC_SKILL_NAMES,
   drivingSkill,
+  integrateEgmaReference,
   instructionsWith,
   publicSkill,
   publicSkillDirectory,
@@ -27,8 +28,12 @@ import {
 import { discoveryInstructions } from "../src/wizard/discovery.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
-import { generateInstructions } from "../src/wizard/test-generation.ts";
+import {
+  generateInstructions,
+  MAX_GENERATED_EXPECTED_BEHAVIORS,
+} from "../src/wizard/test-generation.ts";
 import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
+import { workerIntegrationInstructions } from "../src/wizard/worker-integration-step.ts";
 import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
 
 const run = promisify(execFile);
@@ -42,16 +47,16 @@ describe("Egma's instruction content", () => {
       expect(content.startsWith("---\n")).toBe(true);
       expect(content).toMatch(new RegExp(`^name: ${name}$`, "mu"));
       expect(content).toMatch(/^description: \S.+$/mu);
-      expect(content.length).toBeGreaterThan(1_000);
+      expect(content.length).toBeGreaterThan(500);
       expect(content.length).toBeLessThan(20_000);
     }
   });
 
   it("keeps marker protocols in assembled CLI tasks, not public skills", () => {
     const discovery = discoveryInstructions("/repo");
-    expect(discovery.startsWith(publicSkill("find-voice-agent"))).toBe(true);
-    expect(discovery).toContain(publicSkillDirectory("find-voice-agent"));
-    expect(discovery).not.toContain("# Trace Retell repository evidence");
+    expect(discovery.startsWith(publicSkill("integrate-egma"))).toBe(true);
+    expect(discovery).toContain(publicSkillDirectory("integrate-egma"));
+    expect(discovery).not.toContain("# Connect a Retell agent");
     for (const marker of ["egma:found", "egma:note", "egma:none", "egma:abort"]) {
       expect(discovery).toContain(marker);
     }
@@ -121,12 +126,15 @@ describe("Egma's instruction content", () => {
   it("agrees with the README about the repository folder", () => {
     const layout = [
       "egma/",
-      "  config.yaml     what this folder points at — names and ids",
+      "  config.yaml     format 2 platform, project, agents, and connections",
       "  mock-tools.md   what Egma answers for the agent's tools with",
       "  tests/",
       "    release/      one local directory per suite",
       "      suite.yaml  stable suite id and mutable display name",
       "      *.md        zero or more tests in this suite",
+      "    regression/   another suite in the same project",
+      "      suite.yaml",
+      "      *.md",
     ].join("\n");
 
     expect(drivingSkill()).toContain(layout);
@@ -153,14 +161,14 @@ describe("Egma's instruction content", () => {
     const held: readonly (readonly [string, string, string])[] = [
       ["skills/egma/SKILL.md", drivingSkill(), "## Keep the folder and Egma in step"],
       [
-        "skills/find-voice-agent/SKILL.md",
-        publicSkill("find-voice-agent"),
-        "If no candidate survives corroboration",
+        "skills/integrate-egma/SKILL.md",
+        publicSkill("integrate-egma"),
+        "# Integrate Egma",
       ],
       [
         "skills/write-egma-tests/SKILL.md",
         publicSkill("write-egma-tests"),
-        "## Handle personas carefully",
+        "## Name a persona",
       ],
       [
         "README.md",
@@ -184,7 +192,47 @@ describe("Egma's instruction content", () => {
     expect(driving).toContain("inside that test file under `## Mock tools`");
 
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
-    expect(writing).toContain("Put either `answer` or `error` in its JSON block");
+    expect(writing).toContain(
+      "Put exactly one of `answer` or `error` in its JSON block",
+    );
+  });
+
+  it("makes every expected behavior judgeable in one execution", () => {
+    const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
+
+    expect(writing).toContain(
+      "Make each expected behavior judgeable in one simulation: write one observable, unconditional claim per item.",
+    );
+    expect(writing).toContain(
+      "Put the branch condition in `## Scenario`; use a separate test for each other branch.",
+    );
+  });
+
+  it("keeps generated tests focused on at most four grader assertions", () => {
+    const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
+    const instructions = generateInstructions(
+      {
+        cwd: "/repo",
+        suiteDirectory: "release-contract",
+        facts: new Map(),
+        prompt: null,
+        toolCount: 0,
+        agentName: "agent",
+        taken: [],
+        personas: ["Everyday caller"],
+      },
+      4,
+    ).replace(/\s+/gu, " ");
+
+    expect(MAX_GENERATED_EXPECTED_BEHAVIORS).toBe(4);
+    expect(writing).toContain("write three expected behaviors by default");
+    expect(writing).toContain("Never write more than four expected behaviors");
+    expect(instructions).toContain(
+      "Each expected behavior becomes one independent grader assertion",
+    );
+    expect(instructions).toContain(
+      "Put a general requirement in its own focused test instead of repeating it",
+    );
   });
 
   /**
@@ -206,49 +254,58 @@ describe("Egma's instruction content", () => {
     expect(writing).not.toContain("only when this test needs an answer different");
   });
 
-  /**
-   * The SDK skill is authored for a customer's own coding agent, so it has to
-   * carry the three things that make an unsupervised edit safe: where each
-   * public entry goes, the rule that keeps it out of `.env`, and what to do
-   * when it cannot find the worker at all.
-   */
-  it("teaches both SDK entries, the .env rule, and the printed fallback", () => {
-    const sdk = publicSkill("integrate-egma-sdk");
+  /** The router owns common safety; the selected reference adds SDK-specific bounds. */
+  it("teaches both SDK entries, named credential custody, and the printed fallback", () => {
+    const integration = publicSkill("integrate-egma");
+    const sdk = readFileSync(
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "integrate-egma-sdk.md",
+      ),
+      "utf8",
+    );
 
     // The testing entry, where it goes and why the wait is structural.
     expect(sdk).toContain("await mockable(agent, ctx, session)");
     expect(sdk).toContain("AgentSession.start");
+    expect(sdk).toContain("do not add another\nconnection call");
+    const testingExample = /## Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+      sdk,
+    )?.[1];
+    const bothExample = /## Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+      sdk,
+    )?.[1];
+    expect(testingExample).toBeDefined();
+    expect(bothExample).toBeDefined();
+    expect(testingExample).not.toContain("await ctx.connect()");
+    expect(bothExample?.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+      bothExample?.indexOf("await mockable(agent, ctx, session)") ?? -1,
+    );
+    expect(bothExample).not.toContain("await ctx.connect()");
+    expect(bothExample?.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+      bothExample?.indexOf("await session.start") ?? -1,
+    );
     // The monitoring entry, which ticket 02 reuses and this lane never adds.
     expect(sdk).toContain("monitor_livekit(ctx)");
     expect(sdk).toContain("ctx.connect()");
-    // The two environment variables are named, and writing them is still
-    // Egma's own command's job. Naming is teaching: a by-hand fallback that
-    // never said what to export would produce a worker that crashes on start,
-    // and knowing a variable's name is not the same as being allowed to put a
-    // live key in a file (founder decision, 2026-08-24).
     expect(sdk).toContain("EGMA_URL");
     expect(sdk).toContain("EGMA_API_KEY");
-    expect(sdk.replace(/\s+/gu, " ")).toContain(
-      "Naming them is teaching; setting them is not yours to do",
-    );
-    expect(sdk.replace(/\s+/gu, " ")).toContain(
-      "do not add them to `.env` or to any other file",
-    );
-    // The rule that keeps a live credential away from a driven coding agent.
-    expect(sdk.replace(/\s+/gu, " ")).toContain("Never touch `.env`");
-    expect(sdk.replace(/\s+/gu, " ")).toContain("Never read");
-    expect(sdk.replace(/\s+/gu, " ")).toContain("Never write");
-    // And the fallback, so a worker nobody can identify is never guessed at.
-    expect(sdk).toContain("When the entrypoint cannot be found");
-    expect(sdk).toContain("Do not guess");
+    expect(integration).toContain("Leave every `.env` file unread and unchanged");
+    expect(sdk).toContain("Keep both values out of changed files and command output");
+    expect(sdk).not.toContain(".env");
+    expect(sdk).toContain("When the entrypoint is unknown");
+    expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
   });
 
-  /**
-   * The mock-authoring dispatch is the wizard's, and the marker protocol stays
-   * in it: the public skill has to make sense installed on its own.
-   */
-  it("keeps the mock-authoring markers in the task, not in the SDK skill", () => {
-    const sdk = publicSkill("integrate-egma-sdk");
+  it("requires the first Python SDK release that follows LiveKit handoffs", () => {
+    const sdk = integrateEgmaReference("integrate-egma-sdk");
+
+    expect(sdk).toContain("`egma>=0.1.1`");
+  });
+
+  /** The mock-world task owns no worker file or SDK instructions. */
+  it("keeps mock authoring on mock files and test overrides", () => {
     const authoring = mockAuthoringInstructions({
       cwd: "/repo",
       suiteDirectory: "generated",
@@ -257,53 +314,108 @@ describe("Egma's instruction content", () => {
       tests: ["greets-a-new-customer"],
     });
 
-    expect(authoring.indexOf(sdk)).toBe(0);
-    expect(authoring).toContain(publicSkill("write-egma-tests"));
+    expect(authoring.startsWith("# Your task")).toBe(true);
+    expect(authoring).not.toContain(publicSkill("integrate-egma"));
+    expect(authoring).not.toContain(publicSkill("write-egma-tests"));
     expect(authoring).toContain("egma/mock-tools.md");
-    expect(authoring).toContain("egma:found sdk-entry");
-    for (const marker of ["egma:plan", "egma:wrote", "egma:note", "egma:abort"]) {
+    expect(authoring).not.toContain("worker file where");
+    expect(authoring).not.toContain("dependency manifest");
+    expect(authoring).not.toContain("egma:found worker-entry");
+    for (const marker of [
+      "egma:plan",
+      "egma:writing",
+      "egma:wrote",
+      "egma:note",
+      "egma:abort",
+    ]) {
       expect(authoring).toContain(marker);
     }
-    // And the monitoring entry is never asked for in the testing lane.
-    expect(authoring).toContain("add **only the testing entry**");
+  });
+
+  it("mocks external dependencies without replacing the agent's own workflow", () => {
+    const authoring = mockAuthoringInstructions({
+      cwd: "/repo",
+      suiteDirectory: "generated",
+      facts: new Map([["framework", "livekit-agents"]]),
+      agentName: "front-desk",
+      tests: ["books-an-appointment"],
+    }).replace(/\s+/gu, " ");
+
+    expect(authoring).toContain(
+      "Only mock a tool when its real implementation crosses a boundary outside the agent process",
+    );
+    expect(authoring).toContain("AgentTask.complete");
+    expect(authoring).toContain("TaskGroup");
+    expect(authoring).toContain("in-memory state");
+    expect(authoring).toContain("egma:none");
+    expect(authoring).toContain("mixes an external effect with agent-runtime control");
+    expect(authoring).toContain("egma:abort");
+    expect(authoring).toContain("cannot safely run only half of its implementation");
+    expect(authoring).not.toContain("For **each real tool**");
+  });
+
+  it("gives one worker owner the selected SDK reference and final mode", () => {
+    const router = publicSkill("integrate-egma");
+    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const integration = workerIntegrationInstructions(
+      "/repo",
+      new Map([["framework", "livekit-agents"]]),
+      "both",
+    );
+
+    expect(integration.indexOf(router)).toBe(0);
+    expect(integration).toContain(sdk);
+    expect(integration.split(sdk)).toHaveLength(2);
+    expect(integration).toContain("final mode is **both**");
+    expect(integration).toContain("egma:found worker-entry");
+    expect(integration).toContain("worker file where");
+    expect(integration).toContain("dependency manifest");
   });
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("find-voice-agent"), "references", "retell.md"),
+      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
       "utf8",
     );
     expect(retell).toContain("retell-sdk");
-    expect(retell).toContain("Retell dashboard");
+    expect(retell).toContain("managed response engine");
     expect(retell).toContain("agent_");
     expect(retell).toContain("llm_");
   });
 
   it("recognizes LiveKit workers without assuming one SDK shape", () => {
     const livekit = readFileSync(
-      path.join(publicSkillDirectory("find-voice-agent"), "references", "livekit.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "find-voice-agent.md",
+      ),
       "utf8",
     );
     expect(livekit).toContain("livekit-agents");
     expect(livekit).toContain("@livekit/agents");
     expect(livekit).toContain("AgentSession");
     expect(livekit).toContain("WorkerOptions");
-    expect(livekit).toContain("agent name");
+    expect(livekit).toContain("dispatch name");
   });
 
   it("uses Egma's product words in public and dispatched content", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("find-voice-agent"), "references", "retell.md"),
+      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
       "utf8",
     );
     const livekit = readFileSync(
-      path.join(publicSkillDirectory("find-voice-agent"), "references", "livekit.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "find-voice-agent.md",
+      ),
       "utf8",
     );
     const all = [
       ...PUBLIC_SKILL_NAMES.map((name) => [name, publicSkill(name)] as const),
-      ["find-voice-agent/references/retell.md", retell] as const,
-      ["find-voice-agent/references/livekit.md", livekit] as const,
+      ["integrate-egma/references/connect-retell.md", retell] as const,
+      ["integrate-egma/references/find-voice-agent.md", livekit] as const,
     ];
 
     for (const [name, source] of all) {
@@ -351,8 +463,9 @@ describe("Egma's instruction content", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
       expect(paths).toContain(`skills/${name}/SKILL.md`);
     }
-    expect(paths).toContain("skills/find-voice-agent/references/retell.md");
-    expect(paths).toContain("skills/find-voice-agent/references/livekit.md");
+    expect(paths).toContain("skills/integrate-egma/references/connect-retell.md");
+    expect(paths).toContain("skills/integrate-egma/references/find-voice-agent.md");
+    expect(paths).toContain("skills/integrate-egma/scripts/livekit-local.mjs");
     expect(paths.some((file) => file.startsWith("context/"))).toBe(false);
     for (const removed of [
       "dist/acp/drive.js",
@@ -371,29 +484,31 @@ describe("Egma's instruction content", () => {
       expect(path.relative(PACKAGE_ROOT, file)).toBe(path.join("skills", name, "SKILL.md"));
       expect(readFileSync(file, "utf8")).toContain(publicSkill(name));
     }
-    for (const [provider, heading] of [
-      ["retell", "# Trace Retell repository evidence"],
-      ["livekit", "# Trace LiveKit repository evidence"],
+    for (const [referenceName, heading] of [
+      ["connect-retell", "# Connect a Retell agent"],
+      ["find-voice-agent", "# Find the voice agent"],
+      ["integrate-egma-sdk", "# Add the Egma SDK to a LiveKit worker"],
+      ["run-livekit-agent-locally", "# Run a LiveKit agent locally"],
     ] as const) {
       const reference = path.join(
-        publicSkillDirectory("find-voice-agent"),
+        publicSkillDirectory("integrate-egma"),
         "references",
-        `${provider}.md`,
+        `${referenceName}.md`,
       );
       expect(path.relative(PACKAGE_ROOT, reference)).toBe(
-        path.join("skills", "find-voice-agent", "references", `${provider}.md`),
+        path.join("skills", "integrate-egma", "references", `${referenceName}.md`),
       );
       expect(readFileSync(reference, "utf8")).toContain(heading);
     }
   });
 
-  it("keeps the finder before the task and leaves provider details conditionally disclosed", () => {
-    const finding = publicSkill("find-voice-agent");
-    const instructions = instructionsWith([finding], "# Your task\nLook.");
+  it("keeps the integration router before the task and leaves phase details in references", () => {
+    const integration = publicSkill("integrate-egma");
+    const instructions = instructionsWith([integration], "# Your task\nLook.");
 
-    expect(instructions.indexOf(finding)).toBe(0);
-    expect(instructions).not.toContain("# Trace Retell repository evidence");
-    expect(instructions).not.toContain("# Trace LiveKit repository evidence");
+    expect(instructions.indexOf(integration)).toBe(0);
+    expect(instructions).not.toContain("# Connect a Retell agent");
+    expect(instructions).not.toContain("# Run a LiveKit agent locally");
     expect(instructions.endsWith("# Your task\nLook.")).toBe(true);
   });
 });

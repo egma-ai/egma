@@ -1,6 +1,8 @@
 import {
+  ActiveApiKeyNameConflictError,
   authorize,
   createApiKey,
+  getAgent,
   listApiKeys,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -16,6 +18,7 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { sendRefusal } from "../http/refusals.ts";
 
 /**
  * Working with keys: see the ones you may see, mint one, retire one.
@@ -42,6 +45,13 @@ type Body = Record<string, unknown>;
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** The only reserved key namespace exposed by this route. */
+const LIVEKIT_MONITORING_KEY_NAMESPACE = "Egma monitoring ";
+
+function liveKitMonitoringKeyPrefix(agentId: string): string {
+  return `${LIVEKIT_MONITORING_KEY_NAMESPACE}${agentId} — `;
 }
 
 /** A key as a list is allowed to describe it. Never the secret. */
@@ -111,17 +121,86 @@ export async function apiKeyRoutes(
       });
 
       const projectId = text(body.projectId) || null;
-      const minted = mintApiKeySecret();
+      const name = text(body.name) || null;
+      const monitoringAgentId = body.monitoringAgentId === undefined
+        ? undefined
+        : text(body.monitoringAgentId);
 
-      let key: ApiKey;
-      try {
-        key = await createApiKey(auth, {
+      if (
+        monitoringAgentId === undefined &&
+        name?.startsWith(LIVEKIT_MONITORING_KEY_NAMESPACE)
+      ) {
+        return sendRefusal(
+          reply,
+          "invalid_request",
+          "this key name is reserved for Egma's guarded LiveKit monitoring setup",
+        );
+      }
+
+      if (
+        monitoringAgentId !== undefined &&
+        (monitoringAgentId === "" || projectId === null || name === null)
+      ) {
+        return sendRefusal(
+          reply,
+          "invalid_request",
+          "monitoringAgentId needs a projectId and a non-empty key name",
+        );
+      }
+
+      let activeNamePrefix: string | undefined;
+      if (monitoringAgentId !== undefined) {
+        authorize(auth, "configure_monitoring", {
+          organizationId: auth.organizationId,
+          projectId: projectId as string,
+        });
+
+        const target = await getAgent(auth, monitoringAgentId);
+        if (
+          target === undefined ||
+          target.projectId !== projectId ||
+          target.agentPlatform !== "livekit" ||
+          target.archivedAt !== null
+        ) {
+          return sendRefusal(
+            reply,
+            "unprocessable",
+            "monitoringAgentId must name a living LiveKit agent in the key's project",
+          );
+        }
+
+        activeNamePrefix = liveKitMonitoringKeyPrefix(target.id);
+        if (!(name as string).startsWith(activeNamePrefix)) {
+          return sendRefusal(
+            reply,
+            "invalid_request",
+            "the monitoring key name must start with Egma's prefix for that agent",
+          );
+        }
+      }
+
+      const minted = mintApiKeySecret();
+      const newKey = activeNamePrefix === undefined
+        ? {
           hash: minted.hash,
           prefix: minted.prefix,
           displaySuffix: minted.displaySuffix,
-          name: text(body.name) || null,
+          name,
           projectId,
-        });
+        }
+        : {
+          hash: minted.hash,
+          prefix: minted.prefix,
+          displaySuffix: minted.displaySuffix,
+          // Both values were checked before the secret was minted.
+          name: name as string,
+          projectId: projectId as string,
+          activeNamePrefix,
+        };
+
+      let key: ApiKey;
+      try {
+        key = await createApiKey(auth, newKey);
       } catch (cause) {
         if (cause instanceof ProjectOutsideOrganizationError) {
           return reply.code(403).send({
@@ -131,6 +210,13 @@ export async function apiKeyRoutes(
               "organization on a key comes from the credential rather than " +
               "from the request",
           });
+        }
+        if (cause instanceof ActiveApiKeyNameConflictError) {
+          return sendRefusal(
+            reply,
+            "active_key_name_conflict",
+            cause.message,
+          );
         }
         throw cause;
       }

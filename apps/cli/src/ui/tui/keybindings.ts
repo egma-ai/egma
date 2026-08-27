@@ -15,6 +15,11 @@ export type KeyState = {
   readonly downArrow?: boolean;
   readonly leftArrow?: boolean;
   readonly rightArrow?: boolean;
+  readonly tab?: boolean;
+  readonly home?: boolean;
+  readonly end?: boolean;
+  readonly backspace?: boolean;
+  readonly delete?: boolean;
   readonly ctrl?: boolean;
 };
 
@@ -27,6 +32,7 @@ export type KeyMatch =
   | "downArrow"
   | "leftArrow"
   | "rightArrow"
+  | "tab"
   | (string & NonNullable<unknown>);
 
 export type KeyBinding = {
@@ -53,6 +59,7 @@ const DEFAULT_PRIORITY: Readonly<Record<string, number>> = {
   downArrow: 0,
   leftArrow: 1,
   rightArrow: 1,
+  tab: 0,
   space: 10,
   escape: 20,
   return: 21,
@@ -94,6 +101,8 @@ export function matchesKey(match: KeyMatch, input: string, key: KeyState): boole
       return key.leftArrow === true;
     case "rightArrow":
       return key.rightArrow === true;
+    case "tab":
+      return key.tab === true || input === "\t";
     default:
       return input === match;
   }

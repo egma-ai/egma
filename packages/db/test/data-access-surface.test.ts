@@ -412,6 +412,10 @@ const THE_MODELS = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  // A guarded key creation found a living key under its reserved name prefix.
+  // It carries no row metadata because the conflicting key can belong to a
+  // colleague whose keys the caller cannot list.
+  "ActiveApiKeyNameConflictError",
   // One egma agent binds to one platform agent. A second, different one is
   // refused by name — its own class, and a subclass of the unprocessable-input
   // refusal, because the sentence is the whole of the answer and the two ids

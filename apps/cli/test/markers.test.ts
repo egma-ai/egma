@@ -42,7 +42,7 @@ describe("a marker line", () => {
     expect(markerIn("egma:wrote one-thing")).toEqual({ kind: "wrote", name: "one-thing" });
     // An agent that answers with the file rather than the name has said the
     // same thing, and is read as having said it.
-    expect(markerIn("egma:wrote egma/tests/generated/one-thing.md")).toEqual({
+    expect(markerIn("egma:wrote egma/tests/order-line-tests/one-thing.md")).toEqual({
       kind: "wrote",
       name: "one-thing",
     });
@@ -152,6 +152,7 @@ describe("markers arriving in pieces", () => {
       "Write it as [egma:found framework retell-sdk] on its own line.",
       "The marker is *egma:found framework retell-sdk* in this example.",
       "One line each: 'egma:found framework retell-sdk' is the shape.",
+      "Use `egma:plan first-test``egma:writing first-test` to show the two forms.",
     ];
 
     for (const line of prose) {
@@ -167,6 +168,25 @@ describe("markers arriving in pieces", () => {
     expect(stream.push("**egma:found** framework retell-sdk\n")).toEqual([
       { kind: "marker", marker: { kind: "note", text: "Reading the manifest." } },
       { kind: "marker", marker: { kind: "found", field: "framework", value: "retell-sdk" } },
+    ]);
+  });
+
+  it("reads adjacent inline-code markers when ACP loses their line ending", () => {
+    const stream = new MarkerStream();
+
+    expect(
+      stream.push(
+        "`egma:plan first-test, second-test``egma:writing first-test`\n" +
+          "`egma:wrote first-test``egma:writing second-test`\n",
+      ),
+    ).toEqual([
+      {
+        kind: "marker",
+        marker: { kind: "plan", names: ["first-test", "second-test"] },
+      },
+      { kind: "marker", marker: { kind: "writing", name: "first-test" } },
+      { kind: "marker", marker: { kind: "wrote", name: "first-test" } },
+      { kind: "marker", marker: { kind: "writing", name: "second-test" } },
     ]);
   });
 

@@ -13,18 +13,27 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createEgmaFolder,
+  EMPTY_CONFIG,
+  folderPathsIn,
+  readConfig,
+  writeConfig,
+} from "../src/folder/egma-folder.ts";
 import { walkExitCode } from "../src/wizard/exit-code.ts";
 import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
 import { MintedSecret } from "../src/platform/api-keys.ts";
+import type { StartLocalLiveKitWorker } from "../src/livekit/local-worker.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, exitLines } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
+import { publicSkillDirectory } from "../src/skills/index.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import type { StartRefusalReason } from "./support/fixture-platform/index.ts";
@@ -45,11 +54,24 @@ const AGENT_NAME = "order-line";
 const LIVEKIT_API_KEY = "APIhx4bmvHnLcWXYZ";
 const LIVEKIT_API_SECRET = "livekit-secret-E5F6G7H8QRST";
 
-/** The one fragment that names the monitoring dispatch and nothing else. */
-const MONITORING_EDIT_TASK = "send its production evidence to Egma";
+const startFakeLocalWorker: StartLocalLiveKitWorker = async () => {
+  let finish!: () => void;
+  const ended = new Promise<{ readonly kind: "stopped" }>((resolve) => {
+    finish = () => resolve({ kind: "stopped" });
+  });
+  return {
+    kind: "started",
+    worker: { ended, stop: async () => finish() },
+  };
+};
+
+/** The one task that owns the worker and dependency manifest for every mode. */
+const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mocked-world dispatch and nothing else. */
-const MOCK_AUTHORING_TASK = "run isolated from its real";
+const MOCK_AUTHORING_TASK = "Write the mocked world for";
 const GENERATE_TASK = "## The words the agent is running on";
+const REQUIREMENTS_BEFORE = "livekit-agents\n";
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.1\n`;
 
 /**
  * The Retell account behind the wizard's own discovery, for the both lane.
@@ -104,6 +126,29 @@ const WORKER_MONITORED = WORKER_BEFORE.replace(
   "from egma import monitor_livekit\nfrom livekit import agents",
 );
 
+/** The worker after one Both-mode integration edit. */
+const WORKER_BOTH = WORKER_BEFORE.replace(
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)\n    await ctx.connect()",
+)
+  .replace(
+    "    await session.start(agent=agent, room=ctx.room)",
+    "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+  )
+  .replace(
+    "from livekit import agents",
+    "from egma import mockable, monitor_livekit\nfrom livekit import agents",
+  );
+
+/** A testing-only rewrite, used to prove the final Both check catches clobbering. */
+const WORKER_TESTING_ONLY = WORKER_BEFORE.replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+).replace(
+  "from livekit import agents",
+  "from egma import mockable\nfrom livekit import agents",
+);
+
 let platform: Platform;
 let workspace: Workspace;
 
@@ -112,9 +157,33 @@ async function gitRepository(dir: string, ignoring: readonly string[]): Promise<
   await writeFile(path.join(dir, ".gitignore"), `${ignoring.join("\n")}\n`, "utf8");
 }
 
+/** Keep discovery readable while making the post-success config record fail. */
+async function lockEgmaFolder(): Promise<() => Promise<void>> {
+  await createEgmaFolder({
+    repository: workspace.dir,
+    config: {
+      ...EMPTY_CONFIG,
+      platform: { origin: platform.url },
+    },
+  });
+  const root = folderPathsIn(workspace.dir).root;
+  const config = folderPathsIn(workspace.dir).config;
+  await chmod(config, 0o400);
+  await chmod(root, 0o500);
+  return async () => {
+    await chmod(root, 0o700);
+    await chmod(config, 0o600);
+  };
+}
+
 beforeEach(async () => {
   platform = await startPlatform();
   workspace = await makeWorkspace({ "package.json": MANIFEST });
+  await writeFile(
+    path.join(workspace.dir, "requirements.txt"),
+    REQUIREMENTS_BEFORE,
+    "utf8",
+  );
   await workspace.signIn(platform.url, platform.device.mint());
   platform.monitoring.account(KEY, [{ id: PLATFORM_AGENT, name: AGENT_NAME }]);
 });
@@ -148,17 +217,70 @@ function liveKitDiscovery(): FakeStep[] {
   return [
     { kind: "say", text: "egma:found framework livekit-agents\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+    { kind: "say", text: "egma:found entrypoint agent.py\n" },
     { kind: "stop", reason: "end_turn" },
   ];
+}
+
+function nodeLiveKitDiscovery(): FakeStep[] {
+  return liveKitDiscovery().map((step) =>
+    step.kind === "say" && step.text.includes("framework livekit-agents")
+      ? { kind: "say" as const, text: "egma:found framework @livekit/agents\n" }
+      : step,
+  );
 }
 
 /** The coding agent applying the monitoring entry, and naming the agent. */
 function appliesMonitorEntry(): FakeStep[] {
   return [
     { kind: "write-file", path: "agent.py", content: WORKER_MONITORED },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
     { kind: "say", text: "egma:note Added monitor_livekit(ctx) to agent.py\n" },
-    { kind: "say", text: "egma:found monitor-entry agent.py\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** The coding agent applying the complete final integration in one edit. */
+function appliesBothEntries(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_BOTH },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:note Added both Egma entries to agent.py\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** Report a worker that was already integrated, without editing it again. */
+function reportsIntegratedWorker(agentName = "front-desk"): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    {
+      kind: "say",
+      text: "egma:found dependency-manifest requirements.txt\n",
+    },
+    { kind: "say", text: `egma:found agent-name ${agentName}\n` },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function clobbersMonitoringDuringMockAuthoring(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_TESTING_ONLY },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -177,12 +299,15 @@ function testFile(name: string): string {
   ].join("\n");
 }
 
-function writesOneTest(name: string): FakeStep[] {
+function writesOneTest(
+  name: string,
+  suiteDirectory = "order-line-tests",
+): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/generated/${name}.md`,
+      path: `egma/tests/${suiteDirectory}/${name}.md`,
       content: testFile(name),
     },
     { kind: "say", text: `egma:wrote ${name}\n` },
@@ -306,6 +431,7 @@ async function walk(options: WalkOptions) {
       }),
       ...(options.retell === undefined ? {} : { retell: { url: options.retell.url } }),
       connectionFetchImpl: connectionFetch(),
+      startLiveKitWorker: startFakeLocalWorker,
       home: path.join(workspace.dir, "pretend-home"),
       runPollMs: 20,
       howManyTests: 1,
@@ -370,13 +496,25 @@ describe("choosing monitoring on Retell", () => {
     // entry is LiveKit's, and a Retell repository is never asked for it.
     const sent = await dispatched();
     expect(sent).toHaveLength(1);
-    expect(sent.some((task) => task.includes(MONITORING_EDIT_TASK))).toBe(false);
+    expect(sent.some((task) => task.includes(WORKER_INTEGRATION_TASK))).toBe(false);
 
-    // The committed folder records nothing about monitoring — it records
-    // nothing at all, because monitoring writes no folder.
-    await expect(
-      readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    // The committed catalog names the monitored target. Monitoring alone has
+    // no simulation connection, so its connection list is deliberately empty.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toEqual([]);
+    expect(config).toMatchObject({
+      format: 2,
+      platform: { origin: platform.url },
+      project: { id: platform.registered.agents[0]?.projectId },
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: AGENT_NAME,
+          connections: [],
+        },
+      ],
+    });
 
     expect(buildExitLine(report)).toContain("Monitoring page");
     expect(ui.record.asked).not.toContain("reach");
@@ -396,6 +534,38 @@ describe("choosing monitoring on Retell", () => {
     expect(report).toMatchObject({ kind: "monitoring-started", arrived: false });
     expect(walkExitCode(report)).toBe(0);
     expect(buildExitLine(report)).toContain("Nothing has arrived yet");
+    expect(platform.registered.agents[0]?.pullProductionCalls).toBe(true);
+  });
+
+  it("keeps the remote receipt when the repository catalog cannot be written", async () => {
+    const unlock = await lockEgmaFolder();
+    let walked: Awaited<ReturnType<typeof walk>>;
+    try {
+      walked = await walk({
+        goal: "monitoring",
+        steps: retellDiscovery(),
+        answers: { "retell-key": KEY },
+      });
+    } finally {
+      await unlock();
+    }
+
+    expect(walked.report.kind).toBe("monitoring-record-failed");
+    expect(walkExitCode(walked.report)).toBe(1);
+    const lines = exitLines(walked.report);
+    const printed = lines.join("\n");
+    expect(printed).toContain(`agent_id: ${platform.registered.agents[0]?.id ?? ""}`);
+    expect(printed).toContain(`platform_agent_id: ${PLATFORM_AGENT}`);
+    expect(printed).toContain("pull_production_calls: on");
+    expect(printed).toContain("status: repository-record-failed");
+    expect(printed).toContain(`url: ${platform.url}`);
+    expect(lines.findIndex((line) => line.startsWith("agent_id:"))).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("Egma could not record")),
+    );
+    expect(printed).toContain(
+      `egma monitoring record --agent ${platform.registered.agents[0]?.id ?? ""}`,
+    );
+    expect(printed).toContain(`--url ${platform.url}`);
     expect(platform.registered.agents[0]?.pullProductionCalls).toBe(true);
   });
 
@@ -437,17 +607,35 @@ describe("choosing monitoring on LiveKit", () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
   });
 
+  it("stops a Node worker before monitoring creates remote resources", async () => {
+    const { report } = await walk({
+      goal: "monitoring",
+      steps: nodeLiveKitDiscovery(),
+    });
+
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected Node refusal");
+    expect(report.reason).toContain("Egma SDK is Python only today");
+    expect(report.reason).toContain("did not create remote resources");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+
+    const sent = await dispatched();
+    expect(sent.some((task) => task.includes(WORKER_INTEGRATION_TASK))).toBe(false);
+  });
+
   /**
-   * The gated edit, the minted key, the written file — and no wait, because a
-   * pushing worker has nothing to prove until it runs.
+   * The coding-agent edit, the minted key, and the safe automatic file write —
+   * with no separate approval screen and no wait for production traffic.
    */
   it("wires the worker, mints a project key, and writes exactly two lines", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
 
-    const { report } = await walk({
+    const { report, ui } = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
-      stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
     });
 
     expect(report).toMatchObject({
@@ -458,6 +646,7 @@ describe("choosing monitoring on LiveKit", () => {
       wired: true,
     });
     expect(walkExitCode(report)).toBe(0);
+    expect(ui.record.gatesOpened).toEqual(["welcome", "begin"]);
 
     // The agent's row: platform-bound, named by the coding agent, and holding
     // nothing about the key — push is observed, never declared.
@@ -492,22 +681,221 @@ describe("choosing monitoring on LiveKit", () => {
     const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
     expect(worker).toContain("monitor_livekit(ctx)");
 
-    // Monitoring wrote no committed folder at all: the platform is the one
-    // place the truth about monitoring lives.
-    await expect(
-      readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    // Monitoring commits the target identity, but no simulation connection.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toEqual([]);
+    expect(config).toMatchObject({
+      format: 2,
+      platform: { origin: platform.url },
+      project: { id: platform.registered.agents[0]?.projectId },
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: "front-desk",
+          connections: [],
+        },
+      ],
+    });
 
     // The coding agent was told, in the dispatch itself, never to touch an
     // environment file — the key is Egma's own code's to write.
     const sent = await dispatched();
-    const edit = sent.find((task) => task.includes(MONITORING_EDIT_TASK)) ?? "";
+    const edit = sent.find((task) => task.includes(WORKER_INTEGRATION_TASK)) ?? "";
     expect(edit).toContain("Never open, write, or mention a `.env` file");
     expect(edit).not.toContain(minted.secret);
 
     // The lines survive the screen, one to a line, for the deployment.
     expect(exitLines(report)).toContain(`export EGMA_API_KEY=${minted.secret}`);
     expect(buildExitLine(report)).toContain("Monitoring page");
+  });
+
+  it("keeps monitoring unchanged and continues into testing on a second Both walk", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const firstAgent = platform.registered.agents[0];
+    const firstKey = platform.keys.minted[0];
+    const firstEnvironment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+
+    const second = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: appliesBothEntries(),
+        },
+        { contains: MOCK_AUTHORING_TASK, steps: writesNoMockedWorld() },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("second-walk", "front-desk-tests"),
+        },
+      ],
+      answers: {
+        "connection:variant": "livekit_room.project_credentials",
+        "connection:config:url": "wss://acme.livekit.cloud",
+        "connection:credentials:apiKey": LIVEKIT_API_KEY,
+        "connection:credentials:apiSecret": LIVEKIT_API_SECRET,
+      },
+    });
+
+    expect(second.report.kind, JSON.stringify(second.report)).toBe("run-started");
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toEqual([firstKey]);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      firstEnvironment,
+    );
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
+    ]);
+    expect(platform.registered.agents.some((agent) => agent.name === "front-desk-2")).toBe(
+      false,
+    );
+    expect(platform.tests.tests).toHaveLength(1);
+    expect(platform.running.runs).toHaveLength(1);
+  });
+
+  it("uses case-sensitive names and reuses the exact match among several agents", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const second = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker("Front Desk"),
+        },
+      ],
+    });
+    expect(second.report.kind).toBe("monitoring-wired");
+
+    const firstAgent = platform.registered.agents[0];
+    const agentsBeforeRepeat = [...platform.registered.agents];
+    const keysBeforeRepeat = [...platform.keys.minted];
+
+    const repeated = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker("front-desk"),
+        },
+      ],
+    });
+
+    expect(repeated.report).toMatchObject({
+      kind: "monitoring-already-configured",
+      agentName: "front-desk",
+    });
+    expect(platform.registered.agents).toEqual(agentsBeforeRepeat);
+    expect(platform.keys.minted).toEqual(keysBeforeRepeat);
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
+      expect.objectContaining({ name: "Front Desk" }),
+    ]);
+  });
+
+  it("refuses duplicate exact name matches and asks for a stable id", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const configFile = folderPathsIn(workspace.dir).config;
+    const config = await readConfig(configFile);
+    await writeConfig(configFile, {
+      ...config,
+      agents: [
+        ...config.agents,
+        { id: "agt_duplicate", name: "front-desk", connections: [] },
+      ],
+    });
+    const agentsBeforeRepeat = [...platform.registered.agents];
+    const keysBeforeRepeat = [...platform.keys.minted];
+    const environmentBeforeRepeat = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+
+    const repeated = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker("front-desk"),
+        },
+      ],
+    });
+
+    expect(repeated.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining('names 2 agents called "front-desk"'),
+    });
+    if (repeated.report.kind !== "failed") throw new Error("expected ambiguity");
+    expect(repeated.report.reason).toContain(
+      "egma monitoring enable --agent <id>",
+    );
+    expect(platform.registered.agents).toEqual(agentsBeforeRepeat);
+    expect(platform.keys.minted).toEqual(keysBeforeRepeat);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      environmentBeforeRepeat,
+    );
+  });
+
+  it("keeps the LiveKit key receipt when the repository catalog cannot be written", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const unlock = await lockEgmaFolder();
+    let walked: Awaited<ReturnType<typeof walk>>;
+    try {
+      walked = await walk({
+        goal: "monitoring",
+        steps: liveKitDiscovery(),
+        stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+      });
+    } finally {
+      await unlock();
+    }
+
+    expect(walked.report).toMatchObject({ kind: "monitoring-record-failed" });
+    expect(walkExitCode(walked.report)).toBe(1);
+    const printed = exitLines(walked.report).join("\n");
+    const minted = platform.keys.minted[0];
+    expect(printed).toContain(`monitoring_key_id: ${minted?.id ?? ""}`);
+    expect(printed).toContain(
+      `--monitoring-key-id ${minted?.id ?? ""}`,
+    );
+    expect(printed).toContain("EGMA_API_KEY=");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(1);
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).resolves.toContain(`EGMA_API_KEY=${minted?.secret ?? ""}`);
   });
 
   /**
@@ -520,7 +908,7 @@ describe("choosing monitoring on LiveKit", () => {
     const { report } = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
-      stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
     });
 
     expect(report).toMatchObject({ kind: "monitoring-wired", envFile: null });
@@ -537,35 +925,6 @@ describe("choosing monitoring on LiveKit", () => {
     expect(printed).toContain("EGMA_API_KEY=");
   });
 
-  /**
-   * A coding agent that reports the edit and did not make it is not believed:
-   * Egma opens the file and looks. The walk still ends well, with the lines to
-   * add by hand and a key minted for when they are.
-   */
-  it("does not take a reported edit on trust", async () => {
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
-    const { report, ui } = await walk({
-      goal: "monitoring",
-      steps: liveKitDiscovery(),
-      stepsByTask: [
-        {
-          contains: MONITORING_EDIT_TASK,
-          steps: [
-            { kind: "say", text: "egma:found monitor-entry agent.py\n" },
-            { kind: "say", text: "egma:found agent-name front-desk\n" },
-            { kind: "stop", reason: "end_turn" },
-          ],
-        },
-      ],
-    });
-
-    expect(report).toMatchObject({ kind: "monitoring-wired", wired: false });
-    expect(ui.record.statuses.join("\n")).toContain("found no monitor_livekit()");
-    expect(ui.record.statuses.join("\n")).toContain("monitor_livekit(ctx)");
-    // The worker is exactly as the developer left it.
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(WORKER_BEFORE);
-  });
 });
 
 describe("choosing both", () => {
@@ -584,7 +943,7 @@ describe("choosing both", () => {
    * filling both custodies, one agent row through the whole of it, and a last
    * screen that points at the graded run and at Monitoring.
    */
-  it("runs monitoring first, pastes once, and keeps one agent row", async () => {
+  it("runs monitoring first, keeps one row, and never leaks the pasted key", async () => {
     const { report, ui } = await walk({
       goal: "both",
       steps: retellDiscovery(),
@@ -627,6 +986,23 @@ describe("choosing both", () => {
       platform.registered.agents[0]?.id,
     );
 
+    // Monitoring first records the agent with no connection. Testing then
+    // upserts its connection on that same agent instead of adding a duplicate.
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toHaveLength(1);
+    expect(config).toMatchObject({
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: AGENT_NAME,
+          connections: [
+            { id: platform.registered.connections[0]?.id },
+          ],
+        },
+      ],
+    });
+
     // And the tests really ran.
     expect(platform.tests.tests).toHaveLength(1);
     expect(platform.running.runs).toHaveLength(1);
@@ -635,30 +1011,10 @@ describe("choosing both", () => {
     const lines = exitLines(report).join("\n");
     expect(lines).toContain("Your first run is live");
     expect(lines).toContain("Monitoring page");
-  });
-
-  /**
-   * The whole-run sweep, on the lane that handles the key most: it is pasted
-   * once, sealed twice, and exists nowhere a person or a program could read it
-   * afterwards.
-   */
-  it("leaves the key in no file, no line and no report", async () => {
-    const { report, ui } = await walk({
-      goal: "both",
-      steps: retellDiscovery(),
-      stepsByTask: [{ contains: GENERATE_TASK, steps: writesOneTest("late-repair") }],
-      answers: { "retell-key": KEY, reach: "text" },
-      retell,
-    });
-
-    expect(report.kind).toBe("run-started");
-    // The sweep is only worth its name against a run that really used the key.
-    expect(platform.monitoring.monitoringKeys).toEqual([KEY]);
-    expect(platform.registered.sealed).toEqual([KEY]);
 
     expect(JSON.stringify(ui.record)).not.toContain(KEY);
     expect(JSON.stringify(report)).not.toContain(KEY);
-    expect(exitLines(report).join("\n")).not.toContain(KEY);
+    expect(lines).not.toContain(KEY);
 
     for (const name of await filesUnder(workspace.dir)) {
       const held = await readFile(path.join(workspace.dir, name), "utf8").catch(() => "");
@@ -690,7 +1046,7 @@ describe("choosing both", () => {
    * and the connection the testing half needs is added to that row rather than
    * to a second one.
    */
-  it("wires the worker and reuses its row for the LiveKit connection", async () => {
+  it("integrates both worker hooks once and reuses its row for the LiveKit connection", async () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
 
@@ -698,9 +1054,12 @@ describe("choosing both", () => {
       goal: "both",
       steps: liveKitDiscovery(),
       stepsByTask: [
-        { contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() },
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
         { contains: MOCK_AUTHORING_TASK, steps: writesNoMockedWorld() },
-        { contains: GENERATE_TASK, steps: writesOneTest("late-repair") },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("late-repair", "front-desk-tests"),
+        },
       ],
       answers: {
         "connection:variant": "livekit_room.project_credentials",
@@ -724,19 +1083,104 @@ describe("choosing both", () => {
       platform.registered.agents[0]?.id,
     );
 
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toHaveLength(1);
+    expect(config).toMatchObject({
+      agents: [
+        {
+          id: platform.registered.agents[0]?.id,
+          name: "front-desk",
+          connections: [
+            { id: platform.registered.connections[0]?.id },
+          ],
+        },
+      ],
+    });
+
     // The name was settled by the monitoring half, so nobody was asked for it.
     expect(ui.record.connectionAsks.map((ask) => ask.id)).not.toContain(
       "connection:agent-name",
     );
 
-    // The `.env` holds the two lines and the worker holds the entry.
+    // The `.env` holds the two lines and one worker edit holds both requested
+    // hooks in the order the public SDK reference teaches.
     const env = await readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8");
     expect(env).toContain("EGMA_API_KEY=");
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(
-      "monitor_livekit(ctx)",
+    const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+    expect(worker).toContain("monitor_livekit(ctx)");
+    expect(worker).toContain("await mockable(agent, ctx, session)");
+    expect(worker.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+      worker.indexOf("await ctx.connect()"),
+    );
+    expect(worker.indexOf("await ctx.connect()")).toBeLessThan(
+      worker.indexOf("await mockable(agent, ctx, session)"),
+    );
+    expect(worker.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+      worker.indexOf("await session.start"),
     );
 
+    // The final mode reaches one worker owner with the exact public SDK
+    // reference. The later mock-world task owns only mock answers and test
+    // overrides, so it cannot contradict or undo the integration.
+    const sent = await dispatched();
+    const workerOwners = sent.filter(
+      (task) => task.includes("worker file where") && task.includes("dependency manifest"),
+    );
+    expect(workerOwners).toHaveLength(1);
+    const integration = workerOwners[0] ?? "";
+    expect(integration).toContain(WORKER_INTEGRATION_TASK);
+    expect(integration).toContain("final mode is **both**");
+    const sdkReference = (
+      await readFile(
+        path.join(
+          publicSkillDirectory("integrate-egma"),
+          "references",
+          "integrate-egma-sdk.md",
+        ),
+        "utf8",
+      )
+    ).trimEnd();
+    expect(integration).toContain(sdkReference);
+
+    const mockAuthoring = sent.find((task) => task.includes(MOCK_AUTHORING_TASK)) ?? "";
+    expect(mockAuthoring).not.toContain("worker file where");
+    expect(mockAuthoring).not.toContain("dependency manifest");
+    expect(mockAuthoring).not.toContain("Put the Egma testing entry in the worker");
+
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
+  });
+
+  it("propagates a verifier rejection when a later task removes monitoring", async () => {
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const { report, ui } = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
+        { contains: MOCK_AUTHORING_TASK, steps: clobbersMonitoringDuringMockAuthoring() },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("late-repair", "front-desk-tests"),
+        },
+      ],
+      answers: {
+        "connection:variant": "livekit_room.project_credentials",
+        "connection:config:url": "wss://acme.livekit.cloud",
+        "connection:credentials:apiKey": LIVEKIT_API_KEY,
+        "connection:credentials:apiSecret": LIVEKIT_API_SECRET,
+      },
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected the final verification");
+    expect(report.reason).toContain("worker changed after integration approval");
+    expect(report.reason).toContain("did not open review, push tests");
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
   });
 });
 

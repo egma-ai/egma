@@ -61,7 +61,10 @@ export const KEY_ASK_LINE = "Paste your Retell API key (Retell dashboard → Set
  * moment the developer decides whether to hand it over rather than afterwards.
  */
 export const CUSTODY_LINE =
-  "It is sent to Egma and stored encrypted. It never lands in a file here.";
+  "Egma uses this key now to read your Retell agents and confirm the selected setup. " +
+  "For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API. " +
+  "For Phone, Egma uses it only during setup and does not store it. " +
+  "It never lands in this repository.";
 
 /** The exact failure for a key Retell will not take. */
 export const INVALID_KEY_LINE =
@@ -805,6 +808,11 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     if (options.signal.aborted) return { kind: "interrupted" };
     if (chosen === null) return { kind: "unchosen", agents };
   }
+
+  // Confirm the settled agent before the next provider read. The read gives a
+  // terminal renderer time to paint this line; saying it only after every
+  // registration step can let the next wizard screen replace it first.
+  options.say(`Retell agent ${defaultAgentName(chosen.name)}`, "action");
 
   const pulled = await pullAgent(key, chosen, options.retell ?? {});
   if (options.signal.aborted) return { kind: "interrupted" };

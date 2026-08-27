@@ -18,7 +18,7 @@ Open a terminal in the repository that contains your voice agent and run:
 npx @egma/cli
 ```
 
-The wizard opens on the terminal's alternate screen. It tells you what it is about to do and waits for one keystroke before it starts. If you are running in CI or want plain output without the interactive UI, pass `--headless`:
+The wizard opens on the terminal's alternate screen. It tells you what it is about to do and waits for one keystroke before it starts. It authorizes the CLI first. Only after sign-in succeeds does it look for installed copies of Claude Code, Codex, Cursor, or OpenCode and ask which one to use. If you are running in CI or want plain output without the interactive UI, pass `--headless`:
 
 ```bash
 npx @egma/cli --headless
@@ -143,12 +143,50 @@ This creates:
 
 ```
 egma/
-  config.yaml       what this folder points at — instance URL and IDs
+  config.yaml       format 2 platform, project, agents, and connections
   mock-tools.md     default tool mock responses for simulations
-  tests/            direct child directories for test suites
+  tests/
+    receptionist-core/  one direct directory per test suite
+      suite.yaml
+      *.md
+    release-checks/     another suite in the same project
+      suite.yaml
+      *.md
 ```
 
 Everything in this folder is committed to version control. No secrets ever land here.
+
+The config supports many agents and many connections under each agent:
+
+```yaml
+format: 2
+platform:
+  origin: https://app.egma.ai
+project:
+  id: prj_01JXMK8P2QN4R6S9T1UV3WX5Y
+  name: Voice agents
+agents:
+  - id: agt_01JXMK8P2QN4R6S9T1UV3WX5Y
+    name: Front desk
+    connections:
+      - id: con_01JXMK8P2QN4R6S9T1UV3WX5Y
+        name: livekit-1
+      - id: con_01JXMK8P2QN4R6S9T1UV3WX5Z
+        name: phone_number-1
+  - id: agt_01JXMK8P2QN4R6S9T1UV3WX5Z
+    name: After hours
+    connections: []
+```
+
+Format 2 is required. The CLI refuses the former top-level `agent` and
+`connection` fields. It does not translate or alias an old folder shape.
+
+<Note>
+  LiveKit monitoring setup does not pause for a separate environment-line
+  approval. Egma writes the SDK lines automatically only when Git ignores the
+  `.env` file. The safe writer refuses links and non-regular files, writes
+  atomically, restricts the file to its owner, and prints the lines either way.
+</Note>
 
 ## Step 5 — Generate your first test suite
 
@@ -199,15 +237,16 @@ reschedule this week. They are short on time and irritated.
 3. The agent confirms the new booking before ending the call.
 ```
 
-Before starting the run, the wizard shows you the full list of generated tests and pauses:
+The first generated suite contains exactly four tests. Before starting the run,
+the wizard shows the full list and pauses:
 
 ```
-12 tests generated · suite "Receptionist core"
+4 tests generated · suite "Receptionist core"
 
   › quoted-a-price          Everyday caller
     lost-the-order-number   Everyday caller
     open-on-sunday          somebody-in-a-hurry
-    … 9 more (↑↓ browse · e opens in $EDITOR)
+    after-hours-emergency   default persona
 
 Run these against order-line over text-1?
 
@@ -217,6 +256,9 @@ Run these against order-line over text-1?
 Press `[e]` to open any test in `$EDITOR` before committing to the run. Press
 `[q]` to exit with all files saved to your repository. You can push and run the
 suite later with `egma push` and `egma run <suite-directory>`.
+
+Run the wizard again to add another target or another suite. It keeps the
+agents, connections, and suite directories already recorded in `egma/`.
 
 ## Step 6 — Run tests with `egma run`
 
@@ -229,13 +271,21 @@ egma push   # sync local files to Egma
 egma run receptionist-core   # run this complete suite and follow it
 ```
 
+A suite is project-owned, not agent-owned. A run selects the suite, agent, and
+connection together. If the config has more than one runnable agent or the
+selected agent has more than one connection, use exact names or IDs:
+
+```bash
+egma run receptionist-core --agent "Front desk" --connection livekit-1
+```
+
 The simulator claims each simulation and conducts the conversation. The
 Expected behaviors grader then writes one grade for the completed trace. Its
 assertion details show each expected behavior, and its top-level score is
 normalized from `0` to `1`. The wizard follows the run live:
 
 ```
-run run_01K7QXV2M8  ·  12 simulations
+run run_01K7QXV2M8  ·  4 simulations
 
 ◼ quoted-a-price            grading complete
 ▶ lost-the-order-number     in progress
@@ -244,7 +294,7 @@ run run_01K7QXV2M8  ·  12 simulations
 
 ✓ First result: quoted-a-price grading complete
 
-execution 1/12 finished  ·  grading 1/1 terminal  ·  errors 0
+execution 1/4 finished  ·  grading 1/1 terminal  ·  errors 0
 ```
 
 The wizard closes after the first completed trace's whole grading work becomes
@@ -263,8 +313,8 @@ folder: /repo/egma
 agent: agt_01K…
 connection: con_01K…
 run: run_01K…
-tests: 12
-simulations: 12
+tests: 4
+simulations: 4
 results: http://localhost:3101/projects/prj_01K…/runs/run_01K…
 simulation: quoted-a-price Everyday caller running
 simulation: quoted-a-price Everyday caller completed
@@ -274,13 +324,13 @@ first-result: quoted-a-price Everyday caller complete
 execution-finished: 12
 execution-failed: 0
 execution-canceled: 0
-grading-terminal: 12
-grading-complete: 12
+grading-terminal: 4
+grading-complete: 4
 grading-not-requested: 0
 grading-errors: 0
 grading-pending: 0
 grading-running: 0
-simulations: 12
+simulations: 4
 status: completed
 ```
 

@@ -40,15 +40,15 @@ export function walkExitCode(report: ExitReport): number {
     // The worker is wired and the two lines are on the screen. Nothing waits,
     // because push is observed rather than declared.
     case "monitoring-wired":
-    // The repository is already set up. Refusing to onboard it twice is the
-    // command working, so it answers a shell the way working commands do.
-    case "already-onboarded":
+    // A repeated setup kept the working monitoring identity unchanged.
+    case "monitoring-already-configured":
       return 0;
     case "interrupted":
       return 130;
     // The monitoring lane's deliverable is that watching is really on, so a
     // walk that did not manage it answers a shell as the failure it is.
     case "monitoring-refused":
+    case "monitoring-record-failed":
       return 1;
     case "no-agent-context":
     case "unsupported-agent-platform":

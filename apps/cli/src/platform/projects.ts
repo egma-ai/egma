@@ -23,10 +23,14 @@ export async function readProject(
   signedIn: SignedIn,
   projectId: string,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformProject> {
   const answer = await getProjectRequest(
     { projectId },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (!response.ok || answer.data === undefined) {

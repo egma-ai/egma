@@ -21,34 +21,19 @@
 import {
   bindRepositoryPlatform,
   createEgmaFolder,
+  EMPTY_CONFIG,
   MEMORY_FOLDER_NAME,
-  type FolderConfig,
-  type NamedThing,
   type PlatformBinding,
 } from "../folder/egma-folder.ts";
 import { FOLDER_EXIT, type FolderCommandOptions } from "./folder-verbs.ts";
 
 export type InitCommandOptions = FolderCommandOptions & {
-  /** What the folder points at, when the caller knows. */
-  readonly names: {
-    readonly agent: string | null;
-    readonly connection: string | null;
-  };
   /** The platform URL to commit, or `null` when the command named none. */
   readonly binding: PlatformBinding | null;
 };
 
-function named(name: string | null): NamedThing | null {
-  return name === null || name.trim() === "" ? null : { name: name.trim(), id: null };
-}
-
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
-  const config: FolderConfig = {
-    platform: options.binding,
-    project: null,
-    agent: named(options.names.agent),
-    connection: named(options.names.connection),
-  };
+  const config = { ...EMPTY_CONFIG, platform: options.binding };
 
   // Which egma this command talked to, first and in the shape every other verb
   // says it in — and only when it talked to one. `init` on its own reaches no
@@ -86,9 +71,14 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
   // reports is what a teammate cloning the repository will get, not what this
   // one run happened to be handed.
   if (committed.platform !== null) options.out(`platform: ${committed.platform.origin}`);
-  for (const key of ["project", "agent", "connection"] as const) {
-    const thing = committed[key];
-    if (thing !== null) options.out(`${key}: ${thing.name}${thing.id === null ? "" : ` ${thing.id}`}`);
+  if (committed.project !== null) {
+    options.out(`project: ${committed.project.name} ${committed.project.id}`);
+  }
+  for (const agent of committed.agents) {
+    options.out(`agent: ${agent.name} ${agent.id}`);
+    for (const connection of agent.connections) {
+      options.out(`connection: ${connection.name} ${connection.id} ${agent.id}`);
+    }
   }
   options.out("committable: yes");
   options.out(`status: ${folder.created ? "created" : "already-there"}`);

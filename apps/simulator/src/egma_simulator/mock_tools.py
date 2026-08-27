@@ -13,11 +13,12 @@ disagree about.
 egma is already a participant in the room. So the agent's side asks egma,
 in the room, before anything real runs — two methods and no more:
 
-- **``egma.hello``** — sent once when the agent's session starts. It
-  carries the protocol version and the census: every tool the agent has,
-  by name, with its schema. egma writes the census down and answers with
-  the names it will be answering for, so the other side wraps exactly
-  those and leaves every other tool alone.
+- **``egma.hello``** — sent when the agent's session starts and again when a
+  LiveKit handoff discovers more tools. It carries the protocol version and
+  the cumulative census: every tool found in the session so far, by name,
+  with its schema. egma replaces the stored census and answers with the fixed
+  names it will answer for, so the other side wraps exactly those and leaves
+  every other tool alone.
 - **``egma.tool``** — one per call the agent makes to a wrapped tool. It
   carries the tool's name and the arguments. egma waits the mock tool's
   declared delay, answers with the pinned answer, and writes the whole

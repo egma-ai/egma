@@ -141,18 +141,19 @@ That is the whole integration.
 
 In a simulation, `mockable`:
 
-1. **Reads your agent's tools** — names and schemas — off the `agent` object and sends them to Egma as a census. Mock authoring in Egma starts from your real tool names and signatures, not from your memory of them.
+1. **Starts a tool census** from the initial agent's names and schemas. Mock authoring in Egma starts from your real tool names and signatures, not from your memory of them.
 2. **Learns which tools Egma answers for** in this simulation.
 3. **Installs a courier** in front of each of those tools using LiveKit's own `mock_tools`. Couriers go into a side table LiveKit keeps per session; they do not touch your agent, your agent's class, or your tool registry. The model keeps seeing your real tool schemas throughout.
-4. **Leaves every other tool exactly as it was.**
+4. **Follows LiveKit handoffs.** Before a selected `Agent` or `AgentTask` starts, the SDK installs its couriers and adds its tools to the census. The census is cumulative: tools found before a handoff remain in it.
+5. **Leaves every other tool exactly as it was.**
 
 Every covered tool call lands on the simulation record with its arguments, its answer, how long it took, and which mock tool answered it. Tools that ran their real implementation are also marked, so you always know whether a simulation was fully isolated.
 
 ### Placement
 
-Call `mockable` after the agent object exists and before `session.start`. The census is the first message sent, so an Egma that is not in the room is discovered before any tool call rather than halfway through a test.
+Call `mockable` once on the initial agent, after the agent object exists and before `session.start`. The first census is the first message sent, so an Egma that is not in the room is discovered before any tool call rather than halfway through a test.
 
-If your application hands off between several `Agent` classes, call `mockable` once per class you want covered.
+The SDK follows later `Agent` and `AgentTask` handoffs. Do not add another `mockable` call inside those classes.
 
 ## Production safety guarantee
 
@@ -187,7 +188,7 @@ import logging
 logging.getLogger("egma").setLevel(logging.INFO)
 ```
 
-At `INFO` level, the line after the census names how many tools your agent has and how many Egma answers for in this simulation. This is the first thing to check when wiring an agent up for the first time.
+At `INFO` level, each census update names how many tools the SDK has found and how many Egma answers for in this simulation. This is the first thing to check when wiring an agent up for the first time.
 
 ## Version pinning
 

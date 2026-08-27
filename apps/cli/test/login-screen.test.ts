@@ -14,6 +14,7 @@
  * that the machine wins whenever it is busy.
  */
 
+import { readFile } from "node:fs/promises";
 import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +28,7 @@ import {
   FAKE_AGENT,
   MANIFEST,
   makeWorkspace,
+  waitUntil,
   type Workspace,
 } from "./support/workspace.ts";
 
@@ -101,15 +103,15 @@ function codeOn(screen: string): string {
 }
 
 /**
- * The intro, and the keystroke that opens the walk.
+ * The welcome screen, and the keystroke that starts CLI authorization.
  *
  * Login is the second screen, so nothing about it can be waited for until the
  * first one has been answered. The hint bar is what is waited for: it is the
- * last line the intro draws, and it is the one line short enough to survive
+ * last line the welcome screen draws, and it is the one line short enough to survive
  * the narrow terminal one check here runs in without being wrapped.
  */
 async function past(terminal: TerminalRun): Promise<void> {
-  await showing(terminal, "[enter] begin", "[q] quit");
+  await showing(terminal, "Welcome to egma", "Press Enter to authenticate", "[q] quit");
   terminal.write("\r");
 }
 
@@ -139,6 +141,8 @@ async function loginScreen(
  * run ends here, and the line it leaves says exactly that.
  */
 async function declineTheKey(terminal: TerminalRun): Promise<void> {
+  await showing(terminal, "Egma is about to find your voice agent", "[enter] begin");
+  terminal.write("\r");
   await chooseTesting(terminal);
   await showing(terminal, "Paste your Retell API key");
   terminal.write("");
@@ -159,12 +163,39 @@ function asOneLine(screen: string): string {
 }
 
 describe("the login screen", () => {
+  it("explains Egma and CLI authorization before opening the browser", async () => {
+    const browser = await workspace.browser();
+    const terminal = await wizard({ browser, cols: 120 });
+
+    try {
+      await showingIn(
+        terminal,
+        asOneLine,
+        "Welcome to egma, the platform to test, monitor, and self-improve your voice agents.",
+        "Through this wizard we will set up your egma in your repo for monitoring and/or simulations.",
+        "Press Enter to authenticate the CLI with your egma account.",
+        "[q] quit",
+      );
+      expect(await readFile(browser.opened, "utf8").catch(() => "")).toBe("");
+
+      terminal.write("\r");
+      await loginScreen(terminal, platform.url, "Approve this code");
+      expect(
+        await waitUntil(async () =>
+          (await readFile(browser.opened, "utf8").catch(() => "")).includes(platform.url),
+        ),
+      ).toBe(true);
+    } finally {
+      await terminal.kill();
+    }
+  });
+
   it("shows the code, the address on its own line, and a way to copy it", async () => {
     const browser = await workspace.browser();
     const terminal = await wizard({ browser, cols: 120 });
 
     try {
-      // The intro comes first, and the consent keystroke opens the walk.
+      // The welcome comes first, and its keystroke starts authorization.
       await past(terminal);
 
       // The browser opening repaints the first line of this screen, so the

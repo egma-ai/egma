@@ -11,6 +11,8 @@ import {
   createEgmaFolder,
   folderPathsIn,
   serializeSuiteManifest,
+  writeConfig,
+  type FolderAgent,
 } from "../src/folder/egma-folder.ts";
 import { serializeTestFile } from "../src/folder/test-file.ts";
 import type { GradingState, SimulationStatus } from "../src/platform/runs.ts";
@@ -77,8 +79,13 @@ beforeEach(async () => {
     config: {
       ...EMPTY_CONFIG,
       project: { id: PROJECT_ID, name: "Northside" },
-      agent: { id: "agt_one", name: "Receptionist" },
-      connection: { id: "con_one", name: "Phone" },
+      agents: [
+        {
+          id: "agt_one",
+          name: "Receptionist",
+          connections: [{ id: "con_one", name: "Phone" }],
+        },
+      ],
     },
   });
   const suite = path.join(folderPathsIn(workspace.dir).tests, "release");
@@ -120,12 +127,16 @@ function platformTest(): Record<string, unknown> {
   };
 }
 
-function runHeader(status = "pending"): Record<string, unknown> {
+function runHeader(
+  status = "pending",
+  agentId = "agt_one",
+  connectionId = "con_one",
+): Record<string, unknown> {
   return {
     id: "run_one",
     status,
-    agentId: "agt_one",
-    connectionId: "con_one",
+    agentId,
+    connectionId,
     productLabel: "Fixture",
     modality: "chat",
     expectedSimulationCount: 1,
@@ -153,11 +164,18 @@ async function followedRun(input: {
   readonly status?: "completed" | "failed" | "canceled";
   readonly gradingState?: "complete" | "error" | "not_requested";
   readonly stop?: AbortController;
-}): Promise<{ readonly code: number; readonly lines: readonly string[] }> {
+  readonly agent?: string;
+  readonly connection?: string;
+}): Promise<{
+  readonly code: number;
+  readonly lines: readonly string[];
+  readonly startedWith: Readonly<Record<string, unknown>> | null;
+}> {
   const status = input.status ?? "completed";
   const gradingState = status === "completed" ? (input.gradingState ?? "complete") : null;
   const lines: string[] = [];
   let moved = false;
+  let startedWith: Readonly<Record<string, unknown>> | null = null;
   const fetchImpl: typeof fetch = async (request, init) => {
     const url = String(request);
     if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
@@ -171,7 +189,17 @@ async function followedRun(input: {
       );
     }
     if (url === `${URL}/v1/runs` && init?.method === "POST") {
-      return new JsonResponse(JSON.stringify(runHeader()), { status: 201 });
+      startedWith = JSON.parse(String(init.body)) as Readonly<Record<string, unknown>>;
+      return new JsonResponse(
+        JSON.stringify(
+          runHeader(
+            "pending",
+            String(startedWith.agentId),
+            String(startedWith.connectionId),
+          ),
+        ),
+        { status: 201 },
+      );
     }
     if (url === `${URL}/v1/runs/run_one`) {
       return new JsonResponse(JSON.stringify(runHeader(moved ? "completed" : "pending")));
@@ -241,16 +269,201 @@ async function followedRun(input: {
     access: { url: URL, credentialsFile: workspace.credentialsFile },
     cwd: workspace.dir,
     suiteDirectory: "release",
+    ...(input.agent === undefined ? {} : { agent: input.agent }),
+    ...(input.connection === undefined ? {} : { connection: input.connection }),
     out: (line) => lines.push(line),
     fail: (line) => lines.push(`stderr: ${line}`),
     everyMs: 0,
     ...(input.stop === undefined ? {} : { signal: input.stop.signal }),
     fetchImpl,
   });
-  return { code, lines };
+  return { code, lines, startedWith };
+}
+
+async function writeTargets(agents: readonly FolderAgent[]): Promise<void> {
+  const paths = folderPathsIn(workspace.dir);
+  await writeConfig(paths.config, {
+    ...EMPTY_CONFIG,
+    project: { id: PROJECT_ID, name: "Northside" },
+    agents,
+  });
 }
 
 describe("runRunCommand operational exit behavior", () => {
+  it("selects configured agents and connections by exact name or stable id", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Phone" }],
+      },
+      {
+        id: "agt_two",
+        name: "After hours",
+        connections: [
+          { id: "con_two", name: "Phone" },
+          { id: "con_three", name: "Chat" },
+        ],
+      },
+    ]);
+
+    const byNameAndId = await followedRun({
+      agent: "After hours",
+      connection: "con_three",
+    });
+
+    expect(byNameAndId.code).toBe(0);
+    expect(byNameAndId.lines).toContain("agent: agt_two");
+    expect(byNameAndId.lines).toContain("connection: con_three");
+    expect(byNameAndId.startedWith).toMatchObject({
+      agentId: "agt_two",
+      connectionId: "con_three",
+    });
+
+    const byIdAndName = await followedRun({
+      agent: "agt_two",
+      connection: "Chat",
+    });
+    expect(byIdAndName.code).toBe(0);
+    expect(byIdAndName.startedWith).toMatchObject({
+      agentId: "agt_two",
+      connectionId: "con_three",
+    });
+  });
+
+  it("refuses to guess between runnable agents and prints each exact choice", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Phone" }],
+      },
+      {
+        id: "agt_two",
+        name: "After hours",
+        connections: [{ id: "con_two", name: "Chat" }],
+      },
+    ]);
+
+    const answer = await followedRun({});
+
+    expect(answer.code).toBe(1);
+    expect(answer.startedWith).toBeNull();
+    expect(answer.lines).toContain("agent-option: agt_one Receptionist");
+    expect(answer.lines).toContain("agent-option: agt_two After hours");
+    expect(answer.lines).toContain("status: unchosen-agent");
+    expect(answer.lines).toContain(
+      "stderr: This folder names 2 voice agents that can run. Choose one with --agent <name-or-id>. Nothing was started.",
+    );
+  });
+
+  it("refuses to guess between one agent's connections", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [
+          { id: "con_one", name: "Phone" },
+          { id: "con_two", name: "Chat" },
+        ],
+      },
+    ]);
+
+    const answer = await followedRun({});
+
+    expect(answer.code).toBe(1);
+    expect(answer.startedWith).toBeNull();
+    expect(answer.lines).toContain("connection-option: con_one Phone");
+    expect(answer.lines).toContain("connection-option: con_two Chat");
+    expect(answer.lines).toContain("status: unchosen-connection");
+    expect(answer.lines).toContain(
+      'stderr: Agent "Receptionist" has 2 connections. Choose one with --connection <name-or-id>. Nothing was started.',
+    );
+  });
+
+  it("does not select a connection that belongs to another agent", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Phone" }],
+      },
+      {
+        id: "agt_two",
+        name: "After hours",
+        connections: [{ id: "con_two", name: "Chat" }],
+      },
+    ]);
+
+    const answer = await followedRun({ agent: "Receptionist", connection: "con_two" });
+
+    expect(answer.code).toBe(1);
+    expect(answer.startedWith).toBeNull();
+    expect(answer.lines).toContain("connection-option: con_one Phone");
+    expect(answer.lines).not.toContain("connection-option: con_two Chat");
+    expect(answer.lines).toContain("status: unknown-connection");
+  });
+
+  it("requires a stable id when an exact name is not unique", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Primary" }],
+      },
+      {
+        id: "agt_two",
+        name: "Receptionist",
+        connections: [{ id: "con_two", name: "Primary" }],
+      },
+    ]);
+
+    const agent = await followedRun({ agent: "Receptionist" });
+
+    expect(agent.code).toBe(1);
+    expect(agent.startedWith).toBeNull();
+    expect(agent.lines).toContain("status: ambiguous-agent");
+    expect(agent.lines).toContain("agent-option: agt_one Receptionist");
+    expect(agent.lines).toContain("agent-option: agt_two Receptionist");
+
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [
+          { id: "con_one", name: "Primary" },
+          { id: "con_two", name: "Primary" },
+        ],
+      },
+    ]);
+    const connection = await followedRun({ connection: "Primary" });
+
+    expect(connection.code).toBe(1);
+    expect(connection.startedWith).toBeNull();
+    expect(connection.lines).toContain("status: ambiguous-connection");
+    expect(connection.lines).toContain("connection-option: con_one Primary");
+    expect(connection.lines).toContain("connection-option: con_two Primary");
+  });
+
+  it("ignores monitoring-only agents when one runnable target remains", async () => {
+    await writeTargets([
+      { id: "agt_monitoring", name: "Production only", connections: [] },
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Phone" }],
+      },
+    ]);
+
+    const answer = await followedRun({});
+
+    expect(answer.code).toBe(0);
+    expect(answer.startedWith).toMatchObject({
+      agentId: "agt_one",
+      connectionId: "con_one",
+    });
+  });
+
   it("shows one Expected behaviors grade with seven assertion details and keeps the operational success exit", async () => {
     const answer = await followedRun({ gradingState: "complete" });
 

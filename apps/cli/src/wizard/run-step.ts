@@ -1,20 +1,12 @@
 /**
- * The wizard's last step: start the run, show the first trace result, offer the
- * skill, and leave.
+ * The wizard's last step: start the run, follow every simulation and grader to
+ * a terminal state, offer the skills, and leave.
  *
- * **The wizard does not wait for the suite.** It waits until the first
- * completed trace has terminal grading and nothing more. That is the moment
- * the whole walk is timed against — a
- * developer who has watched egma find their voice agent, reach it and write
- * tests for it has still only been told things until a result is ready, and
- * then they have been shown one. Everything after that is the suite finishing,
- * which happens on the platform whether a terminal is open or not.
- *
- * So the follow keeps going in the background while the developer answers the
- * last question, and the counts in the exit line are the counts at the moment
- * the wizard closed. "Three of twelve results ready" is a true sentence and a
- * useful one; waiting nine more minutes to be able to say twelve of twelve
- * would be the wizard holding a terminal open for its own tidiness.
+ * A LiveKit testing walk starts the repository's worker on this machine. That
+ * worker must remain registered while Egma dispatches every simulation, so the
+ * wizard cannot leave after the first result. Waiting for the complete run also
+ * makes the last screen literal: every row the developer sees has reached its
+ * final execution and grading state before the local worker is stopped.
  *
  * The skill offer is here rather than anywhere else for the same reason it is
  * a question rather than a default: it is the only thing in the walk that
@@ -23,11 +15,9 @@
  * offers is every public Egma skill, and what writes them is the standard
  * skills installer that shipped inside this package.
  *
- * **A stop from here is still this ending.** Once the run exists, every
- * promise the walk made has been kept — the tests are on egma and the suite is
- * going — so Ctrl-C over the run screen or the offer closes a window rather
- * than cancelling work, and the developer leaves with the address of a live
- * run in their scrollback. The counts are whatever they were at that moment.
+ * **A stop from here is still this ending.** Once the run exists, Ctrl-C closes
+ * the local view; it does not cancel hosted work. The developer still leaves
+ * with the run address and the counts reached before the stop.
  */
 
 import {
@@ -38,6 +28,7 @@ import {
 import type { SignedIn } from "../platform/signed-in.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import type { RunView } from "../run/view.ts";
+import type { LocalLiveKitWorker } from "../livekit/local-worker.ts";
 import {
   installEgmaSkills,
   skillPlacesFor,
@@ -68,6 +59,8 @@ export type RunStepOptions = {
   /** The developer's home, for the global scope. Passed in, never assumed. */
   readonly home: string;
   readonly signal: AbortSignal;
+  /** A local worker whose unexpected exit makes this run unable to dispatch. */
+  readonly localWorker?: LocalLiveKitWorker | undefined;
   /**
    * Which Egma this sitting also set production monitoring up on, or omitted
    * when it set none up.
@@ -170,64 +163,61 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   announce(ui, run, options.expectedTestVersions.length);
   ui.setRun(viewOf(follower));
 
-  // The follow outlives this await on purpose. The developer is about to be
-  // asked one more question, and the run is not going to stand still while
-  // they think about it.
   const watching = new AbortController();
   const stopWatching = (): void => watching.abort();
   signal.addEventListener("abort", stopWatching, { once: true });
-
-  let resultReady!: () => void;
-  const firstResult = new Promise<void>((resolve) => {
-    resultReady = resolve;
-    // The simulator can finish one conversation between the run POST and the
-    // first bounded simulation page. In that case hydration already carries
-    // the first terminal grading state, so there is no new change to open
-    // the offer below.
-    if (follower.firstResult !== null) resolve();
-  });
 
   const following = followRun({
     signedIn: options.signedIn,
     follower,
     signal: watching.signal,
     ...(options.everyMs === undefined ? {} : { everyMs: options.everyMs }),
-    onChange: (change) => {
+    onChange: () => {
       ui.setRun(viewOf(follower));
-      if (change.firstResult) resultReady();
     },
-  })
-    // A run that finished without a completed trace result, or one Egma stopped talking to,
-    // must still let the wizard move on — otherwise the last question is never
-    // asked and the developer is left watching a list that will not move.
-    .catch((cause: unknown) => {
-      // Not when the follow was stopped on purpose: that is the wizard closing,
-      // and it is not news.
-      if (!watching.signal.aborted) {
-        ui.pushStatus(
-          `${FAILURE_MARK} Egma stopped answering about this run: ${cause instanceof Error ? cause.message : String(cause)}`,
-        );
-      }
-      return "interrupted" as const;
-    })
-    .finally(() => resultReady());
+  }).then(
+    (ending) => ({ kind: "ended" as const, ending }),
+    (cause: unknown) => {
+      const reason = cause instanceof Error ? cause.message : String(cause);
+      return { kind: "failed" as const, reason };
+    },
+  );
 
-  await untilAborted(firstResult, signal);
+  // Keep the local view, and therefore any local LiveKit worker owned by the
+  // caller, alive until every simulation and every requested grade is terminal.
+  const completed = await untilAborted(
+    options.localWorker === undefined
+      ? following.then((result) => ({ kind: "run" as const, result }))
+      : Promise.race([
+          following.then((result) => ({ kind: "run" as const, result })),
+          options.localWorker.ended.then((ending) => ({
+            kind: "worker" as const,
+            ending,
+          })),
+        ]),
+    signal,
+  );
 
-  // From here the walk has done what it set out to do, and it says so however
-  // it ends. The tests are on egma, the run is live, and the screen the
-  // developer is looking at says the suite carries on without this terminal —
-  // so a stop here is them closing a window on work that is still going, and
-  // not egma stopping short. Telling them egma stopped before the task
-  // finished would be telling them something that did not happen, and leaving
-  // the address out would leave them with a run and no way to open it.
-  //
-  // What a stop does change is that nothing is installed: before the question
-  // it is never asked, and at the question an unanswered question is a skip.
-  if (signal.aborted) {
+  if (completed?.kind === "worker") {
     watching.abort();
     signal.removeEventListener("abort", stopWatching);
     await following;
+    const reason =
+      completed.ending.kind === "failed"
+        ? completed.ending.reason
+        : "The local LiveKit worker stopped before the Egma run finished.";
+    ui.pushStatus(`${FAILURE_MARK} ${reason}`);
+    return {
+      kind: "failed",
+      reason: `${reason} The hosted run is ${follower.resultsUrl}.`,
+    };
+  }
+
+  // A stop changes only what can still happen in this terminal. Hosted work
+  // continues, and no skill is installed because its question was never asked.
+  if (signal.aborted) {
+    watching.abort();
+    signal.removeEventListener("abort", stopWatching);
     ui.setRun(viewOf(follower));
     const stopped = follower.progress;
     return {
@@ -243,6 +233,62 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     };
   }
 
+  if (completed?.kind !== "run") {
+    watching.abort();
+    signal.removeEventListener("abort", stopWatching);
+    return {
+      kind: "failed",
+      reason:
+        "Egma stopped answering before this run was complete: " +
+        "the run follower ended without a result. " +
+        `The hosted run is ${follower.resultsUrl}.`,
+    };
+  }
+  if (completed.result.kind === "failed") {
+    watching.abort();
+    signal.removeEventListener("abort", stopWatching);
+    return {
+      kind: "failed",
+      reason:
+        `Egma stopped answering before this run was complete: ${completed.result.reason}. ` +
+        `The hosted run is ${follower.resultsUrl}.`,
+    };
+  }
+  if (completed.result.ending !== "finished") {
+    watching.abort();
+    signal.removeEventListener("abort", stopWatching);
+    return {
+      kind: "failed",
+      reason:
+        `Egma stopped following this run before it was complete. ` +
+        `The hosted run is ${follower.resultsUrl}.`,
+    };
+  }
+
+  watching.abort();
+  signal.removeEventListener("abort", stopWatching);
+
+  // Worker custody belongs only to run execution. Skill installation is a
+  // separate optional question and must not keep credentials or a registered
+  // worker alive while somebody considers it.
+  await options.localWorker?.stop();
+
+  const progress = follower.progress;
+  ui.setRun(viewOf(follower));
+  if (
+    progress.executionFailed > 0 ||
+    progress.executionCanceled > 0 ||
+    progress.gradingErrors > 0
+  ) {
+    const reason =
+      `The run finished with ${String(progress.executionFailed)} execution failures, ` +
+      `${String(progress.executionCanceled)} canceled simulations, and ` +
+      `${String(progress.gradingErrors)} grading errors. ` +
+      `Review it at ${follower.resultsUrl}.`;
+    ui.pushStatus(`${FAILURE_MARK} ${reason}`);
+    return { kind: "failed", reason };
+  }
+
   const places = skillPlacesFor(options.drivenAgentId, {
     repository: options.cwd,
     home: options.home,
@@ -252,13 +298,6 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   // egma had helped.
   const skill: SkillOutcome =
     places === null ? { kind: "not-offered" } : await offerTheSkill(options, places);
-
-  watching.abort();
-  signal.removeEventListener("abort", stopWatching);
-  await following;
-
-  const progress = follower.progress;
-  ui.setRun(viewOf(follower));
 
   return {
     kind: "run-started",

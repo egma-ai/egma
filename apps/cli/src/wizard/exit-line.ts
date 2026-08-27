@@ -92,9 +92,9 @@ export type ExitReport =
   /** The tests are on egma, and they are files in the repository as well. */
   | { readonly kind: "tests-pushed"; readonly count: number }
   /**
-   * The whole walk, done: the tests are on egma, a run of them is going, and
-   * one completed trace has terminal grading. The wizard does not wait for
-   * the rest; the run stays on the platform without this terminal.
+   * The whole walk, done: the tests are on egma and every simulation in their
+   * run has terminal execution and grading. The run and its evidence remain
+   * on the platform without this terminal.
    */
   | {
       readonly kind: "run-started";
@@ -151,6 +151,22 @@ export type ExitReport =
       readonly wired: boolean;
       readonly platformUrl: string | null;
     }
+  /** A repeated LiveKit setup kept the existing working key and environment. */
+  | {
+      readonly kind: "monitoring-already-configured";
+      readonly agentName: string;
+      readonly platformUrl: string | null;
+    }
+  /**
+   * Remote monitoring setup finished, but its committed repository record did
+   * not. The receipt comes first so no later failure can hide the stable agent
+   * id or LiveKit deployment lines.
+   */
+  | {
+      readonly kind: "monitoring-record-failed";
+      readonly receipt: readonly string[];
+      readonly reason: string;
+    }
   /**
    * The platform refused to start watching, and said which rule refused it.
    *
@@ -187,26 +203,6 @@ export type ExitReport =
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
   /**
-   * The repository has an egma folder already, so it is not a new one.
-   *
-   * v1 of the wizard onboards new repositories. A second run over a folder
-   * somebody already committed would half-write another suite into it, so it
-   * refuses before it starts anything and says the one thing that redoes setup.
-   *
-   * `hasSuites` is why the refusal is two sentences and not one. A folder
-   * holding tests can be pushed and run as it stands, and saying so is the
-   * useful half of this line. A folder holding only a binding — which is what
-   * an earlier walk that stopped between binding and registering leaves behind
-   * — cannot: `egma push` refuses it for the contract it does not yet have, and
-   * sending somebody to that command would be egma naming a command egma turns
-   * away.
-   */
-  | {
-      readonly kind: "already-onboarded";
-      readonly folder: string;
-      readonly hasSuites: boolean;
-    }
-  /**
    * The coding agent stopped the work itself and said why. It is not the same
    * as finding nothing, and saying it was would put words in the agent's mouth.
    */
@@ -228,6 +224,8 @@ export type ExitReport =
       readonly kind: "interrupted";
       readonly drivenAgentName: string | null;
       readonly testsKept?: number;
+      /** A fresh remote LiveKit agent left without a worker key after the stop. */
+      readonly monitoringAgentCreated?: string;
     }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -347,17 +345,15 @@ export function buildExitLine(report: ExitReport): string {
           : `Egma put the two lines in ${report.envFile}, and they are below for wherever this worker really runs.`;
       return `${wired} ${where} ${monitoringPointer(report.platformUrl)}`;
     }
+    case "monitoring-already-configured":
+      return (
+        `✓ ${report.agentName} already pushes its production evidence to Egma. ` +
+        `No key or environment file changed. ${monitoringPointer(report.platformUrl)}`
+      );
+    case "monitoring-record-failed":
+      return `Egma could not record the completed monitoring setup: ${oneLine(report.reason)}`;
     case "monitoring-refused":
       return `Egma did not start watching: ${oneLine(report.lines[0] ?? "")}`;
-    case "already-onboarded": {
-      const redo = `Delete or rename ${report.folder} and run egma again to redo setup`;
-      return (
-        `Egma is already set up here: ${report.folder} exists, and the wizard only works with new repositories for now. ` +
-        (report.hasSuites
-          ? `${redo}, or use egma push and egma run on the tests that are already there.`
-          : `${redo}.`)
-      );
-    }
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
@@ -369,13 +365,17 @@ export function buildExitLine(report: ExitReport): string {
         report.drivenAgentName === null
           ? "Egma stopped before the task finished."
           : `Egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+      const monitoring =
+        report.monitoringAgentCreated === undefined
+          ? ""
+          : ` Agent ${report.monitoringAgentCreated} exists on Egma, but no worker key was created. Run Egma again to resume setup.`;
       const kept = report.testsKept ?? 0;
-      if (kept === 0) return stopped;
+      if (kept === 0) return `${stopped}${monitoring}`;
       // The folder is not empty, so the line says so. A developer who finds
       // files they were never told about has been told a half-truth.
       return kept === 1
-        ? `${stopped} Your 1 test is in ${TESTS_FOLDER}.`
-        : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
+        ? `${stopped}${monitoring} Your 1 test is in ${TESTS_FOLDER}.`
+        : `${stopped}${monitoring} Your ${kept} tests are in ${TESTS_FOLDER}.`;
     }
     case "failed":
       return `Egma could not finish: ${saidAndBlock(report.reason)[0]}`;
@@ -398,6 +398,9 @@ export function buildExitLine(report: ExitReport): string {
  * and a squashed copy of it is neither readable nor usable.
  */
 export function exitLines(report: ExitReport): readonly string[] {
+  if (report.kind === "monitoring-record-failed") {
+    return [...report.receipt, buildExitLine(report)];
+  }
   if (report.kind === "failed") {
     const [, block] = saidAndBlock(report.reason);
     return block.length === 0

@@ -41,13 +41,6 @@ export const ENV_FILE_NAME = ".env";
 export const ENV_URL_VARIABLE = "EGMA_URL";
 export const ENV_KEY_VARIABLE = "EGMA_API_KEY";
 
-/** What the developer is told before Egma writes a live credential down. */
-export const ENV_CONSENT_LINE =
-  `Egma will write ${ENV_URL_VARIABLE} and ${ENV_KEY_VARIABLE} into ` +
-  `${ENV_FILE_NAME} so your worker can export. The key is minted for this ` +
-  `project alone, and Egma refuses to write it unless Git ignores ` +
-  `${ENV_FILE_NAME}.`;
-
 /** What Egma is handed to write down. */
 export type EnvValues = {
   /** Which Egma the worker exports to. */

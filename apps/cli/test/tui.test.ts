@@ -26,6 +26,11 @@ import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "
 // budget is generous so that only a broken wizard can reach it.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
+async function authorizeStoredCli(terminal: ReturnType<typeof runInTerminal>): Promise<void> {
+  await showing(terminal, "Welcome to egma", "Press Enter to authenticate");
+  terminal.write("\r");
+}
+
 describe("the wizard on a real terminal", () => {
   let platform: Platform;
   let workspace: Workspace;
@@ -81,7 +86,23 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      await showing(terminal, "Claude Code", "Codex", "Cursor", "OpenCode");
+      await showing(
+        terminal,
+        "Welcome to egma",
+        "platform to test, monitor, and self-improve your voice agents",
+        "Press Enter to authenticate",
+      );
+      terminal.write("\r");
+      await showing(
+        terminal,
+        "egma will use a coding agent on your machine",
+        "We found the following coding agents on your machine.",
+        "Which one should we use?",
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "OpenCode",
+      );
       terminal.write("\u001b[B\u001b[B\r");
 
       await showing(terminal, "It reads this folder with Cursor", "[enter] begin");
@@ -123,6 +144,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       // The intro says what is about to happen and what the keystroke means.
       const intro = await showing(
         terminal,
@@ -132,6 +154,7 @@ describe("the wizard on a real terminal", () => {
         "[q] quit",
       );
       expect(intro.indexOf("[enter] begin")).toBeLessThan(intro.indexOf("[q] quit"));
+      expect(intro).not.toContain("For a different Egma instance");
 
       // It is drawn on the alternate screen, so scrollback is still untouched.
       expect(terminal.scrollback().trim()).toBe("");
@@ -140,19 +163,27 @@ describe("the wizard on a real terminal", () => {
 
       // Every action the agent takes, and every fact it reports, lands on
       // screen while it works.
-      await showing(terminal, "Read package.json", "┊ Framework  retell-sdk");
+      await showing(
+        terminal,
+        "Read package.json",
+        "┊ Framework",
+        "retell-sdk",
+      );
 
       // The one question about what Egma is here to do, drawn on the same
       // alternate screen, once the agent and its platform are known.
       const goal = await showing(
         terminal,
-        "What should Egma do for this voice agent?",
-        "[t] Test it",
-        "[m] Watch its production traffic",
-        "[b] Both",
+        "Setup",
+        "› Simulation testing",
+        "Setup production monitoring",
+        "Both",
+        "[enter] choose this one",
       );
-      expect(goal.indexOf("[t] Test it")).toBeLessThan(goal.indexOf("[b] Both"));
-      terminal.write("t");
+      expect(goal).not.toContain("[t]");
+      expect(goal).not.toContain("[m]");
+      expect(goal).not.toContain("[b]");
+      terminal.write("\r");
 
       // The walk goes on to the one secret it needs. This check is about the
       // screens before it, so the key is declined here and the ending is the
@@ -200,6 +231,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find your voice agent", "[enter] begin");
       terminal.write("\r");
 
@@ -233,6 +265,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[q] quit");
 
       terminal.write("q");
@@ -272,6 +305,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
+      await authorizeStoredCli(terminal);
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
       await showing(terminal, "Thinking about it");

@@ -16,15 +16,16 @@
 import type { WizardState } from "./state.ts";
 
 export type ScreenId =
+  | "welcome"
   | "coding-agent"
   | "intro"
   | "login"
   | "goal"
+  | "connection-fields"
   | "connection-field"
   | "retell-key"
   | "retell-agent"
   | "monitoring-agent"
-  | "env-consent"
   | "reach"
   | "phone-number"
   | "existing-tests"

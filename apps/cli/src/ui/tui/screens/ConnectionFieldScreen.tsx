@@ -85,13 +85,13 @@ export function ConnectionFieldScreen({ ask, onAnswer }: ConnectionFieldScreenPr
     ask.kind === "secret" ? DOT.repeat(Math.min(typed.length, MOST_DOTS)) : typed;
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       {ask.problem == null ? null : <Text>{ask.problem}</Text>}
-      <Text>{`${ask.label}${ask.required ? "" : " (optional)"}`}</Text>
+      <Text>{`${ask.label}${ask.required ? " *" : " [optional]"}`}</Text>
       <Text dimColor>{ask.help}</Text>
-      {ask.custody === undefined ? null : <Text dimColor>{ask.custody}</Text>}
+      {ask.custody === undefined ? null : <Text>{ask.custody}</Text>}
       <Box height={1} />
       {ask.kind === "choice" ? (
         <Box flexDirection="column">

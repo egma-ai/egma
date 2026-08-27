@@ -42,6 +42,8 @@ import {
   type AskId,
   type CodingAgentChoice,
   type ConnectionAsk,
+  type ConnectionFieldsAnswer,
+  type ConnectionFieldsAsk,
   type DrivenAgent,
   type GateId,
   type GoalAsk,
@@ -68,8 +70,6 @@ export type HeadlessRecord = {
   agentChoices: RetellAgent[];
   /** The account's agents a monitoring choice was offered between. */
   monitoringAgentChoices: MonitoringAgentOffer[];
-  /** Every consent line the flow put up before writing a credential down. */
-  envConsents: string[];
   /** Whether the choice between text and phone was ever put to anybody. */
   reachOffered: boolean;
   /** The provider-safe options shown at that choice. */
@@ -78,6 +78,8 @@ export type HeadlessRecord = {
   numberChoices: RetellNumber[];
   /** Provider fields shown, never the answers typed into them. */
   connectionAsks: ConnectionAsk[];
+  /** Required provider forms shown, never the answers typed into them. */
+  connectionFieldGroups: ConnectionFieldsAsk[];
   statuses: string[];
   summary: string;
   /** Every test the coding agent said it had written, in the order it said so. */
@@ -102,7 +104,7 @@ export type HeadlessOptions = {
 
 export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
-    phase: "coding-agent",
+    phase: "welcome",
     drivenAgent: null,
     codingAgentChoices: [],
     drivenAgentLog: null,
@@ -113,11 +115,11 @@ export class HeadlessUI implements WizardUI {
     keyAsks: [],
     agentChoices: [],
     monitoringAgentChoices: [],
-    envConsents: [],
     reachOffered: false,
     reachOptions: [],
     numberChoices: [],
     connectionAsks: [],
+    connectionFieldGroups: [],
     statuses: [],
     summary: "",
     written: [],
@@ -131,6 +133,7 @@ export class HeadlessUI implements WizardUI {
 
   private readonly write: (line: string) => void;
   private readonly answers: Partial<Readonly<Record<AskId, string>>>;
+  private connectionFieldsAsk: ConnectionFieldsAsk | null = null;
 
   constructor(options: HeadlessOptions = {}) {
     this.write = options.write ?? (() => undefined);
@@ -248,19 +251,6 @@ export class HeadlessUI implements WizardUI {
   }
 
   /**
-   * The consent line, printed and then agreed to.
-   *
-   * Consent can be given in advance, and a run with nobody watching was given
-   * it in the command — so the line is on the record and the gate opens, which
-   * is what every other gate here does.
-   */
-  setEnvConsent(line: string | null): void {
-    if (line === null) return;
-    this.record.envConsents.push(line);
-    this.write(line);
-  }
-
-  /**
    * The offer, printed the same way the screen draws it.
    *
    * It is printed even though nobody is here to answer it, so the output says
@@ -289,11 +279,26 @@ export class HeadlessUI implements WizardUI {
     if (ask === null) return;
     this.record.connectionAsks.push(ask);
     if (ask.problem != null) this.write(ask.problem);
-    this.write(`${ask.label}${ask.required ? "" : " (optional)"}`);
+    this.write(`${ask.label}${ask.required ? " *" : " [optional]"}`);
     this.write(ask.help);
     if (ask.custody !== undefined) this.write(ask.custody);
     for (const choice of ask.choices ?? []) {
       this.write(`connection_option: ${choice.value} ${choice.label}`);
+    }
+  }
+
+  setConnectionFieldsAsk(ask: ConnectionFieldsAsk | null): void {
+    this.connectionFieldsAsk = ask;
+    if (ask === null) return;
+    this.record.connectionFieldGroups.push(ask);
+    this.record.connectionAsks.push(...ask.fields);
+    this.write(ask.title);
+    this.write(ask.help);
+    if (ask.notice !== undefined) this.write(ask.notice);
+    for (const field of ask.fields) {
+      if (field.problem != null) this.write(field.problem);
+      this.write(`${field.label}${field.required ? " *" : " [optional]"}`);
+      this.write(field.help);
     }
   }
 
@@ -310,6 +315,17 @@ export class HeadlessUI implements WizardUI {
   waitForAnswer(ask: AskId): Promise<string | null> {
     this.record.asked.push(ask);
     return Promise.resolve(this.answers[ask] ?? null);
+  }
+
+  async waitForConnectionFields(): Promise<ConnectionFieldsAnswer | null> {
+    const ask = this.connectionFieldsAsk;
+    if (ask === null) return null;
+    const values: Partial<Record<(typeof ask.fields)[number]["id"], string>> = {};
+    for (const field of ask.fields) {
+      const answer = await this.waitForAnswer(field.id);
+      if (answer !== null) values[field.id] = answer;
+    }
+    return { values };
   }
 
   taskStarted(): void {
@@ -427,6 +443,10 @@ export class HeadlessUI implements WizardUI {
   pushStatus(line: string): void {
     this.record.statuses.push(line);
     this.write(line);
+  }
+
+  pushAgentMessage(_chunk: string): void {
+    // A promptless run has no live view. Its completed summary is stable output.
   }
 
   setSummary(text: string): void {

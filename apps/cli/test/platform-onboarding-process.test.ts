@@ -72,7 +72,7 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
               const number = index + 1;
               return {
                 kind: "write-file" as const,
-                path: `egma/tests/generated/first-onboarding-${number}.md`,
+                path: `egma/tests/first-receptionist-tests/first-onboarding-${number}.md`,
                 content: `---\nformat: 4\nname: first-onboarding-${number}\n---\n## Scenario\nThe caller needs a different appointment time in case ${number}.\n## Expected behaviors\n1. The agent confirms the new time.\n`,
               };
             }),
@@ -141,8 +141,8 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
 
     const config = await readConfig(paths.config);
     expect(config.platform).toEqual({ origin: platform.url });
-    expect(config.agent?.id).toMatch(/^agt_/u);
-    expect(config.connection?.id).toMatch(/^con_/u);
+    expect(config.agents[0]?.id).toMatch(/^agt_/u);
+    expect(config.agents[0]?.connections[0]?.id).toMatch(/^con_/u);
 
     // The binding is committed, so what is written beside it is read by
     // everybody who clones this repository. It carries the URL and no key:

@@ -33,7 +33,13 @@ import {
   type FixtureGrade,
   type Platform,
 } from "./support/fixture-platform/index.ts";
-import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import {
+  chooseNoExistingTests,
+  chooseTesting,
+  runInTerminal,
+  showing,
+  type TerminalRun,
+} from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -68,17 +74,20 @@ const ONE_AGENT: FakeRetellScript = {
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
 
-/** Three, so a first result can be ready while two are still moving. */
-const TESTS = ["quoted-a-price", "lost-the-order-number", "open-on-sunday"] as const;
+/** Four, so a first result can be ready while three are still moving. */
+const TESTS = [
+  "quoted-a-price",
+  "lost-the-order-number",
+  "open-on-sunday",
+  "asked-for-the-binder",
+] as const;
+const SUITE_DIRECTORY = "order-line-tests";
 
 const EXPECTED_BEHAVIORS = [
   "confirms the new time back before finishing",
   "checks that an afternoon next week is acceptable",
   "keeps the existing booking until the new time is confirmed",
-  "states the day of the rescheduled cleaning",
-  "states the time of the rescheduled cleaning",
   "does not create a second booking",
-  "explains what happens to the Thursday booking",
 ] as const;
 
 const EXPECTED_BEHAVIORS_GRADE: FixtureGrade = {
@@ -86,15 +95,15 @@ const EXPECTED_BEHAVIORS_GRADE: FixtureGrade = {
   graderDefinitionId: "gdf_expected_behaviors",
   graderDefinitionVersion: 1,
   graderName: "expected_behaviors",
-  score: 0.86,
+  score: 0.75,
   details: {
-    rationale: "Six of seven expected behaviors were present.",
+    rationale: "Three of four expected behaviors were present.",
     assertions: EXPECTED_BEHAVIORS.map((behavior, at) => ({
       key: `behavior_${String(at + 1)}`,
       score: at === EXPECTED_BEHAVIORS.length - 1 ? 0 : 1,
       rationale:
         at === EXPECTED_BEHAVIORS.length - 1
-          ? "The transcript did not explain what happened to the Thursday booking."
+          ? "The transcript did not prove that it avoided a second booking."
           : `The transcript supports: ${behavior}`,
       ...(at === EXPECTED_BEHAVIORS.length - 1
         ? {}
@@ -152,7 +161,11 @@ function fileFor(name: string): string {
 function writes(name: string): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
-    { kind: "write-file", path: `egma/tests/generated/${name}.md`, content: fileFor(name) },
+    {
+      kind: "write-file",
+      path: `egma/tests/${SUITE_DIRECTORY}/${name}.md`,
+      content: fileFor(name),
+    },
     { kind: "say", text: `egma:wrote ${name}\n` },
   ];
 }
@@ -212,6 +225,9 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   });
   terminal = run;
 
+  await showing(run, "Welcome to egma", "Press Enter to authenticate");
+  run.write("\r");
+
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
 
@@ -223,10 +239,9 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   await showing(run, "How should Egma reach this agent?");
   run.write("\r");
 
-  await showing(run, "Do you already have test cases", "[n] none");
-  run.write("n");
+  await chooseNoExistingTests(run);
 
-  await showing(run, `${TESTS.length} tests generated`, "[enter] run");
+  await showing(run, `${TESTS.length} tests`, "Press Enter to run.");
   run.write("\r");
 
   // The push happened, the run was created, and it is queued on the platform.
@@ -237,16 +252,39 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
 /** What the skill offer waits on, and the shape it waits in. */
 const OFFER_HINTS = ["[p] project", "[g] global", "[s] skip"] as const;
 
-/** Where a skill lands, under whichever tree. */
-const SKILL_PATH = path.join(".claude", "skills", "egma", "SKILL.md");
-const SDK_SKILL_PATH = path.join(".claude", "skills", "integrate-egma-sdk", "SKILL.md");
+/** Where the standard installer writes the skill and Claude Code's alias. */
+const SKILL_PATH = path.join(".agents", "skills", "egma", "SKILL.md");
+const INTEGRATION_SKILL_PATH = path.join(
+  ".agents",
+  "skills",
+  "integrate-egma",
+  "SKILL.md",
+);
+const CLAUDE_SKILL_LINK = path.join(".claude", "skills", "egma");
 
 describe("the run screen", () => {
-  it("shows one Expected behaviors grade, its seven assertion details, and one combined score", async () => {
+  it("shows one Expected behaviors grade, its four assertion details, and one combined score", async () => {
     const run = await toTheRun(200, 45);
 
     // Every simulation is on screen the moment the run exists, queued.
-    await showing(run, "run run_", `${TESTS.length} simulations`, TESTS[0], "queued");
+    const started = platform.running.runs[0];
+    expect(started).toBeDefined();
+    const resultsUrl = `${platform.url}/projects/${platform.projectId}/runs/${started!.id}`;
+    await showing(
+      run,
+      "run run_",
+      `${TESTS.length} simulations`,
+      `Results: ${resultsUrl}`,
+      TESTS[0],
+      "queued",
+      "[enter] open results in browser",
+    );
+    expect(run.raw()).toContain(
+      `\u001B]8;;${resultsUrl}\u001B\\${resultsUrl}\u001B]8;;\u001B\\`,
+    );
+
+    run.write("\r");
+    await showing(run, "Opened results in your browser.");
 
     // One at a time. Each check waits for the screen event, so each state is a
     // frame the screen really held without a fixed pause.
@@ -270,36 +308,45 @@ describe("the run screen", () => {
       simulation: TESTS[0],
       state: "complete",
       grades: [EXPECTED_BEHAVIORS_GRADE],
-      combinedScore: 0.86,
+      combinedScore: 0.75,
     });
     const landed = await showing(
       run,
       `First result: ${TESTS[0]}`,
-      "Combined score 0.86",
+      "Combined score 0.75",
       "Expected behaviors",
-      "score 0.86",
+      "score 0.75",
       "pass threshold 0.62",
-      "Six of seven expected behaviors were present.",
+      "Three of four expected behaviors were present.",
       "Assertion 01",
-      "Assertion 07",
+      "Assertion 04",
       EXPECTED_BEHAVIORS[0],
-      EXPECTED_BEHAVIORS[6],
-      "The transcript did not explain what happened to the Thursday booking.",
-      "Install 4 Egma skills into Claude Code",
-      ...OFFER_HINTS,
+      EXPECTED_BEHAVIORS[3],
+      "The transcript did not prove that it avoided a second booking.",
     );
     // The result stays visible while the final choice waits. It is not a frame
     // that disappears before a developer can read it.
     expect(landed).toContain(`First result: ${TESTS[0]}`);
-    expect(landed.match(/Assertion \d{2}/gu)).toHaveLength(7);
+    expect(landed.match(/Assertion \d{2}/gu)).toHaveLength(4);
     expect(landed).not.toMatch(/overall verdict|\bgate\b|\brequired\b|latency/iu);
 
-    await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     const held = platform.running.simulationsOf();
     expect(held.filter((one) => one.gradingState === "complete")).toHaveLength(1);
-    expect(held.filter((one) => one.gradingState === null)).toHaveLength(2);
+    expect(held.filter((one) => one.gradingState === null)).toHaveLength(3);
     expect(held.filter((one) => one.status === "running")).toHaveLength(1);
-    expect(held.filter((one) => one.status === "queued")).toHaveLength(1);
+    expect(held.filter((one) => one.status === "queued")).toHaveLength(2);
+
+    // The terminal stays with the complete run. Finish the other simulations,
+    // then the skill offer replaces the run screen.
+    platform.running.advance({ simulation: TESTS[1], status: "completed" });
+    platform.running.setGrading({ simulation: TESTS[1], state: "not_requested" });
+    for (const test of TESTS.slice(2)) {
+      platform.running.advance({ simulation: test, status: "claimed" });
+      platform.running.advance({ simulation: test, status: "running" });
+      platform.running.advance({ simulation: test, status: "completed" });
+      platform.running.setGrading({ simulation: test, state: "not_requested" });
+    }
+    await showing(run, "Install 3 Egma skills into Claude Code", ...OFFER_HINTS);
   });
 
   /**
@@ -324,15 +371,16 @@ describe("the run screen", () => {
       reason: "the agent never joined",
     });
     platform.running.advance({ simulation: TESTS[2], status: "canceled" });
+    platform.running.advance({ simulation: TESTS[3], status: "canceled" });
 
-    const screen = await showing(run, "execution 3/3 finished", "grading 0/1 terminal");
+    const screen = await showing(run, "execution 4/4 finished", "grading 0/1 terminal");
     expect(screen).toContain(TESTS[0]);
     expect(screen).toContain("waiting to grade");
     expect(screen).toContain(TESTS[1]);
     expect(screen).toContain("did not run");
     expect(screen).toContain(TESTS[2]);
     expect(screen).toContain("stopped");
-    expect(screen).toContain("execution 3/3 finished");
+    expect(screen).toContain("execution 4/4 finished");
     expect(screen).toContain("grading 0/1 terminal");
   });
 });
@@ -345,18 +393,17 @@ describe("the skill offer and what is left behind", () => {
    */
   const WIDE = 200;
 
-  /** The wizard, driven as far as the offer, with one result ready. */
+  /** The wizard, driven as far as the offer, with the complete run ready. */
   async function toTheOffer(): Promise<TerminalRun> {
     const run = await toTheRun(WIDE);
     await showing(run, "run run_");
 
-    platform.running.advance({ simulation: TESTS[0], status: "claimed" });
-    platform.running.advance({ simulation: TESTS[0], status: "running" });
-    platform.running.advance({
-      simulation: TESTS[0],
-      status: "completed",
-    });
-    platform.running.setGrading({ simulation: TESTS[0], state: "complete" });
+    for (const test of TESTS) {
+      platform.running.advance({ simulation: test, status: "claimed" });
+      platform.running.advance({ simulation: test, status: "running" });
+      platform.running.advance({ simulation: test, status: "completed" });
+      platform.running.setGrading({ simulation: test, state: "not_requested" });
+    }
 
     await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     return run;
@@ -372,14 +419,14 @@ describe("the skill offer and what is left behind", () => {
     expect(await readFile(landed, "utf8")).toContain("name: egma");
     // Every public skill, not only the one that drives the command.
     expect(
-      await readFile(path.join(workspace.dir, SDK_SKILL_PATH), "utf8"),
-    ).toContain("name: integrate-egma-sdk");
+      await readFile(path.join(workspace.dir, INTEGRATION_SKILL_PATH), "utf8"),
+    ).toContain("name: integrate-egma");
+    expect(existsSync(path.join(workspace.dir, CLAUDE_SKILL_LINK))).toBe(true);
     expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
 
     const left = run.scrollback();
-    // Where they went, in the installer's own words rather than in a path egma
-    // guessed at before it ran.
-    expect(left).toContain(path.join(".claude", "skills", "egma"));
+    expect(left).toContain("3 Egma skills are in this repository.");
+    expect(left).toContain("./.agents/skills/egma");
     expect(left).toContain("Commit all of it");
     // The second thing a project install puts in the repository is named too.
     expect(left).toContain("skills-lock.json");
@@ -398,7 +445,9 @@ describe("the skill offer and what is left behind", () => {
     // The repository gained only what the walk was always going to write.
     expect(before.length).toBeLessThan((await filesUnder(workspace.dir)).length);
 
-    expect(run.scrollback()).toContain(path.join(".claude", "skills", "egma"));
+    expect(existsSync(path.join(home, CLAUDE_SKILL_LINK))).toBe(true);
+    expect(run.scrollback()).toContain("3 Egma skills are beside Claude Code.");
+    expect(run.scrollback()).toContain("~/.agents/skills/egma");
   });
 
   /**
@@ -415,6 +464,8 @@ describe("the skill offer and what is left behind", () => {
     expect(offer).toContain(home);
     expect(existsSync(path.join(workspace.dir, SKILL_PATH))).toBe(false);
     expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
+    expect(existsSync(path.join(workspace.dir, CLAUDE_SKILL_LINK))).toBe(false);
+    expect(existsSync(path.join(home, CLAUDE_SKILL_LINK))).toBe(false);
 
     run.write("s");
 

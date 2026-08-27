@@ -491,10 +491,19 @@ export const listApiKeys = <ThrowOnError extends boolean = false>(options?: Opti
  * Create an API key
  */
 export const createApiKey = <ThrowOnError extends boolean = false>(parameters?: {
-    name?: string;
-    projectId?: string | null;
+    body?: {
+        name?: string;
+        projectId?: string | null;
+    } | {
+        name: string;
+        projectId: string;
+        /**
+         * The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.
+         */
+        monitoringAgentId: string;
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateApiKeyResponses, CreateApiKeyErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'body', key: 'name' }, { in: 'body', key: 'projectId' }] }]);
+    const params = buildClientParams([parameters], [{ args: [{ key: 'body', map: 'body' }] }]);
     return (options?.client ?? client).post<CreateApiKeyResponses, CreateApiKeyErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',

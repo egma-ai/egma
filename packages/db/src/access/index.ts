@@ -20,6 +20,7 @@
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
+  ActiveApiKeyNameConflictError,
   AgentWriteRefusedError,
   AgentAlreadyBoundError,
   AlreadyBelongsToAnOrganizationError,

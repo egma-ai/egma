@@ -210,14 +210,14 @@ describe("the complete suite repository", () => {
     );
   });
 
-  it("does not accept the former singular suite config", async () => {
+  it("does not accept the former unversioned singleton config", async () => {
     await writeFile(
       folderPathsIn(workspace.dir).config,
       "platform:\nproject:\nagent:\nconnection:\nsuite:\n  name: first-suite\n",
     );
 
     await expect(readRepository(folderPathsIn(workspace.dir))).rejects.toThrow(
-      /config\.yaml.*suite/i,
+      /config\.yaml.*folder format none.*requires format 2.*no legacy reader/i,
     );
   });
 

@@ -155,6 +155,18 @@ async function mint(
   };
 }
 
+/** A living LiveKit agent whose id may reserve one worker-key namespace. */
+async function liveKitAgent(person: Person, name: string): Promise<string> {
+  const response = await api.app.inject({
+    method: "POST",
+    url: "/v1/agents",
+    headers: { cookie: person.cookie },
+    payload: { name, agentPlatform: "livekit" },
+  });
+  expect(response.statusCode, response.body).toBe(201);
+  return (response.json() as { agent: { id: string } }).agent.id;
+}
+
 describe("minting a key", () => {
   it("shows the secret exactly once and stores something that is not it", async () => {
     api = await createApi("keys_mint");
@@ -231,6 +243,238 @@ describe("minting a key", () => {
       payload: { name: "second machine" },
     });
     expect(another.statusCode).toBe(201);
+  });
+
+  it("accepts only a living LiveKit agent for a reserved worker key", async () => {
+    api = await createApi("keys_monitoring_agent_validation");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const agentId = await liveKitAgent(ada, "appointment agent");
+    const prefix = `Egma monitoring ${agentId} — `;
+
+    for (const payload of [
+      { monitoringAgentId: agentId },
+      { monitoringAgentId: agentId, projectId: ada.projectId },
+      {
+        monitoringAgentId: agentId,
+        projectId: ada.projectId,
+        name: "another kind of key",
+      },
+      {
+        activeNamePrefix: prefix,
+        projectId: ada.projectId,
+        name: `${prefix}legacy client-controlled prefix`,
+      },
+      {
+        projectId: ada.projectId,
+        name: `${prefix}ordinary key in the reserved namespace`,
+      },
+    ]) {
+      const refused = await api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: ada.cookie },
+        payload,
+      });
+
+      expect(refused.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(refused.json()).toMatchObject({ error: "invalid_request" });
+    }
+
+    const missing = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: ada.cookie },
+      payload: {
+        monitoringAgentId: newId("agt"),
+        projectId: ada.projectId,
+        name: `Egma monitoring ${newId("agt")} — missing agent`,
+      },
+    });
+    expect(missing.statusCode).toBe(422);
+    expect(missing.json()).toMatchObject({ error: "unprocessable" });
+  });
+
+  it("keeps guarded monitoring keys out of a viewer's read-only role", async () => {
+    api = await createApi("keys_monitoring_viewer_refused");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const vic = await colleagueOf(ada, "vic-monitoring@acme.example", "viewer");
+    const agentId = await liveKitAgent(ada, "appointment agent");
+
+    const ordinary = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: vic.cookie },
+      payload: {
+        projectId: vic.projectId,
+        name: `Egma monitoring ${agentId} — ordinary viewer key`,
+      },
+    });
+    expect(ordinary.statusCode).toBe(400);
+    expect(ordinary.json()).toMatchObject({ error: "invalid_request" });
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: vic.cookie },
+      payload: {
+        monitoringAgentId: agentId,
+        projectId: vic.projectId,
+        name: `Egma monitoring ${agentId} — appointment agent [viewer]`,
+      },
+    });
+
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ error: "not_permitted" });
+  });
+
+  it("reserves one active project key prefix across creators and reveals no foreign key", async () => {
+    api = await createApi("keys_active_prefix_members");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const monitoringAgentId = await liveKitAgent(ada, "appointment agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+
+    const first = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: ada.cookie },
+      payload: {
+        monitoringAgentId,
+        projectId: ada.projectId,
+        name: `${activeNamePrefix} - appointment agent`,
+      },
+    });
+    expect(first.statusCode, first.body).toBe(201);
+
+    const miasList = await api.app.inject({
+      method: "GET",
+      url: "/v1/keys",
+      headers: { cookie: mia.cookie },
+    });
+    expect(miasList.statusCode).toBe(200);
+    expect((miasList.json() as { keys: unknown[] }).keys).toEqual([]);
+
+    const second = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: mia.cookie },
+      payload: {
+        monitoringAgentId,
+        projectId: mia.projectId,
+        name: `${activeNamePrefix} - another machine`,
+      },
+    });
+    expect(second.statusCode, second.body).toBe(409);
+    expect(second.json()).toEqual({
+      error: "active_key_name_conflict",
+      message:
+        "an active API key already reserves this name prefix in this project; revoke it before creating a replacement",
+    });
+  });
+
+  it("permits a reserved prefix again after its key is revoked", async () => {
+    api = await createApi("keys_active_prefix_replacement");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const monitoringAgentId = await liveKitAgent(ada, "replacement agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+    const first = await mint(ada, {
+      monitoringAgentId,
+      projectId: ada.projectId,
+      name: `${activeNamePrefix} - first`,
+    });
+    expect(first.status).toBe(201);
+
+    const revoked = await api.app.inject({
+      method: "POST",
+      url: `/v1/keys/${first.id}/revoke`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(revoked.statusCode).toBe(200);
+
+    const replacement = await mint(ada, {
+      monitoringAgentId,
+      projectId: ada.projectId,
+      name: `${activeNamePrefix} - replacement`,
+    });
+    expect(replacement.status).toBe(201);
+  });
+
+  it("creates exactly one key when two requests reserve the same prefix together", async () => {
+    api = await createApi("keys_active_prefix_concurrent");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const monitoringAgentId = await liveKitAgent(ada, "racing agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+
+    const responses = await Promise.all(
+      [ada, mia].map((person, index) =>
+        api.app.inject({
+          method: "POST",
+          url: "/v1/keys",
+          headers: { cookie: person.cookie },
+          payload: {
+            monitoringAgentId,
+            projectId: person.projectId,
+            name: `${activeNamePrefix} - contender ${index + 1}`,
+          },
+        }),
+      ),
+    );
+
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      201,
+      409,
+    ]);
+  });
+
+  it("cannot race an ordinary key into a monitoring agent's reserved namespace", async () => {
+    api = await createApi("keys_monitoring_namespace_race");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const mia = await colleagueOf(ada, "mia-race@acme.example", "member");
+    const monitoringAgentId = await liveKitAgent(ada, "guarded agent");
+    const activeNamePrefix = `Egma monitoring ${monitoringAgentId} — `;
+
+    const [guarded, ordinary] = await Promise.all([
+      api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: ada.cookie },
+        payload: {
+          monitoringAgentId,
+          projectId: ada.projectId,
+          name: `${activeNamePrefix}guarded`,
+        },
+      }),
+      api.app.inject({
+        method: "POST",
+        url: "/v1/keys",
+        headers: { cookie: mia.cookie },
+        payload: {
+          projectId: mia.projectId,
+          name: `${activeNamePrefix}ordinary`,
+        },
+      }),
+    ]);
+
+    expect(guarded.statusCode, guarded.body).toBe(201);
+    expect(ordinary.statusCode, ordinary.body).toBe(400);
+    expect(ordinary.json()).toMatchObject({ error: "invalid_request" });
+  });
+
+  it("keeps ordinary duplicate names when no active prefix was requested", async () => {
+    api = await createApi("keys_duplicate_names_stay_ordinary");
+    const ada = await signUp("ada@acme.example", "Acme");
+
+    const first = await mint(ada, {
+      name: "same ordinary name",
+      projectId: ada.projectId,
+    });
+    const second = await mint(ada, {
+      name: "same ordinary name",
+      projectId: ada.projectId,
+    });
+
+    expect([first.status, second.status]).toEqual([201, 201]);
   });
 });
 

@@ -95,7 +95,7 @@ describe("one task, driven on a scripted agent", () => {
     // Every action the agent took was shown, and the fact it reported is on the
     // card, while the words around it are not.
     expect(ui.record.statuses).toContain("◆ Read package.json");
-    expect(ui.record.summary).toContain("Framework  retell-sdk");
+    expect(ui.record.summary).toMatch(/Framework\s+retell-sdk/u);
     expect(ui.record.summary).not.toContain("Let me look at that file.");
   });
 

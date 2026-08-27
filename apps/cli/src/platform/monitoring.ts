@@ -119,6 +119,8 @@ export type AgentMonitoring = {
   readonly agentId: string;
   readonly agentName: string;
   readonly projectId: string;
+  /** An archived agent is not a living monitoring target. */
+  readonly archived: boolean;
   /** Which platform runs this agent, or `null` while nobody has bound it. */
   readonly agentPlatform: string | null;
   readonly platformAgentId: string | null;
@@ -334,6 +336,7 @@ export async function readAgentMonitoring(
       agentId: platformText(agent.id),
       agentName: platformText(agent.name),
       projectId: platformText(agent.projectId),
+      archived: agent.archived,
       agentPlatform:
         agent.agentPlatform === null ? null : platformText(agent.agentPlatform),
       platformAgentId:

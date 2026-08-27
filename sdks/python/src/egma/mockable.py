@@ -5,7 +5,6 @@ Call it once, after the agent is built and before the session starts::
     from egma import mockable
 
     async def entrypoint(ctx: agents.JobContext) -> None:
-        await ctx.connect()
         agent = Agent(instructions=..., tools=[...])
         session = AgentSession(...)
         await mockable(agent, ctx, session)
@@ -19,11 +18,16 @@ nothing at all: no wrapping, no side table, no call. That inertness is
 the whole safety story, and it is a test in this package rather than a
 promise in a document.
 
-In a simulation it sends the **census** first: every tool the agent has,
-by name and schema, read off the agent object. That is the first message
-of the exchange on purpose — an egma that is not there is discovered
-here, before a single tool call, rather than half way through a
-simulation with somebody waiting on the line.
+In a simulation it connects the job to its LiveKit room, if the agent's
+normal startup has not already done so. This uses ``JobContext.connect``
+before reading the room's local participant; an already-connected job is
+left alone.
+
+In a simulation it sends the **census** first: every tool the initial
+agent has, by name and schema, read off the agent object. That is the
+first message of the exchange on purpose — an egma that is not there is
+discovered here, before a single tool call, rather than half way through
+a simulation with somebody waiting on the line.
 
 egma answers with the names it covers, and one **courier** is stood in
 front of each. Couriers go in through LiveKit's own ``mock_tools``, which
@@ -36,6 +40,13 @@ A courier is registered for **every name egma answers for**, not for the
 overlap with the census. The side table is consulted per call, by name,
 so a tool attached after this call is still intercepted on its first
 call, and a courier for a tool that never turns up simply never fires.
+
+LiveKit may later hand the session to another ``Agent`` or ``AgentTask``.
+The public handoff event fires after LiveKit selects that exact instance
+and before its activity starts. At that boundary this one integration
+call installs couriers for the selected class, then reports a cumulative
+census containing every tool discovered in the session so far. Returning
+to an earlier agent never removes tools from Egma's coverage record.
 
 ## What a courier does with one call
 
@@ -77,23 +88,30 @@ agent down to make the same point would only lose the simulation as well.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from livekit.agents import (
     Agent,
     AgentSession,
+    ConversationItemAddedEvent,
     JobContext,
     RunContext,
     ToolContext,
     ToolError,
     mock_tools,
 )
-from livekit.agents.llm import FunctionTool, RawFunctionTool, is_raw_function_tool
+from livekit.agents.llm import (
+    AgentHandoff,
+    FunctionTool,
+    RawFunctionTool,
+    is_raw_function_tool,
+)
 from livekit.rtc import RpcError
 
 from . import seam
@@ -152,6 +170,9 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
         )
         return
 
+    if not ctx.room.isconnected():
+        await ctx.connect()
+
     seat = _Seat(room=ctx.room, identity=context.identity)
     try:
         answered = await seat.ask(seam.HELLO_METHOD, census)
@@ -168,10 +189,8 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
         )
         return
 
-    couriers: dict[str, Callable[..., Any]] = {
-        name: _courier(name, tools.get(name), agent, seat) for name in mocked
-    }
-    mock_tools(type(agent), couriers, session=session)
+    couriers = _install_couriers(agent, mocked, seat, session)
+    _install_handoff_couriers(agent, mocked, seat, session, context)
     logger.info(
         "simulation %s: the agent reported %d tool(s) and Egma answers for "
         "%d of them (%s); every other tool runs its own implementation",
@@ -180,6 +199,178 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
         len(couriers),
         ", ".join(couriers) or "none",
     )
+
+
+def _install_couriers(
+    agent: Agent,
+    mocked: Sequence[str],
+    seat: _Seat,
+    session: AgentSession,
+) -> dict[str, Callable[..., Any]]:
+    """Put this agent instance's couriers in LiveKit's session side table."""
+    tools = ToolContext(agent.tools).function_tools
+    couriers: dict[str, Callable[..., Any]] = {
+        name: _courier(name, tools.get(name), agent, seat) for name in mocked
+    }
+    mock_tools(type(agent), couriers, session=session)
+    return couriers
+
+
+def _install_handoff_couriers(
+    initial_agent: Agent,
+    mocked: Sequence[str],
+    seat: _Seat,
+    session: AgentSession,
+    context: _EgmaContext,
+) -> None:
+    """Cover each agent LiveKit selects before that agent starts running.
+
+    LiveKit looks up mock tools by the exact class of ``current_agent``.
+    ``AgentTask`` handoffs therefore need their own entry even though they
+    share the same session. LiveKit emits this public event after selecting
+    the next agent and before starting its activity, so this synchronous
+    callback closes that gap before the task can make its first tool call.
+    """
+    active_mocked = tuple(mocked)
+    last_selected_agent: Agent | None = initial_agent
+    installed_types: set[type[Agent]] = {type(initial_agent)}
+    initial_tools = ToolContext(initial_agent.tools).function_tools
+    discovered = {
+        name: {"name": name, "schema": _schema_of(tool)}
+        for name, tool in initial_tools.items()
+    }
+    refresh_tasks: set[asyncio.Task[None]] = set()
+    refresh_tail: asyncio.Task[None] | None = None
+
+    def on_conversation_item_added(event: ConversationItemAddedEvent) -> None:
+        nonlocal last_selected_agent, refresh_tail
+        try:
+            if not isinstance(event.item, AgentHandoff):
+                return
+
+            current = session.current_agent
+            if (
+                current is None
+                or event.item.new_agent_id != current.id
+                or current is last_selected_agent
+            ):
+                return
+
+            installed_types.add(type(current))
+            try:
+                couriers = _install_couriers(current, active_mocked, seat, session)
+            except Exception:
+                # Never leave a courier bound to the previous instance of
+                # this exact class. If preparing the new one fails, running
+                # its own tools is safer than calling through stale state.
+                mock_tools(type(current), {}, session=session)
+                logger.exception(
+                    "simulation %s: Egma could not prepare LiveKit's selected "
+                    "%s; that agent will run its own tools",
+                    context.simulation_id,
+                    type(current).__name__,
+                )
+                return
+            last_selected_agent = current
+            logger.info(
+                "simulation %s: LiveKit handed off to %s; Egma answers for %d "
+                "tool name(s) on that agent (%s)",
+                context.simulation_id,
+                type(current).__name__,
+                len(couriers),
+                ", ".join(couriers) or "none",
+            )
+
+            try:
+                changed = False
+                for name, tool in ToolContext(current.tools).function_tools.items():
+                    entry = {"name": name, "schema": _schema_of(tool)}
+                    if discovered.get(name) != entry:
+                        discovered[name] = entry
+                        changed = True
+                if not changed:
+                    return
+
+                cumulative_census = list(discovered.values())
+                previous_refresh = refresh_tail
+
+                async def refresh_in_handoff_order() -> None:
+                    try:
+                        if previous_refresh is not None:
+                            await previous_refresh
+                        await _refresh_census(
+                            cumulative_census, active_mocked, seat, context
+                        )
+                    except (RpcError, seam.SeamError) as refused:
+                        logger.warning(
+                            "simulation %s: the cumulative tool census could not "
+                            "be refreshed (%s); its already-installed couriers remain",
+                            context.simulation_id,
+                            refused,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "simulation %s: the cumulative tool census could not "
+                            "be refreshed; its already-installed couriers remain",
+                            context.simulation_id,
+                        )
+
+                refresh_tail = asyncio.create_task(refresh_in_handoff_order())
+                refresh_tasks.add(refresh_tail)
+                refresh_tail.add_done_callback(refresh_tasks.discard)
+            except Exception:
+                logger.exception(
+                    "simulation %s: Egma installed this handoff's couriers but "
+                    "could not add its tools to the cumulative census",
+                    context.simulation_id,
+                )
+        except Exception:
+            # LiveKit's event emitter re-raises TypeError from synchronous
+            # callbacks. A mock-tools hook must never stop the agent handoff.
+            logger.exception(
+                "simulation %s: Egma's LiveKit handoff hook failed; LiveKit "
+                "will continue without new courier state from this event",
+                context.simulation_id,
+            )
+
+    def on_close(_: Any) -> None:
+        session.off("conversation_item_added", on_conversation_item_added)
+        for task in tuple(refresh_tasks):
+            task.cancel()
+        for agent_type in installed_types:
+            mock_tools(agent_type, {}, session=session)
+        installed_types.clear()
+        discovered.clear()
+
+    session.on("conversation_item_added", on_conversation_item_added)
+    session.once("close", on_close)
+
+
+async def _refresh_census(
+    reported_tools: Sequence[dict[str, Any]],
+    expected_mocked: Sequence[str],
+    seat: _Seat,
+    context: _EgmaContext,
+) -> None:
+    """Report every tool discovered so far without changing the mock world."""
+    census = seam.hello_request(list(reported_tools))
+    seam.fits_on_the_wire("the cumulative handoff census", census)
+    answered = await seat.ask(seam.HELLO_METHOD, census)
+    answered_mocked = seam.mocked_tools_in(answered)
+    logger.info(
+        "simulation %s: the cumulative census now reports %d tool(s) and "
+        "Egma answers for %d of them (%s)",
+        context.simulation_id,
+        len(reported_tools),
+        len(answered_mocked),
+        ", ".join(answered_mocked) or "none",
+    )
+    if tuple(answered_mocked) != tuple(expected_mocked):
+        logger.warning(
+            "simulation %s: Egma changed the mock-tool names in a later "
+            "census; this session keeps the names negotiated at startup",
+            context.simulation_id,
+        )
 
 
 @dataclass(frozen=True)

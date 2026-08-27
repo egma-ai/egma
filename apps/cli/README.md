@@ -12,25 +12,29 @@ a checkout instead — for development, or ahead of a release — is
 verb the same. See [Trying it on an instance of your
 own](#trying-it-on-an-instance-of-your-own) for the two lines that do it.
 
-Run it in your repository. It opens a terminal wizard, tells you what it is
-about to do, and starts on one keystroke. When it closes, your terminal has one
-plain line in it and nothing else.
+Run it in your repository. It opens a terminal wizard. On the welcome screen,
+`[enter]` starts CLI authorization. Only after authorization succeeds does Egma
+find your installed coding agents and ask which one to use. A later `[enter]`
+starts the repository work after Egma has shown exactly what it will do. When
+the wizard closes, it leaves a plain summary and, after a run, the results
+address in your normal terminal buffer.
 
-That keystroke is how you agree to Egma driving your coding agent, so Egma needs
-a real terminal to ask in. Piped or redirected, it refuses and says so. Pass
-`--headless` to agree in the command itself and get plain lines instead — that
-is how CI runs it.
+The wizard needs a real terminal for those choices. Piped or redirected, it
+refuses and says so. Pass `--headless` to agree in the command itself and get
+plain lines instead — that is how CI runs it.
 
 ## What it does today
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx @egma/cli` first finds the supported coding agents installed on this
-machine and asks which one to use. It supports Claude Code, Codex, Cursor, and
-OpenCode. It signs this machine in to Egma, then finds your voice agent. It starts
-only the coding agent you chose, hands it Egma's own notes on how voice agents
-are built, and has it read this folder and report which framework runs it, what
-the voice agent is called, where its prompts live, where its tools are defined,
+`npx @egma/cli` signs this machine in to Egma first. Only after authorization
+succeeds does it look for Claude Code, Codex, Cursor, and OpenCode on this
+machine and ask which installed coding agent to use. It then finds your voice
+agent. It starts only the coding agent you chose, hands it Egma's own notes on
+how voice agents are built, and has it read this folder and report which
+framework runs it, what the voice agent is called, which LiveKit dispatch name
+its worker registers, which file starts its worker, where its prompts live,
+where its tools are defined,
 how it reaches production, and
 where its identifier is written down. Every action it takes appears on screen
 while it works, and the facts it finds arrive one line at a time.
@@ -46,10 +50,10 @@ Your code and your prompts never leave this machine.
 If this folder holds no voice agent, Egma ends and says to use the folder that
 contains the agent or configure it in the Egma UI.
 
-Then it connects that agent so Egma can reach it, writes a first suite of tests
-for it, puts them on Egma when you say so, and runs them — closing as soon as
-the first completed trace has terminal grading, with the rest of the suite still
-going on Egma.
+Then it connects that agent so Egma can reach it, writes a first suite of
+exactly four tests, puts them on Egma when you say so, and runs them. The wizard
+stays with the run until every simulation has finished execution and every
+completed trace has finished grading.
 See below.
 
 ## Signing in
@@ -123,15 +127,18 @@ the screen says what happens to it before you type it:
 
 ```
 ◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
-  It is sent to Egma and stored encrypted. It never lands in a file here.
+  Egma uses this key now to read your Retell agents and confirm the selected setup.
+  For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API.
+  For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.
   › ●●●●●●●●●●●●●●●●
 ```
 
 That sentence is the whole promise, and it is enforced rather than intended.
-The key is held in memory, sent in one header to Retell and in one body to Egma,
-which seals it. It is written to no file, printed in no line, kept in no log,
-and never passed as a command argument — arguments are readable by every
-process on your machine and are kept in your shell history.
+The key is held in memory and sent to Retell during setup. For Chat, Egma also
+sends it to the platform, which seals it for simulations. For Phone, setup does
+not send it to the platform. It is written to no repository file, printed in no
+line, kept in no log, and never passed as a command argument — arguments are
+readable by every process on your machine and are kept in your shell history.
 
 Egma checks the key by listing the agents on the account. A key Retell will not
 take, and a key for an account with no agents on it, are told apart by name and
@@ -196,6 +203,12 @@ LiveKit targets by URL because a LiveKit URL identifies a server, not an agent.
 LiveKit keeps its prompt and tools in repository code. Test writing therefore
 uses the repository evidence and the context already held by the same coding
 agent session; there is no provider prompt API to pull first.
+
+For the run, Egma uses the discovered entrypoint and dispatch name. It checks
+for LiveKit CLI 2.18.2 or newer, starts `lk agent dev` in the repository, waits
+until the worker registers, and stops it when the run ends. The URL, API key,
+and API secret reach that process only through its environment. Egma does not
+create or deploy a LiveKit Cloud agent.
 
 ### Retell without the wizard
 
@@ -264,17 +277,48 @@ status: connected
 
 ```
 egma/
-  config.yaml     what this folder points at — names and ids
+  config.yaml     format 2 platform, project, agents, and connections
   mock-tools.md   what Egma answers for the agent's tools with
   tests/
     release/      one local directory per suite
       suite.yaml  stable suite id and mutable display name
       *.md        zero or more tests in this suite
+    regression/   another suite in the same project
+      suite.yaml
+      *.md
 ```
 
 `egma init` makes it. Everything in it is committed: nothing secret ever lands
 here, so there are no gitignore lines to write and none to forget. Your tests
 are code your team reviews in pull requests.
+
+`egma/config.yaml` has one strict shape. A project can name many agents, and
+each agent can name many connections:
+
+```yaml
+format: 2
+platform:
+  origin: https://app.egma.ai
+project:
+  id: prj_01K3XQ7M4E8YB2FVN0H9TZQWER
+  name: Voice agents
+agents:
+  - id: agt_01K3XQ7M4E8YB2FVN0H9TZQWER
+    name: Front desk
+    connections:
+      - id: con_01K3XQ7M4E8YB2FVN0H9TZQWER
+        name: livekit-1
+      - id: con_01K3XQ7M4E8YB2FVN0H9TZQWES
+        name: phone_number-1
+  - id: agt_01K3XQ7M4E8YB2FVN0H9TZQWES
+    name: After hours
+    connections: []
+```
+
+Format 2 is required. The former top-level `agent` and `connection` fields are
+refused; this CLI has no legacy reader or compatibility alias. Run the wizard
+again to add another target or another suite. It keeps the agents, connections,
+and suite directories that are already present.
 
 Create a suite with `egma suite create release --name "Release contract"`.
 Egma creates the platform record first, then writes exactly:
@@ -337,30 +381,26 @@ test cases written down — a spreadsheet, a document, a page of notes? Drop a
 path and your own coding agent turns each one into a test file first. Egma
 reads that file itself and hands the whole of it over inside the task, so
 nothing goes looking on your disk; the file has to be inside the folder you ran
-Egma in, and `.env` files are never read. Press `[n]` and Egma writes the whole
-suite itself.
+Egma in, and `.env` files are never read. Keep **No** selected and press
+`[enter]` for Egma to write the whole suite itself.
 
 Egma creates the real platform suite and writes its `suite.yaml` first. Then
 your coding agent writes tests into that direct suite directory, grounded in
-what your provider is actually running and in what it found in your repository. They
-arrive one file at a time, with what is still to come beside them:
+what your provider is actually running and in what it found in your repository.
+The screen shows the coding-agent session itself and an honest file count while
+it works:
 
 ```
-A test                            ◼ quoted-a-price          written
-                                  ▶ lost-the-order-number   writing…
-One situation to put your agent   ◻ open-on-sunday
-in: what the person on the other
-end wants, and the expected       Progress: 2/12
-behaviors that say what should
-happen.
+Writing tests for your voice agent.
+Progress: 2/4
+This may take a couple of minutes.
+
+Coding agent: Claude Code
+Claude Code: I am checking the worker and its tools.
+◆ Read src/agent.py
 ```
 
-Beside them, Egma's own words: what a test is, what a run and its simulations
-are, and the difference between a metric and a grader. The cards turn on their
-own and nothing waits on them — the suite is written at exactly the speed it
-would be with the pane closed.
-
-Twelve tests, each with at least one expected behavior. A test with none can
+Four tests, each with at least one expected behavior. A test with none can
 never fail, so Egma will not upload one; nor will it upload a file it could not
 read. Either way it says which file and why, and leaves the file exactly where
 it is for you to fix.
@@ -368,22 +408,21 @@ it is for you to fix.
 Then one keystroke:
 
 ```
-12 tests generated · suite "order-line tests"
+4 tests
 
-  › quoted-a-price          Everyday caller
-    lost-the-order-number   Everyday caller
-    open-on-sunday          somebody-in-a-hurry
-    … 9 more (↑↓ browse · e opens in $EDITOR)
+  quoted-a-price
+  lost-the-order-number
+  open-on-sunday
+  after-hours-emergency
 
-Run these against order-line over retell_chat_api-1 (chat)?
+0 mock tools written
 
-[enter] run   [e] edit first   [q] quit
+Press Enter to run.
+[q] quit
 ```
 
-`[e]` opens the highlighted file in your `$EDITOR` — Egma hands the terminal
-over and takes it back — and returns you here. `[q]` closes the wizard with
-every file still in your repository, ready for `egma push` when you have read
-them. `[enter]` pushes them and carries on.
+`[q]` closes the wizard with every file still in your repository, ready for
+`egma push` when you have read them. `[enter]` pushes them and carries on.
 
 It is a pause to scan, not a review. The tests are code in your repository
 either way, and code is reviewed in a pull request.
@@ -395,22 +434,25 @@ against your voice agent over the connection Egma registered. Each test becomes
 one **simulation** per persona, and each one arrives on its own line and moves:
 
 ```
-run run_01K7QXV2M8  ·  12 simulations
+run run_01K7QXV2M8  ·  4 simulations
+Results: https://app.egma.ai/projects/prj_01…/runs/run_01K7QXV2M8
 
 ◼ quoted-a-price            grading complete
-▶ lost-the-order-number     in progress
-▶ open-on-sunday            dialing…
-◻ after-hours-emergency     queued
+◼ lost-the-order-number     grading complete
+◼ open-on-sunday            grading complete
+◼ after-hours-emergency     grading complete
 
 ✓ First result: quoted-a-price grading complete
 
-execution 1/12 finished  ·  grading 1/1 terminal  ·  errors 0
+execution 4/4 finished  ·  grading 4/4 terminal  ·  errors 0
+
+[enter] open results in browser   [ctrl-c] stop
 ```
 
-**The wizard does not wait for the suite.** It waits for the first completed
-trace whose whole grading work is terminal. It never advances on the first
-individual grade. The run carries on on Egma; shutting your terminal has never
-stopped one.
+**The wizard waits for the complete suite.** It keeps the run screen open until
+every simulation has ended and every completed trace has terminal grading. The
+results address is a terminal link, and `[enter]` opens it in your browser. The
+same address remains as a plain line when the wizard closes.
 
 **Grading starts after a completed conversation.** A grader reads trace
 evidence, test values, outcomes, and metrics and returns one normalized score
@@ -433,11 +475,20 @@ the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 
 ```
-egma run generated
+egma run order-line-tests
 ```
 
-is the same thing with nobody watching. It pins the version of every test it
-runs, prints every change as it lands, and answers with a number:
+is the same thing with nobody watching. The suite does not belong to one agent:
+a run selects the suite, agent, and connection together. When the config names
+more than one runnable agent or more than one connection under the selected
+agent, name them exactly:
+
+```sh
+egma run order-line-tests --agent "Front desk" --connection livekit-1
+```
+
+It pins the version of every test it runs, prints every change as it lands, and
+answers with a number:
 
 ```
 url: http://localhost:3101
@@ -498,17 +549,15 @@ The last thing the wizard asks:
   on its own next time?   [p] project   [g] global   [s] skip
 ```
 
-`[p]` writes `.claude/skills/egma/SKILL.md` in this repository — commit it and
-your whole team has it. `[g]` writes `~/.claude/skills/egma/SKILL.md`, for every
-repository you open. `[s]` writes nothing at all, and is a perfectly good
+`[p]` puts the real skill folders in `.agents/skills/` in this repository —
+commit them and your whole team has them. When Claude Code is selected, the
+standard installer also creates `.claude/skills/<skill>` symlinks to that
+canonical store. `[g]` uses the standard installer's global folders for the
+selected coding agent. `[s]` writes nothing at all, and is a perfectly good
 answer: `egma --help` is enough for any coding agent to drive the whole product.
 
-Codex keeps its skills under `.codex/`, Cursor under `.cursor/`, and OpenCode
-under `.opencode/` for a project or `~/.config/opencode/` globally.
-
-Egma writes the one file itself. Nothing is downloaded, nothing else on your
-machine is touched, and the screen names the exact path before you press
-anything.
+Egma runs the pinned `skills` installer that ships in the CLI package. Nothing
+is downloaded, and the screen names the paths the installer wrote.
 
 ## The line the wizard leaves behind
 
@@ -517,7 +566,7 @@ away. So everything you need is printed after that screen is released, in plain
 text, each item alone on its line so a triple-click takes it whole:
 
 ```
-✓ Your first run is live — 3 of 12 simulation results ready.
+✓ Your first run is live — 3 of 4 simulation results ready.
 
 http://localhost:3101/projects/prj_01K7QXV2M8ZB4C6D8E0F2G4H6J/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
 
@@ -577,26 +626,26 @@ and the version the file now pins.
 ## The context Egma hands your coding agent
 
 Egma has three public Agent Skills, authored in the public repository under
-`skills/`: `egma` for operating the product, `find-voice-agent` for mapping a
-repository's voice agent, and `write-egma-tests` for writing the local test
-files. The CLI package carries the exact snapshot from its release tag.
+`skills/`: `egma` for operating the product, `integrate-egma` for finding and
+integrating a repository's voice agent, and `write-egma-tests` for writing the
+local test files. The CLI package carries the exact snapshot from its release
+tag.
 
 The wizard puts `write-egma-tests` at the front of each generation task. It
 then adds the facts for this repository and the CLI marker lines its screen
-reads. Discovery puts `find-voice-agent` at the front of its task. When the
-repository points to Retell or LiveKit, the coding agent reads only that
-provider reference from the public skill. The exact marker lines remain part of
-the wizard task.
+reads. Discovery and integration use the short `integrate-egma` router. The
+coding agent reads only the reference for the current phase. The exact marker
+lines remain part of the wizard task.
 
 Nothing is downloaded while the wizard runs. The public skills and their
-references are read from this package. The only skill that the wizard offers to
-install is `egma`, and it does so only when you say yes at the end of the wizard.
+references are read from this package. The wizard offers all three only when
+you say yes at the end of the wizard.
 
 You can install the public skills independently for any supported coding agent:
 
 ```sh
 npx skills add egma-ai/egma --skill egma
-npx skills add egma-ai/egma --skill find-voice-agent
+npx skills add egma-ai/egma --skill integrate-egma
 npx skills add egma-ai/egma --skill write-egma-tests
 ```
 
@@ -605,10 +654,11 @@ Leave out `--skill` to choose from all three.
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
-as a subprocess and Egma is the client. Before the consent screen, Egma checks
-for Claude Code, Codex, Cursor, and OpenCode on this machine and shows the ones
-it can prove are installed. It does not start ACP, log in, or download an agent
-during this check. `--coding-agent <id>` makes the choice without a screen.
+as a subprocess and Egma is the client. After the start screen, Egma authorizes
+the CLI. Only then does it check for Claude Code, Codex, Cursor, and OpenCode on
+this machine and show the ones it can prove are installed. It does not start
+ACP or download an agent during this check. `--coding-agent <id>` makes the
+choice without a screen after authorization.
 
 The wizard opens one ACP process and one session after consent. Discovery,
 conversion, and test writing are later turns in that same session, so the coding
@@ -632,8 +682,10 @@ still needs.
 
 That holds while Egma sets monitoring up on LiveKit, where a `.env` really is
 written: the two lines the Egma SDK reads are written by Egma's own code, with
-your agreement, and only when Git already ignores the file. Your coding agent
-still never opens it.
+no separate approval screen. The safe writer runs automatically only when Git
+already ignores the file, refuses links and non-regular files, writes
+atomically, and restricts the file to its owner. Your coding agent still never
+opens it.
 
 ## Options
 
@@ -657,11 +709,16 @@ egma monitoring enable [options]
                          Start watching this agent's production traffic. On
                          Retell the account key comes in on standard input,
                          never as an argument. On LiveKit Egma mints a project
-                         key and writes the two lines the Egma SDK reads into
-                         .env when Git ignores it, printing them either way.
+                         key and automatically writes the two lines the Egma SDK
+                         reads into .env when Git ignores it, printing them
+                         either way.
 egma monitoring disable  Turn the switch off. Everything stored stays stored.
 egma monitoring status   Print the switch, the binding, the key hint, and when
                          a production conversation last arrived.
+egma monitoring record --agent <id> [--monitoring-key-id <id>]
+                         Recover the repository record after remote monitoring
+                         succeeded. LiveKit also needs the non-secret worker-key
+                         id from the setup receipt.
 
   --coding-agent <id>  Use one installed coding agent without asking.
                        claude, codex, cursor, opencode
@@ -690,9 +747,12 @@ egma monitoring status   Print the switch, the binding, the key hint, and when
                        With the wizard: test cases you already have written
                        down, inside this folder. They are turned into test
                        files before Egma writes any of its own.
-  --agent <name>       With init: what to call the voice agent this
-                       folder's tests are for.
-  --connection <name>  With init: what to call the way Egma reaches it.
+  --agent <name-or-id> With run and ordinary monitoring actions: which
+                       configured voice agent to use. With monitoring record:
+                       the stable Egma agent id from the receipt.
+  --connection <name-or-id>
+                       With run: which configured connection under that agent
+                       to use when it has more than one.
   --name <name>        With suite create: the suite display name. With run:
                        an optional run name. With monitoring enable: what to
                        call the agent Egma writes.
@@ -704,6 +764,9 @@ egma monitoring status   Print the switch, the binding, the key hint, and when
   --platform-agent <id>
                        With monitoring enable on Retell: which agent on the
                        account to watch, when it holds more than one.
+  --monitoring-key-id <id>
+                       With monitoring record on LiveKit: the non-secret
+                       worker-key id from the failed setup receipt.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.
@@ -721,7 +784,6 @@ Environment:
   EGMA_PHONE_NUMBER    Which number to dial, same as --phone-number.
   EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
   EGMA_EXISTING_TESTS  Your existing test cases, same as --existing-tests.
-  VISUAL, EDITOR       What e opens a generated test in, at the gate.
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,
@@ -823,11 +885,11 @@ The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
 puts them on Egma when you say so, and starts a run over them.
 
-**Then it waits for the first result.** The simulator claims the work and holds
-the conversation; graders run after a completed trace. The wizard moves on only
-after that trace's whole grading work is terminal. The headless `egma run`
-command follows all simulations until execution is terminal and every completed
-trace has terminal grading.
+**Then it waits for the complete run.** The simulator claims the work and holds
+each conversation; graders run after a completed trace. The wizard keeps the
+run screen open until every simulation has ended and every completed trace has
+terminal grading. The headless `egma run` command follows the same completion
+boundary.
 
 The whole wizard flow is checked against a real instance the same way. On a checkout
 that has had `pnpm install`, and on a machine with a Chrome — or with

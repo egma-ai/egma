@@ -41,6 +41,7 @@
 
 import { isIP } from "node:net";
 
+import { connectionOptionMetadata } from "@egma/db";
 import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
 import type { FixtureAnswer, RouteGroup } from "./server.ts";
 
@@ -770,6 +771,8 @@ export type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
+  /** Null while active; set when a test needs the archived lifecycle state. */
+  archivedAt: string | null;
   // Written at registration, and by start-monitoring exactly as the real
   // access layer writes it: binding an agent Egma is told to watch.
   agentPlatform: BoundPlatform;
@@ -813,6 +816,7 @@ export function blankAgent(
     id: newId("agt"),
     projectId,
     name,
+    archivedAt: null,
     agentPlatform,
     platformAgentId: null,
     monitoringApiKey: null,
@@ -836,8 +840,8 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     monitoringApiKeyHint: agent.monitoringApiKeyHint,
     pullProductionCalls: agent.pullProductionCalls,
     lastReceivedAt: agent.lastReceivedAt,
-    archived: false,
-    archivedAt: null,
+    archived: agent.archivedAt !== null,
+    archivedAt: agent.archivedAt,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
@@ -1182,6 +1186,15 @@ export function agentRoutes(options: {
   const group: RouteGroup = {
     name: "agents",
     routes: [
+      {
+        // The same server-owned form catalog the real platform exposes.
+        method: "GET",
+        path: "/v1/connection-options",
+        handle: (request) =>
+          authorized(request.headers)
+            ? { status: 200, body: { items: connectionOptionMetadata() } }
+            : notAuthenticated,
+      },
       {
         /**
          * Register an agent, with the first way of reaching it written in

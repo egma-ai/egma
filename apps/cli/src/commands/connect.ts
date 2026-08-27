@@ -16,7 +16,7 @@
 import {
   bindRepositoryPlatform,
   folderPathsIn,
-  updateConfig,
+  recordRegisteredTarget,
 } from "../folder/egma-folder.ts";
 import { readCredentials, type PlatformAccess } from "../platform/credentials.ts";
 import { readProject } from "../platform/projects.ts";
@@ -336,7 +336,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
         registered.agent.projectId,
         options.fetchImpl,
       );
-      await updateConfig(paths.config, {
+      await recordRegisteredTarget(paths.config, {
         project,
         agent: { name: registered.agent.name, id: registered.agent.id },
         connection: {

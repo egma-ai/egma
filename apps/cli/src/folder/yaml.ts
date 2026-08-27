@@ -194,9 +194,10 @@ function opensAnItem(text: string): boolean {
  *     name: Impatient customer
  * ```
  *
- * Nothing nests inside an item. That is the whole shape the folder needs, and
- * reading no more than it is what keeps this module something a person can hold
- * in their head beside the files it reads.
+ * A mapping item may itself contain another mapping or sequence. The config
+ * file uses that one extra level for an agent's connections. Scalar items stay
+ * scalar, and every nested value is still read through the same small YAML
+ * grammar as the rest of the folder.
  */
 function blockSequenceAt(
   lines: readonly Line[],
@@ -214,19 +215,12 @@ function blockSequenceAt(
 
     const opening = line.text.slice(1).trim();
     // Everything indented past the dash belongs to this item, up to the next
-    // one. A line that opens an item at a deeper indent would be a sequence
-    // inside a sequence, which these files never hold.
+    // item in this sequence. `mappingAt` below decides whether those lines are
+    // a nested mapping or a nested sequence opened by one of its keys.
     const under: Line[] = [];
     while (at < lines.length) {
       const next = lines[at] as Line;
       if (next.indent <= indent) break;
-      if (opensAnItem(next.text)) {
-        throw new YamlProblem(
-          where,
-          next.number,
-          "Egma reads a list of plain name: value lines, and this line opens a list inside one",
-        );
-      }
       under.push(next);
       at += 1;
     }

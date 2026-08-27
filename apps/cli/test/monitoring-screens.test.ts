@@ -16,8 +16,9 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MONITORING_CUSTODY_LINE } from "../src/monitoring/retell-lane.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import { runInTerminal, showing, showingIn, type TerminalRun } from "./support/pty.ts";
 import { GOAL_ASK_LINE } from "../src/ui/wizard-ui.ts";
 import {
   CLI_ENTRY,
@@ -85,9 +86,19 @@ async function walkToTheGoal(): Promise<TerminalRun> {
   });
   terminal = run;
 
+  await showing(run, "Welcome to egma", "Press Enter to authenticate", "[q] quit");
+  run.write("\r");
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
   return run;
+}
+
+function asOneLine(screen: string): string {
+  return screen
+    .split("\n")
+    .map((line) => line.replaceAll("│", "").trim())
+    .join(" ")
+    .replaceAll(/\s+/gu, " ");
 }
 
 describe("watching production traffic, on a real terminal", () => {
@@ -99,15 +110,23 @@ describe("watching production traffic, on a real terminal", () => {
   it("asks the question, takes the key, offers the account, and leaves one line", async () => {
     const run = await walkToTheGoal();
 
-    await showing(run, GOAL_ASK_LINE, "[m] Watch its production traffic");
-    run.write("m");
+    const defaultGoal = await showing(run, GOAL_ASK_LINE, "› Simulation testing");
+    expect(defaultGoal).not.toContain("[m]");
+    run.write("\u001b[B");
+    await showing(run, "› Setup production monitoring");
+    run.write("\u001b[B");
+    await showing(run, "› Both");
+    run.write("\u001b[A");
+    await showing(run, "› Setup production monitoring");
+    run.write("\r");
 
     // The key box is drawn in this phase too, with the custody line under it —
     // said at the moment the developer decides whether to hand the key over.
-    await showing(
+    await showingIn(
       run,
+      asOneLine,
       "Paste your Retell API key",
-      "It is sent to Egma and stored encrypted on this agent.",
+      MONITORING_CUSTODY_LINE,
     );
     run.write(`${KEY}\r`);
 

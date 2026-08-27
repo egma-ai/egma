@@ -11,32 +11,52 @@
  * Nothing here flips a switch on the platform. Push is observed, never declared
  * (ADR-0015): the worker exports and the evidence is the whole record. What
  * this does write is the agent's identity in the roster, bound to LiveKit, so
- * the agent exists in Egma even though no switch says so — and nothing about
- * the key is kept on that row. The key lives in the customer's `.env` and in
- * Egma's own key records, which is where it is revoked from.
+ * the agent exists in Egma even though no switch says so. The worker key is an
+ * ordinary project key. Its stable name is the recovery receipt already held
+ * by Egma's key list; no monitoring-only database relationship is required.
  */
 
+import { randomBytes } from "node:crypto";
+
 import {
+  agentNamed,
   registerBoundAgent,
   type RegisteredAgent,
   type RegisterOptions,
 } from "../platform/agents.ts";
-import { mintProjectKey, type MintedKey } from "../platform/api-keys.ts";
+import {
+  listActiveProjectKeys,
+  mintProjectKey,
+  revokeProjectKey,
+  type MintedKey,
+} from "../platform/api-keys.ts";
 import { readAgentMonitoring } from "../platform/monitoring.ts";
 import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
 
-/** The platform binding a LiveKit worker's agent row carries. */
+/** The platform binding written on a LiveKit monitoring agent. */
 const LIVEKIT = "livekit";
 
-/** How many names are tried when a living agent already holds the first one. */
-const NAME_ATTEMPTS = 20;
+/** Cleanup must finish even when the developer stops the parent command. */
+const CLEANUP_TIMEOUT_MS = 5_000;
+
+/** A started mutation finishes independently of a later terminal interrupt. */
+const COMMIT_TIMEOUT_MS = 30_000;
 
 /**
  * What Egma calls the key it mints, so a person reading the key list a year
  * later can tell what revoking it would break.
  */
-export function monitoringKeyName(agentName: string): string {
-  return `${agentName} production monitoring`;
+/** Stable across display-name changes, and readable in the project key list. */
+export function monitoringKeyPrefix(agentId: string): string {
+  return `Egma monitoring ${agentId} — `;
+}
+
+export function monitoringKeyName(
+  agentName: string,
+  agentId: string,
+  attempt: string,
+): string {
+  return `${monitoringKeyPrefix(agentId)}${agentName} [${attempt}]`;
 }
 
 /** The closing sentence, which promises nothing Egma cannot see. */
@@ -58,13 +78,27 @@ export type LiveKitWired = {
    * put in front of the developer and nowhere else.
    */
   readonly lines: readonly string[];
+  /** The non-secret stable id used to prove this exact key during recovery. */
+  readonly keyId: string;
   /** Enough to tell the minted key from another, and not enough to be one. */
   readonly keyLooksLike: string;
 };
 
 export type LiveKitOutcome =
   | LiveKitWired
-  | { readonly kind: "interrupted" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | {
+      readonly kind: "already-configured";
+      readonly agent: RegisteredAgent;
+      /** Null when another member's key is deliberately not visible here. */
+      readonly keyId: string | null;
+      readonly reason: string;
+    }
+  | {
+      readonly kind: "interrupted";
+      /** A fresh remote agent that this stopped run saved for a safe retry. */
+      readonly retryTarget?: { readonly agentId: string };
+    }
   | { readonly kind: "failed"; readonly reason: string };
 
 export type LiveKitOptions = {
@@ -90,25 +124,96 @@ export type LiveKitOptions = {
 const NOT_SIGNED_IN =
   "Egma would not take this machine's key. Run egma login, then try again.";
 
+/** Revoke only the key created by this invocation. */
+async function rollbackUncommittedKey(
+  keyId: string,
+  platform: RegisterOptions,
+): Promise<boolean> {
+  return (
+    await revokeProjectKey(keyId, {
+      ...platform,
+      signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
+    })
+  ).kind === "revoked";
+}
+
+function cleanupResult(
+  keyRevoked: boolean,
+  keyId: string,
+): string {
+  if (keyRevoked) {
+    return "The unused key was revoked and no environment file was changed.";
+  }
+  return (
+    `Egma could not confirm that key ${keyId} was revoked, so it may still be active. ` +
+    "Revoke that key in Egma before retrying. No environment file was changed."
+  );
+}
+
+/** Finish a Ctrl-C after mint without leaving this invocation's key behind. */
+async function interruptedAfterMint(
+  options: LiveKitOptions,
+  agent: RegisteredAgent,
+  created: boolean,
+  keyId: string,
+): Promise<LiveKitOutcome> {
+  const keyRevoked = await rollbackUncommittedKey(keyId, options.platform);
+  return keyRevoked
+    ? interruptedAfterAgent(agent, created)
+    : {
+        kind: "failed",
+        reason:
+          "The monitoring command was stopped after Egma minted a key. " +
+          cleanupResult(keyRevoked, keyId),
+      };
+}
+
+/** Preserve a fresh remote agent's stable id if the setup is interrupted. */
+function interruptedAfterAgent(
+  agent: RegisteredAgent,
+  created: boolean,
+): Extract<LiveKitOutcome, { readonly kind: "interrupted" }> {
+  return created
+    ? { kind: "interrupted", retryTarget: { agentId: agent.id } }
+    : { kind: "interrupted" };
+}
+
 /**
  * The agent this repository's monitoring is about: the one it already has, or
  * a new platform-bound row.
  *
- * A name a living agent already holds is answered by trying the next one, the
- * same way connection setup does — the alternative is refusing a developer
- * whose repository is named after something ordinary.
+ * A taken name is refused. Inventing a suffixed name here would turn a retry
+ * after a partial local write into another agent, another key, and a rewritten
+ * environment for the same worker.
  */
 async function theAgent(
   options: LiveKitOptions,
 ): Promise<
-  | { readonly kind: "agent"; readonly agent: RegisteredAgent; readonly created: boolean }
-  | { readonly kind: "failed"; readonly reason: string }
+  | {
+      readonly kind: "agent";
+      readonly agent: RegisteredAgent;
+      readonly created: boolean;
+    }
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly uncertainMutation?: boolean;
+    }
+  | { readonly kind: "refused"; readonly reason: string }
 > {
   const held = options.agentId?.trim() ?? "";
   if (held !== "") {
     const read = await readAgentMonitoring(held, options.platform);
     switch (read.kind) {
       case "monitoring":
+        if (read.monitoring.archived) {
+          return {
+            kind: "refused",
+            reason:
+              `Agent ${read.monitoring.agentId} is archived and cannot be enabled for monitoring. ` +
+              "Restore it, then run enable again. No key was created and no environment file was changed.",
+          };
+        }
         return {
           kind: "agent",
           agent: {
@@ -133,33 +238,75 @@ async function theAgent(
     }
   }
 
+  if (options.signal.aborted) return { kind: "failed", reason: "stopped" };
   const wanted = options.agentName.trim() || "voice-agent";
-  for (let attempt = 1; attempt <= NAME_ATTEMPTS; attempt += 1) {
-    if (options.signal.aborted) return { kind: "failed", reason: "stopped" };
-    const name = attempt === 1 ? wanted : `${wanted}-${attempt}`;
-    const written = await registerBoundAgent(
-      { name, agentPlatform: LIVEKIT },
-      options.platform,
-    );
-    switch (written.kind) {
-      case "registered":
-        return { kind: "agent", agent: written.agent, created: written.result === "created" };
-      case "name-taken":
-        continue;
-      case "not-authenticated":
-        return { kind: "failed", reason: NOT_SIGNED_IN };
-      case "refused":
-      case "unreachable":
-        return { kind: "failed", reason: written.reason };
+  const written = await registerBoundAgent(
+    { name: wanted, agentPlatform: LIVEKIT },
+    {
+      ...options.platform,
+      signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+    },
+  );
+  switch (written.kind) {
+    case "registered":
+      return {
+        kind: "agent",
+        agent: written.agent,
+        created: written.result === "created",
+      };
+    case "name-taken": {
+      const existing = await agentNamed(wanted, {
+        ...options.platform,
+        signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+      });
+      if (existing.kind === "found") {
+        const read = await readAgentMonitoring(existing.agent.id, {
+          ...options.platform,
+          signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+        });
+        if (read.kind === "monitoring" && read.monitoring.archived) {
+          return {
+            kind: "refused",
+            reason:
+              `Agent ${read.monitoring.agentId} is archived and cannot be enabled for monitoring. ` +
+              "Restore it, then run enable again. No key was created and no environment file was changed.",
+          };
+        }
+        if (
+          read.kind === "monitoring" &&
+          read.monitoring.agentPlatform === LIVEKIT
+        ) {
+          return { kind: "agent", agent: existing.agent, created: false };
+        }
+      }
+      return {
+        kind: "failed",
+        reason:
+          `An Egma agent already uses the name ${JSON.stringify(wanted)}, but Egma could not prove that it is this LiveKit worker. ` +
+          "Egma did not create a second agent, mint a key, or change the environment. Select the existing agent in egma/config.yaml before retrying.",
+      };
     }
+    case "not-authenticated":
+      return { kind: "failed", reason: NOT_SIGNED_IN };
+    case "uncertain":
+      return {
+        kind: "failed",
+        uncertainMutation: true,
+        reason:
+          `${written.reason} Egma may have created an agent named ${JSON.stringify(wanted)} ` +
+          "before the response was lost. Check for that exact agent before retrying.",
+      };
+    case "refused":
+      return { kind: "failed", reason: written.reason };
+    case "unreachable":
+      return {
+        kind: "failed",
+        uncertainMutation: true,
+        reason:
+          `${written.reason} Egma may have created an agent named ${JSON.stringify(wanted)} ` +
+          "before the response was lost. Check for that exact agent before retrying.",
+      };
   }
-
-  return {
-    kind: "failed",
-    reason:
-      `every name from "${wanted}" onwards is already taken in this project. ` +
-      "Rename one of them, then run this again.",
-  };
 }
 
 /**
@@ -176,8 +323,9 @@ export async function wireLiveKitMonitoring(
   if (options.signal.aborted) return { kind: "interrupted" };
 
   const resolved = await theAgent(options);
+  if (resolved.kind === "refused") return resolved;
   if (resolved.kind === "failed") {
-    return options.signal.aborted
+    return options.signal.aborted && resolved.uncertainMutation !== true
       ? { kind: "interrupted" }
       : { kind: "failed", reason: resolved.reason };
   }
@@ -186,30 +334,207 @@ export async function wireLiveKitMonitoring(
     options.say(`${agent.name} is on Egma, bound to LiveKit Agents.`, "action");
   }
 
+  if (options.signal.aborted) return interruptedAfterAgent(agent, created);
+
+  const namePrefix = monitoringKeyPrefix(agent.id);
+  const before = await listActiveProjectKeys(
+    { projectId: agent.projectId, namePrefix },
+    {
+      ...options.platform,
+      signal: AbortSignal.any([
+        options.signal,
+        AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+      ]),
+    },
+  );
+  if (options.signal.aborted) return interruptedAfterAgent(agent, created);
+  if (before.kind !== "listed") {
+    return {
+      kind: "failed",
+      reason:
+        before.kind === "not-authenticated"
+          ? NOT_SIGNED_IN
+          : `${before.reason} No key was created and no environment file was changed.`,
+    };
+  }
+  if (before.keys.length > 0) {
+    if (before.keys.length > 1) {
+      return {
+        kind: "failed",
+        reason:
+          `Egma found ${String(before.keys.length)} active project keys for ${agent.name}. ` +
+          "It cannot safely choose one. Revoke the duplicate worker keys in Egma, then run enable again. " +
+          "No key was created and no file was changed.",
+      };
+    }
+    const current = before.keys[0]!;
+    return {
+      kind: "already-configured",
+      agent,
+      keyId: current.id,
+      reason:
+        `LiveKit monitoring already has an active project key for ${agent.name} ` +
+        `(${current.looksLike || current.id}). No key was rotated and no environment file was changed. ` +
+        "Revoke that key in Egma before running enable to replace it.",
+    };
+  }
+
   /*
    * A fresh project key, never this machine's own.
    *
    * The terminal's credential is this machine's identity. A worker in a
    * deployment holding it would be this laptop everywhere, and revoking it
-   * later would sign the laptop out — so what the worker gets is minted for
-   * this project, named for the job, and revocable on its own.
+   * later would sign the laptop out. The worker gets a normal project key with
+   * a stable agent-id name, so the existing key list can make retries safe.
    */
-  const minted = await mintProjectKey(
-    { name: monitoringKeyName(agent.name), projectId: agent.projectId },
-    options.platform,
+  const keyName = monitoringKeyName(
+    agent.name,
+    agent.id,
+    randomBytes(8).toString("hex"),
   );
-  if (options.signal.aborted) return { kind: "interrupted" };
+  const minted = await mintProjectKey(
+    {
+      name: keyName,
+      projectId: agent.projectId,
+      monitoringAgentId: agent.id,
+    },
+    {
+      ...options.platform,
+      signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+    },
+  );
 
   let key: MintedKey;
   switch (minted.kind) {
     case "minted":
       key = minted.key;
       break;
+    case "minted-without-secret": {
+      const keyRevoked = await rollbackUncommittedKey(
+        minted.keyId,
+        options.platform,
+      );
+      return {
+        kind: "failed",
+        reason: `${minted.reason} ${cleanupResult(keyRevoked, minted.keyId)}`,
+      };
+    }
+    case "uncertain":
+    case "unreachable": {
+      const found = await listActiveProjectKeys(
+        { projectId: agent.projectId, namePrefix },
+        {
+          ...options.platform,
+          signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
+        },
+      );
+      if (found.kind !== "listed") {
+        const detail =
+          found.kind === "not-authenticated" ? NOT_SIGNED_IN : found.reason;
+        return {
+          kind: "failed",
+          reason:
+            `${minted.reason} Egma could not reconcile the request by its exact key name: ${detail} ` +
+            `Check for an active key named ${JSON.stringify(keyName)} before retrying. ` +
+            "No environment file was changed.",
+        };
+      }
+      const exact = found.keys.filter((candidate) => candidate.name === keyName);
+      if (exact.length === 0) {
+        return {
+          kind: "failed",
+          reason:
+            `${minted.reason} Egma found no active key from this attempt. ` +
+            "No environment file was changed.",
+        };
+      }
+      if (exact.length > 1) {
+        return {
+          kind: "failed",
+          reason:
+            `${minted.reason} Egma found ${String(exact.length)} active keys named ` +
+            `${JSON.stringify(keyName)} and cannot tell which concurrent request created each one. ` +
+            "Check those keys before retrying. No environment file was changed.",
+        };
+      }
+      const uncertainKey = exact[0]!;
+      const keyRevoked = await rollbackUncommittedKey(
+        uncertainKey.id,
+        options.platform,
+      );
+      return {
+        kind: "failed",
+        reason:
+          `${minted.reason} Reconciled ${JSON.stringify(keyName)} for agent ${agent.id}. ` +
+          cleanupResult(keyRevoked, uncertainKey.id),
+      };
+    }
     case "not-authenticated":
-      return { kind: "failed", reason: NOT_SIGNED_IN };
+      return {
+        kind: "failed",
+        reason: `${NOT_SIGNED_IN} No environment file was changed.`,
+      };
+    case "active-name-conflict":
+      return {
+        kind: "already-configured",
+        agent,
+        keyId: null,
+        reason:
+          `LiveKit monitoring already has an active project key for ${agent.name}. ` +
+          "It may belong to another project member, so Egma does not show its details here. " +
+          "No key was minted and no environment file was changed. Revoke that worker key in Egma before running enable to replace it.",
+      };
     case "refused":
-    case "unreachable":
-      return { kind: "failed", reason: minted.reason };
+      return {
+        kind: "failed",
+        reason: `${minted.reason} No environment file was changed.`,
+      };
+  }
+
+  if (options.signal.aborted) {
+    return interruptedAfterMint(options, agent, created, key.id);
+  }
+
+  /*
+   * The list is also the concurrency check. If another enable passed the empty
+   * preflight at the same time, this invocation revokes only its own returned
+   * key and asks the developer to retry after the competing setup settles.
+   */
+  const after = await listActiveProjectKeys(
+    { projectId: agent.projectId, namePrefix },
+    {
+      ...options.platform,
+      signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+    },
+  );
+  if (after.kind !== "listed") {
+    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
+    const detail =
+      after.kind === "not-authenticated" ? NOT_SIGNED_IN : after.reason;
+    return {
+      kind: "failed",
+      reason:
+        `Egma could not verify the new key in the project key list: ${detail} ` +
+        cleanupResult(keyRevoked, key.id),
+    };
+  }
+  const ownIsActive = after.keys.some((candidate) => candidate.id === key.id);
+  const competing = after.keys.filter((candidate) => candidate.id !== key.id);
+  if (!ownIsActive || competing.length > 0) {
+    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
+    const why = ownIsActive
+      ? "Another LiveKit monitoring setup ran for this agent at the same time."
+      : `Egma did not find key ${key.id} in the active project key list.`;
+    return {
+      kind: "failed",
+      reason:
+        `${why} ${cleanupResult(keyRevoked, key.id)} ` +
+        "Check the agent's project keys, then run enable again.",
+    };
+  }
+
+  if (options.signal.aborted) {
+    return interruptedAfterMint(options, agent, created, key.id);
   }
 
   const values = { url: options.platform.url, key: key.secret };
@@ -229,6 +554,7 @@ export async function wireLiveKitMonitoring(
     created,
     env,
     lines: exportLines(values),
+    keyId: key.id,
     keyLooksLike: key.looksLike,
   };
 }

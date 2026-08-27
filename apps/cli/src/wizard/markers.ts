@@ -4,8 +4,9 @@
  * A coding agent writes prose, and prose is not a report. So every step that
  * egma dispatches asks for its answers on marker lines: one fact per line, at
  * the start of the line, beginning `egma:`. Those become status lines and the
- * step's result. Everything else the agent says is kept in the log and never
- * put on screen, because a wall of text is not visibility.
+ * step's result. Everything else the agent says remains ordinary prose for the
+ * live coding-agent activity and the task log. Marker lines are withheld from
+ * that prose view because the step already renders their structured meaning.
  *
  * Four markers, and they mean the same thing in every step:
  *
@@ -161,6 +162,33 @@ export function markerIn(line: string): Marker | null {
 const WELDED_MARKER = /(?<=[\w.,])(?=(?:\*\*|__|`)?egma:)/gi;
 
 /**
+ * Two inline-code marker lines whose ACP boundary lost its line ending.
+ *
+ * Claude commonly wraps each required marker in one backtick pair. When ACP
+ * joins two chunks without the newline between them, the closing backtick of
+ * the first marker touches the opening backtick of the next:
+ *
+ *   `egma:writing one``egma:wrote one`
+ *
+ * Split that exact shape only when the logical line itself starts as an
+ * inline-code marker. A sentence that merely quotes the same words stays
+ * prose, so this cannot turn an explanation into a reported fact.
+ */
+function splitAdjacentInlineMarkers(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const start = line.trim().replace(DECORATION, "").trimStart();
+      if (!start.toLowerCase().startsWith("`egma:")) return line;
+      return line.replace(
+        /`(?=`egma:(?:note|found|none|abort|plan|writing|wrote)\b)/giu,
+        "`\n",
+      );
+    })
+    .join("\n");
+}
+
+/**
  * The agent's words as they arrive, split into markers and everything else.
  *
  * Text arrives in pieces that do not respect line endings, so a line is only
@@ -172,7 +200,10 @@ export class MarkerStream {
 
   /** Everything that has become whole since the last call. */
   push(chunk: string): ParsedLine[] {
-    this.pending = (this.pending + chunk).replace(WELDED_MARKER, "\n");
+    this.pending = splitAdjacentInlineMarkers(this.pending + chunk).replace(
+      WELDED_MARKER,
+      "\n",
+    );
     const parts = this.pending.split("\n");
     this.pending = parts.pop() ?? "";
     return parts.map(read);

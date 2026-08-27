@@ -21,8 +21,11 @@
 import { instructionsWith, publicSkill } from "../skills/index.ts";
 import { FACTS, LABEL_WIDTH } from "./facts.ts";
 
-/** The number of tests a first suite is generated with. */
-export const DEFAULT_TEST_COUNT = 12;
+/** The exact number of tests the first suite must contain. */
+export const DEFAULT_TEST_COUNT = 4;
+
+/** The most independent judgments one generated first-suite test may ask for. */
+export const MAX_GENERATED_EXPECTED_BEHAVIORS = 4;
 
 /** What the walk knows about the agent by the time tests are written. */
 export type GenerationContext = {
@@ -194,6 +197,20 @@ function reportingBlock(): readonly string[] {
   ];
 }
 
+/** Keep one generated test about one situation rather than the whole agent. */
+function expectedBehaviorBlock(): readonly string[] {
+  return [
+    "## Keep each test focused",
+    "",
+    "Write three expected behaviors per generated test. Add a fourth only for",
+    "a distinct critical safety or completion requirement. Never write more",
+    `than ${String(MAX_GENERATED_EXPECTED_BEHAVIORS)} expected behaviors in one test. Each expected behavior becomes one`,
+    "independent grader assertion, so include only requirements that distinguish",
+    "this scenario. Put a general requirement in its own focused test instead",
+    "of repeating it across every test in the suite.",
+  ];
+}
+
 /** What egma asks the coding agent to write, from what the walk found. */
 export function generateTask(context: GenerationContext, howMany: number): string {
   return [
@@ -224,6 +241,8 @@ export function generateTask(context: GenerationContext, howMany: number): strin
     ...personaBlock(context.personas),
     ...takenBlock(context.taken),
     "",
+    ...expectedBehaviorBlock(),
+    "",
     ...reportingBlock(),
     "",
     "## When you are done",
@@ -249,25 +268,32 @@ export type ConvertContext = {
   readonly taken: readonly string[];
   /** The personas egma has, which are the only ones a file may name. */
   readonly personas: readonly string[];
+  /** The most files this first setup may take from the material. */
+  readonly limit: number;
 };
 
 export function convertTask(options: ConvertContext): string {
   return [
     "# Your task",
     "",
-    `The developer already has test cases written down, in ${options.shown}. Turn`,
-    `each one into a test file in egma/tests/${options.suiteDirectory}/, in the format the notes above`,
-    "describe.",
+    `The developer already has test cases written down, in ${options.shown}. Turn at`,
+    `most ${String(options.limit)} of them into test files in egma/tests/${options.suiteDirectory}/, in the`,
+    "format the notes above describe.",
     "",
     ...boundaryBlock(options.cwd, options.suiteDirectory),
     "",
     "**Convert, do not invent.** Every test you write must come from something",
     "in the material below. Do not add situations it does not mention, and do",
-    "not drop one because it is thin — a thin one still needs at least one",
-    "expected behavior, read out of what it actually says.",
+    `not invent another. If the material has more than ${String(options.limit)}, choose the ${String(options.limit)} most`,
+    "representative distinct cases for this first suite. A thin chosen case still",
+    "needs at least one expected behavior, read out of what it actually says.",
     "",
     ...personaBlock(options.personas),
     ...takenBlock(options.taken),
+    "",
+    ...expectedBehaviorBlock(),
+    "When the source material states fewer than three distinct requirements,",
+    "keep only those requirements. Do not invent another to reach a count.",
     "",
     "## The material",
     "",
@@ -280,7 +306,7 @@ export function convertTask(options: ConvertContext): string {
     "",
     "## When you are done",
     "",
-    "Stop once every case in the material is a file and every file has an",
+    `Stop once at most ${String(options.limit)} cases from the material are files and every file has an`,
     "`egma:wrote` line. Report nothing else.",
   ].join("\n");
 }
@@ -306,7 +332,7 @@ export type GenerationProgress = {
   /** What the developer is watching happen. */
   readonly what: GenerationKind;
   readonly tests: readonly WritingTest[];
-  /** The denominator of "2 of 12" — never fewer than the tests already named. */
+  /** The denominator of "2 of 4" — never fewer than the tests already named. */
   readonly total: number;
 };
 

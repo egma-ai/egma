@@ -14,11 +14,22 @@ thing the copy exists to survive.
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 import json
 
 import pytest
 from conftest import ReceptionAgent, called, couriers_on, in_a_simulation
-from livekit.agents import RunContext, ToolError, function_tool
+from livekit.agents import (
+    AgentTask,
+    CloseEvent,
+    CloseReason,
+    ConversationItemAddedEvent,
+    RunContext,
+    ToolError,
+    function_tool,
+)
+from livekit.agents.llm import AgentHandoff
 from livekit.rtc import RpcError
 from room_stub import EGMA_IDENTITY, StubRoom, not_reached
 
@@ -36,6 +47,27 @@ def failure(message: str) -> dict:
 
 
 # -- The census ---------------------------------------------------------------
+
+
+async def test_a_simulation_connects_before_it_reports_tools(session):
+    agent = ReceptionAgent()
+    room = StubRoom(connected=False)
+    ctx = in_a_simulation(room)
+
+    await mockable(agent, ctx, session)
+
+    assert ctx.connect_calls == 1
+    assert room.methods_asked == [seam.HELLO_METHOD]
+
+
+async def test_an_already_connected_simulation_does_not_connect_again(session):
+    agent = ReceptionAgent()
+    room = StubRoom()
+    ctx = in_a_simulation(room)
+
+    await mockable(agent, ctx, session)
+
+    assert ctx.connect_calls == 0
 
 
 async def test_the_census_goes_first_and_names_every_tool(session):
@@ -348,6 +380,63 @@ async def test_a_raw_schema_call_is_reported_as_the_model_sent_it(session):
 # -- Tools that arrive late ---------------------------------------------------
 
 
+class SpecialRequestsTask(AgentTask[None]):
+    """A real LiveKit task with a tool that is absent from the root agent."""
+
+    def __init__(self) -> None:
+        super().__init__(instructions="Record the caller's notes.")
+
+    @function_tool
+    async def record_special_requests(self, notes: list[str]) -> str:
+        """Store the caller's special requests."""
+        return f"really stored: {notes!r}"
+
+
+class MarkedSpecialRequestsTask(AgentTask[None]):
+    """The result says which same-class instance really handled a fallback."""
+
+    def __init__(self, marker: str) -> None:
+        super().__init__(instructions="Record the caller's notes.")
+        self.marker = marker
+
+    @function_tool
+    async def record_special_requests(self, notes: list[str]) -> str:
+        """Store the caller's special requests."""
+        return f"{self.marker}: {notes!r}"
+
+
+class HandoffProbeTask(AgentTask[None]):
+    """Observe whether couriers exist at LiveKit's real task entry boundary."""
+
+    def __init__(self, observed: asyncio.Future[bool]) -> None:
+        self.observed = observed
+        super().__init__(instructions="Observe startup ordering.")
+
+    @function_tool
+    async def record_special_requests(self, notes: list[str]) -> str:
+        """Store the caller's special requests."""
+        return f"really stored: {notes!r}"
+
+    async def on_enter(self) -> None:
+        if not self.observed.done():
+            self.observed.set_result(
+                "record_special_requests" in couriers_on(self.session, self)
+            )
+        self.complete(None)
+
+
+class InsuranceTask(AgentTask[None]):
+    """A second task class, used to prove that census discovery only grows."""
+
+    def __init__(self) -> None:
+        super().__init__(instructions="Verify insurance.")
+
+    @function_tool
+    async def verify_insurance(self, member_id: str) -> str:
+        """Verify the caller's insurance."""
+        return f"really verified {member_id}"
+
+
 async def test_a_tool_attached_after_this_runs_is_intercepted_on_its_first_call(
     session,
 ):
@@ -399,6 +488,262 @@ async def test_a_late_attached_call_reports_no_arguments_rather_than_wrong_ones(
     await called(couriers_on(session, agent)["book_appointment"], day="Tuesday")
 
     assert room.tool_calls == [{"name": "book_appointment"}]
+
+
+async def test_a_tool_on_an_agent_task_handoff_is_intercepted_before_its_first_call(
+    session,
+):
+    """LiveKit dispatches tools by the current agent's exact class.
+
+    An ``AgentTask`` is a temporary agent with a different class from the root
+    agent. The public handoff event fires after LiveKit selects that task and
+    before it starts the task activity, so the task's first tool call must see
+    the same session-scoped courier as a tool on the root agent.
+    """
+
+    agent = ReceptionAgent()
+    task = SpecialRequestsTask()
+    room = StubRoom(
+        mocked_tools=("record_special_requests",),
+        answers={
+            "record_special_requests": answer(
+                "the simulated scheduling system kept the notes"
+            )
+        },
+    )
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    # ``update_agent`` is LiveKit's public way to select the next agent. A
+    # running session emits this public event at the handoff boundary; the
+    # unit test emits the same value without starting audio or a model.
+    session.update_agent(task)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=task.id)
+        ),
+    )
+
+    served = await called(
+        couriers_on(session, task)["record_special_requests"],
+        notes=["wheelchair access", "interpreter"],
+    )
+
+    assert served == "the simulated scheduling system kept the notes"
+    assert room.tool_calls[-1] == {
+        "name": "record_special_requests",
+        "arguments": {"notes": ["wheelchair access", "interpreter"]},
+    }
+
+
+async def test_livekit_public_handoff_installs_before_the_task_enters(session):
+    """Lock down the public event ordering the handoff hook relies on."""
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("record_special_requests",))
+    observed = asyncio.get_running_loop().create_future()
+
+    await mockable(agent, in_a_simulation(room), session)
+    try:
+        await session.start(agent=agent)
+        session.update_agent(HandoffProbeTask(observed))
+        assert await asyncio.wait_for(observed, timeout=1)
+    finally:
+        await session.aclose()
+
+
+async def test_an_agent_task_handoff_reports_the_task_tools_in_a_new_census(session):
+    """The hosted run's coverage must name tools owned by an ``AgentTask``."""
+    agent = ReceptionAgent()
+    task = SpecialRequestsTask()
+    room = StubRoom(mocked_tools=("record_special_requests",))
+
+    await mockable(agent, in_a_simulation(room), session)
+    session.update_agent(task)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=task.id)
+        ),
+    )
+    await asyncio.sleep(0)
+
+    assert room.methods_asked == [seam.HELLO_METHOD, seam.HELLO_METHOD]
+    task_census = room.asked[-1].body
+    assert {tool["name"] for tool in task_census["tools"]} == {
+        "check_calendar",
+        "read_notice",
+        "record_special_requests",
+    }
+
+
+async def test_census_only_grows_across_tasks_and_a_return_to_the_root(session):
+    """A later handoff must never erase tools discovered on an earlier one."""
+    root = ReceptionAgent()
+    requests = SpecialRequestsTask()
+    insurance = InsuranceTask()
+    room = StubRoom(
+        mocked_tools=("record_special_requests", "verify_insurance")
+    )
+
+    await mockable(root, in_a_simulation(room), session)
+    for old, new in (
+        (root, requests),
+        (requests, root),
+        (root, insurance),
+    ):
+        session.update_agent(new)
+        session.emit(
+            "conversation_item_added",
+            ConversationItemAddedEvent(
+                item=AgentHandoff(old_agent_id=old.id, new_agent_id=new.id)
+            ),
+        )
+
+    for _ in range(5):
+        if room.methods_asked.count(seam.HELLO_METHOD) == 3:
+            break
+        await asyncio.sleep(0)
+
+    censuses = [
+        {tool["name"] for tool in asked.body["tools"]}
+        for asked in room.asked
+        if asked.method == seam.HELLO_METHOD
+    ]
+    assert censuses == [
+        {"check_calendar", "read_notice"},
+        {"check_calendar", "read_notice", "record_special_requests"},
+        {
+            "check_calendar",
+            "read_notice",
+            "record_special_requests",
+            "verify_insurance",
+        },
+    ]
+
+
+async def test_a_new_instance_of_the_same_task_class_gets_its_own_fallback(session):
+    """A courier must never retain the previous task instance's real tool."""
+    agent = ReceptionAgent()
+    first = MarkedSpecialRequestsTask("first")
+    second = MarkedSpecialRequestsTask("second")
+    room = StubRoom(mocked_tools=("record_special_requests",))
+
+    await mockable(agent, in_a_simulation(room), session)
+    session.update_agent(first)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=first.id)
+        ),
+    )
+    session.update_agent(second)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=first.id, new_agent_id=second.id)
+        ),
+    )
+    room.refuses_tool_with = not_reached()
+
+    served = await called(
+        couriers_on(session, second)["record_special_requests"],
+        notes=["second task only"],
+    )
+
+    assert served == "second: ['second task only']"
+
+
+async def test_a_failed_same_class_install_clears_the_previous_instance(
+    session, monkeypatch
+):
+    """A broken handoff may run real tools, but never a stale task's tool."""
+    agent = ReceptionAgent()
+    first = MarkedSpecialRequestsTask("first")
+    second = MarkedSpecialRequestsTask("second")
+    room = StubRoom(mocked_tools=("record_special_requests",))
+
+    await mockable(agent, in_a_simulation(room), session)
+    implementation = importlib.import_module("egma.mockable")
+    install = implementation._install_couriers
+
+    def fail_for_second(selected, mocked, seat, selected_session):
+        if selected is second:
+            raise TypeError("the second task could not be prepared")
+        return install(selected, mocked, seat, selected_session)
+
+    monkeypatch.setattr(implementation, "_install_couriers", fail_for_second)
+    session.update_agent(first)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=first.id)
+        ),
+    )
+    assert "record_special_requests" in couriers_on(session, first)
+
+    session.update_agent(second)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=first.id, new_agent_id=second.id)
+        ),
+    )
+
+    assert couriers_on(session, second) == {}
+
+
+async def test_a_later_census_cannot_change_the_startup_mock_set(session):
+    """The run's mocked world is fixed even while tool discovery grows."""
+    agent = ReceptionAgent()
+    task = SpecialRequestsTask()
+    room = StubRoom(mocked_tools=("record_special_requests",))
+
+    await mockable(agent, in_a_simulation(room), session)
+    room.mocked_tools = ("verify_insurance",)
+    session.update_agent(task)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=task.id)
+        ),
+    )
+    for _ in range(3):
+        if room.methods_asked.count(seam.HELLO_METHOD) == 2:
+            break
+        await asyncio.sleep(0)
+
+    assert set(couriers_on(session, task)) == {"record_special_requests"}
+
+
+async def test_session_close_removes_handoff_couriers_and_listener(session):
+    """A reused LiveKit session must not retain a previous run's mocks."""
+    agent = ReceptionAgent()
+    task = SpecialRequestsTask()
+    room = StubRoom(mocked_tools=("record_special_requests",))
+
+    await mockable(agent, in_a_simulation(room), session)
+    session.update_agent(task)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=task.id)
+        ),
+    )
+    session.emit("close", CloseEvent(reason=CloseReason.USER_INITIATED))
+
+    assert couriers_on(session, agent) == {}
+    assert couriers_on(session, task) == {}
+
+    another = SpecialRequestsTask()
+    session.update_agent(another)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=task.id, new_agent_id=another.id)
+        ),
+    )
+    assert couriers_on(session, another) == {}
 
 
 # -- When egma is not reached -------------------------------------------------

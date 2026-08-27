@@ -32,8 +32,7 @@ const SKILLS_CLI = require.resolve("skills/bin/cli.mjs");
 
 const PUBLIC_SKILLS = [
   "egma",
-  "find-voice-agent",
-  "integrate-egma-sdk",
+  "integrate-egma",
   "write-egma-tests",
 ] as const;
 const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
@@ -101,25 +100,49 @@ describe("the public skill source", () => {
     expect(test.mockTools.map((tool) => tool.tool)).toEqual(["check_availability"]);
   });
 
-  it("discloses only the provider evidence selected by the standalone finder", async () => {
-    const root = path.join(SOURCE_ROOT, "find-voice-agent");
+  it("keeps integration phases in short, selected references", async () => {
+    const root = path.join(SOURCE_ROOT, "integrate-egma");
     const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
-    const retell = await readFile(path.join(root, "references", "retell.md"), "utf8");
-    const livekit = await readFile(path.join(root, "references", "livekit.md"), "utf8");
+    const finding = await readFile(
+      path.join(root, "references", "find-voice-agent.md"),
+      "utf8",
+    );
+    const retell = await readFile(
+      path.join(root, "references", "connect-retell.md"),
+      "utf8",
+    );
+    const sdk = await readFile(
+      path.join(root, "references", "integrate-egma-sdk.md"),
+      "utf8",
+    );
+    const livekit = await readFile(
+      path.join(root, "references", "run-livekit-agent-locally.md"),
+      "utf8",
+    );
+    const helper = await readFile(
+      path.join(root, "scripts", "livekit-local.mjs"),
+      "utf8",
+    );
 
-    expect(skill).toContain("Load only the reference selected by evidence");
-    expect(skill).toContain("[references/retell.md](references/retell.md)");
-    expect(skill).toContain("[references/livekit.md](references/livekit.md)");
-    expect(skill).toContain("Pipecat or Vapi");
-    expect(skill).toContain("does not support Pipecat or Vapi yet");
-    expect(skill).toContain("## Report what you found");
-    expect(skill).toContain("every file whose name starts with `.env`");
+    expect(skill).toContain("Complete only the phase the task requests");
+    expect(skill).toContain("[references/find-voice-agent.md](references/find-voice-agent.md)");
+    expect(skill).toContain("[references/connect-retell.md](references/connect-retell.md)");
+    expect(skill).toContain(
+      "[references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md)",
+    );
+    expect(skill).toContain("every `.env` file");
+    expect([finding, retell, sdk, livekit].join("\n")).not.toContain("`.env");
     expect(skill).not.toMatch(CLI_MARKER);
+    expect(finding).toContain("Pipecat");
+    expect(finding).toContain("Vapi");
+    expect(finding).toContain("Dispatch name");
+    expect(finding).toContain("Entrypoint");
     expect(retell).toContain("retell-sdk");
-    expect(livekit).toContain("livekit-agents");
-    expect(livekit).toContain("AgentSession");
+    expect(livekit).toContain("LiveKit CLI 2.18.2 or newer");
+    expect(livekit).toContain("egma:livekit-worker ready");
+    expect(helper).toContain("const MINIMUM_VERSION = [2, 18, 2]");
+    expect(finding).not.toMatch(CLI_MARKER);
     expect(retell).not.toMatch(CLI_MARKER);
-    expect(livekit).not.toMatch(CLI_MARKER);
   });
 
   it("keeps the documented complete test in the shape the real parser reads", async () => {
@@ -178,7 +201,7 @@ describe("npx skills compatibility", () => {
     }
   });
 
-  it("installs every provider reference with the finder", async () => {
+  it("installs every integration reference and helper", async () => {
     const project = await mkdtemp(path.join(tmpdir(), "egma-public-skill-install-"));
     temporary.push(project);
 
@@ -189,7 +212,7 @@ describe("npx skills compatibility", () => {
         "add",
         CODE_ROOT,
         "--skill",
-        "find-voice-agent",
+        "integrate-egma",
         "--agent",
         "codex",
         "--copy",
@@ -208,8 +231,14 @@ describe("npx skills compatibility", () => {
       },
     );
 
-    for (const provider of ["retell", "livekit"] as const) {
-      const relative = path.join("find-voice-agent", "references", `${provider}.md`);
+    for (const file of [
+      path.join("references", "find-voice-agent.md"),
+      path.join("references", "connect-retell.md"),
+      path.join("references", "integrate-egma-sdk.md"),
+      path.join("references", "run-livekit-agent-locally.md"),
+      path.join("scripts", "livekit-local.mjs"),
+    ]) {
+      const relative = path.join("integrate-egma", file);
       expect(
         await readFile(path.join(project, ".agents", "skills", relative)),
       ).toEqual(await readFile(path.join(SOURCE_ROOT, relative)));

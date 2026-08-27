@@ -24,6 +24,24 @@ export class ProjectOutsideOrganizationError extends Error {
     this.projectId = projectId;
   }
 }
+
+/**
+ * A guarded key creation found an active key whose name already starts with
+ * the caller's reserved prefix.
+ *
+ * The conflicting row stays private. This refusal carries no key id, creator,
+ * or full name because the person creating the replacement might not be
+ * allowed to list that key.
+ */
+export class ActiveApiKeyNameConflictError extends Error {
+  constructor() {
+    super(
+      "an active API key already reserves this name prefix in this project; revoke it before creating a replacement",
+    );
+    this.name = "ActiveApiKeyNameConflictError";
+  }
+}
+
 /**
  * The agent factory turned a write away, and which rule turned it away is
  * carried beside the sentence rather than hidden inside it.

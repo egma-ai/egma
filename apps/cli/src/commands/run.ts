@@ -6,6 +6,7 @@ import {
   readConfig,
   type FolderConfig,
 } from "../folder/egma-folder.ts";
+import { selectTarget, type RefusedTarget } from "../folder/target-selection.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { hydrateRun, startRun } from "../platform/runs.ts";
@@ -36,18 +37,25 @@ export const RUN_EXIT = {
 
 export type RunCommandOptions = FolderCommandOptions & {
   readonly suiteDirectory: string;
+  /** Exact committed agent name or stable id. Omit only when one can run. */
+  readonly agent?: string;
+  /** Exact committed connection name or stable id under the selected agent. */
+  readonly connection?: string;
   readonly name?: string;
   readonly noFollow?: boolean;
   readonly signal?: AbortSignal;
   readonly everyMs?: number;
 };
 
-function targetIn(config: FolderConfig): { readonly agentId: string; readonly connectionId: string } | string {
-  const agentId = config.agent?.id ?? "";
-  const connectionId = config.connection?.id ?? "";
-  return agentId === "" || connectionId === ""
-    ? "This folder does not say which voice agent to run against, or how Egma reaches it. Run egma connect here first."
-    : { agentId, connectionId };
+function reportTargetRefusal(options: RunCommandOptions, refusal: RefusedTarget): void {
+  for (const agent of refusal.agents) {
+    options.out(`agent-option: ${agent.id} ${agent.name}`);
+  }
+  for (const connection of refusal.connections) {
+    options.out(`connection-option: ${connection.id} ${connection.name}`);
+  }
+  options.out(`status: ${refusal.status}`);
+  options.fail(refusal.message);
 }
 
 function reportSelection(options: RunCommandOptions, selection: Selection): void {
@@ -76,14 +84,16 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
     options.fail(notSignedInRefusal(options.access.url));
     return RUN_EXIT.notSignedIn;
   }
-  const target = targetIn(config);
-  if (typeof target === "string") {
-    options.out("status: not-connected");
-    options.fail(target);
+  const target = selectTarget(config, {
+    ...(options.agent === undefined ? {} : { agent: options.agent }),
+    ...(options.connection === undefined ? {} : { connection: options.connection }),
+  });
+  if (target.kind === "refused") {
+    reportTargetRefusal(options, target);
     return RUN_EXIT.nothing;
   }
-  options.out(`agent: ${target.agentId}`);
-  options.out(`connection: ${target.connectionId}`);
+  options.out(`agent: ${target.agent.id}`);
+  options.out(`connection: ${target.connection.id}`);
 
   let selection: Selection;
   try {
@@ -111,8 +121,8 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
       signedIn,
       {
         suiteId: selection.suiteId,
-        agentId: target.agentId,
-        connectionId: target.connectionId,
+        agentId: target.agent.id,
+        connectionId: target.connection.id,
         expectedTestVersions: selection.pinned.map((one) => ({
           testId: one.testId,
           versionId: one.versionId,

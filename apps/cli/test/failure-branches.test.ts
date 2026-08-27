@@ -69,7 +69,7 @@ const WRITES_ONE_TEST = {
     { kind: "say", text: "egma:writing open-on-sunday\n" },
     {
       kind: "write-file",
-      path: "egma/tests/generated/open-on-sunday.md",
+      path: "egma/tests/order-line-tests/open-on-sunday.md",
       content: [
         "---",
         "format: 4",

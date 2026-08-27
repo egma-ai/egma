@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import pytest
 from conftest import ReceptionAgent, couriers_on
+from livekit.agents import AgentTask, ConversationItemAddedEvent, function_tool
+from livekit.agents.llm import AgentHandoff
 from room_stub import StubContext, StubRoom, egma_metadata
 
 from egma import mockable
@@ -33,13 +35,26 @@ NO_EGMA = [
 ]
 
 
+class ProductionTask(AgentTask[None]):
+    """A task a normal production session may select after startup."""
+
+    def __init__(self) -> None:
+        super().__init__(instructions="Book the appointment.")
+
+    @function_tool
+    async def book_appointment(self, day: str) -> str:
+        """Book a real appointment."""
+        return f"really booked {day}"
+
+
 @pytest.mark.parametrize("metadata", NO_EGMA)
 async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     agent = ReceptionAgent()
     before = agent.tools
-    room = StubRoom()
+    room = StubRoom(connected=False)
+    ctx = StubContext(room, metadata)
 
-    await mockable(agent, StubContext(room, metadata), session)
+    await mockable(agent, ctx, session)
 
     # The very same objects. Not equal, not equivalent — the identical
     # callables the agent was built with, which is the only claim that
@@ -54,6 +69,27 @@ async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     # And nothing was said. This is the assertion that would catch an SDK
     # which discovered egma's absence by asking — a call that costs a
     # production room a round trip on every session start.
+    assert room.asked == []
+    assert ctx.connect_calls == 0
+
+
+async def test_a_production_handoff_stays_inert_after_mockable_returns(session):
+    """No metadata also means no listener waiting to wrap a later task."""
+    agent = ReceptionAgent()
+    task = ProductionTask()
+    room = StubRoom(connected=False)
+
+    await mockable(agent, StubContext(room, ""), session)
+    session.update_agent(task)
+    session.emit(
+        "conversation_item_added",
+        ConversationItemAddedEvent(
+            item=AgentHandoff(old_agent_id=agent.id, new_agent_id=task.id)
+        ),
+    )
+
+    assert couriers_on(session, task) == {}
+    assert await task.book_appointment("Tuesday") == "really booked Tuesday"
     assert room.asked == []
 
 

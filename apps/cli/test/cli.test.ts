@@ -107,6 +107,8 @@ describe("the egma command", () => {
     expect(help.stdout).not.toContain("--suite");
     expect(help.stdout).toContain("--no-follow");
     expect(help.stdout).toContain("What egma run answers with:");
+    expect(help.stdout).toContain("monitoring_key_id");
+    expect(help.stdout).toContain("9 remote monitoring is ready");
     expect(help.stdout).toContain("egma self-host up");
     expect(help.stdout).not.toContain("--replace-carrier");
     expect(help.stdout).not.toContain("Twilio Auth Token");
@@ -184,7 +186,7 @@ describe("the egma command", () => {
 
     const lines = result.stdout.trimEnd().split("\n");
     expect(lines).toContain("◆ Read package.json");
-    expect(lines).toContain("┊ Framework  retell-sdk");
+    expect(lines).toContain("┊ Framework   retell-sdk");
 
     // Finding the agent is not reaching it. The walk goes on to ask for the
     // key that would reach it, and a run with nobody watching and nothing in

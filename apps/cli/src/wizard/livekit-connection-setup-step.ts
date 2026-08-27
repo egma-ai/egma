@@ -31,7 +31,14 @@ import {
   type CredentialField,
 } from "../platform/connection-options.ts";
 import { readCredentials } from "../platform/credentials.ts";
-import type { ConnectionAsk, ConnectionAskId, WizardUI } from "../ui/wizard-ui.ts";
+import type { ConnectionCredentials } from "../platform/connection-credentials.ts";
+import { connectionFieldIssue } from "../ui/connection-field-validation.ts";
+import type {
+  ConnectionAsk,
+  ConnectionAskId,
+  ConnectionFieldsAsk,
+  WizardUI,
+} from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
@@ -42,8 +49,12 @@ export type LiveKitConnectionSetupStepOptions = {
   readonly platform: PlatformAccess;
   readonly cwd: string;
   readonly signal: AbortSignal;
-  /** A name reported by discovery. The developer still confirms it. */
+  /** The voice-agent name reported by repository discovery. */
   readonly suggestedName: string;
+  /** The exact worker name LiveKit dispatches, read from the agent source. */
+  readonly dispatchName: string;
+  /** The repository-relative worker entrypoint read from source. */
+  readonly entrypoint: string;
   /**
    * The agent this sitting is already about, when monitoring created it.
    *
@@ -67,14 +78,34 @@ export type LiveKitConnected = {
       readonly prompt: null;
       readonly toolCount: null;
     };
+    /** Present only when this connection can start the repository's local worker. */
+    readonly localWorker: {
+      readonly url: string;
+      readonly credentials: ConnectionCredentials;
+      readonly dispatchName: string;
+      readonly entrypoint: string;
+    } | null;
   } | null;
 };
 
 const SECRET_CUSTODY =
-  "This value goes straight to Egma, which stores it sealed. It is not sent to the coding agent or written to this repository.";
+  "This value is not sent to the coding agent or written to this repository. Egma stores it sealed; project credentials also reach the local LiveKit worker only through its process environment.";
+
+const LIVEKIT_FIELDS_HELP =
+  "For project credentials, get the WebSocket URL, API key, and API secret from LiveKit Cloud. Egma uses them to connect each simulation to a room.";
+
+const LIVEKIT_CREDENTIAL_NOTICE =
+  "Credentials are not sent to the coding agent or written to this repository. " +
+  "Egma stores them sealed; project credentials also reach the local worker only through its process environment.";
 
 function ending(reason: string): LiveKitConnected {
   return { report: { kind: "failed", reason }, connected: null };
+}
+
+/** Discovery uses the literal `unknown` when committed source proves no value. */
+function discoveredValue(value: string): string | null {
+  const held = value.trim();
+  return held === "" || held.toLowerCase() === "unknown" ? null : held;
 }
 
 async function ask(
@@ -112,51 +143,130 @@ function fieldAsk(
   };
 }
 
-function isJsonObject(text: string): boolean {
+type Collected =
+  | {
+      readonly kind: "values";
+      readonly config: Readonly<Record<string, string>>;
+      readonly credentials: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly kind: "stopped";
+      readonly field: string;
+      readonly reason: "missing" | "invalid-json";
+    }
+  | { readonly kind: "interrupted" };
+
+type ScopedField =
+  | { readonly scope: "config"; readonly field: ConnectionField }
+  | { readonly scope: "credentials"; readonly field: CredentialField };
+
+/** Server order around the credential boundary: config before, credentials, config after. */
+function orderedFields(option: ConnectionOption): readonly ScopedField[] {
+  return [
+    ...option.fields
+      .filter((field) => !field.afterCredentials)
+      .map((field): ScopedField => ({ scope: "config", field })),
+    ...option.credentialFields.map(
+      (field): ScopedField => ({ scope: "credentials", field }),
+    ),
+    ...option.fields
+      .filter((field) => field.afterCredentials)
+      .map((field): ScopedField => ({ scope: "config", field })),
+  ];
+}
+
+/** Fields the onboarding walk owns. Dispatch is discovered; metadata is not asked. */
+function wizardFields(option: ConnectionOption): readonly ScopedField[] {
+  return orderedFields(option).filter(({ field }) => {
+    const key = "key" in field ? field.key : field.field;
+    return key !== "agentName" && key !== "metadata";
+  });
+}
+
+function valuesFrom(
+  fields: readonly ScopedField[],
+  answers: Readonly<Partial<Record<ConnectionAskId, string>>>,
+): Collected {
+  const config: Record<string, string> = {};
+  const credentials: Record<string, string> = {};
+  for (const { scope, field } of fields) {
+    const key = "key" in field ? field.key : field.field;
+    const value = answers[askId(`${scope}:${key}`)]?.trim() ?? "";
+    const issue = connectionFieldIssue(field, value);
+    if (issue !== null) return { kind: "stopped", field: field.label, reason: issue };
+    if (value !== "") {
+      (scope === "config" ? config : credentials)[key] = value;
+    }
+  }
+  return { kind: "values", config, credentials };
+}
+
+async function collectRequiredFields(
+  ui: WizardUI,
+  signal: AbortSignal,
+  fields: readonly ScopedField[],
+  option: ConnectionOption,
+): Promise<Collected> {
+  const questions = fields.map(({ scope, field }) => fieldAsk(scope, field, option));
+  const form: ConnectionFieldsAsk = {
+    title: "LiveKit connection details",
+    help: LIVEKIT_FIELDS_HELP,
+    notice: LIVEKIT_CREDENTIAL_NOTICE,
+    fields: questions,
+  };
+  ui.setConnectionFieldsAsk(form);
   try {
-    const value = JSON.parse(text) as unknown;
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  } catch {
-    return false;
+    const answer = await untilAborted(ui.waitForConnectionFields(), signal);
+    if (signal.aborted) return { kind: "interrupted" };
+    if (answer === null || answer === undefined) {
+      return {
+        kind: "stopped",
+        field: questions[0]?.label ?? "LiveKit connection details",
+        reason: "missing",
+      };
+    }
+    return valuesFrom(fields, answer.values);
+  } finally {
+    ui.setConnectionFieldsAsk(null);
   }
 }
 
-type Collected =
-  | { readonly kind: "values"; readonly values: Readonly<Record<string, string>> }
-  | { readonly kind: "stopped"; readonly field: string }
-  | { readonly kind: "interrupted" };
-
-async function collectFields(
+async function collectOptionalFields(
   ui: WizardUI,
   signal: AbortSignal,
-  scope: "config" | "credentials",
-  fields: readonly (ConnectionField | CredentialField)[],
+  fields: readonly ScopedField[],
   option: ConnectionOption,
 ): Promise<Collected> {
-  const values: Record<string, string> = {};
+  const config: Record<string, string> = {};
+  const credentials: Record<string, string> = {};
 
-  for (const field of fields) {
+  for (const { scope, field } of fields) {
     const key = "key" in field ? field.key : field.field;
     let problem: string | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const value = await ask(ui, signal, fieldAsk(scope, field, option, problem));
       if (signal.aborted) return { kind: "interrupted" };
       if (value === null || value.trim() === "") {
-        if (field.required) return { kind: "stopped", field: field.label };
         break;
       }
-      if (field.kind === "json" && !isJsonObject(value)) {
+      if (connectionFieldIssue(field, value.trim()) === "invalid-json") {
         if (attempt === 0) {
           problem = `${field.label} must be one JSON object. Correct it and try again.`;
           continue;
         }
-        return { kind: "stopped", field: field.label };
+        return { kind: "stopped", field: field.label, reason: "invalid-json" };
       }
-      values[key] = value.trim();
+      (scope === "config" ? config : credentials)[key] = value.trim();
       break;
     }
   }
-  return { kind: "values", values };
+  return { kind: "values", config, credentials };
+}
+
+function stoppedReason(stopped: Extract<Collected, { readonly kind: "stopped" }>): string {
+  return stopped.reason === "invalid-json"
+    ? `${stopped.field} must be one JSON object. Correct it and run Egma again.`
+    : `No value was given for ${stopped.field}, so nothing was created.`;
 }
 
 function providerReason(
@@ -165,7 +275,7 @@ function providerReason(
 ): string {
   switch (result.kind) {
     case "name-taken":
-      return `An Egma agent already uses the name ${result.name}. Choose another name.`;
+      return `An Egma agent already uses the name ${result.name}. Rename this voice agent in its source, then run Egma again.`;
     case "not-authenticated":
       return "This machine is not signed in to Egma. Run egma login, then try again.";
     case "refused":
@@ -257,159 +367,141 @@ export async function liveKitConnectionSetupStep(
     return ending("This Egma instance did not describe a LiveKit connection setup.");
   }
 
-  let problem: string | null = null;
-  let suggestedName = options.suggestedName.trim() || "voice-agent";
-  let bound = false;
+  const discoveredName = options.suggestedName.trim() || "voice-agent";
+  const suggestedName = options.existingAgent?.name ?? discoveredName;
+  const dispatchName = discoveredValue(options.dispatchName);
+  if (dispatchName === null) {
+    return ending(
+      "Egma could not find the LiveKit dispatch name in this repository, so it did not create a connection. Set the worker's agent name in code and run Egma again.",
+    );
+  }
+  const entrypoint = discoveredValue(options.entrypoint);
+  if (entrypoint === null) {
+    return ending(
+      "Egma could not find the LiveKit worker entrypoint in this repository, so it did not create a connection. Make the worker startup path clear and run Egma again.",
+    );
+  }
   const existing = options.existingAgent ?? null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (existing === null) {
-      const name = await ask(options.ui, options.signal, {
-        id: askId("agent-name"),
-        label: "Agent name on Egma",
-        help: "The name people will see for this voice agent in Egma.",
-        kind: "text",
-        required: true,
-        defaultValue: suggestedName,
-        problem,
-      });
-      if (options.signal.aborted) {
-        return { report: stopReport(options.signal, null), connected: null };
-      }
-      if (name === null || name.trim() === "") return ending("No agent name was given.");
-      suggestedName = name.trim();
-    } else {
-      suggestedName = existing.name;
-    }
+  const selected = await ask(options.ui, options.signal, {
+    id: askId("variant"),
+    label: "How should Egma get LiveKit room tokens?",
+    help:
+      "Project credentials (API key and secret) are Recommended and let Egma " +
+      "run this repository's worker locally. An Advanced customer token endpoint " +
+      "keeps the signing secret with you and requires an already-running worker.",
+    kind: "choice",
+    required: true,
+    defaultValue: variants[0]!.accessVariant,
+    choices: variants.map((variant) => ({
+      value: variant.accessVariant,
+      label: variant.accessVariantLabel,
+    })),
+  });
+  if (options.signal.aborted) {
+    return { report: stopReport(options.signal, null), connected: null };
+  }
+  const variant = variants.find((entry) => entry.accessVariant === selected);
+  if (variant === undefined) return ending("No LiveKit connection method was chosen.");
 
-    const selected = await ask(options.ui, options.signal, {
-      id: askId("variant"),
-      label: "How should Egma get LiveKit room tokens?",
-      help:
-        "Project credentials (API key and secret) are Recommended and are the " +
-        "quickest setup. An Advanced customer token endpoint keeps the signing " +
-        "secret with you; Egma calls it for each simulation.",
-      kind: "choice",
-      required: true,
-      defaultValue: variants[0]!.accessVariant,
-      choices: variants.map((variant) => ({
-        value: variant.accessVariant,
-        label: variant.accessVariantLabel,
-      })),
-    });
-    if (options.signal.aborted) {
-      return { report: stopReport(options.signal, null), connected: null };
-    }
-    const variant = variants.find((entry) => entry.accessVariant === selected);
-    if (variant === undefined) return ending("No LiveKit connection method was chosen.");
-
-    const config = await collectFields(
-      options.ui,
-      options.signal,
-      "config",
-      variant.fields,
-      variant,
-    );
-    if (config.kind === "interrupted") {
-      return { report: stopReport(options.signal, null), connected: null };
-    }
-    if (config.kind === "stopped") {
-      return ending(`No value was given for ${config.field}, so nothing was created.`);
-    }
-    const credentials = await collectFields(
-      options.ui,
-      options.signal,
-      "credentials",
-      variant.credentialFields,
-      variant,
-    );
-    if (credentials.kind === "interrupted") {
-      return { report: stopReport(options.signal, null), connected: null };
-    }
-    if (credentials.kind === "stopped") {
-      return ending(`No value was given for ${credentials.field}, so nothing was created.`);
-    }
-
-    const common = { name: suggestedName, url: config.values["url"] ?? "" };
-    let input: LiveKitRegistration;
-    if (variant.accessVariant === LIVEKIT_KEY_PAIR_VARIANT) {
-      input = {
-        ...common,
-        variant: LIVEKIT_KEY_PAIR_VARIANT,
-        ...(config.values["agentName"] === undefined
-          ? {}
-          : { agentName: config.values["agentName"] }),
-        ...(config.values["metadata"] === undefined
-          ? {}
-          : { metadata: config.values["metadata"] }),
-        credentials: liveKitKeyPair(
-          credentials.values["apiKey"] ?? "",
-          credentials.values["apiSecret"] ?? "",
-        ),
-      };
-    } else {
-      input = {
-        ...common,
-        variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-        tokenEndpoint: config.values["tokenEndpoint"] ?? "",
-        credentials: liveKitTokenHeaders(credentials.values["headers"] ?? ""),
-      };
-    }
-
-    if (!bound) {
-      try {
-        await bindRepositoryPlatform(options.cwd, {
-          origin: options.platform.url,
-        });
-        bound = true;
-      } catch (cause) {
-        return ending(cause instanceof Error ? cause.message : String(cause));
-      }
-      options.ui.pushStatus(
-        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.url}.`,
-      );
-    }
-
-    /*
-     * An agent that already exists gains a connection; one that does not is
-     * written with its first connection in the same request. Registering under
-     * a name a living agent already holds would be refused, and answering that
-     * refusal by trying the next name would put a second row in the roster for
-     * one voice agent — which is the one thing threading the name exists to
-     * prevent.
-     */
-    const result =
-      existing === null
-        ? await connectLiveKit(input, registerOptions)
-        : await attachTo(existing, input, registerOptions);
-    if (result.kind === "registered") {
-      options.ui.pushStatus(`${ACTION_MARK} LiveKit agent ${result.registered.agent.name}`);
-      options.ui.pushStatus(
-        `${DETAIL_MARK} Reachable over ${result.registered.connection.name} (LiveKit voice).`,
-      );
-      return {
-        report: {
-          kind: "connected",
-          agentName: result.registered.agent.name,
-          connectionName: result.registered.connection.name,
-        },
-        connected: {
-          registered: result.registered,
-          source: { prompt: null, toolCount: null },
-        },
-      };
-    }
-
-    problem = providerReason(result, held.url);
-    if (
-      attempt === 0 &&
-      (result.kind === "name-taken" || result.kind === "refused")
-    ) {
-      options.ui.pushStatus(problem);
-      continue;
-    }
-    return ending(problem);
+  const ordered = wizardFields(variant);
+  const required = await collectRequiredFields(
+    options.ui,
+    options.signal,
+    ordered.filter(({ field }) => field.required),
+    variant,
+  );
+  if (required.kind === "interrupted") {
+    return { report: stopReport(options.signal, null), connected: null };
+  }
+  if (required.kind === "stopped") {
+    return ending(stoppedReason(required));
+  }
+  const optional = await collectOptionalFields(
+    options.ui,
+    options.signal,
+    ordered.filter(({ field }) => !field.required),
+    variant,
+  );
+  if (optional.kind === "interrupted") {
+    return { report: stopReport(options.signal, null), connected: null };
+  }
+  if (optional.kind === "stopped") {
+    return ending(stoppedReason(optional));
   }
 
-  return ending("Egma could not connect this LiveKit agent.");
+  const config = { ...required.config, ...optional.config };
+  const credentials = { ...required.credentials, ...optional.credentials };
+
+  const common = { name: suggestedName, url: config["url"] ?? "" };
+  let input: LiveKitRegistration;
+  let localWorker: NonNullable<LiveKitConnected["connected"]>["localWorker"];
+  if (variant.accessVariant === LIVEKIT_KEY_PAIR_VARIANT) {
+    const heldCredentials = liveKitKeyPair(
+      credentials["apiKey"] ?? "",
+      credentials["apiSecret"] ?? "",
+    );
+    input = {
+      ...common,
+      variant: LIVEKIT_KEY_PAIR_VARIANT,
+      agentName: dispatchName,
+      credentials: heldCredentials,
+    };
+    localWorker = {
+      url: common.url,
+      credentials: heldCredentials,
+      dispatchName,
+      entrypoint,
+    };
+  } else {
+    input = {
+      ...common,
+      variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+      tokenEndpoint: config["tokenEndpoint"] ?? "",
+      credentials: liveKitTokenHeaders(credentials["headers"] ?? ""),
+    };
+    localWorker = null;
+  }
+
+  try {
+    await bindRepositoryPlatform(options.cwd, {
+      origin: options.platform.url,
+    });
+  } catch (cause) {
+    return ending(cause instanceof Error ? cause.message : String(cause));
+  }
+  options.ui.pushStatus(
+    `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.url}.`,
+  );
+
+  /*
+   * An agent that already exists gains a connection; one that does not is
+   * written with its first connection in the same request. Discovery owns both
+   * names, so a refusal is shown as-is and never turns into another name prompt.
+   */
+  const result =
+    existing === null
+      ? await connectLiveKit(input, registerOptions)
+      : await attachTo(existing, input, registerOptions);
+  if (result.kind === "registered") {
+    options.ui.pushStatus(`${ACTION_MARK} LiveKit agent ${result.registered.agent.name}`);
+    options.ui.pushStatus(`${DETAIL_MARK} Dispatch name ${dispatchName}.`);
+    options.ui.pushStatus(
+      `${DETAIL_MARK} Reachable over ${result.registered.connection.name} (LiveKit voice).`,
+    );
+    return {
+      report: {
+        kind: "connected",
+        agentName: result.registered.agent.name,
+        connectionName: result.registered.connection.name,
+      },
+      connected: {
+        registered: result.registered,
+        source: { prompt: null, toolCount: null },
+        localWorker,
+      },
+    };
+  }
+
+  return ending(providerReason(result, held.url));
 }

@@ -6,13 +6,13 @@
  */
 
 import { useSyncExternalStore } from "react";
-import { useApp, useInput, useStdout } from "ink";
+import { useInput, useStdout } from "ink";
 
 import { copyLink } from "../../platform/clipboard.ts";
-import { openInEditor } from "./editor.ts";
-import { EnvConsentScreen } from "./screens/EnvConsentScreen.tsx";
+import { openInBrowser } from "../../platform/browser.ts";
 import { ExistingTestsScreen } from "./screens/ExistingTestsScreen.tsx";
 import { ConnectionFieldScreen } from "./screens/ConnectionFieldScreen.tsx";
+import { ConnectionFieldsScreen } from "./screens/ConnectionFieldsScreen.tsx";
 import { CodingAgentScreen } from "./screens/CodingAgentScreen.tsx";
 import { GateScreen } from "./screens/GateScreen.tsx";
 import { GeneratingScreen } from "./screens/GeneratingScreen.tsx";
@@ -27,6 +27,7 @@ import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
 import { RunScreen } from "./screens/RunScreen.tsx";
 import { SkillsOfferScreen } from "./screens/SkillsOfferScreen.tsx";
 import { TaskScreen } from "./screens/TaskScreen.tsx";
+import { WelcomeScreen } from "./screens/WelcomeScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
 export type AppProps = {
@@ -38,7 +39,6 @@ export type AppProps = {
 export function App({ store, onQuit, onInterrupt }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { stdout } = useStdout();
-  const { suspendTerminal } = useApp();
 
   // Ctrl-C is handled here rather than by the renderer, because stopping means
   // shutting the driven agent down and leaving an honest line behind, not
@@ -49,6 +49,9 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
 
   const screen = store.router.resolve(state);
 
+  if (screen === "welcome") {
+    return <WelcomeScreen onContinue={() => store.welcome()} onQuit={onQuit} />;
+  }
   if (screen === "coding-agent") {
     return (
       <CodingAgentScreen
@@ -101,6 +104,15 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       />
     );
   }
+  if (screen === "connection-fields" && state.connectionFieldsAsk !== null) {
+    return (
+      <ConnectionFieldsScreen
+        key={state.connectionFieldsAsk.fields.map((field) => field.id).join(":")}
+        ask={state.connectionFieldsAsk}
+        onAnswer={(answer) => store.answerConnectionFields(answer)}
+      />
+    );
+  }
   if (screen === "retell-agent") {
     return (
       <RetellAgentScreen state={state} onAnswer={(id) => store.answer("retell-agent", id)} />
@@ -111,15 +123,6 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       <MonitoringAgentScreen
         state={state}
         onAnswer={(id) => store.answer("monitoring-agent", id)}
-      />
-    );
-  }
-  if (screen === "env-consent" && state.envConsent !== null) {
-    return (
-      <EnvConsentScreen
-        line={state.envConsent}
-        onAgree={() => store.writeEnv()}
-        onQuit={onQuit}
       />
     );
   }
@@ -148,27 +151,13 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
     return (
       <GateScreen
         gate={state.gate}
-        at={state.gateAt}
-        problem={state.editorProblem}
-        onMove={(by) => store.moveGate(by)}
         onRun={() => store.runTests()}
         onQuit={onQuit}
-        onEdit={() => {
-          const file = store.selectedGateFile();
-          if (file === null) return;
-          // The editor owns the terminal while it runs, so egma owns none of
-          // it: Ink is suspended, egma's own alternate screen comes off, and
-          // both are put back when the child is gone.
-          void openInEditor(file, {
-            ...(stdout === undefined ? {} : { stdout }),
-            suspend: (during) => suspendTerminal(during),
-          }).then((said) => store.setEditorProblem(said));
-        }}
       />
     );
   }
   if (screen === "generating" && state.generation !== null) {
-    return <GeneratingScreen progress={state.generation} />;
+    return <GeneratingScreen progress={state.generation} state={state} />;
   }
   if (screen === "skills-offer" && state.skillPlaces !== null) {
     return (
@@ -180,7 +169,16 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
     );
   }
   if (screen === "run" && state.run !== null) {
-    return <RunScreen run={state.run} />;
+    return (
+      <RunScreen
+        run={state.run}
+        onOpen={() =>
+          openInBrowser(state.run!.resultsUrl, {
+            instanceUrl: state.platform?.url ?? state.run!.resultsUrl,
+          })
+        }
+      />
+    );
   }
   return <TaskScreen state={state} />;
 }

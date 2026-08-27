@@ -7,10 +7,9 @@
  * platform for finished conversations with the customer's own key, so what the
  * terminal collects is that key and which agent to spend it on, and the switch
  * that says so is the one declared monitoring choice in the product. **LiveKit
- * is push**: the worker sends its own evidence, so nothing is declared
- * anywhere — what the terminal does instead is get the SDK's monitoring entry
- * into the worker, mint the key that entry exports with, and put it where the
- * process will find it.
+ * is push**: the worker sends its own evidence, so this step mints the key for
+ * the integration that the wizard already put in the worker and places those
+ * values where the process will find them.
  *
  * One state, two shapes of work, and the goal decides what follows either of
  * them: monitoring alone ends here, and both carries on into the testing lane
@@ -24,12 +23,10 @@
 
 import path from "node:path";
 
-import type { DrivenAgent } from "../acp/driven-agent.ts";
 import {
   LIVEKIT_CLOSING_LINE,
   wireLiveKitMonitoring,
 } from "../monitoring/livekit-lane.ts";
-import { ENV_CONSENT_LINE } from "../monitoring/env-file.ts";
 import { refusalLines } from "../monitoring/refusals.ts";
 import {
   MONITORING_CUSTODY_LINE,
@@ -43,14 +40,8 @@ import { readCredentials } from "../platform/credentials.ts";
 import { RetellKey } from "../retell/key.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { Facts } from "./discovery.ts";
-import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { PlatformAccess } from "./login-step.ts";
-import {
-  monitorEntryInstructions,
-  monitoringEditStep,
-  type MonitoringEdit,
-} from "./monitoring-edit.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 import type { WizardAgentPlatform } from "./wizard-machine.ts";
@@ -70,13 +61,17 @@ export type MonitoringSetupOptions = {
   /** The repository this walk is in. */
   readonly cwd: string;
   readonly signal: AbortSignal;
-  readonly drivenAgent: DrivenAgent;
-  readonly log: DrivenAgentLog;
   readonly agentPlatform: WizardAgentPlatform;
   /** Which lane this is: monitoring alone, or monitoring and then testing. */
   readonly goal: "monitoring" | "both";
   /** What the find-the-agent step reported, by fact name. */
   readonly facts: Facts;
+  /** The name settled by the one worker-integration owner, when it found one. */
+  readonly integratedAgentName: string | null;
+  /** The stable agent already committed for this worker, when there is one. */
+  readonly configuredAgentId: string | null;
+  /** Whether the requested worker integration was verified before setup. */
+  readonly workerWired: boolean;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
   /** How long to wait for the first conversation. Egma's own pace when omitted. */
   readonly waitMs?: number | undefined;
@@ -109,6 +104,8 @@ export type MonitoringSetup = {
     readonly retellKey: RetellKey | null;
     /** The platform agent already chosen, so no second picker is drawn. */
     readonly platformAgentId: string | null;
+    /** LiveKit's non-secret project-key id, for record-only recovery. */
+    readonly monitoringKeyId: string | null;
   } | null;
 };
 
@@ -265,16 +262,16 @@ async function watchOnRetell(
       projectId: outcome.projectId,
       retellKey: pasted,
       platformAgentId: outcome.platformAgentId,
+      monitoringKeyId: null,
     },
   };
 }
 
 /**
- * LiveKit: the edit belongs to the coding agent, the credential to Egma.
+ * LiveKit: platform registration, credential minting, and environment custody.
  *
- * The dispatch goes first because its answer decides the rest: the coding
- * agent reads the repository and says what this worker should be called, and
- * that name is the one the roster row takes and the one the testing half reuses.
+ * The worker was already reconciled by the flow's single integration owner.
+ * This step owns only the remote setup and the environment values it mints.
  */
 async function pushFromLiveKit(
   options: MonitoringSetupOptions,
@@ -282,38 +279,13 @@ async function pushFromLiveKit(
 ): Promise<MonitoringSetup> {
   const { ui, signal } = options;
 
-  const edited: MonitoringEdit = await monitoringEditStep({
-    ui,
-    drivenAgent: options.drivenAgent,
-    signal,
-    log: options.log,
-    cwd: options.cwd,
-    facts: options.facts,
-  });
-  if (edited.halted !== null) {
-    return { report: edited.halted, monitored: null };
-  }
-  if (!edited.wired) {
-    // Not fatal, and not silent: the worker is Egma's to teach and the
-    // developer's to change, so the lines they add by hand are printed and the
-    // key is still minted for when they do.
-    for (const line of monitorEntryInstructions()) ui.pushStatus(line);
-  }
-
-  // The one keystroke before a live credential is written into a working tree.
-  ui.setEnvConsent(ENV_CONSENT_LINE);
-  await untilAborted(ui.waitForGate("write-env"), signal);
-  ui.setEnvConsent(null);
-  if (signal.aborted) {
-    return { report: stopReport(signal, options.drivenAgent.name), monitored: null };
-  }
-
   const wired = await wireLiveKitMonitoring({
     platform: access,
     cwd: options.cwd,
     signal,
+    agentId: options.configuredAgentId,
     agentName:
-      edited.agentName ??
+      options.integratedAgentName ??
       options.facts.get("agent-name") ??
       path.basename(options.cwd),
     say: (line, kind) =>
@@ -321,7 +293,37 @@ async function pushFromLiveKit(
   });
 
   if (wired.kind === "interrupted") {
-    return { report: stopReport(signal, options.drivenAgent.name), monitored: null };
+    const stopped = stopReport(signal, null);
+    return {
+      report:
+        wired.retryTarget === undefined
+          ? stopped
+          : {
+              kind: "interrupted",
+              drivenAgentName: null,
+              monitoringAgentCreated: wired.retryTarget.agentId,
+            },
+      monitored: null,
+    };
+  }
+  if (wired.kind === "refused") return ending(wired.reason);
+  if (wired.kind === "already-configured") {
+    ui.pushStatus(`${DETAIL_MARK} ${wired.reason}`);
+    return {
+      report: {
+        kind: "monitoring-already-configured",
+        agentName: wired.agent.name,
+        platformUrl: options.platform.url,
+      },
+      monitored: {
+        agentId: wired.agent.id,
+        agentName: wired.agent.name,
+        projectId: wired.agent.projectId,
+        retellKey: null,
+        platformAgentId: null,
+        monitoringKeyId: wired.keyId,
+      },
+    };
   }
   if (wired.kind === "failed") {
     return ending(wired.reason);
@@ -337,7 +339,7 @@ async function pushFromLiveKit(
       envFile: wired.env.kind === "written" ? wired.env.file : null,
       envRefusal: wired.env.kind === "refused" ? wired.env.reason : null,
       lines: wired.lines,
-      wired: edited.wired,
+      wired: options.workerWired,
       platformUrl: options.platform.url,
     },
     monitored: {
@@ -346,6 +348,7 @@ async function pushFromLiveKit(
       projectId: wired.agent.projectId,
       retellKey: null,
       platformAgentId: null,
+      monitoringKeyId: wired.keyId,
     },
   };
 }

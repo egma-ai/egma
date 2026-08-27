@@ -15,9 +15,9 @@
  *
  * **What is on disk is the truth**, and it is what this step believes twice
  * over. While the agent works, the pane is drawn from the folder as much as
- * from what the agent says about it. When the writing stops, the list the
- * developer scans is built from the files that are really there — which is why
- * a coding agent that says it wrote twelve and wrote nine puts nine on screen.
+ * from what the agent says about it. When the writing stops, the files that
+ * are really there must match the first-suite count before any are reviewed or
+ * pushed.
  *
  * **What runs is the complete suite.** One invalid file or one atomic platform
  * refusal stops the step. The wizard never treats approval as permission to
@@ -28,15 +28,20 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  CONFIG_FORMAT,
   createEgmaFolder,
   readRepository,
-  updateConfig,
+  recordRegisteredTarget,
   writeSuiteManifest,
   type FolderPaths,
   type FolderContents,
   type FolderTest,
   RepositoryValidationError,
 } from "../folder/egma-folder.ts";
+import {
+  portableSuiteDirectory,
+  withStablePathSuffix,
+} from "../folder/portable-path.ts";
 import type { DrivenAgent } from "../acp/driven-agent.ts";
 import type { Registered } from "../platform/agents.ts";
 import { listPersonas as listPersonasRequest } from "@egma/platform-api/client";
@@ -51,6 +56,7 @@ import { readProject } from "../platform/projects.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import { createTestSuite } from "../platform/test-suites.ts";
+import { pullRepository } from "../sync/pull.ts";
 import { pushTests } from "../sync/push.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
@@ -67,6 +73,7 @@ import {
   DEFAULT_TEST_COUNT,
   generateInstructions,
   GenerationTally,
+  MAX_GENERATED_EXPECTED_BEHAVIORS,
   type GenerationContext,
 } from "./test-generation.ts";
 
@@ -110,7 +117,7 @@ export type GenerateStepOptions = {
   };
   /** What the find-the-agent step reported. */
   readonly facts: Facts;
-  /** How many tests a first suite holds. The default when it is left out. */
+  /** Exactly how many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
   /**
    * What happens between the test files landing and the list going up.
@@ -227,10 +234,14 @@ async function writeFiles(
       switch (marker.kind) {
         case "plan":
           tally.plan(marker.names);
+          ui.pushStatus(
+            `${ACTION_MARK} Planned ${String(marker.names.length)} ${marker.names.length === 1 ? "test" : "tests"}`,
+          );
           moved = true;
           break;
         case "writing":
           tally.writing(marker.name);
+          ui.pushStatus(`${ACTION_MARK} Writing ${marker.name}`);
           moved = true;
           break;
         case "wrote":
@@ -397,7 +408,7 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
    *
    * Every test names at least one persona from birth, so this is read here and
    * not at push time: a folder written against an empty list is a folder that
-   * cannot be pushed, and a refusal after a coding agent has written twelve
+   * cannot be pushed, and a refusal after a coding agent has written four
    * files is a far worse place to learn it.
    */
   const personas = await personasEgmaHolds(options.signedIn, project.id);
@@ -405,29 +416,42 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   const folder = await createEgmaFolder({
     repository: options.cwd,
     config: {
+      format: CONFIG_FORMAT,
       platform: null,
       project: { name: project.name, id: project.id },
-      agent,
-      connection,
+      agents: [{ ...agent, connections: [connection] }],
     },
   });
   if (!folder.created) {
-    await updateConfig(folder.paths.config, {
+    await recordRegisteredTarget(folder.paths.config, {
       project: { name: project.name, id: project.id },
       agent,
       connection,
     });
   }
 
+  // Push is the complete project working copy. A fresh repository can still
+  // point at a project with suites made in the browser or by an earlier local
+  // attempt, so materialize those before creating one more remote identity.
+  await pullRepository({ signedIn: options.signedIn, paths: folder.paths });
+  options.ui.pushStatus(
+    `${ACTION_MARK} Pulled the project's current suites, tests, and mock tools into this repository`,
+  );
+
   const repository = await readRepository(folder.paths);
-  const used = new Set(repository.suites.map((suite) => suite.directory));
-  let directory = "generated";
-  for (let suffix = 2; used.has(directory); suffix += 1) directory = `generated-${String(suffix)}`;
+  const used = new Set(
+    repository.suites.map((suite) => suite.directory.toLowerCase()),
+  );
   const name = `${options.registered.agent.name} tests`;
   const remote = await createTestSuite(
     options.signedIn,
     { projectId: project.id, name },
   );
+  const wanted = portableSuiteDirectory(remote.name);
+  let directory = wanted;
+  for (let suffix = 2; used.has(directory.toLowerCase()); suffix += 1) {
+    directory = withStablePathSuffix(wanted, String(suffix));
+  }
   const root = path.join(folder.paths.tests, directory);
   let createdRoot = false;
   try {
@@ -587,6 +611,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
         content: existing.content,
         taken: namesOf((await contentsFor(paths, suite.id)).found),
         personas: generated.personas,
+        limit: howMany,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
       // pane counts what turns up rather than promising a number.
@@ -633,6 +658,26 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   };
 
   const written = await contentsFor(paths, suite.id);
+  const writtenCount = (await namesInFolder(generated.root)).length;
+  if (writtenCount !== howMany) {
+    return ending({
+      kind: "failed",
+      reason:
+        `${options.drivenAgent.name} left ${String(writtenCount)} ${writtenCount === 1 ? "test" : "tests"} in the first suite, ` +
+        `but this setup requires exactly ${String(howMany)}. Keep exactly ${String(howMany)} test files there, then run the wizard again.`,
+    });
+  }
+  const tooBroad = written.found.filter(
+    (file) => file.test.expectedBehaviors.length > MAX_GENERATED_EXPECTED_BEHAVIORS,
+  );
+  if (tooBroad.length > 0) {
+    return ending({
+      kind: "failed",
+      reason:
+        `${options.drivenAgent.name} wrote more than ${String(MAX_GENERATED_EXPECTED_BEHAVIORS)} expected behaviors in ` +
+        `${tooBroad.map((file) => file.shown).join(", ")}. Keep only the distinct requirements for each scenario, then run the wizard again.`,
+    });
+  }
   const usable = written.found.filter(
     (file) => file.test.expectedBehaviors.length > 0,
   );
@@ -681,8 +726,8 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     });
   }
 
-  // Re-read the complete repository after the editor returns. Approval never
-  // means permission to omit a held-back file.
+  // Re-read the complete repository after approval. Approval never means
+  // permission to omit a held-back file.
   const reread = await contentsFor(paths, suite.id);
   const approved = gateFrom(reread, about, reread.mockTools, changed);
   if (approved.heldBack.length > 0) {

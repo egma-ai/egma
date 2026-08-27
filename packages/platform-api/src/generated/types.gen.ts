@@ -1213,6 +1213,13 @@ export type CreateApiKeyData = {
     body?: {
         name?: string;
         projectId?: string | null;
+    } | {
+        name: string;
+        projectId: string;
+        /**
+         * The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.
+         */
+        monitoringAgentId: string;
     };
     path?: never;
     query?: never;
@@ -1232,6 +1239,10 @@ export type CreateApiKeyErrors = {
      * The request was refused.
      */
     403: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
     /**
      * The request was refused.
      */

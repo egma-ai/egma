@@ -448,8 +448,13 @@ async function pushTheTests(
   const suite = beforePush.suites.find((entry) => entry.directory === "onboarding");
   check(suite !== undefined, "the onboarding suite is a direct repository directory");
   check(
-    beforePush.config.agent?.id === registered.agentId &&
-      beforePush.config.connection?.id === registered.connectionId,
+    beforePush.config.agents.some(
+      (agent) =>
+        agent.id === registered.agentId &&
+        agent.connections.some(
+          (connection) => connection.id === registered.connectionId,
+        ),
+    ),
     "the connected agent and connection remain in the repository config",
   );
 

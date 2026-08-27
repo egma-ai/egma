@@ -1,12 +1,14 @@
 /**
- * Secret fields that may cross exactly one seam: into an Egma connection
- * request. The platform either seals a durable connection credential or uses
- * a request-only platform selection credential and discards it.
+ * Secret fields that may cross only explicit custody seams: into an Egma
+ * connection request, or into a provider worker's child environment. The
+ * platform either seals a durable credential or uses a request-only platform
+ * selection credential and discards it.
  *
  * The values live behind a private field. String conversion, JSON conversion,
  * and Node inspection all return a mask, so passing this object through a log
- * or an error does not reveal a provider credential. `reveal` exists for one
- * caller only: the request-body builder in `platform/agents.ts`.
+ * or an error does not reveal a provider credential. `reveal` is used only at
+ * approved custody boundaries: the platform request body and a local provider
+ * worker's child-process environment.
  */
 
 /** What every accidental way of printing connection credentials sees. */
@@ -45,7 +47,7 @@ export class ConnectionCredentials {
     return new ConnectionCredentials(reveal);
   }
 
-  /** Read once, while building the request body that Egma receives. */
+  /** Read only while building an approved request body or child environment. */
   reveal(): Readonly<Record<string, string>> {
     return { ...this.#reveal() };
   }

@@ -93,7 +93,7 @@ export function RetellKeyScreen({ state, onAnswer }: RetellKeyScreenProps) {
   const dots = DOT.repeat(Math.min(typed.length, MOST_DOTS));
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       {ask?.problem == null ? null : (
@@ -103,7 +103,7 @@ export function RetellKeyScreen({ state, onAnswer }: RetellKeyScreenProps) {
         </Box>
       )}
       <Text>{ask?.asking ?? ""}</Text>
-      <Text dimColor>{ask?.custody ?? ""}</Text>
+      <Text>{ask?.custody ?? ""}</Text>
       <Box height={1} />
       <Text>{`  › ${dots}`}</Text>
       <Box height={1} />

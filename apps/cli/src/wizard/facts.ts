@@ -24,6 +24,16 @@ export type Fact = {
 export const FACTS: readonly Fact[] = [
   { name: "framework", label: "Framework", phrase: "which framework runs it" },
   { name: "agent-name", label: "Name", phrase: "what the voice agent is called" },
+  {
+    name: "dispatch-name",
+    label: "Dispatch",
+    phrase: "which LiveKit dispatch name its worker registers",
+  },
+  {
+    name: "entrypoint",
+    label: "Entrypoint",
+    phrase: "which file starts its worker",
+  },
   { name: "prompts", label: "Prompts", phrase: "where its prompts live" },
   { name: "tools", label: "Tools", phrase: "where its tools are defined" },
   { name: "deploy", label: "Deploy", phrase: "how it reaches production" },

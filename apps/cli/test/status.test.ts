@@ -160,6 +160,30 @@ describe("what the developer is shown while the agent works", () => {
     ).toEqual(["✗ Read .env did not work"]);
   });
 
+  it("shows the failure reason when the adapter provides one", () => {
+    const actions = new ActionStream(CWD);
+
+    actions.lines({
+      sessionUpdate: "tool_call",
+      toolCallId: "t1",
+      title: "Terminal",
+      status: "in_progress",
+      rawInput: { command: "pnpm test" },
+    });
+
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        status: "failed",
+        rawOutput: { stderr: "No test files found" },
+      }),
+    ).toEqual([
+      "✗ Terminal ┊ pnpm test did not work",
+      "┊ No test files found",
+    ]);
+  });
+
   it("keeps the agent's own prose out of the stream and in the summary", () => {
     const actions = new ActionStream(CWD);
     const update = {

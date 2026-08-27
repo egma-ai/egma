@@ -12,14 +12,13 @@
  * monitoring and both lanes per platform.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
+import { folderPathsIn, readConfig, readRepository } from "../src/folder/egma-folder.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
-import { buildExitLine } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -74,12 +73,12 @@ function testFile(name: string): string {
   ].join("\n");
 }
 
-function writesOneTest(name: string): FakeStep[] {
+function writesOneTest(suiteDirectory: string, name: string): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/generated/${name}.md`,
+      path: `egma/tests/${suiteDirectory}/${name}.md`,
       content: testFile(name),
     },
     { kind: "say", text: `egma:wrote ${name}\n` },
@@ -116,11 +115,20 @@ async function dispatched(): Promise<readonly string[]> {
   }
 }
 
-async function walk(goal: string | undefined) {
+async function walk(
+  goal: string | undefined,
+  generated: { readonly directory: string; readonly name: string } = {
+    directory: "order-line-tests",
+    name: "late-repair",
+  },
+) {
   const script = await workspace.script({
     steps: FOUND,
     stepsByTask: [
-      { contains: GENERATE_TASK, steps: writesOneTest("late-repair") },
+      {
+        contains: GENERATE_TASK,
+        steps: writesOneTest(generated.directory, generated.name),
+      },
     ],
   });
   const ui = new HeadlessUI({
@@ -208,7 +216,7 @@ describe("the goal question", () => {
       .split("\n")
       .flatMap((line) => /^(?<key>[a-z_]+):/u.exec(line)?.groups?.key ?? []);
 
-    expect(keys).toEqual(["platform", "project", "agent", "connection"]);
+    expect(keys).toEqual(["format", "platform", "project", "agents"]);
     expect(written.toLowerCase()).not.toContain("monitor");
     expect(written.toLowerCase()).not.toContain("goal");
     // And it still parses, which is what makes the key list closed rather than
@@ -228,103 +236,34 @@ describe("the goal question", () => {
 });
 
 describe("a repository that has already been through the wizard", () => {
-  /**
-   * The refusal comes before anything at all is started, so "nothing half-runs"
-   * is a fact about the filesystem and the coding agent rather than an
-   * intention: the peer was never dispatched, and the committed folder is
-   * exactly what it was.
-   */
-  it("refuses politely and starts nothing", async () => {
+  it("adds another suite and preserves the registered target", async () => {
+    const first = await walk("testing");
+    expect(first.report.kind).toBe("run-started");
+
     const paths = folderPathsIn(workspace.dir);
-    await mkdir(paths.tests, { recursive: true });
-    const committed = "project:\n  name: Bookbinding\n";
-    await writeFile(paths.config, committed, "utf8");
+    const firstConfig = await readConfig(paths.config);
+    expect(firstConfig.agents).toHaveLength(1);
+    expect(firstConfig.agents[0]?.connections).toHaveLength(1);
 
-    const script = await workspace.script({
-      steps: FOUND,
-      stepsByTask: [
-        { contains: GENERATE_TASK, steps: writesOneTest("late-repair") },
-      ],
+    const second = await walk("testing", {
+      directory: "order-line-tests-2",
+      name: "wrong-address",
     });
-    const ui = new HeadlessUI({ answers: { "retell-key": KEY, reach: "text" } });
+    expect(second.report.kind).toBe("run-started");
 
-    const report = await runWizard({
-      ui,
-      launch: workspace.launch(script),
-      cwd: workspace.dir,
-      signal: new AbortController().signal,
-      platform: selectedPlatform({
-        url: platform.url,
-        credentialsFile: workspace.credentialsFile,
-      }),
-      retell: { url: retell.url },
-      home: path.join(workspace.dir, "pretend-home"),
-      runPollMs: 20,
-      howManyTests: 1,
-    });
+    const after = await readConfig(paths.config);
+    expect(after.project).toEqual(firstConfig.project);
+    expect(after.agents).toEqual(firstConfig.agents);
 
-    // The folder holds a config and no suite, which is exactly what a walk
-    // that stopped between binding and registering leaves behind.
-    expect(report).toEqual({
-      kind: "already-onboarded",
-      folder: "egma/",
-      hasSuites: false,
-    });
-    expect(ui.record.phase).toBe("already-onboarded");
-
-    // The coding agent was never started, so nothing was asked of it.
-    expect(await dispatched()).toEqual([]);
-    expect(ui.record.asked).toEqual([]);
-
-    // Nothing was created on the platform either.
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.tests.tests).toHaveLength(0);
-
-    // And the developer's own committed file is byte for byte what it was.
-    expect(await readFile(paths.config, "utf8")).toBe(committed);
-
-    const line = buildExitLine(report);
-    expect(line).toContain("already set up");
-    expect(line).toContain("Delete or rename egma/");
-    // And it does not send them to a command that would refuse this folder.
-    expect(line).not.toContain("egma push");
-  });
-
-  /**
-   * The same refusal, with the other half of its sentence, for the folder that
-   * really can be pushed and run as it stands.
-   */
-  it("names push and run when the folder already holds a suite", async () => {
-    const paths = folderPathsIn(workspace.dir);
-    await mkdir(path.join(paths.tests, "release"), { recursive: true });
-    await writeFile(paths.config, "project:\n  name: Bookbinding\n", "utf8");
-    await writeFile(
-      path.join(paths.tests, "release", "suite.yaml"),
-      "id: ste_01K7QXV2M8ZB4C6D8E0F2G4H6J\nname: Release\n",
-      "utf8",
-    );
-
-    const script = await workspace.script({ steps: FOUND });
-    const report = await runWizard({
-      ui: new HeadlessUI(),
-      launch: workspace.launch(script),
-      cwd: workspace.dir,
-      signal: new AbortController().signal,
-      platform: selectedPlatform({
-        url: platform.url,
-        credentialsFile: workspace.credentialsFile,
-      }),
-      retell: { url: retell.url },
-      home: path.join(workspace.dir, "pretend-home"),
-    });
-
-    expect(report).toEqual({
-      kind: "already-onboarded",
-      folder: "egma/",
-      hasSuites: true,
-    });
-    expect(buildExitLine(report)).toContain(
-      "egma push and egma run on the tests that are already there",
-    );
+    const repository = await readRepository(paths);
+    expect(repository.suites.map((suite) => suite.directory)).toEqual([
+      "order-line-tests",
+      "order-line-tests-2",
+    ]);
+    expect(
+      repository.suites.map((suite) => suite.tests.map((test) => test.test.name)),
+    ).toEqual([["late-repair"], ["wrong-address"]]);
+    expect(platform.tests.tests).toHaveLength(2);
+    expect(platform.running.runs).toHaveLength(2);
   });
 });

@@ -546,7 +546,7 @@ async function walkOnce(options: {
 
     /* [human 4] no, there are no test cases written down already */
     await showing(terminal, "the question about prior work", BUDGET.existing, "Do you already have");
-    terminal.write("n");
+    terminal.write("\r");
 
     // Everything registered so far becomes a secret before the first screen is
     // printed. Whose agents these were is not worth printing and the line that
@@ -757,8 +757,13 @@ async function assertWhatLanded(options: {
     `the repository is bound to the platform it walked against (${String(written.config.platform?.origin)})`,
   );
   check(
-    written.config.agent?.id === agentId &&
-      written.config.connection?.id === String(connection?.id),
+    written.config.agents.some(
+      (heldAgent) =>
+        heldAgent.id === agentId &&
+        heldAgent.connections.some(
+          (heldConnection) => heldConnection.id === String(connection?.id),
+        ),
+    ),
     "the agent and the connection egma made are the ones the file names",
   );
   const localSuite = written.suites.at(-1);
