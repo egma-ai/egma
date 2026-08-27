@@ -1791,7 +1791,10 @@ describe("the suite grid's columns", () => {
     for (const header of screen.getAllByRole("columnheader")) {
       expect(header.className, header.textContent ?? "").toContain(LANE);
     }
-    const padded = name.closest("td")?.firstElementChild as HTMLElement;
-    expect(padded.className).toContain(LANE);
+    const padded = name.closest("td")?.firstElementChild;
+    /* Named rather than cast: a missing box should say which box is missing,
+     * not read a property off `undefined` three lines later. */
+    expect(padded, "the name cell's padded box").toBeInstanceOf(HTMLElement);
+    expect((padded as HTMLElement).className).toContain(LANE);
   });
 });

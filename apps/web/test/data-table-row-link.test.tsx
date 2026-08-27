@@ -103,6 +103,10 @@ describe("DataTable row links", () => {
  * product inherits it, so this asserts the token rather than a pixel: a header
  * and the cells under it name the same padding, and the only cell that aligns
  * its content any other way is the row's own control lane.
+ *
+ * The lane's own `px-0` is written unconditionally and applied by the
+ * `data-action` attribute, so the attribute is what this asserts. Reading the
+ * class back would pass on every cell in the table and prove nothing.
  */
 describe("DataTable column alignment", () => {
   const LANE = "px-(--row-padding-x)";
@@ -120,15 +124,16 @@ describe("DataTable column alignment", () => {
     const headers = within(table).getAllByRole("columnheader");
     const cells = within(table).getAllByRole("cell");
 
-    /* The facts: header and value read from the same declared edge. */
+    /* The facts: header and value read from the same declared edge, and
+     * neither is marked as the lane that leaves it. */
     for (const element of [...headers.slice(0, 2), ...cells.slice(0, 2)]) {
-      expect(element.className).toContain(LANE);
-      expect(element.className).not.toContain("text-right");
+      expect(element.className, element.textContent ?? "").toContain(LANE);
+      expect(element.dataset.action, element.textContent ?? "").toBeUndefined();
     }
 
-    /* The control lane: no side padding, in the header and in the row. */
-    expect(headers[2]!.className).toContain("data-[action=true]:px-0");
-    expect(cells[2]!.className).toContain("data-[action=true]:px-0");
+    /* The control lane, marked in the header as well as in the row: the mark
+     * is what takes the side padding off both. */
+    expect(headers[2]!.dataset.action).toBe("true");
     expect(cells[2]!.dataset.action).toBe("true");
   });
 });

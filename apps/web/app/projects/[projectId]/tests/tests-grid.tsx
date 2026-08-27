@@ -17,6 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { LANE_X } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
   platformAnswer,
@@ -139,8 +140,12 @@ const ACTION =
  * column step left, and 10px is not on `DESIGN.md`'s spacing scale to begin
  * with. Header and cells both read this, so the column keeps one edge from the
  * heading to the last row — which is the same promise the shared table makes.
+ *
+ * The edge itself is imported rather than copied: this grid is the one table
+ * that inherits nothing from `components/ui/table.tsx`, and two files naming
+ * the same edge separately is how it drifted off it the first time.
  */
-const PAD = "px-(--row-padding-x) py-(--row-padding-y)";
+const PAD = `${LANE_X} py-(--row-padding-y)`;
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
 /*
  * A woken cell wears its 2px ink edge as an inset shadow rather than a border,

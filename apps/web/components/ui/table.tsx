@@ -31,14 +31,24 @@ import { cn } from "@/lib/utils";
  * **A header and the cells under it are one column, so they share one
  * declaration.** Two copies of the same padding are two things that can be
  * changed apart, and a header that drifts off its own figures is the defect
- * this names away. The rule is the whole of the product's column alignment:
- * one left edge per lane, header and value on it, in every table.
+ * this names away. The rule is the wide layout's column alignment: one left
+ * edge per lane, header and value on it, in every table.
  *
- * The other half of the rule is that nothing overrides it. A cell aligns its
- * content some other way only where the content is not a fact to scan — the
- * row's own control lane, which is centred in a slot of fixed width.
+ * It is exported because one table in the product is not built from these
+ * parts — the inline-editing suite grid in `tests/tests-grid.tsx` — and an
+ * edge two files declare apart is an edge that drifts. What is still written
+ * out by hand is the side padding the two settings tables put back inside
+ * their own control cells, where the class list is a caller's rather than
+ * this file's.
+ *
+ * Two things align some other way, and both are deliberate:
+ *
+ * - The row's own control lane, centred in a slot of fixed width.
+ * - Every non-primary value in the **stacked** layout, which `ui/data-table`
+ *   right-aligns against its label. A narrow row is a label-and-value list
+ *   rather than a set of columns, so it has no shared edge to keep.
  */
-const LANE_X = "px-(--row-padding-x)";
+export const LANE_X = "px-(--row-padding-x)";
 
 /** The bordered surface a table is drawn on. */
 function TablePanel({ className, ...props }: ComponentProps<"div">) {
