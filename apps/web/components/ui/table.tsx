@@ -25,6 +25,21 @@ import { cn } from "@/lib/utils";
  * row heights it lines up with.
  */
 
+/**
+ * The edge every column reads from, written once.
+ *
+ * **A header and the cells under it are one column, so they share one
+ * declaration.** Two copies of the same padding are two things that can be
+ * changed apart, and a header that drifts off its own figures is the defect
+ * this names away. The rule is the whole of the product's column alignment:
+ * one left edge per lane, header and value on it, in every table.
+ *
+ * The other half of the rule is that nothing overrides it. A cell aligns its
+ * content some other way only where the content is not a fact to scan — the
+ * row's own control lane, which is centred in a slot of fixed width.
+ */
+const LANE_X = "px-(--row-padding-x)";
+
 /** The bordered surface a table is drawn on. */
 function TablePanel({ className, ...props }: ComponentProps<"div">) {
   return (
@@ -83,7 +98,8 @@ function TableHead({ className, ...props }: ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-(--row-height) border-b border-border px-(--row-padding-x)",
+        "h-(--row-height) border-b border-border",
+        LANE_X,
         "text-left font-normal whitespace-nowrap text-faint",
         className,
       )}
@@ -105,7 +121,8 @@ function TableCell({ className, ...props }: ComponentProps<"td">) {
       data-slot="table-cell"
       className={cn(
         "border-t border-border align-middle",
-        "px-(--row-padding-x) py-(--row-padding-y)",
+        LANE_X,
+        "py-(--row-padding-y)",
         className,
       )}
       {...props}

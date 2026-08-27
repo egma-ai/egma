@@ -91,9 +91,10 @@ const WHOLE_ORGANIZATION = "";
  * wider than the slot and grows it, and with no padding of its own the button
  * then sits against the panel's own hairline. This puts the row's padding back
  * inside the cell, where the width is the caller's problem rather than the
- * table's.
+ * table's. It is the row's padding by name, so it cannot drift off the edge
+ * every other cell in this table reads from.
  */
-const ROW_ACTIONS = "flex items-center justify-end gap-2 px-4";
+const ROW_ACTIONS = "flex items-center justify-end gap-2 px-(--row-padding-x)";
 
 /**
  * The only copy of a newly minted secret.

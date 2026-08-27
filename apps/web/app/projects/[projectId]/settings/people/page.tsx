@@ -113,13 +113,13 @@ type Tab = "people" | "invitations";
  * that.
  */
 const ROW_ACTIONS = [
-  "grid grid-cols-[max-content_max-content] items-center gap-2 px-4",
+  "grid grid-cols-[max-content_max-content] items-center gap-2 px-(--row-padding-x)",
   "[&>span]:col-span-2 [&>span]:row-start-2 [&>span]:text-left",
   "[&>span]:w-0 [&>span]:min-w-full [&>span]:whitespace-normal",
 ].join(" ");
 
 /** The same lane, for a row that offers one control and no reason. */
-const ROW_ACTION = "flex items-center justify-end gap-2 px-4";
+const ROW_ACTION = "flex items-center justify-end gap-2 px-(--row-padding-x)";
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();

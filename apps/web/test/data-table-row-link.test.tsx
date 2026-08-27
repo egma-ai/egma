@@ -96,6 +96,43 @@ describe("DataTable row links", () => {
   });
 });
 
+/**
+ * One left edge per column, header and values on it.
+ *
+ * The rule is written once in `components/ui/table.tsx` and every table in the
+ * product inherits it, so this asserts the token rather than a pixel: a header
+ * and the cells under it name the same padding, and the only cell that aligns
+ * its content any other way is the row's own control lane.
+ */
+describe("DataTable column alignment", () => {
+  const LANE = "px-(--row-padding-x)";
+
+  it("puts every header and its cells on one edge", () => {
+    render(
+      <DataTable
+        label="Agents"
+        columns={[...COLUMNS.slice(0, 2), { ...COLUMNS[2]!, action: true }]}
+        rows={[ROW]}
+        keyOf={(row) => row.id}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "Agents" });
+    const headers = within(table).getAllByRole("columnheader");
+    const cells = within(table).getAllByRole("cell");
+
+    /* The facts: header and value read from the same declared edge. */
+    for (const element of [...headers.slice(0, 2), ...cells.slice(0, 2)]) {
+      expect(element.className).toContain(LANE);
+      expect(element.className).not.toContain("text-right");
+    }
+
+    /* The control lane: no side padding, in the header and in the row. */
+    expect(headers[2]!.className).toContain("data-[action=true]:px-0");
+    expect(cells[2]!.className).toContain("data-[action=true]:px-0");
+    expect(cells[2]!.dataset.action).toBe("true");
+  });
+});
+
 /** A row control whose open panel lives in `body`, the way the ⋮ menu does. */
 function PortalMenu() {
   const [open, setOpen] = useState(false);
