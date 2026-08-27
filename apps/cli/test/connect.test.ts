@@ -399,6 +399,7 @@ describe("what lands on the platform", () => {
       "lastReceivedAt",
       "monitoringApiKey",
       "monitoringApiKeyHint",
+      "monitoringExportApiKeyId",
       "name",
       "platformAgentId",
       "projectId",
@@ -409,6 +410,7 @@ describe("what lands on the platform", () => {
       agentPlatform: "retell",
       platformAgentId: null,
       monitoringApiKey: null,
+      monitoringExportApiKeyId: null,
       pullProductionCalls: false,
     });
   });
