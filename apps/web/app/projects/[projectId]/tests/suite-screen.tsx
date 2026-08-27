@@ -48,10 +48,10 @@ import { TestsGrid } from "./tests-grid.tsx";
  * builder with this suite in the address, which is where the suites list's own
  * Run suite goes.
  *
- * **Writing a test is the grid's own verb, and the toolbar has none.** The
- * ghost row at the foot of the grid says "+ Write a test" where the row it
- * opens will stand, so a second button in the title bar said the same word
- * twice and pointed away from the place the caret lands. It went on
+ * **Writing a test is the grid's own verb, and the toolbar holds no second
+ * one.** The ghost row at the foot of the grid says "+ Write a test" where the
+ * row it opens will stand, so a second button in the title bar said the same
+ * word twice and pointed away from the place the caret lands. It went on
  * 2026-08-25. The two ways in are the ghost row and the `/tests/new?suite=`
  * address, which both open the entry row in place.
  */
