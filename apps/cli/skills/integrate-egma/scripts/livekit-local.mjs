@@ -10,7 +10,7 @@ const MINIMUM_VERSION = [2, 18, 2];
 const MINIMUM_EGMA_VERSION = [0, 1, 0];
 const LIVEKIT_INSTALLER = "https://get.livekit.io/cli";
 const REQUIRED_ENV = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"];
-const PREPARATION_SECRETS = [...REQUIRED_ENV, "EGMA_URL", "EGMA_API_KEY"];
+const WORKER_ONLY_ENV_PREFIX = "EGMA_";
 const READY_MARKER = "egma:livekit-worker ready";
 const ANSI_ESCAPE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/gu;
 
@@ -74,7 +74,11 @@ function executable(name) {
 
 function withoutRuntimeCredentials(env = process.env) {
   const safe = { ...env };
-  for (const name of PREPARATION_SECRETS) delete safe[name];
+  for (const name of Object.keys(safe)) {
+    if (REQUIRED_ENV.includes(name) || name.startsWith(WORKER_ONLY_ENV_PREFIX)) {
+      delete safe[name];
+    }
+  }
   return safe;
 }
 

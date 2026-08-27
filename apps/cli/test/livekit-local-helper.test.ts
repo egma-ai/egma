@@ -56,10 +56,13 @@ appendFileSync(process.env.OBSERVED_PYTHON_FILE, JSON.stringify({
   url: process.env.LIVEKIT_URL ?? null,
   key: process.env.LIVEKIT_API_KEY ?? null,
   secret: process.env.LIVEKIT_API_SECRET ?? null,
+  egmaUrl: process.env.EGMA_URL ?? null,
+  egmaKey: process.env.EGMA_API_KEY ?? null,
+  futureEgmaSecret: process.env.EGMA_FUTURE_SECRET ?? null,
 }) + "\\n");
-if (args[0] === "-c") process.exit(existsSync(process.env.EGMA_INSTALLED_MARKER) ? 0 : 1);
+if (args[0] === "-c") process.exit(existsSync(process.env.FIXTURE_INSTALLED_MARKER) ? 0 : 1);
 if (args[0] === "-m" && args[1] === "pip" && args[2] === "install" && args[3] === "-r") {
-  writeFileSync(process.env.EGMA_INSTALLED_MARKER, "0.1.0\\n");
+  writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.0\\n");
   process.exit(0);
 }
 process.exit(2);
@@ -81,6 +84,9 @@ if (args.join(" ") === "--version" || args.join(" ") === "agent dev --help") {
     url: process.env.LIVEKIT_URL ?? null,
     key: process.env.LIVEKIT_API_KEY ?? null,
     secret: process.env.LIVEKIT_API_SECRET ?? null,
+    egmaUrl: process.env.EGMA_URL ?? null,
+    egmaKey: process.env.EGMA_API_KEY ?? null,
+    futureEgmaSecret: process.env.EGMA_FUTURE_SECRET ?? null,
   }) + "\\n");
 }
 if (args.join(" ") === "--version") {
@@ -95,6 +101,9 @@ writeFileSync(process.env.OBSERVED_FILE, JSON.stringify({
   url: process.env.LIVEKIT_URL,
   key: process.env.LIVEKIT_API_KEY,
   secret: process.env.LIVEKIT_API_SECRET,
+  egmaUrl: process.env.EGMA_URL,
+  egmaKey: process.env.EGMA_API_KEY,
+  futureEgmaSecret: process.env.EGMA_FUTURE_SECRET,
 }));
 const secret = process.env.LIVEKIT_API_SECRET;
 process.stdout.write("worker secret=" + secret.slice(0, 5));
@@ -148,10 +157,13 @@ setInterval(() => {}, 1_000);
           OBSERVED_FILE: observed,
           OBSERVED_PREPARATION_FILE: observedPreparation,
           OBSERVED_PYTHON_FILE: observedPython,
-          EGMA_INSTALLED_MARKER: installedEgma,
+          FIXTURE_INSTALLED_MARKER: installedEgma,
           LIVEKIT_URL: "wss://example.livekit.cloud",
           LIVEKIT_API_KEY: "livekit-secret",
           LIVEKIT_API_SECRET: secret,
+          EGMA_URL: "https://app.egma.example",
+          EGMA_API_KEY: "egma-secret",
+          EGMA_FUTURE_SECRET: "future-secret",
           REGISTRATION_STYLE: "node-pretty",
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -215,6 +227,9 @@ setInterval(() => {}, 1_000);
       url: "wss://example.livekit.cloud",
       key: "livekit-secret",
       secret,
+      egmaUrl: "https://app.egma.example",
+      egmaKey: "egma-secret",
+      futureEgmaSecret: "future-secret",
     });
     expect(await realpath(launched.cwd)).toBe(await realpath(repository));
     expect(launched.args.join(" ")).not.toContain(secret);
@@ -225,7 +240,14 @@ setInterval(() => {}, 1_000);
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(preparation).toHaveLength(2);
     for (const command of preparation) {
-      expect(command).toMatchObject({ url: null, key: null, secret: null });
+      expect(command).toMatchObject({
+        url: null,
+        key: null,
+        secret: null,
+        egmaUrl: null,
+        egmaKey: null,
+        futureEgmaSecret: null,
+      });
     }
 
     const python = (await readFile(observedPython, "utf8"))
@@ -238,7 +260,14 @@ setInterval(() => {}, 1_000);
       expect.arrayContaining(["-c"]),
     ]);
     for (const command of python) {
-      expect(command).toMatchObject({ url: null, key: null, secret: null });
+      expect(command).toMatchObject({
+        url: null,
+        key: null,
+        secret: null,
+        egmaUrl: null,
+        egmaKey: null,
+        futureEgmaSecret: null,
+      });
     }
 
     const probe = (python[0]?.args as string[] | undefined)?.[1];
@@ -281,7 +310,7 @@ setInterval(() => {}, 1_000);
           OBSERVED_FILE: observed,
           OBSERVED_PREPARATION_FILE: observedPreparation,
           OBSERVED_PYTHON_FILE: observedPython,
-          EGMA_INSTALLED_MARKER: installedEgma,
+          FIXTURE_INSTALLED_MARKER: installedEgma,
           LIVEKIT_URL: "wss://example.livekit.cloud",
           LIVEKIT_API_KEY: "livekit-secret",
           LIVEKIT_API_SECRET: secret,
@@ -346,7 +375,7 @@ setInterval(() => {}, 1_000);
       `#!/usr/bin/env node
 import { existsSync } from "node:fs";
 const args = process.argv.slice(2);
-if (args[0] === "-c") process.exit(existsSync(process.env.EGMA_INSTALLED_MARKER) ? 0 : 1);
+if (args[0] === "-c") process.exit(existsSync(process.env.FIXTURE_INSTALLED_MARKER) ? 0 : 1);
 process.exit(2);
 `,
       { mode: 0o755 },
@@ -377,7 +406,7 @@ writeFileSync(process.env.OBSERVED_UV_FILE, JSON.stringify({
   key: process.env.LIVEKIT_API_KEY ?? null,
   secret: process.env.LIVEKIT_API_SECRET ?? null,
 }));
-writeFileSync(process.env.EGMA_INSTALLED_MARKER, "0.1.0\\n");
+writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.0\\n");
 `,
       { mode: 0o755 },
     );
@@ -427,7 +456,7 @@ setInterval(() => {}, 1_000);
         env: {
           ...process.env,
           PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
-          EGMA_INSTALLED_MARKER: marker,
+          FIXTURE_INSTALLED_MARKER: marker,
           OBSERVED_UV_FILE: observedUv,
           OBSERVED_WORKER_FILE: observedWorker,
           FAKE_UV_PYTHON: fakePython,

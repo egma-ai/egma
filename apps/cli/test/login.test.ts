@@ -503,7 +503,7 @@ describe("which egma a command talks to", () => {
    * covered by reading it. The checks themselves are not scanned: proving the
    * variable is inert means naming it.
    *
-   * **Three files name it on purpose, and the list below is exhaustive** (founder
+   * **Two files name it on purpose, and the list below is exhaustive** (founder
    * decision, monitoring audit round, 2026-08-24). The variable has a second
    * life that has nothing to do with choosing a platform: it is one of the two
    * the Egma Python SDK reads inside the *customer's own* worker process, and
@@ -536,9 +536,6 @@ describe("which egma a command talks to", () => {
       // The coding-agent skill names them in its by-hand fallback, and still
       // never reads or writes an environment file.
       "skills/integrate-egma/references/integrate-egma-sdk.md",
-      // The local runner removes the SDK's worker-only credentials from every
-      // preparation subprocess before passing them only to the actual worker.
-      "skills/integrate-egma/scripts/livekit-local.mjs",
     ];
 
     const naming: string[] = [];
