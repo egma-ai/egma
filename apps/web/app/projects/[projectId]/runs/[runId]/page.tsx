@@ -26,9 +26,8 @@ import {
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Actions, Section } from "../../../../../ui/section.tsx";
+import { Actions } from "../../../../../ui/section.tsx";
 import { Refused } from "../../../../../ui/form.tsx";
-import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
   Empty,
@@ -42,10 +41,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import {
-  GradingState,
-  RunProgress,
   RunStatus,
-  SimulationStatus,
 } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
@@ -54,6 +50,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { RunScenarioWorkbench } from "./run-scenario-workbench.tsx";
 
 /**
  * One run: what it froze, what happened, and how far grading has got.
@@ -61,11 +58,11 @@ import {
  * Execution state and grading state stay separate. Grade scores belong to each
  * simulation trace. Egma does not create a run-level pass or fail result.
  *
- * **It follows the numbered feed rather than re-reading the run.** The run is
- * read once for its fixed context, and everything that moves afterwards arrives
- * as numbered events, each applied at most once. That is what makes a tab left
- * open overnight correct rather than merely refreshed: a follower that misses a
- * poll asks again from the last number it applied and misses nothing.
+ * **Execution follows the numbered feed.** Each event is applied at most once.
+ * Duration and grading projections do not exist in that feed, so the bounded
+ * simulation pages already opened are refreshed without changing their order or
+ * the selected row. A follower that misses a poll still asks from the last event
+ * number it applied and misses nothing.
  */
 export default function RunDetailPage() {
   const { projectId, runId } = useParams<{
@@ -82,53 +79,24 @@ export default function RunDetailPage() {
 /** How often the feed is asked for more while anything is still moving. */
 const AGAIN_MS = 2000;
 
-/**
- * One fact in the run's overview: a quiet uppercase label over its value.
- *
- * The value takes the 14px table step whole — its line height and its letter
- * spacing included — rather than the 14px-with-body-leading the stylesheet
- * this replaces mixed by hand. That step is the one `DESIGN.md` names for
- * table and caption text, and taking it whole is what stops this page drifting
- * from every other 14px value in the product.
- */
-const FACT = cn(
-  "min-w-0 [&_dd]:min-w-0",
-  "[&_dt]:mb-1 [&_dt]:text-xs [&_dt]:tracking-(--tracking-label)",
-  "[&_dt]:text-faint [&_dt]:uppercase",
-  "[&_dd]:m-0 [&_dd]:text-sm [&_dd]:text-foreground [&_dd]:[overflow-wrap:anywhere]",
-  /* "Metrics, dates, durations, and scores use tabular numerals." */
-  "[&_time]:tabular-nums",
-);
-
 /** A name and, where it applies, the note saying it has been archived. */
 const IDENTITY = "inline-flex flex-wrap items-center gap-2";
 
-/**
- * A cell that wraps instead of being cut off at one line.
- *
- * **This is what replaced a reach-in.** The route used to style the shared
- * table's own cell spans from its stylesheet — `.simulationsTable td > span`
- * — to turn off the ellipsis every list row gets. That rule reached past the
- * component's surface into its internals, and an unlayered route stylesheet
- * beats the component's own utilities, so the component could never take that
- * decision back. What a route legitimately owns is what it puts *in* a cell,
- * so the wrapping lives on this page's own element inside the cell instead.
- */
-const WRAPS = "block min-w-0 whitespace-normal";
-
-/**
- * Why a conversation could not be conducted.
- *
- * It wraps rather than truncating. The whole value of this column is the
- * sentence, and half a sentence is how somebody comes to believe their agent
- * failed.
- */
-const WHY = "block whitespace-normal text-sm text-muted-foreground";
+/** A record value that is also a way into that record. */
+const SUMMARY_LINK = cn(
+  "text-foreground no-underline underline-offset-4",
+  "pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline",
+);
 
 /** What one conversation's row shows after the feed has moved it. */
 type Moved = {
   readonly status: SimulationStatusWord;
   readonly reason: RunSimulation["reason"];
+};
+
+type LoadedSimulationPage = {
+  readonly cursor: string;
+  readonly value: RunSimulationPage;
 };
 
 function RunDetailView({
@@ -145,7 +113,7 @@ function RunDetailView({
   const mayControl = role !== null && canAuthor(role);
   const now = useMinuteClock();
 
-  const { answer, reload } = useProjectRead<RunDetail>(
+  const { answer, reload, refresh: refreshRun } = useProjectRead<RunDetail>(
     (projectId) =>
       platformAnswer(
         getRun({ runId, projectId }, { client: platformClient }),
@@ -153,7 +121,11 @@ function RunDetailView({
     projectId,
     runId,
   );
-  const { answer: simulationPage, reload: reloadSimulations } =
+  const {
+    answer: simulationPage,
+    reload: reloadSimulations,
+    refresh: refreshSimulations,
+  } =
     useProjectRead<RunSimulationPage>(
       (projectId) =>
         platformAnswer(
@@ -165,7 +137,15 @@ function RunDetailView({
       projectId,
       runId,
     );
-  const [laterSimulations, setLaterSimulations] = useState<RunSimulationPage | null>(null);
+  const [laterSimulationPages, setLaterSimulationPages] = useState<
+    readonly LoadedSimulationPage[]
+  >([]);
+  const laterSimulationPagesRef = useRef(laterSimulationPages);
+  laterSimulationPagesRef.current = laterSimulationPages;
+  const simulationPageScope = `${projectId}\u0000${runId}`;
+  const simulationPageScopeRef = useRef(simulationPageScope);
+  simulationPageScopeRef.current = simulationPageScope;
+  const refreshingSimulationPages = useRef(false);
   const [loadingMoreSimulations, setLoadingMoreSimulations] = useState(false);
   const [moreSimulationsRefused, setMoreSimulationsRefused] = useState<Refusal | null>(null);
 
@@ -204,7 +184,7 @@ function RunDetailView({
     setMoved(new Map());
     setRunStatus(null);
     setFinishedByFeed(false);
-    setLaterSimulations(null);
+    setLaterSimulationPages([]);
     setMoreSimulationsRefused(null);
   }, [runId, projectId]);
 
@@ -233,6 +213,49 @@ function RunDetailView({
     !finishedByFeed &&
     (run.finishedAt === null ||
       run.gradedCount < run.gradableCount);
+
+  const refreshLoadedSimulationPages = useCallback(async () => {
+    refreshSimulations();
+    const heldPages = laterSimulationPagesRef.current;
+    const askedScope = simulationPageScope;
+    if (heldPages.length === 0 || refreshingSimulationPages.current) {
+      return;
+    }
+    refreshingSimulationPages.current = true;
+    try {
+      const refreshed = await Promise.all(
+        heldPages.map(async (held) => ({
+          cursor: held.cursor,
+          answer: await platformAnswer(
+            listRunSimulations(
+              { runId, projectId, pageToken: held.cursor },
+              { client: platformClient },
+            ),
+          ),
+        })),
+      );
+      if (refreshed.some((held) => held.answer.status === "signed-out")) {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (simulationPageScopeRef.current !== askedScope) return;
+      const ready = new Map(
+        refreshed.flatMap((held) =>
+          held.answer.status === "ready"
+            ? [[held.cursor, held.answer.value] as const]
+            : [],
+        ),
+      );
+      setLaterSimulationPages((current) =>
+        current.map((held) => ({
+          cursor: held.cursor,
+          value: ready.get(held.cursor) ?? held.value,
+        })),
+      );
+    } finally {
+      refreshingSimulationPages.current = false;
+    }
+  }, [projectId, runId, simulationPageScope, refreshSimulations]);
 
   /**
    * One page of the feed, applied.
@@ -289,11 +312,24 @@ function RunDetailView({
       for (const event of fresh) {
         if (event.kind === "run") setRunStatus(event.status);
       }
+      const terminalSimulationLanded = fresh.some(
+        (event) =>
+          event.kind === "simulation" &&
+          ["completed", "failed", "canceled"].includes(event.status),
+      );
+      if (terminalSimulationLanded && !done) {
+        /*
+         * A feed event has execution state only. Re-read the bounded rows for
+         * duration, grading state, and score. Every page already opened is read
+         * again so a person stays on the same selected simulation.
+         */
+        await refreshLoadedSimulationPages();
+      }
     }
 
     if (done) setFinishedByFeed(true);
     return done;
-  }, [projectId, runId]);
+  }, [projectId, runId, refreshLoadedSimulationPages]);
 
   /**
    * The follower itself: one page, then another, while anything is moving.
@@ -312,7 +348,8 @@ function RunDetailView({
       const done = await follow();
       if (stopped) return;
       if (done) {
-        reload();
+        refreshRun();
+        await refreshLoadedSimulationPages();
         return;
       }
       timer = setTimeout(() => void again(), AGAIN_MS);
@@ -325,7 +362,21 @@ function RunDetailView({
     };
     // `run` is in the list so that a reload restarts the follower against the
     // freshly-read run rather than leaving it following the old one.
-  }, [run, stillMoving, follow, reload]);
+  }, [run, stillMoving, follow, refreshRun, refreshLoadedSimulationPages]);
+
+  /*
+   * The numbered feed ends with execution. Grades can settle afterwards and do
+   * not create feed events, so keep the run and its first bounded row page fresh
+   * until every gradable simulation has a terminal grading state.
+   */
+  useEffect(() => {
+    if (run === null || run.gradedCount >= run.gradableCount) return undefined;
+    const timer = setInterval(() => {
+      refreshRun();
+      void refreshLoadedSimulationPages();
+    }, AGAIN_MS);
+    return () => clearInterval(timer);
+  }, [run, refreshRun, refreshLoadedSimulationPages]);
 
   async function cancel(): Promise<void> {
     if (!mayControl || working) return;
@@ -353,6 +404,7 @@ function RunDetailView({
       return;
     }
     reload();
+    await refreshLoadedSimulationPages();
   }
 
   async function loadMoreSimulations(cursor: string): Promise<void> {
@@ -374,17 +426,18 @@ function RunDetailView({
       setMoreSimulationsRefused(next.refusal);
       return;
     }
-    setLaterSimulations((held) => ({
-      simulations: [...(held?.simulations ?? []), ...next.value.simulations],
-      nextPageToken: next.value.nextPageToken,
-    }));
+    setLaterSimulationPages((held) => {
+      const nextPage = { cursor, value: next.value };
+      const existing = held.findIndex((page) => page.cursor === cursor);
+      if (existing < 0) return [...held, nextPage];
+      return held.map((page, at) => (at === existing ? nextPage : page));
+    });
   }
 
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Run"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -402,7 +455,6 @@ function RunDetailView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Run"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -420,7 +472,6 @@ function RunDetailView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Run"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -442,13 +493,14 @@ function RunDetailView({
   const status = (runStatus ?? read.status) as RunDetail["status"];
   const loadedSimulations =
     simulationPage?.status === "ready"
-      ? [...simulationPage.value.simulations, ...(laterSimulations?.simulations ?? [])]
+      ? [
+          ...simulationPage.value.simulations,
+          ...laterSimulationPages.flatMap((page) => page.value.simulations),
+        ]
       : [];
   const nextSimulationCursor =
-    laterSimulations?.nextPageToken ??
-    (simulationPage?.status === "ready"
-      ? simulationPage.value.nextPageToken
-      : null);
+    laterSimulationPages.at(-1)?.value.nextPageToken ??
+    (simulationPage?.status === "ready" ? simulationPage.value.nextPageToken : null);
   const simulations = loadedSimulations.map((one) => {
     const change = moved.get(one.id);
     return change === undefined
@@ -462,37 +514,11 @@ function RunDetailView({
 
   const active = status === "pending" || status === "running";
 
-  /**
-   * How many of this run's simulations have landed — **a floor, never a
-   * guess.**
-   *
-   * `finishedCount` is what the run said when it was last read, and the run is
-   * only re-read when the feed says it is done. So a bar drawn from that alone
-   * would sit still for the whole of a live run. The feed, meanwhile, names
-   * every simulation that has reached a terminal state since the read, and each
-   * of those is finished by definition.
-   *
-   * The larger of the two is therefore true of both moments and can only move
-   * forwards: it never claims a simulation nobody has finished, and the final
-   * read settles it exactly. `RunProgress` clamps its own share, so an overlap
-   * between the two cannot push the bar past its end.
-   */
-  const landed = [...moved.values()].filter((one) =>
-    ["completed", "failed", "canceled"].includes(one.status),
-  ).length;
-  const finished = Math.max(read.finishedCount, landed);
-
   return (
-    <ProductPage wide>
+    <ProductPage wide desktopViewport>
       <PageHeader
-        eyebrow="Simulation runs"
         title={displayTitle}
-        /*
-         * The real trail: Runs, then this run. `PageHeader` takes the last
-         * step off, because the heading beside it is that step. Before that
-         * rule this page named the *kind* here — "Runs / Run   Pre-release
-         * check" — to keep the run's own name out of the bar twice.
-         */
+        /* The real trail: the Runs section, then this run as the page heading. */
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           { label: displayTitle },
@@ -513,58 +539,56 @@ function RunDetailView({
         }
       />
       <PageBody>
-        {refused === null ? null : <Refused message={refused.message} />}
+        <div className="min-w-0 min-[901px]:flex min-[901px]:h-full min-[901px]:min-h-0 min-[901px]:flex-col">
+          {refused === null ? null : <Refused message={refused.message} />}
 
-        {/*
-          The run's compact overview: the facts that do not move, in one
-          block above the conversations that do.
-        */}
-        <section
-          className="rounded-card border border-border bg-surface px-5 py-4 max-[900px]:p-4"
-          role="group"
-          aria-label="Run summary"
-        >
-          <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-x-6 gap-y-4">
-            <div className={FACT}>
-              <dt>Started</dt>
-              <dd>
-                <RelativeInstant instant={read.createdAt} now={now} />
+          <dl
+            className="m-0 grid flex-none grid-cols-5 gap-px border border-border bg-border max-[1000px]:grid-cols-2 max-[40rem]:grid-cols-1"
+            role="group"
+            aria-label="Run summary"
+          >
+            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
+              <dt className="text-sm text-faint">Status</dt>
+              <dd className="m-0 mt-1 min-w-0">
+                <RunStatus status={status} />
               </dd>
             </div>
-            <div className={FACT}>
-              <dt>Test suite</dt>
-              <dd>
+            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
+              <dt className="text-sm text-faint">Started</dt>
+              <dd className="m-0 mt-1 min-w-0 text-sm tabular-nums text-foreground">
+                {read.startedAt === null ? (
+                  <span className="text-faint">Not started</span>
+                ) : (
+                  <RelativeInstant instant={read.startedAt} now={now} />
+                )}
+              </dd>
+            </div>
+            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
+              <dt className="text-sm text-faint">Test suite</dt>
+              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
                 {read.suiteDeleted ? (
                   suiteDisplay
                 ) : (
-                  <Link href={projectPath(projectId, "tests", "suites", read.suiteId)}>
+                  <Link
+                    className={SUMMARY_LINK}
+                    href={projectPath(projectId, "tests", "suites", read.suiteId)}
+                  >
                     {suiteDisplay}
                   </Link>
                 )}
               </dd>
             </div>
-            <div className={FACT}>
-              <dt>Status</dt>
-              <dd>
-                <RunStatus status={status} compact />
-              </dd>
-            </div>
-            <div className={FACT}>
-              <dt>Grading</dt>
-              <dd>
-                <span className="tabular-nums">
-                  {read.gradedCount} of {read.gradableCount} graded
-                </span>
-              </dd>
-            </div>
-            <div className={FACT}>
-              <dt>Agent</dt>
-              <dd>
+            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
+              <dt className="text-sm text-faint">Agent</dt>
+              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
                 {read.agent === null ? (
                   "Unavailable"
                 ) : (
                   <span className={IDENTITY}>
-                    <Link href={projectPath(projectId, "agents", read.agent.id)}>
+                    <Link
+                      className={SUMMARY_LINK}
+                      href={projectPath(projectId, "agents", read.agent.id)}
+                    >
                       {read.agent.name}
                     </Link>
                     {read.agent.archived ? (
@@ -574,14 +598,15 @@ function RunDetailView({
                 )}
               </dd>
             </div>
-            <div className={FACT}>
-              <dt>Connection</dt>
-              <dd>
+            <div className="min-w-0 bg-surface px-5 py-3 max-[40rem]:px-4">
+              <dt className="text-sm text-faint">Connection</dt>
+              <dd className="m-0 mt-1 min-w-0 text-sm wrap-anywhere text-foreground">
                 <span className={IDENTITY}>
                   {read.connection === null ? (
                     "Unavailable"
                   ) : (
                     <Link
+                      className={SUMMARY_LINK}
                       href={projectPath(
                         projectId,
                         "agents",
@@ -600,29 +625,11 @@ function RunDetailView({
               </dd>
             </div>
           </dl>
-        </section>
 
-        <Section title="Simulations">
-          {/*
-            How far the machinery has got, over the conversations it got there
-            through. **The bar measures simulations and says so**: judging
-            settles at a different moment, and one bar over both would have to
-            decide which half a half-full bar meant. Grading has its own figure
-            in the summary above.
-          */}
-          {read.expectedSimulationCount === 0 ? null : (
-            <div className="flex min-w-0 items-center gap-4">
-              <div className="min-w-0 flex-1">
-                <RunProgress
-                  finished={finished}
-                  expected={read.expectedSimulationCount}
-                />
-              </div>
-              <span className="flex-none font-mono text-sm text-faint tabular-nums">
-                {finished} of {read.expectedSimulationCount} finished
-              </span>
-            </div>
-          )}
+          <section
+            className="mt-6 min-w-0 min-[901px]:flex min-[901px]:min-h-0 min-[901px]:flex-1 min-[901px]:flex-col"
+            data-slot="section"
+          >
           {simulationPage === null || simulationPage.status === "signed-out" ? (
             <Loading what="this run's simulations" />
           ) : simulationPage.status !== "ready" ? (
@@ -633,35 +640,37 @@ function RunDetailView({
               lead="This run's simulations appear here as Egma writes them."
             />
           ) : (
-            <DataTable
-              label="Simulations in this run"
-              columns={simulationColumns(projectId, runId)}
+            <RunScenarioWorkbench
+              projectId={projectId}
+              runId={runId}
               rows={simulations}
-              keyOf={(one) => one.id}
-              stretchPrimaryLink
+              total={read.expectedSimulationCount}
               {...(nextSimulationCursor === null
                 ? {}
                 : {
                     more: {
                       onMore: () => void loadMoreSimulations(nextSimulationCursor),
                       loading: loadingMoreSimulations,
-                      note: `${String(simulations.length)} simulations so far`,
+                      note: "More simulations are available",
                     },
                   })}
             />
           )}
           {moreSimulationsRefused === null ? null : (
-            <Failure
-              title="Egma could not load more simulations."
-              message={moreSimulationsRefused.message}
-              onRetry={
-                nextSimulationCursor === null
-                  ? undefined
-                  : () => void loadMoreSimulations(nextSimulationCursor)
-              }
-            />
+            <div className="mt-4">
+              <Failure
+                title="Egma could not load more simulations."
+                message={moreSimulationsRefused.message}
+                onRetry={
+                  nextSimulationCursor === null
+                    ? undefined
+                    : () => void loadMoreSimulations(nextSimulationCursor)
+                }
+              />
+            </div>
           )}
-        </Section>
+          </section>
+        </div>
       </PageBody>
 
       {confirmingCancel ? (
@@ -708,91 +717,5 @@ function RunDetailView({
       ) : null}
 
     </ProductPage>
-  );
-}
-
-/**
- * The columns one conversation's row is drawn with, in this project.
- *
- * A function of the project rather than a constant, because the first cell is
- * the way in to that conversation's evidence — and an address inside a project
- * has to name the project. The other cells stay compact so the table never needs
- * a horizontal scrollbar.
- */
-function simulationColumns(
-  projectId: string,
-  runId: string,
-): readonly Column<RunSimulation>[] {
-  return [
-    {
-      key: "test",
-      header: "Simulation",
-      primary: true,
-      cell: (one) => (
-        <span className={cn(WRAPS, "flex items-start gap-3")}>
-          <span className="flex-none tabular-nums text-sm text-muted-foreground">
-            {String(one.position).padStart(2, "0")}
-          </span>
-          <span className="min-w-0 [&_a]:[overflow-wrap:anywhere] [&_strong]:block [&_strong]:font-medium [&_strong]:text-foreground [&_strong]:[overflow-wrap:anywhere]">
-            {/*
-              The way in to this conversation's own evidence: what was said, when
-              each thing happened, which graders ran, and any later human grade.
-              It is reached from here and from nowhere else — a conversation is a
-              thing inside a run rather than a product area, so it is deliberately
-              absent from the navigation.
-            */}
-            <Link
-              href={projectPath(projectId, "runs", runId, "simulations", one.id)}
-            >
-              <strong>{one.testName ?? "No stored test"}</strong>
-            </Link>
-          </span>
-        </span>
-      ),
-    },
-    {
-      key: "persona",
-      header: "Persona",
-      width: "22%",
-      /* A name is a name: it wraps rather than ending in an ellipsis. */
-      cell: (one) => <span className={WRAPS}>{one.personaName}</span>,
-    },
-    {
-      key: "status",
-      header: "Execution",
-      width: "18%",
-      cell: (one) => (
-        <span className={cn(WRAPS, "flex flex-col items-start gap-1")}>
-          <SimulationStatus status={one.status} compact />
-          <SimulationReason simulation={one} />
-        </span>
-      ),
-    },
-    {
-      key: "grading",
-      header: "Grading",
-      width: "14%",
-      cell: (one) =>
-        one.gradingState === null ? (
-          <span className="text-sm text-muted-foreground">Not started</span>
-        ) : (
-          <GradingState grading={one.gradingState} compact />
-        ),
-    },
-  ];
-}
-
-function SimulationReason({
-  simulation,
-}: {
-  readonly simulation: RunSimulation;
-}) {
-  if (simulation.status !== "failed") return null;
-  return (
-    <span className={WHY}>
-      {simulation.reason ?? "Egma could not conduct this simulation."} This is an
-      execution problem, not a low grade, and says nothing about the
-      agent.
-    </span>
   );
 }

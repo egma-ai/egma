@@ -81,6 +81,7 @@ version it speaks. The ingest is gated on the name, so another framework that
 happens to call something ``agent_turn`` is never read as this one."""
 
 ROOT_SPAN = "simulation"
+RECORDING_SPAN = "recording"
 TOOL_CALL_SPAN = "tool_call"
 TURN_SPAN_OF = {"human": "human_turn", "agent": "agent_turn"}
 """The transcript's two labels, exactly. The speaker rides the span name,
@@ -251,6 +252,20 @@ class SpanEmitter:
             started_unix_nano=began_unix_nano,
             ended_unix_nano=ended_unix_nano,
             attributes={TURN_TEXT_ATTRIBUTE: text},
+        )
+
+    def recording(self, *, started_unix_nano: int) -> None:
+        """Place audio sample zero on the same trace clock as spoken turns.
+
+        The WAV is stored separately, but its origin is trace evidence: every
+        spoken turn already uses this instant plus its media position. One
+        zero-duration span carries that shared origin without copying it onto
+        the simulation lifecycle row.
+        """
+        self._author(
+            RECORDING_SPAN,
+            started_unix_nano=started_unix_nano,
+            ended_unix_nano=started_unix_nano,
         )
 
     def measured(

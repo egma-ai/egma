@@ -31,7 +31,7 @@ function TablePanel({ className, ...props }: ComponentProps<"div">) {
     <div
       data-slot="table-panel"
       className={cn(
-        "overflow-x-auto rounded-card border border-border bg-surface",
+        "relative w-full min-w-0 max-w-full overflow-x-auto rounded-card border border-border bg-surface",
         className,
       )}
       {...props}

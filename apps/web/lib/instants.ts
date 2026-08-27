@@ -130,7 +130,29 @@ export function asListInstant(
 ): string {
   const at = Date.parse(instant);
   if (Number.isNaN(at)) return instant;
-  return listFormatterFor(precision).format(new Date(at));
+  const formatted = listFormatterFor(precision);
+  if (precision !== "second") return formatted.format(new Date(at));
+
+  /*
+   * A production trace is identified by a moment, not only by a day. Keep the
+   * complete timestamp on one scan line and use a middle dot to separate the
+   * date from the clock: `Aug 26, 2026 · 08:44:23`. `Intl` normally inserts a
+   * second comma there, which makes the date and clock read like two fields.
+   */
+  const parts = formatted.formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((one) => one.type === type)?.value ?? "";
+  return `${part("month")} ${part("day")}, ${part("year")} · ${part("hour")}:${part("minute")}:${part("second")}`;
+}
+
+/** A compact call-overview moment: the year is already present in the list. */
+export function asCallOverviewInstant(instant: string): string {
+  const at = Date.parse(instant);
+  if (Number.isNaN(at)) return instant;
+  const parts = listFormatterFor("minute").formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((one) => one.type === type)?.value ?? "";
+  return `${part("month")} ${part("day")} · ${part("hour")}:${part("minute")}`;
 }
 
 /** The local moment to the minute: what detail and history views need. */

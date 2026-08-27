@@ -78,6 +78,7 @@ barge-in is represented when the persona becomes full-duplex, and
 | Span name | One per | Duration | Attributes |
 | --- | --- | --- | --- |
 | `simulation` | conversation | The whole conversation. The root: it names no parent, every other span names it, and it is emitted last — when it arrives, the conversation is over and every other span is already on the wire. | none |
+| `recording` | stored voice recording | Zero. Its start is audio sample zero on the same clock used by spoken turns. It is emitted only after the WAV is stored, before the root closes. | none |
 | `human_turn` | transcript turn spoken by the persona | The turn, ear to ear. Zero on chat, where a message is one instant. | `egma.turn.text` |
 | `agent_turn` | transcript turn spoken by the agent under test | Same terms as `human_turn`. | `egma.turn.text` |
 | `tool_call` | tool call observed from Egma's side of the connection | One instant where the platform reports the invocation and nothing more. Where Egma stood in the tool path — answering the call or refusing it — the span brackets the exchange Egma conducted, the round trip plus any delay the mock tool declared, so a declared delay is readable as the time it actually took and no attribute repeats the number for the two to disagree about. | `egma.tool.name`, `egma.tool.arguments`, `egma.tool.result`, `egma.tool.provenance`, `egma.tool.mock_tool`, `egma.tool.late_attached` |
@@ -155,6 +156,9 @@ takes thin arguments for an agent that passed none.
 - `voice-overlapping-turns.json` — a mid-conversation voice flush where the
   persona starts speaking before the agent finishes: two turns whose intervals
   cross, with the two speech-duration measures beside them.
+- `voice-flush-recording-root.json` — a closing voice flush: the zero-duration
+  recording span places audio sample zero on the trace clock, followed by the
+  root last.
 - `voice-mocked-tool-calls.json` — a mid-conversation flush of three calls that
   reached Egma: an ordinary mocked call, arguments whole and its 250 ms of
   declared delay showing as the span's duration; a late-attached one whose

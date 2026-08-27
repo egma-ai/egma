@@ -725,32 +725,25 @@ async function send(secret: string, resourceSpans: unknown[]): Promise<void> {
 /**
  * The banned list, as a person reading the screen would meet it.
  *
- * Held against **what is actually legible** — the rendered text of the page,
- * with nothing expanded — rather than against the markup. Two words behave
- * differently and it is worth saying which: `trace` and `span` are storage
- * words and must never appear at all, and `session` is the one carve-out,
- * correct for a signed-in browser session and wrong for an exchange, which
- * these pages have no reason to mention either way.
+ * Held against **what is actually legible** rather than against the markup.
+ * `span` remains a storage word. Trace, Trace ID, Call overview, and Caller are
+ * now deliberate Monitoring vocabulary on the approved list and evidence
+ * sheet.
  *
  * The pages' own copy is held against the same list from the other side, in
  * `apps/web/test/transcripts.test.ts`, where every string they can render lives
  * in one file. Both are worth having: that one catches a word before it can
  * reach a screen, and this one catches a word that reached one anyway.
  *
- * **The screen's own name is the second carve-out**, and it is one word wide —
- * the same one `transcripts.test.ts` makes, for the same reason. The developer
- * renamed the surface to Traces on 2026-08-25, so the sidebar row and the list
- * heading both say it on every page this helper reads. `trace` stays banned in
- * every sentence around them: the artifact a person opens is a **transcript**,
- * and this rule is what keeps it one.
+ * The developer renamed the surface to Traces on 2026-08-25, and the approved
+ * compact index now also names Trace ID and the Trace reading sheet. The full
+ * evidence route remains a transcript.
  */
 const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SHOWN = [
-  "trace",
   "span",
   "session",
   "conversation",
-  "caller",
   "persona",
   "eval",
   "scenario",
@@ -1172,7 +1165,26 @@ describe("what a project recorded in production", () => {
       // capture was recorded. Nothing was widened to find this row.
       expect(await page.inputValue("#window")).toBe("24h");
 
-      // The facts the list endpoint returns, as columns.
+      // The approved compact index: five visible facts and the fixed action
+      // lane. Details such as turns, spans, platform, errors and a transcript
+      // preview belong after the row is opened, not in this scan surface.
+      const headings = await page
+        .locator("thead th")
+        .evaluateAll((cells) =>
+          cells.map((cell) => cell.textContent?.trim() ?? ""),
+        );
+      expect(headings).toEqual([
+        "Agent",
+        "Time",
+        "Duration",
+        "P90 turn latency",
+        "Trace ID",
+        "Actions",
+      ]);
+      expect(
+        await page.locator("thead th").last().getAttribute("data-action"),
+      ).toBe("true");
+
       const started = page.locator("tbody time").first();
       /*
        * **A list's date column is an absolute short date, never a changing
@@ -1191,12 +1203,17 @@ describe("what a project recorded in production", () => {
       expect(await started.getAttribute("datetime")).toBe(
         FIXTURE_TRACE.started_at,
       );
+      expect(await started.innerText()).toContain(" · ");
+      expect(
+        await started.evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+            target: unknown,
+          ) => { readonly whiteSpace: string };
+          return styleOf(element.parentElement ?? element).whiteSpace;
+        }),
+      ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      expect(shown).toContain(
-        `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
-      );
-      expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("LiveKit");
+      expect(shown).toContain("1.99s");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1214,10 +1231,11 @@ describe("what a project recorded in production", () => {
       );
       expect(await page.innerText("table")).not.toContain("production");
 
-      // The first thing the *human* said, which is what somebody scanning a
-      // list is looking for — not the greeting the agent opens every one with.
-      expect(shown).toContain("Hi Kelly, my name is Sam.");
+      // Transcript content is evidence inside the opened trace, not a preview
+      // column that makes this index wider and harder to scan.
+      expect(shown).not.toContain("Hi Kelly, my name is Sam.");
       expect(shown).not.toContain("Hello! How can I assist you today?");
+      expect(shown).not.toContain("No project grader");
 
       // And exactly one row: one exchange was recorded, on page one, with no
       // next page to visit.
@@ -1233,21 +1251,186 @@ describe("what a project recorded in production", () => {
   );
 
   it(
-    "marks what failed without anybody having to open anything",
+    "opens one continuous trace sheet from the trace ID",
     async () => {
       await page.goto(monitoringAt(acme));
       await page.waitForSelector("table");
+      const traceId = page
+        .locator('tbody td[data-primary="true"] button')
+        .first();
+      await reactHasTakenOver(page, 'tbody td[data-primary="true"] button');
+      await traceId.click();
 
-      // Three spans of this capture carry an error status — a model timing out,
-      // the fallback giving up, and then a successful retry. The count is on the
-      // row, so a list of a hundred exchanges says which one to open.
-      const headings = await page.locator("thead th").allInnerTexts();
-      const errors = headings.indexOf("Errors");
-      expect(errors, headings.join(", ")).toBeGreaterThan(-1);
+      const sheet = page.locator('[data-kind="sheet"]');
+      await sheet.waitFor();
+      await sheet.getByRole("heading", { name: "Call overview" }).waitFor();
 
-      expect(await page.locator("tbody tr td").nth(errors).innerText()).toBe(
-        String(FIXTURE_TRACE.erroredSpans),
+      // The reading surface is the approved 640px wide sheet. It stays beside
+      // the table, so there is no scrim over the page.
+      expect(
+        await sheet.evaluate((element) =>
+          Math.round(element.getBoundingClientRect().width),
+        ),
+      ).toBe(640);
+      expect(await page.locator('[data-slot="dialog-overlay"]').count()).toBe(0);
+
+      const overview = sheet.getByRole("region", { name: "Call overview" });
+      expect(await overview.locator("dt").allTextContents()).toEqual([
+        "Started",
+        "Duration",
+        "Turns",
+        "P90 turn latency",
+      ]);
+      expect(await overview.innerText()).toContain("1.99s");
+      expect(
+        await sheet
+          .getByRole("heading", { name: "Latency", exact: true })
+          .count(),
+      ).toBe(0);
+      expect(await sheet.innerText()).toContain("No grades for this trace");
+      expect(await sheet.innerText()).toContain(
+        "No project grader was active when this trace was recorded.",
       );
+      expect(await sheet.innerText()).toContain(
+        "No audio recording is available for this trace.",
+      );
+
+      // Summary and Transcript are location anchors over one continuous body,
+      // not tabs that replace one section with the other.
+      const summaryAnchor = sheet.getByRole("button", {
+        name: "Summary",
+        exact: true,
+      });
+      const transcriptAnchor = sheet.getByRole("button", {
+        name: "Transcript",
+        exact: true,
+      });
+      expect(await summaryAnchor.getAttribute("aria-current")).toBe("location");
+      expect(await sheet.getByRole("tab").count()).toBe(0);
+      expect(
+        await sheet.locator("#trace-summary, #trace-transcript").count(),
+      ).toBe(2);
+      expect(
+        await sheet
+          .locator("#trace-summary, #trace-transcript")
+          .evaluateAll(
+            (sections) =>
+              new Set(sections.map((one) => one.parentElement)).size,
+          ),
+      ).toBe(1);
+
+      await transcriptAnchor.click();
+      await expect
+        .poll(() => transcriptAnchor.getAttribute("aria-current"))
+        .toBe("location");
+      expect(await sheet.locator("#trace-summary").count()).toBe(1);
+      expect(
+        await sheet.locator("#trace-transcript").evaluate((section) => {
+          const scroller = section.parentElement;
+          return (
+            scroller !== null &&
+            scroller.scrollTop > 0 &&
+            Math.abs(
+              section.getBoundingClientRect().top -
+                scroller.getBoundingClientRect().top,
+            ) <= 1
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await sheet.getByRole("region", { name: "Transcript" }).count(),
+      ).toBe(1);
+
+      // Dead space on the row opens the same sheet. Closing it returns focus
+      // to that row's one Trace ID control, so keyboard use resumes where the
+      // person was reading.
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      await page.locator("tbody tr").first().locator("td").nth(1).click();
+      await sheet.waitFor();
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      await expect
+        .poll(() =>
+          traceId.evaluate(
+            (element) => {
+              const pageDocument = Reflect.get(globalThis, "document") as {
+                readonly activeElement: unknown;
+              };
+              return element === pageDocument.activeElement;
+            },
+          ),
+        )
+        .toBe(true);
+
+      // The sheet is nonmodal, so its filter remains usable. If that filter
+      // changes, Close keeps the new window instead of going back to the one
+      // that was active when the trace first opened.
+      await traceId.click();
+      await sheet.waitFor();
+      await page.selectOption("#window", "7d");
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("window"))
+        .toBe("7d");
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      expect(new URL(page.url()).searchParams.get("trace")).toBeNull();
+      expect(new URL(page.url()).searchParams.get("window")).toBe("7d");
+      expect(await page.inputValue("#window")).toBe("7d");
+    },
+    SETTLE,
+  );
+
+  it(
+    "keeps the trace table semantic and scrollable on a narrow screen",
+    async () => {
+      const previous = page.viewportSize() ?? { width: 1280, height: 720 };
+      try {
+        await page.setViewportSize({ width: 700, height: 800 });
+        await page.goto(monitoringAt(acme));
+        await page.waitForSelector("table");
+
+        const panel = page.locator('[data-slot="table-panel"]');
+        expect(
+          await page
+            .locator("table")
+            .evaluate((table) => {
+              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+                target: unknown,
+              ) => { readonly display: string };
+              return styleOf(table).display;
+            }),
+        ).toBe("table");
+        expect(
+          await panel.evaluate(
+            (element) => element.scrollWidth > element.clientWidth,
+          ),
+        ).toBe(true);
+        const documentWidth = await page.evaluate(() => {
+          const root = Reflect.get(
+            Reflect.get(globalThis, "document"),
+            "documentElement",
+          ) as { readonly scrollWidth: number; readonly clientWidth: number };
+          return {
+            scrollWidth: root.scrollWidth,
+            clientWidth: root.clientWidth,
+          };
+        });
+        expect(
+          documentWidth.scrollWidth,
+          JSON.stringify(documentWidth),
+        ).toBeLessThanOrEqual(documentWidth.clientWidth);
+        expect(
+          await page.locator("tbody time").first().evaluate((element) => {
+            const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+              target: unknown,
+            ) => { readonly whiteSpace: string };
+            return styleOf(element.parentElement ?? element).whiteSpace;
+          }),
+        ).toBe("nowrap");
+      } finally {
+        await page.setViewportSize(previous);
+      }
     },
     SETTLE,
   );
@@ -1365,7 +1548,7 @@ describe("what a project recorded in production", () => {
 });
 
 describe("one exchange, read as a transcript", () => {
-  /** Following the link out of the list, which is how anybody arrives. */
+  /** Following the explicit full-transcript action out of the list. */
   async function openIt(): Promise<void> {
     await page.goto(monitoringAt(acme));
     await page.waitForSelector("table");
@@ -1377,7 +1560,17 @@ describe("one exchange, read as a transcript", () => {
         (x: number, y: number) => void;
       Reflect.apply(scrollTo, globalThis, [0, pageDocument.body.scrollHeight]);
     });
-    await page.locator("tbody tr td a").first().click();
+    await reactHasTakenOver(
+      page,
+      'tbody button[aria-label^="Actions for trace"]',
+    );
+    await page
+      .getByRole("button", { name: /^Actions for trace /u })
+      .first()
+      .click();
+    await page
+      .getByRole("menuitem", { name: "Open full transcript", exact: true })
+      .click();
     await page.waitForSelector("text=The exchange");
     await expect.poll(() => page.evaluate(() => Number(Reflect.get(globalThis, "scrollY")))).toBe(0);
   }
@@ -1578,9 +1771,10 @@ describe("an exchange with nothing timed inside its turns", () => {
     "still renders as a transcript, and says what is missing rather than hiding it",
     async () => {
       const theirs = await anotherCustomer("bare@sparse.example", "Sparse");
+      const sparseTraceId = "4d1c0b9a8e7f6a5b4c3d2e1f00998877";
       await send(theirs, [
         exchange(
-          "4d1c0b9a8e7f6a5b4c3d2e1f00998877",
+          sparseTraceId,
           new Date(AT.getTime() - 60 * 60 * 1000),
           "Is anybody there?",
           "I am here.",
@@ -1596,10 +1790,24 @@ describe("an exchange with nothing timed inside its turns", () => {
       await them.waitForSelector("table");
 
       const listed = await them.innerText("main");
-      expect(listed).toContain("Is anybody there?");
+      expect(
+        await them
+          .getByRole("button", { name: sparseTraceId, exact: true })
+          .count(),
+      ).toBe(1);
+      expect(listed).not.toContain("Is anybody there?");
       expect(listed).not.toContain("Hi Kelly, my name is Sam.");
 
-      await them.locator("tbody tr td a").first().click();
+      await reactHasTakenOver(
+        them,
+        'tbody button[aria-label^="Actions for trace"]',
+      );
+      await them
+        .getByRole("button", { name: `Actions for trace ${sparseTraceId}` })
+        .click();
+      await them
+        .getByRole("menuitem", { name: "Open full transcript", exact: true })
+        .click();
       await them.waitForSelector("text=The exchange");
 
       const shown = await them.innerText("main");
@@ -1640,6 +1848,8 @@ describe("more exchanges than one page holds", () => {
     "moves between cursor pages, skipping none and repeating none",
     async () => {
       const theirs = await anotherCustomer("many@globex.example", "Globex");
+      const traceIdFor = (index: number) =>
+        `9a0b0c0d0e0f${String(index).padStart(20, "0")}`;
 
       // A minute apart, so newest-first is unambiguous, and inside the day the
       // page asks about.
@@ -1647,7 +1857,7 @@ describe("more exchanges than one page holds", () => {
         theirs,
         Array.from({ length: HOW_MANY }, (_, index) =>
           exchange(
-            `9a0b0c0d0e0f${String(index).padStart(20, "0")}`,
+            traceIdFor(index),
             new Date(AT.getTime() - (index + 1) * 60 * 1000),
             `This is exchange number ${index}.`,
             "Understood.",
@@ -1663,7 +1873,9 @@ describe("more exchanges than one page holds", () => {
       // the paging control says so rather than ending silently at the boundary.
       const rows = them.locator("tbody tr");
       expect(await rows.count()).toBe(50);
-      expect(await them.innerText("main")).toContain("50 transcripts");
+      expect(await them.innerText("main")).toContain(
+        "50 transcripts on this page",
+      );
       expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await reactHasTakenOver(them, "main button");
@@ -1674,7 +1886,11 @@ describe("more exchanges than one page holds", () => {
 
       // Page two contains only the one older exchange. Page one is cached and
       // returns without mixing both pages into one table.
-      expect(await them.innerText("main")).toContain("This is exchange number 50.");
+      expect(
+        await them
+          .getByRole("button", { name: traceIdFor(50), exact: true })
+          .count(),
+      ).toBe(1);
       expect(await them.getByText("Page 2", { exact: true }).count()).toBe(1);
       expect(
         await them
@@ -1684,11 +1900,12 @@ describe("more exchanges than one page holds", () => {
 
       await them.getByRole("button", { name: "Previous" }).click();
       await expect.poll(async () => rows.count()).toBe(50);
-      const shown = await them.innerText("main");
-      const numbered = [...shown.matchAll(/This is exchange number (\d+)\./gu)].map(
-        (found) => Number(found[1]),
+      const listedTraceIds = await them
+        .locator('tbody td[data-primary="true"] button')
+        .allInnerTexts();
+      expect(listedTraceIds).toEqual(
+        Array.from({ length: 50 }, (_, index) => traceIdFor(index)),
       );
-      expect(numbered).toEqual(Array.from({ length: 50 }, (_, index) => index));
       expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await them.context().close();
@@ -1783,16 +2000,43 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
        * conversation. A run of two hundred must never mint two hundred links to
        * serve the one somebody wanted.
        */
+      const simulationsRead = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname ===
+            `/v1/runs/${run.runId}/simulations`,
+      );
       await page.goto(inProject);
-      await page.getByRole("link", { name: /Reschedules/u }).first().waitFor({
-        timeout: 30_000,
-      });
+      const simulationsResponse = await simulationsRead;
+      expect(simulationsResponse.status()).toBe(200);
+      const simulations = (await simulationsResponse.json()) as {
+        simulations: readonly { id: string; personaName: string }[];
+      };
+      const heard = simulations.simulations.find(
+        (simulation) => simulation.id === run.heard,
+      );
+      const silent = simulations.simulations.find(
+        (simulation) => simulation.id === run.silent,
+      );
+      expect(heard, "the run lists the simulation that recorded audio").toBeDefined();
+      expect(silent, "the run lists the simulation that recorded no audio").toBeDefined();
+
+      const heardChoice = page
+        .getByRole("button")
+        .filter({ hasText: heard?.personaName ?? "missing heard simulation" });
+      await heardChoice.waitFor({ timeout: 30_000 });
+      if ((await heardChoice.getAttribute("aria-pressed")) !== "true") {
+        await heardChoice.click();
+      }
       expect(await page.locator("audio").count()).toBe(0);
 
-      await page.goto(`${inProject}/simulations/${run.heard}`);
+      await page.getByRole("tab", { name: "Transcript & audio" }).click();
 
       const player = page.getByLabel("Simulation recording");
-      await player.waitFor({ timeout: 30_000 });
+      // The real audio element is intentionally screen-reader-only. The
+      // visible play button and waveform control it, so presence rather than
+      // visibility is the correct readiness boundary here.
+      await player.waitFor({ state: "attached", timeout: 30_000 });
 
       // The link points at the **store**, and never at egma. The bytes do not
       // pass through the control plane; only the decision did.
@@ -1907,16 +2151,27 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       // recording — and its own page offers no control at all. A disabled
       // player there would read as a broken feature rather than an honest
       // absence.
-      await page.goto(`${inProject}/simulations/${run.silent}`);
-      // **Waited for the read that would have supplied a player**: the
-      // default-open evidence sheet is drawn from the same answer, so by here
-      // the page has been told everything it knows and is offering nothing.
-      const silentEvidence = page.getByRole("dialog", {
-        name: "Transcript and audio",
+      const silentChoice = page
+        .getByRole("button")
+        .filter({ hasText: silent?.personaName ?? "missing silent simulation" });
+      await silentChoice.click();
+      await expect
+        .poll(() => silentChoice.getAttribute("aria-pressed"))
+        .toBe("true");
+      await expect.poll(() => page.locator("audio").count()).toBe(0);
+      const transcriptTab = page.getByRole("tab", {
+        name: "Transcript & audio",
       });
-      await silentEvidence.waitFor({ timeout: 30_000 });
+      await transcriptTab.waitFor({ timeout: 30_000 });
+      await transcriptTab.click();
+      // **Waited for the read that would have supplied a player**: the inline
+      // transcript tab is drawn from the same answer, so by here the page has
+      // been told everything it knows and is offering nothing.
+      const silentEvidence = page.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
       await silentEvidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
       expect(await page.locator("audio").count()).toBe(0);
     },
@@ -1945,17 +2200,20 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       });
 
       await page.goto(
-        `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}/simulations/${run.heard}`,
+        `${origin}/projects/${who.auth.projectId ?? ""}/runs/${run.runId}`,
       );
-      // The default-open sheet comes off the same answer a player would have,
-      // so waiting for it is waiting for the read that could contradict the
-      // absence below.
-      const evidence = page.getByRole("dialog", {
-        name: "Transcript and audio",
+      await page.getByRole("button", { name: /Reschedules/u }).first().waitFor({
+        timeout: 30_000,
       });
-      await evidence.waitFor({ timeout: 30_000 });
+      await page.getByRole("tab", { name: "Transcript & audio" }).click();
+      // The inline transcript tab comes off the same answer a player would
+      // have, so waiting for it is waiting for the read that could contradict
+      // the absence below.
+      const evidence = page.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       expect(await page.locator("audio").count()).toBe(0);
@@ -2436,10 +2694,10 @@ describe("the complete product, walked in order in a second project", () => {
   /**
    * **The run's own machinery word**, as against any conversation's.
    *
-   * A run's page holds four facts that must never be folded into one another,
+   * A run's page holds five facts that must never be folded into one another,
    * and two of them spell their words the same way: the run is `completed` and
    * so is each conversation that finished. The one this reads is the fact
-   * labelled `Run`, taken by its label rather than by a class a build hashes or
+   * labelled `Status`, taken by its label rather than by a class a build hashes or
    * by a sentence somebody may reword.
    */
   async function machineryOfTheRun(which: Page): Promise<string> {
@@ -3130,6 +3388,8 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("runs"));
       await walk.getByRole("link", { name: "Create a run" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/runs/new$`));
+      const runBuilder = walk.getByRole("dialog", { name: "Create a run" });
+      await runBuilder.waitFor();
 
       await walk.waitForSelector("#run-suite");
       await walk.selectOption("#run-suite", { label: "Support reception" });
@@ -3138,12 +3398,11 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForSelector("#run-connection");
       await walk.selectOption("#run-connection", { index: 1 });
 
-      const runBuilder = await walk.innerText("main");
-      expect(runBuilder).toContain(
-        "Egma runs the full suite. Individual tests cannot be picked here.",
+      expect(await runBuilder.innerText()).toContain(
+        "Run one test suite against one agent.",
       );
       expect(
-        await walk
+        await runBuilder
           .getByRole("checkbox", {
             name: "Include Reschedules a booked appointment",
           })
@@ -3185,9 +3444,28 @@ describe("the complete product, walked in order in a second project", () => {
       // the row that proves the simulations response has landed, so every
       // assertion below reads the settled page rather than its loading shell.
       const row = walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first();
       await row.waitFor();
+      // The visible row proves the browser's simulations read settled. Read
+      // the id needed by the rest of this continuous walk through the same API
+      // route with this browser session: Playwright can discard a response
+      // body when Next replaces a client navigation, even after the row drew.
+      const simulationsResponse = await instance.api.inject({
+        method: "GET",
+        url: `/v1/runs/${runIdOf(runAddress)}/simulations?projectId=${second}`,
+        headers: {
+          cookie: (await walk.context().cookies(origin))
+            .map((cookie) => `${cookie.name}=${cookie.value}`)
+            .join("; "),
+        },
+      });
+      expect(simulationsResponse.statusCode, simulationsResponse.body).toBe(200);
+      const listed = simulationsResponse.json() as {
+        simulations: readonly { id: string }[];
+      };
+      const simulation = listed.simulations[0];
+      expect(simulation, "the run wrote its one simulation").toBeDefined();
 
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
@@ -3198,7 +3476,7 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("The Support line");
       expect(shown).toContain("Retell staging");
 
-      conversation = (await row.getAttribute("href")) ?? "";
+      conversation = `${new URL(runAddress).pathname}/simulations/${simulation?.id ?? ""}`;
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
     },
     SETTLE,
@@ -3207,13 +3485,17 @@ describe("the complete product, walked in order in a second project", () => {
   it(
     "opens that conversation's own evidence, before anything has conducted it",
     async () => {
-      await walk.goto(`${origin}${conversation}`);
-      const evidence = walk.getByRole("dialog", {
-        name: "Transcript and audio",
+      await walk.goto(runAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .waitFor({ timeout: 30_000 });
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const evidence = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
       });
-      await evidence.waitFor({ timeout: 30_000 });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       const shown = await walk.innerText("main");
@@ -3223,7 +3505,9 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Impatient Rita");
       // And nothing has happened yet, said as an absence rather than as a
       // failure or as an empty space that could mean either.
-      expect(await evidence.innerText()).toContain("No transcript was filed");
+      expect(await evidence.innerText()).toContain(
+        "No transcript was filed for this simulation.",
+      );
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,
@@ -3260,13 +3544,17 @@ describe("the complete product, walked in order in a second project", () => {
       expect(filed.traceId).toBe(traceIdOfSimulation(landed));
       await finishExpectedBehaviorsGrade(filed.traceId);
 
-      await walk.goto(`${origin}${conversation}`);
-      const evidence = walk.getByRole("dialog", {
-        name: "Transcript and audio",
+      await walk.goto(runAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .waitFor({ timeout: 30_000 });
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const evidence = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
       });
-      await evidence.waitFor({ timeout: 30_000 });
       await evidence
-        .getByRole("heading", { name: "Transcript", exact: true })
+        .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       await expect
@@ -3278,23 +3566,27 @@ describe("the complete product, walked in order in a second project", () => {
 
       // One trace, one current grade, seven nested assertions, and one mean.
       // With one selected grader the display-only mean is that grader's score.
-      const summary = walk.getByRole("region", { name: "Simulation summary" });
+      await walk.getByRole("tab", { name: "Results summary" }).click();
+      const results = walk.getByRole("tabpanel", { name: "Results summary" });
+      const summary = results.getByRole("region", { name: "Simulation summary" });
       expect(await summary.innerText()).toMatch(/Combined score\s+0\.86/u);
 
-      const grades = walk.getByRole("region", { name: "Grades" });
+      const grades = results.getByRole("region", { name: "Grader results" });
       const expected = grades.getByRole("region", {
         name: "Expected behaviors",
       });
       expect(await expected.innerText()).toContain(
-        "Score 0.86 · pass threshold 0.62",
+        "Pass threshold 0.62 · Definition v1",
       );
-      expect(await expected.innerText()).toContain(
-        "Six of seven expected behaviors were present.",
-      );
-      const assertionDetails = expected
-        .getByText("Assertion details")
-        .locator("..");
-      expect(await assertionDetails.getByRole("listitem").count()).toBe(7);
+      // The combined summary is rounded for scanning. A grader result keeps
+      // the exact stored score.
+      expect(await expected.innerText()).toContain("Total Score 0.857");
+      expect(
+        await expected
+          .getByRole("table", { name: "Expected behaviors results" })
+          .getByRole("row")
+          .count(),
+      ).toBe(8);
       expect(await expected.innerText()).toContain(expectedBehaviors[0]);
       expect(await expected.innerText()).toContain(expectedBehaviors[6]);
       expect(await expected.innerText()).toContain(
@@ -3306,7 +3598,7 @@ describe("the complete product, walked in order in a second project", () => {
         "gate",
         "Latency",
       ]) {
-        expect((await grades.innerText()).toLowerCase()).not.toContain(
+        expect((await expected.innerText()).toLowerCase()).not.toContain(
           retired.toLowerCase(),
         );
       }
@@ -3327,7 +3619,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(runAddress);
       await expect
         .poll(() => machineryOfTheRun(walk), { timeout: 30_000 })
-        .toBe("completed");
+        .toBe("Completed");
     },
     SETTLE,
   );
@@ -3344,6 +3636,8 @@ describe("the complete product, walked in order in a second project", () => {
      * arriving is proved rather than assumed.
      */
     readonly says: string;
+    /** A route that opens a named sheet reads that sheet, not the page behind it. */
+    readonly dialog?: string;
     /**
      * Where this address ends up, when that is not itself.
      *
@@ -3471,9 +3765,10 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Create a run",
         address: at("runs", "new"),
-        // The whole page waits on the agents read, so its own sentence is
-        // drawn only after that read answers.
-        says: "Run every current test in one suite against one agent and one connection.",
+        // The route opens a sheet over the runs list. Reading `main` here would
+        // only prove that the list behind it loaded.
+        dialog: "Create a run",
+        says: "Run one test suite against one agent.",
       },
       {
         what: "one run",
@@ -3540,8 +3835,11 @@ describe("the complete product, walked in order in a second project", () => {
         timeout: 30_000,
       })
       .toContain("Support");
+    const surface = route.dialog === undefined
+      ? which.locator("main")
+      : which.getByRole("dialog", { name: route.dialog });
     await expect
-      .poll(() => which.innerText("main").catch(() => ""), { timeout: 30_000 })
+      .poll(() => surface.innerText().catch(() => ""), { timeout: 30_000 })
       .toContain(route.says);
   }
 
@@ -4153,22 +4451,22 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /** The same shared status meaning appears in list and compact detail forms. */
+    /** The same text-first run status appears in list and detail forms. */
     it(
       "keeps one status meaning on a list and on the page it links to",
       async () => {
-        const theRunsStatus = 'main span[title^="The run finished"]';
         const stateOf = async (): Promise<string> =>
           walk
-            .locator(theRunsStatus)
+            .locator('main [data-slot="run-status"][data-status="completed"]')
             .first()
             .evaluate((element) => {
               if (element.getBoundingClientRect().height === 0) return "";
               return JSON.stringify({
-                meaning: element.getAttribute("title"),
-                text: element.textContent?.trim(),
-                moving:
-                  element.querySelector('[data-motion="active"]') !== null,
+                status: element.getAttribute("data-status"),
+                text: element.textContent?.trim().toLowerCase(),
+                loader:
+                  element.querySelector('[data-slot="run-status-loader"]') !== null,
+                marker: element.querySelector('[data-slot="state-mark"]') !== null,
               });
             })
             .catch(() => "");
@@ -4210,7 +4508,10 @@ describe("the complete product, walked in order in a second project", () => {
     it(
       "carries a retuned token into pages that share only their components",
       async () => {
-        for (const address of [at("agents"), at("runs")]) {
+        // Runs intentionally gives its workbench choices a local 56px floor;
+        // Agents and Personas are both shared DataTable lists, so they are the
+        // honest pair for proving the root table token propagates.
+        for (const address of [at("agents"), at("personas")]) {
           await walk.goto(address);
           await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
 
@@ -4317,13 +4618,17 @@ describe("the complete product, walked in order in a second project", () => {
         expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(field);
 
         // And a transcript is dense: its turns are lines rather than cards.
-        await walk.goto(`${origin}${conversation}`);
-        const evidence = walk.getByRole("dialog", {
-          name: "Transcript and audio",
+        await walk.goto(runAddress);
+        await walk
+          .getByRole("button", { name: /Reschedules a booked appointment/u })
+          .first()
+          .waitFor({ timeout: 30_000 });
+        await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+        const evidence = walk.getByRole("tabpanel", {
+          name: "Transcript & audio",
         });
-        await evidence.waitFor({ timeout: 30_000 });
         await evidence
-          .getByRole("heading", { name: "Transcript", exact: true })
+          .getByRole("heading", { name: "Conversation", exact: true })
           .waitFor();
         await expect
           .poll(() => evidence.innerText(), { timeout: 30_000 })
@@ -4695,23 +5000,26 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /**
-     * The recording controls, which are the browser's own.
-     *
-     * Egma does not draw a scrubber; it renders `<audio controls>` and Chrome
-     * draws one that is already keyboard-operable. What egma can get wrong is
-     * putting it somewhere the keyboard cannot reach, so what is asserted is
-     * that it is in the tab order and takes the focus.
-     */
+    /** The custom play and waveform controls remain keyboard reachable. */
     it.skipIf(!storage.available)(
       "reaches the recording controls with the keyboard",
       async () => {
-        await walk.goto(`${origin}${conversation}`);
-        const player = walk.getByLabel("Simulation recording");
-        await player.waitFor({ timeout: 30_000 });
+        await walk.goto(runAddress);
+        await walk
+          .getByRole("button", { name: /Reschedules a booked appointment/u })
+          .first()
+          .waitFor({ timeout: 30_000 });
+        await walk.getByRole("tab", { name: "Transcript & audio" }).click();
 
-        expect(await player.getAttribute("controls")).not.toBeNull();
-        await player.focus();
+        const play = walk.getByRole("button", { name: "Play recording" });
+        const seek = walk.getByRole("slider", { name: "Seek the recording" });
+        await play.waitFor({ timeout: 30_000 });
+        await seek.waitFor({ timeout: 30_000 });
+        await expect
+          .poll(() => seek.isEnabled(), { timeout: 30_000 })
+          .toBe(true);
+
+        await play.focus();
         expect(
           await walk.evaluate(() => {
             const root = Reflect.get(globalThis, "document") as {
@@ -4719,7 +5027,17 @@ describe("the complete product, walked in order in a second project", () => {
             };
             return root.activeElement?.tagName ?? "";
           }),
-        ).toBe("AUDIO");
+        ).toBe("BUTTON");
+
+        await seek.focus();
+        expect(
+          await walk.evaluate(() => {
+            const root = Reflect.get(globalThis, "document") as {
+              readonly activeElement: { readonly tagName: string } | null;
+            };
+            return root.activeElement?.tagName ?? "";
+          }),
+        ).toBe("INPUT");
       },
       SETTLE,
     );
@@ -4879,7 +5197,7 @@ describe("the complete product, walked in order in a second project", () => {
         "Northside Ford (deleted)",
       );
       await walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first()
         .waitFor();
     },

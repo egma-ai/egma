@@ -18,6 +18,7 @@ import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
   REGRADE_IS_NOT_A_REPLAY,
+  regradeRefusalMessage,
   type RegradeAsked,
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
@@ -87,16 +88,6 @@ export default function SimulationEvidencePage() {
 
 /** How often the page asks again while grading is active. */
 const AGAIN_MS = 2000;
-
-/** User-facing regrade copy never repeats storage identifiers from the API. */
-function regradeRefusalMessage(refusal: Refusal): string {
-  if (refusal.error === "unprocessable") {
-    return "This simulation did not finish with gradeable evidence, so it cannot be regraded.";
-  }
-  return refusal.message
-    .replace(/\bsimulation\s+sim_[a-z0-9]+\b/giu, "this simulation")
-    .replace(/\bsim_[a-z0-9]+\b/giu, "this simulation");
-}
 
 function EvidenceView({
   projectId,
@@ -195,7 +186,6 @@ function EvidenceView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Simulation"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -214,7 +204,6 @@ function EvidenceView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Simulation"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -233,7 +222,6 @@ function EvidenceView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Simulation runs"
           title="Simulation"
           breadcrumbs={[
             { label: "Runs", href: projectPath(projectId, "runs") },
@@ -249,18 +237,18 @@ function EvidenceView({
   }
 
   const read = answer.value;
+  const title = read.test.name ?? "This simulation executed no stored test";
   return (
     <ProductPage wide>
       <PageHeader
-        eyebrow="Simulation runs"
-        title={read.test.name ?? "This simulation executed no stored test"}
+        title={title}
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           {
             label: read.runName ?? "Run",
             href: projectPath(projectId, "runs", runId),
           },
-          { label: `Simulation ${String(read.position).padStart(2, "0")}` },
+          { label: title },
         ]}
         lead={
           <>
@@ -327,9 +315,11 @@ function EvidenceView({
 
         {read.status !== "failed" ? null : (
           <Problem>
-            {read.reason ?? "Egma could not conduct this simulation."} This is
-            an execution problem, not a failed grade, and it says nothing about
-            the agent.
+            <span className="block">Egma could not conduct this simulation.</span>
+            <span className="mt-1 block">
+              This is an execution problem, not a failed grade, and it says
+              nothing about the agent.
+            </span>
           </Problem>
         )}
 

@@ -1395,6 +1395,7 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     # The same shapes chat produces, named identically.
     assert names.count("human_turn") == 3
     assert names.count("agent_turn") == 3
+    assert names.count("recording") == 1
     assert names.count("first_response_latency") == 1
     assert names.count("turn_response_latency") == 2
     assert names[-1] == "simulation"

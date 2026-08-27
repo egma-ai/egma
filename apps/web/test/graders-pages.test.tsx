@@ -68,11 +68,13 @@ function finishSheetExit(surface: HTMLElement): void {
 const routed = vi.hoisted(() => ({
   pathname: "/projects/prj_1/graders",
   projectId: "prj_1",
+  search: "",
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useParams: () => ({ projectId: routed.projectId }),
+  useSearchParams: () => new URLSearchParams(routed.search),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
@@ -200,6 +202,7 @@ const EXPECTED_DEFINITION: GraderLibraryEntry = {
   type: "llm_as_judge",
   scopeEditable: false,
   currentDefinitionVersion: 1,
+  definitionVersion: 1,
   modalities: ["chat", "voice"],
   gradingInstructions: null,
   requiredEvidence: ["transcript", "test_expected_behaviors"],
@@ -216,6 +219,7 @@ const LATENCY_DEFINITION: GraderLibraryEntry = {
   type: "code",
   scopeEditable: true,
   currentDefinitionVersion: 1,
+  definitionVersion: 1,
   modalities: ["chat", "voice"],
   gradingInstructions: null,
   requiredEvidence: ["turn_response_latency"],
@@ -304,6 +308,7 @@ function ScopeHarness() {
 beforeEach(() => {
   routed.pathname = "/projects/prj_1/graders";
   routed.projectId = "prj_1";
+  routed.search = "";
   vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal(
     "ResizeObserver",
@@ -436,6 +441,71 @@ describe("the project Graders surface", () => {
         production: null,
       }),
     );
+  });
+
+  it("opens a grader definition linked from evidence", async () => {
+    routed.search = "grader=grd_expected";
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+
+    expect(
+      await screen.findByRole("dialog", { name: "Expected behaviors" }),
+    ).toBeTruthy();
+  });
+
+  it("opens the immutable grader definition linked from a historical result", async () => {
+    routed.search =
+      `graderDefinition=${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}&definitionVersion=1`;
+    const current = {
+      ...EXPECTED_DEFINITION,
+      name: "Current renamed grader",
+      description: "The current description was written after this result.",
+      currentDefinitionVersion: 2,
+      definitionVersion: 2,
+    };
+    const historical = {
+      ...current,
+      currentDefinitionVersion: 2,
+      definitionVersion: 1,
+    };
+    const { asked } = apiAnswers({
+      ...standardAnswers("admin", [], [current]),
+      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
+        status: 200,
+        body: historical,
+      },
+    });
+    render(<GradersPage />);
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Grader definition v1",
+    });
+    expect(
+      within(dialog).getByText("Definition v1 used for this recorded result."),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText("Current renamed grader")).toBeNull();
+    expect(
+      within(dialog).queryByText(
+        "The current description was written after this result.",
+      ),
+    ).toBeNull();
+    expect(await within(dialog).findByText("v1")).toBeTruthy();
+    expect(
+      within(dialog).queryByRole("button", { name: "View active grader" }),
+    ).toBeNull();
+    expect(
+      within(dialog).queryByRole("button", { name: "Use in project" }),
+    ).toBeNull();
+    await waitFor(() => {
+      const request = asked.find((one) =>
+        one.path.startsWith(
+          `/v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}?`,
+        ),
+      );
+      const query = new URL(request?.path ?? "", "http://egma.test").searchParams;
+      expect(query.get("projectId")).toBe("prj_1");
+      expect(query.get("definitionVersion")).toBe("1");
+    });
   });
 
   it("separates active project policy from the grader library without repeated headings", async () => {

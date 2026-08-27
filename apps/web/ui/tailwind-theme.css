@@ -115,6 +115,8 @@
   --border-strong: var(--color-midnight);
   --focus: var(--color-ember);
   --accent: var(--color-ember);
+  --waveform-user: color-mix(in srgb, var(--foreground) 64%, transparent);
+  --waveform-agent: color-mix(in srgb, var(--color-ember) 72%, transparent);
   --action: var(--color-ember-deep);
   --action-hover: var(--color-ember-hover);
   --action-pressed: var(--color-ember-pressed);
@@ -414,6 +416,8 @@
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
   --accent: var(--color-ember);
+  --waveform-user: color-mix(in srgb, var(--foreground) 76%, transparent);
+  --waveform-agent: color-mix(in srgb, var(--color-ember) 84%, transparent);
   /*
    * The primary action's ink, lightened for the dark wash it sits on.
    *
@@ -571,6 +575,8 @@
   --color-accent-foreground: var(--foreground);
   --color-secondary-foreground: var(--foreground);
   --color-faint: var(--faint);
+  --color-waveform-user: var(--waveform-user);
+  --color-waveform-agent: var(--waveform-agent);
 
   /*
    * Ember Wash, for "selected, current, open, cited, or active-attention

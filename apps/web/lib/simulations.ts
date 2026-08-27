@@ -9,6 +9,7 @@
  */
 import type {
   GetSimulationResponse,
+  Refusal,
   RegradeSimulationResponse,
   TraceSpan,
 } from "@egma/platform-api/client";
@@ -119,3 +120,13 @@ export function citedTurnPositions(
 /** What the simulation page says before a whole-simulation regrade. */
 export const REGRADE_IS_NOT_A_REPLAY =
   "A regrade asks every grader in this simulation's frozen plan to grade the same evidence again. It does not conduct the simulation again: nothing is dialed, nothing is said, and the transcript does not change. New grades are added to history; earlier grades stay available.";
+
+/** Keep internal simulation ids out of a regrade refusal shown to a person. */
+export function regradeRefusalMessage(refusal: Refusal): string {
+  if (refusal.error === "unprocessable") {
+    return "This simulation did not finish with gradeable evidence, so it cannot be regraded.";
+  }
+  return refusal.message
+    .replace(/\bsimulation\s+sim_[a-z0-9]+\b/giu, "this simulation")
+    .replace(/\bsim_[a-z0-9]+\b/giu, "this simulation");
+}

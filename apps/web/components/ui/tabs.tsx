@@ -17,11 +17,11 @@ import { cn } from "@/lib/utils";
  * alongside, which is what every rule below reads.
  *
  * `DESIGN.md` calls a tab strip navigation: "Navigation row — support routine
- * navigation — colour feedback only." So nothing here moves. The transition
- * names colour properties and nothing else, the active mark appears rather than
- * fading in, and the label does not change weight — a weight change reflows the
- * strip, and a strip that shifts under the arrow keys is movement whatever it
- * is called.
+ * navigation — colour feedback only." So nothing here moves. The current tab
+ * uses a fixed 2px Ember edge and medium label weight. A segmented control
+ * keeps the approved top edge. A page or panel rail meets the content below it,
+ * so its edge sits at the bottom. The weight is reserved in the compact strip
+ * and changes no box dimensions.
  */
 function Tabs({
   className,
@@ -46,15 +46,15 @@ function Tabs({
  * The two shapes a strip of tabs takes in this product.
  *
  * - `default` is the segmented control: a quiet track holding the choices, and
- *   the current one raised out of it on Ember Wash. It is for a small closed
+ *   the current one on the plain product surface. It is for a small closed
  *   set that belongs inside a row of other controls.
  * - `line` is the rail: the choices sit on a hairline and the current one is
  *   marked on it — the mark alone, with no fill behind the label. It is for the
  *   top of a page or a panel, where the strip is what a whole region is
  *   switched by.
  *
- * The track's 8px input radius holds 6px button radii on 4px of padding, which
- * is the nesting the eye reads as one control rather than two.
+ * The track and choices use the product's square geometry. Four pixels of
+ * padding keep the segmented control readable as one unit.
  */
 const tabsListVariants = cva(
   [
@@ -95,10 +95,9 @@ function TabsList({
  * One choice in the strip.
  *
  * The current one always carries a mark that survives a greyscale screenshot:
- * the rail's 2px Ember rule under the `line` tab, and the raised bordered plate
- * around the `default` one. `DESIGN.md`: "State is not communicated by colour
- * alone." Only the segmented plate is filled with Ember Wash — a rail tab is
- * its mark, which is what `2B1-0` draws.
+ * a 2px rule at the content-facing edge. `DESIGN.md`: "State is not
+ * communicated by colour alone." The active fill stays plain so the mark and
+ * label do the work.
  *
  * There is no `focus-visible` rule here on purpose. `globals.css` draws the
  * product's Ember focus ring for everything a keyboard reaches, `[role="tab"]`
@@ -133,9 +132,9 @@ function TabsTrigger({
           "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
           /*
            * **Hover is for the tabs somebody might go to, not the one they are
-           * on.** The neutral plate and Ember Wash are both a background, and
-           * an unscoped hover wins: pointing at the current tab turned its wash
-           * grey and took the "current" half of the state with it. Found in a
+           * on.** The neutral hover and active surface are both backgrounds,
+           * and an unscoped hover wins: pointing at the current tab turned its
+           * surface grey and took the "current" half of the state with it. Found in a
            * browser, because the two rules never meet until a pointer is on
            * one. Scoping to `inactive` makes them mutually exclusive, so which
            * of them Tailwind happens to emit first stops mattering.
@@ -152,21 +151,9 @@ function TabsTrigger({
           "[&_svg:not([class*='size-'])]:size-4",
         ],
         [
-          /*
-           * The segmented plate: raised out of the track on Ember Wash behind
-           * a narrow Ember edge. **The wash is the plate's, not every tab's.**
-           * It was written unscoped, so the rail tab drew it as well — a block
-           * of wash that stops at the label's box, under a rail whose own mark
-           * is the 2px Ember rule. `2B1-0` draws the mark and nothing else, and
-           * on a dark surface the extra fill read as a second control.
-           *
-           * Scoped here rather than undone in the `line` block, for the reason
-           * the shared table learned the same week: two `background-color`
-           * rules of equal weight under one selector are decided by whichever
-           * Tailwind emits last, and that is not a decision.
-           */
-          "group-data-[variant=default]/tabs-list:data-[state=active]:bg-selected",
-          "group-data-[variant=default]/tabs-list:data-[state=active]:border-brand",
+          /* The segmented choice stays on the plain product surface. */
+          "group-data-[variant=default]/tabs-list:data-[state=active]:bg-surface",
+          "group-data-[variant=default]/tabs-list:data-[state=active]:font-medium",
         ],
         [
           /*
@@ -218,14 +205,15 @@ function TabsTrigger({
            * That is what `DESIGN.md` wants of a strip crossed by arrow key many
            * times a day.
            *
-           * One pixel of overhang is deliberate: the rule is 2px and the
-           * hairline it covers is 1px, so the mark reads as sitting *on* the
-           * rail rather than beside it.
+           * One pixel of overhang keeps the 2px mark crisp against the edge.
+           * A segmented choice keeps the approved top mark. A rail tab marks
+           * the bottom edge where it meets the panel it switches.
            */
           "after:absolute after:rounded-chip after:bg-transparent",
-          "group-data-[variant=line]/tabs-list:data-[state=active]:after:bg-brand",
+          "data-[state=active]:after:bg-brand",
           "group-data-[orientation=horizontal]/tabs:after:inset-x-0",
-          "group-data-[orientation=horizontal]/tabs:after:-bottom-px",
+          "group-data-[orientation=horizontal]/tabs:group-data-[variant=default]/tabs-list:after:-top-px",
+          "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:after:-bottom-px",
           "group-data-[orientation=horizontal]/tabs:after:h-0.5",
           "group-data-[orientation=vertical]/tabs:after:inset-y-0",
           "group-data-[orientation=vertical]/tabs:after:-right-px",

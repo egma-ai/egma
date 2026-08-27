@@ -56,10 +56,33 @@ describe("one run waiting for trace grades", () => {
     );
     expect(simulations.statusCode, JSON.stringify(simulations.body)).toBe(200);
     expect(
-      (simulations.body.simulations as Array<{ gradingState: string }>).map(
-        (simulation) => simulation.gradingState,
+      (simulations.body.simulations as Array<{
+        gradingState: string;
+        combinedScore: number | null;
+        startedAt: string | null;
+        endedAt: string | null;
+      }>).map(
+        (simulation) => ({
+          gradingState: simulation.gradingState,
+          combinedScore: simulation.combinedScore,
+          hasStartedAt: simulation.startedAt !== null,
+          hasEndedAt: simulation.endedAt !== null,
+        }),
       ),
-    ).toEqual(["pending", "pending"]);
+    ).toEqual([
+      {
+        gradingState: "pending",
+        combinedScore: null,
+        hasStartedAt: true,
+        hasEndedAt: true,
+      },
+      {
+        gradingState: "pending",
+        combinedScore: null,
+        hasStartedAt: true,
+        hasEndedAt: true,
+      },
+    ]);
 
     const events = await request(
       api.app,

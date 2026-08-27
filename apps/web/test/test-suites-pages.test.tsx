@@ -156,6 +156,19 @@ function runBuilderAnswers(options: {
   readonly role?: "admin" | "member" | "viewer";
   readonly started?: Stub | readonly Stub[];
 } = {}): void {
+  const started = options.started ?? {
+    status: 201,
+    body: {
+      id: "run_1",
+      projectId: "prj_1",
+      status: "pending",
+      suiteId: "ste_1",
+      suiteName: "Northside Ford",
+      suiteDeleted: false,
+      name: null,
+      expectedSimulationCount: 1,
+    },
+  };
   answers({
     "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
     "/v1/test-suites": {
@@ -187,29 +200,22 @@ function runBuilderAnswers(options: {
       status: 200,
       body: { tests: [testBody()], nextPageToken: null },
     },
-    "/v1/runs": options.started ?? {
-      status: 201,
-      body: {
-        id: "run_1",
-        projectId: "prj_1",
-        status: "pending",
-        suiteId: "ste_1",
-        suiteName: "Northside Ford",
-        suiteDeleted: false,
-        name: null,
-        expectedSimulationCount: 1,
-      },
-    },
+    "/v1/runs": [
+      { status: 200, body: { runs: [], nextPageToken: null } },
+      ...(Array.isArray(started) ? started : [started]),
+    ],
   });
 }
 
 async function chooseRunTarget(): Promise<void> {
-  fireEvent.change(await screen.findByLabelText("Test suite"), {
+  fireEvent.change(await screen.findByLabelText("Test suite *"), {
     target: { value: "ste_1" },
   });
-  fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agt_1" } });
-  await screen.findByRole("option", { name: /Production/ });
-  fireEvent.change(screen.getByLabelText("Connection"), { target: { value: "con_1" } });
+  fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
+  await screen.findByRole("option", { name: "Production" });
+  fireEvent.change(screen.getByLabelText("Connection *"), {
+    target: { value: "con_1" },
+  });
 }
 
 beforeEach(() => {
@@ -298,6 +304,15 @@ describe("the suite-first Tests route", () => {
     expect(screen.getByText("…and who calls.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "+ Write a test" })).toBeTruthy();
 
+    const teachingCell = screen
+      .getByText("One situation to put the agent in…")
+      .closest("td");
+    expect(teachingCell).toBeTruthy();
+    fireEvent.click(teachingCell!);
+    const name = screen.getByLabelText("Name");
+    expect(name).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(name));
+
     // Suite management moved to the suites list. Nothing here runs, renames or
     // deletes a suite, and there is no toolbar ⋮ left to hold them. Writing is
     // the grid's ghost row alone: the toolbar button said the same word twice
@@ -359,6 +374,103 @@ describe("the suite-first Tests route", () => {
     expect(await screen.findAllByRole("link", { name: "Northside Ford" })).toHaveLength(2);
     expect(screen.getByText("ste_1")).toBeTruthy();
     expect(screen.getByText("ste_2")).toBeTruthy();
+  });
+
+  it("starts with only the suite and agent, then reveals their dependent choices", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    runBuilderAnswers();
+
+    render(<NewRunPage />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Runs", hidden: true }),
+    ).toBeTruthy();
+    const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+    await waitFor(() => expect(document.activeElement).toBe(sheet));
+    expect(sheet.style.outline).toBe("none");
+    expect(Number.parseFloat(sheet.style.outlineOffset)).toBe(0);
+    expect(within(sheet).getByRole("button", { name: "Close" })).not.toBe(
+      document.activeElement,
+    );
+    expect(within(sheet).getByText("Run one test suite against one agent.")).toBeTruthy();
+    const suite = within(sheet).getByLabelText("Test suite *");
+    const agent = within(sheet).getByLabelText("Agent *");
+    expect(suite.getAttribute("aria-required")).toBe("true");
+    expect(agent.getAttribute("aria-required")).toBe("true");
+    expect(suite.getAttribute("data-slot")).toBe("select");
+    expect(agent.getAttribute("data-slot")).toBe("select");
+    expect(suite.className).not.toContain("appearance-none");
+    expect(agent.className).not.toContain("appearance-none");
+    expect(sheet.querySelector('[data-slot="run-select-chevron"]')).toBeNull();
+    expect(within(sheet).queryByLabelText("Connection *")).toBeNull();
+    expect(screen.queryByLabelText("Run name [optional]")).toBeNull();
+    expect(screen.queryByText("Choose an agent first.")).toBeNull();
+    const body = sheet.querySelector('[data-slot="sheet-body"]');
+    const footer = sheet.querySelector('[data-slot="sheet-footer"]');
+    expect(body?.className).toContain("gap-6");
+    expect(body?.className).toContain("p-6");
+    expect(footer?.className).toContain("justify-end");
+    expect(
+      within(footer as HTMLElement)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Cancel", "Start run"]);
+    expect((within(sheet).getByRole("button", { name: "Start run" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+
+    fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+      target: { value: "agt_1" },
+    });
+    const connection = await within(sheet).findByLabelText("Connection *");
+    expect(connection.getAttribute("aria-required")).toBe("true");
+    expect(within(sheet).getByRole("option", { name: "Production" })).toBeTruthy();
+    expect(within(sheet).queryByRole("option", { name: /Retell|voice/ })).toBeNull();
+    expect(screen.queryByLabelText("Run name [optional]")).toBeNull();
+
+    fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+      target: { value: "con_1" },
+    });
+    expect(screen.getByLabelText("Run name [optional]")).toBeTruthy();
+    expect(screen.queryByText("Leave blank to use the test suite name.")).toBeNull();
+    expect((within(sheet).getByRole("button", { name: "Start run" }) as HTMLButtonElement).disabled)
+      .toBe(true);
+  });
+
+  it.each(["Close", "Cancel"])(
+    "%s returns the clean Create run sheet to Runs",
+    async (control) => {
+      routed.pathname = "/projects/prj_1/runs/new";
+      routed.params = { projectId: "prj_1" };
+      runBuilderAnswers();
+
+      render(<NewRunPage />);
+
+      const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+      fireEvent.click(within(sheet).getByRole("button", { name: control }));
+      expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs");
+    },
+  );
+
+  it("keeps a changed run draft until its discard is confirmed", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    runBuilderAnswers();
+
+    render(<NewRunPage />);
+
+    const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+    fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+      target: { value: "ste_1" },
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+
+    expect(routed.push).not.toHaveBeenCalled();
+    const warning = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    fireEvent.click(within(warning).getByRole("button", { name: "Discard changes" }));
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs");
   });
 
   it("renames and permanently deletes a suite from the suites list row menu", async () => {
@@ -1542,6 +1654,7 @@ describe("the suite-first Tests route", () => {
         },
       },
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+      "/v1/runs": { status: 200, body: { runs: [], nextPageToken: null } },
     });
 
     render(<NewRunPage />);
@@ -1557,7 +1670,7 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     await chooseRunTarget();
-    fireEvent.change(screen.getByLabelText("Run name (optional)"), {
+    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
       target: { value: "Viewer can inspect this intent" },
     });
 
@@ -1591,10 +1704,11 @@ describe("the suite-first Tests route", () => {
       },
       "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
       "/v1/tests": { status: 200, body: { tests: [], nextPageToken: null } },
+      "/v1/runs": { status: 200, body: { runs: [], nextPageToken: null } },
     });
 
     render(<NewRunPage />);
-    fireEvent.change(await screen.findByLabelText("Test suite"), {
+    fireEvent.change(await screen.findByLabelText("Test suite *"), {
       target: { value: "ste_1" },
     });
 
@@ -1634,16 +1748,16 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     await chooseRunTarget();
-    fireEvent.change(screen.getByLabelText("Run name (optional)"), {
+    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
       target: { value: "Morning check" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
 
     expect(await screen.findByText("Egma could not answer.")).toBeTruthy();
-    expect((screen.getByLabelText("Test suite") as HTMLSelectElement).value).toBe("ste_1");
-    expect((screen.getByLabelText("Agent") as HTMLSelectElement).value).toBe("agt_1");
-    expect((screen.getByLabelText("Connection") as HTMLSelectElement).value).toBe("con_1");
-    expect((screen.getByLabelText("Run name (optional)") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Test suite *") as HTMLSelectElement).value).toBe("ste_1");
+    expect((screen.getByLabelText("Agent *") as HTMLSelectElement).value).toBe("agt_1");
+    expect((screen.getByLabelText("Connection *") as HTMLSelectElement).value).toBe("con_1");
+    expect((screen.getByLabelText("Run name [optional]") as HTMLInputElement).value).toBe(
       "Morning check",
     );
 
@@ -1653,7 +1767,7 @@ describe("the suite-first Tests route", () => {
         sent.filter((request) => request.path === "/v1/runs" && request.method === "POST"),
       ).toHaveLength(2);
     });
-    fireEvent.change(screen.getByLabelText("Run name (optional)"), {
+    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
       target: { value: "Evening check" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
@@ -1729,27 +1843,32 @@ describe("the suite-first Tests route", () => {
           nextPageToken: null,
         },
       },
-      "/v1/runs": {
-        status: 201,
-        body: {
-          id: "run_1",
-          projectId: "prj_1",
-          status: "pending",
-          suiteId: "ste_1",
-          suiteName: "Northside Ford",
-          suiteDeleted: false,
-          name: null,
-          expectedSimulationCount: 2,
+      "/v1/runs": [
+        { status: 200, body: { runs: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            id: "run_1",
+            projectId: "prj_1",
+            status: "pending",
+            suiteId: "ste_1",
+            suiteName: "Northside Ford",
+            suiteDeleted: false,
+            name: null,
+            expectedSimulationCount: 2,
+          },
         },
-      },
+      ],
     });
 
     render(<NewRunPage />);
     await screen.findByRole("option", { name: "Northside Ford" });
-    fireEvent.change(screen.getByLabelText("Test suite"), { target: { value: "ste_1" } });
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agt_1" } });
-    await screen.findByRole("option", { name: /Production/ });
-    fireEvent.change(screen.getByLabelText("Connection"), { target: { value: "con_1" } });
+    fireEvent.change(screen.getByLabelText("Test suite *"), { target: { value: "ste_1" } });
+    fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
+    await screen.findByRole("option", { name: "Production" });
+    fireEvent.change(screen.getByLabelText("Connection *"), {
+      target: { value: "con_1" },
+    });
 
     expect(screen.queryByText(/select the tests/i)).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();

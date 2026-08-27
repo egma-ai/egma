@@ -199,6 +199,7 @@ const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
   // The one span the whole conversation happened inside, emitted last: when it
   // arrives, the conversation is over.
   simulation: "root",
+  recording: "recording",
   human_turn: "turn:human",
   agent_turn: "turn:agent",
   tool_call: "tool",

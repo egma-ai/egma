@@ -1,8 +1,12 @@
 import { traceStore } from "../clickhouse/client.ts";
 import {
+  aggregateOf,
+  measuresFromSpans,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   REPORTED_MEASUREMENTS_PAYLOAD_PATH,
   reportedMeasurementsOf,
+  turnResponseLatencySpanKinds,
+  type MeasuredFromSpans,
   type ReportedMeasurement,
 } from "@egma/metrics";
 import type { AuthContext } from "./context.ts";
@@ -213,6 +217,21 @@ export type TraceSummary = TraceFacts & {
    * emits no turn spans at all.
    */
   readonly preview: string;
+  /**
+   * The tail wait across the turn responses this trace measured, in
+   * milliseconds. `null` means this trace carried no usable
+   * `turn_response_latency` measurement; zero remains a real measurement.
+   *
+   * Computed for the whole page through the same span projection and the same
+   * percentile arithmetic as trace detail. It is stored nowhere and is never
+   * worked out in SQL.
+   */
+  readonly turnResponseLatencyP90Milliseconds: number | null;
+  /**
+   * True when the P90 was computed from the bounded prefix of a larger trace.
+   * A platform-reported measure describes the whole call and stays complete.
+   */
+  readonly turnResponseLatencyP90Partial: boolean;
 };
 
 export type TraceList = {
@@ -728,21 +747,191 @@ export async function listTraces(
         })
       : undefined;
 
-  const previews = await previewsFor(
-    tenancy,
-    page.map((row) => row.trace_id),
-    // The page is newest first, so its last row is the earliest any span of any
-    // trace on it can be.
-    last === undefined ? window.from : BigInt(last.started_at_micros),
-    window.to,
-  );
+  const traceIds = page.map((row) => row.trace_id);
+  const [previews, turnResponseLatencyP90s] = await Promise.all([
+    previewsFor(
+      tenancy,
+      traceIds,
+      // The page is newest first, so its last row is the earliest any span of
+      // any trace on it can be.
+      last === undefined ? window.from : BigInt(last.started_at_micros),
+      window.to,
+    ),
+    turnResponseLatencyP90sFor(
+      tenancy,
+      traceIds,
+      // Use the request's exact window. A detail read made from this list uses
+      // the same bounds, and the two projections must keep the same prefix when
+      // a trace is larger than the read cap.
+      window.from,
+      window.to,
+    ),
+  ]);
 
   return {
-    traces: page.map((row) => ({
-      ...factsOf(row.trace_id, row),
-      preview: previews.get(row.trace_id) ?? "",
-    })),
+    traces: page.map((row) => {
+      const facts = factsOf(row.trace_id, row);
+      const latency = turnResponseLatencyP90s.get(row.trace_id) ?? null;
+      return {
+        ...facts,
+        preview: previews.get(row.trace_id) ?? "",
+        turnResponseLatencyP90Milliseconds: latency?.milliseconds ?? null,
+        turnResponseLatencyP90Partial:
+          latency !== null &&
+          latency.origin !== "reported" &&
+          facts.spanCount > MAXIMUM_SPANS_PER_TRACE,
+      };
+    }),
     nextCursor,
+  };
+}
+
+/**
+ * The span fields the shared metric arithmetic needs, plus the trace they
+ * belong to while one page is projected in a batch.
+ *
+ * The query ranks every stored span before it keeps only metric-relevant rows.
+ * That order matters: detail keeps the first `MAXIMUM_SPANS_PER_TRACE` rows and
+ * computes a partial metric from that prefix, so filtering first would let a
+ * later timing span into the list value even though detail had truncated it.
+ */
+type PageMeasureSpanRow = {
+  readonly trace_id: string;
+  readonly span_id: string;
+  readonly parent_span_id: string;
+  readonly name: string;
+  readonly kind: string;
+  readonly started_at_micros: string;
+  readonly duration_ns: string;
+};
+
+type PageRootSliceRow = RootSliceRow & {
+  readonly trace_id: string;
+};
+
+type PageTurnResponseLatencyP90 = {
+  readonly milliseconds: number;
+  readonly origin: MeasuredFromSpans["origin"];
+};
+
+/**
+ * One batched projection of a page onto its P90 turn-response latency.
+ *
+ * It performs no detail reads. One bounded span query fetches only the rows
+ * the canonical measure can use from each trace's detail-sized prefix, and one
+ * root query fetches the reported-measurement corner for every trace. The
+ * shared `measuresFromSpans` and `aggregateOf` functions then decide source
+ * priority, derivation, units, invalid samples, and percentile arithmetic.
+ */
+async function turnResponseLatencyP90sFor(
+  tenancy: Tenancy,
+  traceIds: readonly string[],
+  fromMicroseconds: bigint,
+  toMicroseconds: bigint,
+): Promise<Map<string, PageTurnResponseLatencyP90 | null>> {
+  if (traceIds.length === 0) return new Map();
+
+  const where = `${tenancy.clause}
+       and started_at >= ${asDateTime64(fromMicroseconds)}
+       and started_at < ${asDateTime64(toMicroseconds)}
+       and trace_id in {trace_ids:Array(String)}`;
+  const parameters = {
+    ...tenancy.parameters,
+    trace_ids: [...traceIds],
+    turn_latency_kinds: [...turnResponseLatencySpanKinds()],
+  };
+
+  const [rows, roots] = await Promise.all([
+    rowsOf<PageMeasureSpanRow>(
+      `select
+       trace_id,
+       span_id,
+       parent_span_id,
+       name,
+       kind,
+       started_at_micros,
+       duration_ns
+     from (
+       select
+         trace_id,
+         span_id,
+         parent_span_id,
+         name,
+         kind,
+         toString(toUnixTimestamp64Micro(started_at)) as started_at_micros,
+         toString(duration_ns) as duration_ns,
+         row_number() over (
+           partition by trace_id order by started_at asc, span_id asc
+         ) as trace_position
+       from ${SPANS_TABLE} final
+       where ${where}
+     )
+     where trace_position <= ${MAXIMUM_SPANS_PER_TRACE}
+       and kind in {turn_latency_kinds:Array(String)}
+     order by trace_id asc, trace_position asc`,
+      parameters,
+    ),
+    rowsOf<PageRootSliceRow>(
+      `select
+       trace_id,
+       span_id,
+       normalised
+     from (
+       select
+         trace_id,
+         span_id,
+         JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
+         row_number() over (
+           partition by trace_id order by started_at asc, span_id asc
+         ) as root_position
+       from ${SPANS_TABLE} final
+       where ${where}
+         and parent_span_id = ''
+     )
+     where root_position = 1`,
+      parameters,
+    ),
+  ]);
+
+  const rowsByTrace = new Map<string, PageMeasureSpanRow[]>();
+  for (const row of rows) {
+    const held = rowsByTrace.get(row.trace_id);
+    if (held === undefined) rowsByTrace.set(row.trace_id, [row]);
+    else held.push(row);
+  }
+  const rootsByTrace = new Map(roots.map((root) => [root.trace_id, root]));
+
+  return new Map<string, PageTurnResponseLatencyP90 | null>(
+    traceIds.map((traceId) => {
+      const projected = transcriptOf(
+        (rowsByTrace.get(traceId) ?? []).map(measureSpanRowAsSpanRow),
+      );
+      const measured = measuresFromSpans({
+        ...projected,
+        reported: reportedOn(rootsByTrace.get(traceId)),
+      }).find((one) => one.measure === "turn_response_latency");
+      const p90 =
+        measured === undefined ? undefined : aggregateOf(measured, "p90");
+      return [
+        traceId,
+        measured === undefined || p90 === undefined
+          ? null
+          : { milliseconds: p90, origin: measured.origin },
+      ] as const;
+    }),
+  );
+}
+
+/** Supply only display fields the metric projection never reads. */
+function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
+  return {
+    ...row,
+    status: "",
+    text: "",
+    audio_url: "",
+    tool_name: "",
+    tool_arguments: "",
+    tool_result: "",
   };
 }
 

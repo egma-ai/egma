@@ -45,6 +45,7 @@ export {
   arithmeticMeanOf,
   everySpanIn,
   measuresFromSpans,
+  turnResponseLatencySpanKinds,
   worstSampleOf,
   type MeasuredFromSpans,
   type Sample,

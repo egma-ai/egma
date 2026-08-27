@@ -76,8 +76,18 @@ const traceFactsSchema = {
 
 const traceSummarySchema = {
   ...traceFactsSchema,
-  properties: { ...traceFactsSchema.properties, preview: stringSchema },
-  required: [...traceFactsSchema.required, "preview"],
+  properties: {
+    ...traceFactsSchema.properties,
+    preview: stringSchema,
+    turnResponseLatencyP90Milliseconds: nullable(numberSchema),
+    turnResponseLatencyP90Partial: booleanSchema,
+  },
+  required: [
+    ...traceFactsSchema.required,
+    "preview",
+    "turnResponseLatencyP90Milliseconds",
+    "turnResponseLatencyP90Partial",
+  ],
 } as const;
 
 const traceSpanReference = { $ref: "#/$defs/traceSpan" } as const;

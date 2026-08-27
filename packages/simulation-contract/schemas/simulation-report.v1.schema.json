@@ -265,7 +265,7 @@
       "type": ["string", "null"]
     },
     "audio_recording": {
-      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; the report stores only the recording reference.",
+      "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; its trace carries audio sample zero on the same clock as spoken turns.",
       "type": "object",
       "additionalProperties": false,
       "required": ["recording"],

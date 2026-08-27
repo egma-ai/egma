@@ -30,7 +30,7 @@ from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
 from .mock_tools import ExchangedToolCall, MockToolSeam
 from .plugs import ConnectionPlug, PlugError, VoiceConnection, plug_for
-from .recording import RECORDING_NAME
+from .recording import RECORDING_NAME, AudioFacts
 from .spec import SimulationSpec
 from .speech import SpeechProviders, voice_from_models
 
@@ -60,9 +60,14 @@ class Assembled:
     record then claims nothing about tools."""
 
     @property
+    def recording(self) -> AudioFacts | None:
+        """The stored recording and its trace-clock origin, once available."""
+        return None if self.conductor is None else self.conductor.audio
+
+    @property
     def audio(self) -> dict | None:
         """The contract's audio block once the exchange is over, else ``None``."""
-        measured = None if self.conductor is None else self.conductor.audio
+        measured = self.recording
         return None if measured is None else measured.as_report()
 
     @property
