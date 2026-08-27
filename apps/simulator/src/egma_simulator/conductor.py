@@ -1033,7 +1033,10 @@ class VoiceConductor:
                 exc_info=True,
             )
             return
-        self.audio = AudioFacts(recording=reference)
+        self.audio = AudioFacts(
+            recording=reference,
+            started_unix_nano=self._opened_unix_nano,
+        )
 
     async def _run(self) -> None:
         while self._ending is None:

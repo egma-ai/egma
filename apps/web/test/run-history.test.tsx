@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
+import { EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID } from "../lib/graders.ts";
 import type { Me } from "../lib/me.ts";
+import { REGRADE_IS_NOT_A_REPLAY } from "../lib/simulations.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 const routed = vi.hoisted(() => ({
@@ -152,10 +154,157 @@ function simulation(overrides: Record<string, unknown> = {}) {
     personaVersionId: "prsv_1",
     status: "completed",
     gradingState: "complete",
+    combinedScore: 1,
     reason: null,
+    startedAt: "2026-08-21T10:00:01.000Z",
+    endedAt: "2026-08-21T10:01:00.000Z",
     modality: "chat",
     hasRecording: false,
     mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
+    ...overrides,
+  };
+}
+
+function simulationEvidence(overrides: Record<string, unknown> = {}) {
+  const tool = {
+    spanId: "span_tool",
+    parentSpanId: "span_agent",
+    name: "lookup_appointment",
+    kind: "tool",
+    status: "ok",
+    startedAt: "2026-08-21T10:00:05.000Z",
+    durationNs: "250000000",
+    text: "",
+    audioUrl: "",
+    toolName: "lookup_appointment",
+    toolArguments: '{"customer":"Ada"}',
+    toolResult: '{"appointment":"Tuesday at 10"}',
+    spans: [],
+  };
+  const human = {
+    spanId: "span_human",
+    parentSpanId: "root",
+    name: "turn:human",
+    kind: "turn:human",
+    status: "ok",
+    startedAt: "2026-08-21T10:00:02.000Z",
+    durationNs: "1000000000",
+    text: "Can you find my appointment?",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    spans: [],
+  };
+  const agent = {
+    spanId: "span_agent",
+    parentSpanId: "root",
+    name: "turn:agent",
+    kind: "turn:agent",
+    status: "ok",
+    startedAt: "2026-08-21T10:00:04.000Z",
+    durationNs: "2000000000",
+    text: "I found it for Tuesday at 10.",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    spans: [tool],
+  };
+  return {
+    id: "sim_1",
+    projectId: "prj_1",
+    runId: "run_1",
+    runName: "Release check",
+    position: 1,
+    status: "completed",
+    gradingState: "complete",
+    grades: [
+      {
+        projectGraderId: "grd_1",
+        graderDefinitionId: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
+        graderDefinitionVersion: 2,
+        graderName: "expected_behaviors",
+        score: 1,
+        details: {
+          rationale: "The agent found and confirmed the appointment.",
+          assertions: [
+            {
+              key: "behavior_1",
+              score: 1,
+              rationale: "The agent found and confirmed the appointment.",
+              citedSpanIds: ["span_agent"],
+            },
+          ],
+        },
+        passThreshold: 0.8,
+        result: "passed",
+        gradedAt: "2026-08-21T10:01:00.000Z",
+      },
+    ],
+    gradeHistory: [],
+    combinedScore: 1,
+    reason: null,
+    modality: "chat",
+    createdAt: "2026-08-21T10:00:00.000Z",
+    startedAt: "2026-08-21T10:00:01.000Z",
+    endedAt: "2026-08-21T10:01:00.000Z",
+    providerReference: null,
+    hasRecording: false,
+    measures: { durationMs: 59_000, turnCount: 2, toolCallCount: 1 },
+    metrics: [],
+    test: {
+      id: "tst_1",
+      versionId: "tstv_1",
+      name: "Books service",
+      scenario: "Find the caller's appointment.",
+      expectedBehaviors: ["Finds and confirms the appointment"],
+    },
+    persona: {
+      id: "prs_1",
+      name: "Patient caller",
+      versionId: "prsv_1",
+      traits: null,
+    },
+    agent: { id: "agt_1", name: "Front desk", archived: false },
+    connection: { id: "con_1", name: "retell-staging", archived: false },
+    connectionSnapshot: {
+      agentPlatform: "retell",
+      connectionType: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      modality: "chat",
+      topology: "hosted-broker",
+      environment: "staging",
+      config: {},
+    },
+    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
+    mockTools: { defaults: [], overrides: [] },
+    gradingPlan: {
+      state: "run_start",
+      capturedAt: "2026-08-21T10:00:00.000Z",
+      items: [
+        {
+          projectGraderId: "grd_1",
+          graderDefinitionId: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
+          graderDefinitionVersion: 2,
+          graderName: "expected_behaviors",
+          passThreshold: 0.8,
+        },
+      ],
+    },
+    transcript: {
+      traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      startedAt: "2026-08-21T10:00:01.000Z",
+      endedAt: "2026-08-21T10:01:00.000Z",
+      durationNs: "59000000000",
+      spanCount: 3,
+      turnCounts: { human: 1, agent: 1 },
+      toolSpanCount: 1,
+      erroredSpanCount: 0,
+      turns: [human, agent],
+      spans: [],
+      spansTruncated: false,
+    },
     ...overrides,
   };
 }
@@ -184,6 +333,20 @@ afterEach(() => {
 });
 
 describe("run history after suites", () => {
+  it("keeps one Create a run action on the empty page", async () => {
+    answers({
+      ...shellStubs(),
+      "/v1/runs": {
+        status: 200,
+        body: { runs: [], nextPageToken: null },
+      },
+    });
+    render(<RunsPage />);
+
+    expect(await screen.findByText("Create your first simulation run")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: "Create a run" })).toHaveLength(1);
+  });
+
   it("shows the run name and the suite's current name as separate facts", async () => {
     answers({
       ...shellStubs(),
@@ -198,9 +361,8 @@ describe("run history after suites", () => {
     expect(within(table).getByRole("link", { name: "Release check" }).getAttribute("href")).toBe(
       "/projects/prj_1/runs/run_1",
     );
-    expect(
-      within(table).getByRole("link", { name: "Northside Ford" }).getAttribute("href"),
-    ).toBe("/projects/prj_1/tests/suites/ste_1");
+    expect(within(table).getByText("Northside Ford")).toBeTruthy();
+    expect(within(table).queryByRole("link", { name: "Northside Ford" })).toBeNull();
     expect(
       within(table)
         .getAllByRole("columnheader")
@@ -263,11 +425,13 @@ describe("one run after suites", () => {
       status: 200,
       body: { simulations: [simulation()], nextPageToken: null },
     },
+    evidenceRead: Stub | readonly Stub[] = { status: 200, body: simulationEvidence() },
   ): Record<string, Stub | readonly Stub[]> {
     return {
       "/api/me": { status: 200, body: ME },
       "/v1/runs/run_1": { status: 200, body: detail },
       "/v1/runs/run_1/simulations": pages,
+      "/v1/simulations/sim_1": evidenceRead,
       "/v1/runs/run_1/cancel": { status: 200, body: detail },
     };
   }
@@ -277,15 +441,247 @@ describe("one run after suites", () => {
     answers(detailStubs());
     render(<RunDetailPage />);
 
-    expect(await screen.findByRole("heading", { name: "Release check" })).toBeTruthy();
+    const title = await screen.findByRole("heading", { name: "Release check" });
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(title.closest("nav")).toBe(navigation);
+    expect(
+      within(navigation).getByRole("link", { name: "Runs" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/runs");
+    expect(navigation.textContent).toBe("Runs/Release check");
     const suite = screen.getByRole("link", { name: "Northside Ford" });
     expect(suite.getAttribute("href")).toBe("/projects/prj_1/tests/suites/ste_1");
-    expect(await screen.findByRole("link", { name: "Books service" })).toBeTruthy();
+    for (const link of [
+      suite,
+      screen.getByRole("link", { name: "Front desk" }),
+      screen.getByRole("link", { name: "retell-staging" }),
+    ]) {
+      expect(link.className).toContain("no-underline");
+      expect(link.className).toContain("pointer-hover:underline");
+    }
+    const first = await screen.findByRole("button", { name: /Books service,/u });
+    expect(first.getAttribute("aria-label")).toBe(
+      "Books service, Patient caller, Completed",
+    );
+    expect(within(first).queryByText(/Score|59s/u)).toBeNull();
+    expect(first.getAttribute("aria-pressed")).toBe("true");
+    expect(first.className).toContain("bg-selected");
+    expect(first.className).toContain("before:bg-brand");
+    expect(first.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(screen.getByText("1 simulation")).toBeTruthy();
+    const summary = screen.getByRole("group", { name: "Run summary" });
+    for (const label of ["Status", "Started", "Test suite", "Agent", "Connection"]) {
+      expect(within(summary).getByText(label)).toBeTruthy();
+    }
+    const completedStatus = within(summary)
+      .getByText("Completed")
+      .closest('[data-slot="run-status"]');
+    expect(completedStatus).not.toBeNull();
+    expect(completedStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(completedStatus?.querySelector('[data-slot="run-status-loader"]')).toBeNull();
+    const resultsTab = screen.getByRole("tab", { name: "Results summary" });
+    expect(resultsTab.getAttribute("data-state")).toBe("active");
+    expect(resultsTab.className).toContain(
+      "group-data-[variant=line]/tabs-list:after:-bottom-px",
+    );
+    expect(resultsTab.className).not.toContain("bg-selected");
+    const graderResults = await screen.findByRole("region", { name: "Grader results" });
+    const expected = within(graderResults).getByRole("region", {
+      name: "Expected behaviors",
+    });
+    const graderLink = within(expected).getByRole("link", {
+      name: "Expected behaviors",
+    });
+    expect(graderLink.getAttribute("href")).toBe(
+      `/projects/prj_1/graders?graderDefinition=${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}&definitionVersion=2`,
+    );
+    expect(graderLink.className).toContain("pointer-hover:underline");
+    const graderHeading = within(expected).getByRole("heading", {
+      name: "Grader Expected behaviors",
+    });
+    expect(graderHeading.textContent).toBe("Grader · Expected behaviors");
+    const passed = within(expected).getByText("Passed");
+    expect(passed.className).toContain("text-success");
+    expect(passed.parentElement?.textContent).toBe("Result · Passed");
+    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
+    const behaviorTable = within(expected).getByRole("table", {
+      name: "Expected behaviors results",
+    });
+    expect(
+      within(behaviorTable)
+        .getAllByRole("cell")
+        .map((cell) => cell.getAttribute("data-label")),
+    ).toEqual(["Expected behavior", "Grader result", "Total Score"]);
+    expect(
+      within(behaviorTable).getByRole("columnheader", { name: "Total Score" })
+        .className,
+    ).toContain("text-center");
+    expect(within(behaviorTable).getAllByRole("cell")[2]?.className).toContain(
+      "text-center",
+    );
+    expect(within(behaviorTable).getByText("Finds and confirms the appointment"))
+      .toBeTruthy();
+    expect(within(behaviorTable).getByText("The agent found and confirmed the appointment."))
+      .toBeTruthy();
+    const simulationSummary = screen.getByRole("region", {
+      name: "Simulation summary",
+    });
+    for (const label of [
+      "Combined score",
+      "Duration",
+      "Total turns",
+      "P90 turn latency",
+    ]) {
+      expect(within(simulationSummary).getByText(label)).toBeTruthy();
+    }
+    expect(within(simulationSummary).getByText("Not recorded")).toBeTruthy();
+    expect(
+      simulationSummary.compareDocumentPosition(expected) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "What was measured" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Frozen grading plan" })).toBeNull();
+    const resultsPanel = screen.getByRole("tabpanel", { name: "Results summary" });
+    expect(resultsPanel.className).toContain("overflow-y-auto");
+    expect(resultsPanel.parentElement?.className).toContain("overflow-hidden");
+    expect(screen.getByRole("button", { name: "Regrade" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open full simulation" })).toBeNull();
+    const selectedHeader = document.querySelector(
+      '[data-slot="selected-simulation-header"]',
+    );
+    expect(selectedHeader?.textContent).toBe("Books service");
+    expect(selectedHeader?.textContent).not.toContain("completed");
+    expect(selectedHeader?.textContent).not.toContain("Graded");
     expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
     expect(
       sent.some(
         (request) =>
           request.method === "GET" && request.path === "/v1/runs/run_1/simulations",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps expected behaviors visible while grading is still running", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(
+        runDetail(),
+        undefined,
+        {
+          status: 200,
+          body: simulationEvidence({
+            gradingState: "running",
+            grades: [],
+            gradeHistory: [],
+            combinedScore: null,
+          }),
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const expected = await screen.findByRole("region", { name: "Expected behaviors" });
+    const table = within(expected).getByRole("table", {
+      name: "Expected behaviors results",
+    });
+    expect(within(table).getByText("Finds and confirms the appointment")).toBeTruthy();
+    expect(within(table).getByText("Waiting for the grader.")).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Total Score" })).toBeTruthy();
+    expect(within(expected).getByText("Total Score —")).toBeTruthy();
+  });
+
+  it("shows partial-transcript disclosure before the recorded conversation", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const read = simulationEvidence();
+    answers(
+      detailStubs(
+        runDetail(),
+        undefined,
+        {
+          status: 200,
+          body: {
+            ...read,
+            transcript: {
+              ...read.transcript,
+              spanCount: 500,
+              spansTruncated: true,
+            },
+          },
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Transcript & audio" }));
+    expect(
+      await screen.findByText(/later tool calls or speech may be absent/iu),
+    ).toBeTruthy();
+  });
+
+  it("keeps the compact p90 summary, grade history, and regrade in the run", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const read = simulationEvidence();
+    const older = {
+      ...read.grades[0],
+      score: 0.5,
+      result: "failed",
+      gradedAt: "2026-08-21T09:01:00.000Z",
+    };
+    const completeEvidence = simulationEvidence({
+      gradeHistory: [older],
+      metrics: [
+        {
+          measure: "turn_response_latency",
+          unit: "milliseconds",
+          derived: false,
+          samples: [420, 6249],
+          spanIds: ["span_agent"],
+          mean: 760,
+          p50: 420,
+          p90: 6249,
+          partial: true,
+        },
+      ],
+    });
+    answers({
+      ...detailStubs(
+        runDetail(),
+        undefined,
+        [
+          { status: 200, body: completeEvidence },
+          { status: 200, body: { ...completeEvidence, gradingState: "pending" } },
+        ],
+      ),
+      "/v1/simulations/sim_1/regrade": {
+        status: 200,
+        body: { simulationId: "sim_1", reopened: 1, alreadyWaiting: 0 },
+      },
+    });
+    render(<RunDetailPage />);
+
+    const summary = await screen.findByRole("region", {
+      name: "Simulation summary",
+    });
+    expect(within(summary).getByText("P90 turn latency")).toBeTruthy();
+    expect(within(summary).getByText("6250 ms · partial")).toBeTruthy();
+    expect(within(summary).queryByText("760")).toBeNull();
+    expect(within(summary).queryByText("420")).toBeNull();
+    expect(screen.queryByRole("region", { name: "What was measured" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Frozen grading plan" })).toBeNull();
+    const history = screen.getByText("1 earlier grade");
+    fireEvent.click(history);
+    expect(within(history.closest("details")!).getByText(/score 0.5/iu)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Regrade" }));
+    const dialog = screen.getByRole("dialog", { name: "Regrade “Books service”?" });
+    expect(within(dialog).getByText(REGRADE_IS_NOT_A_REPLAY)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
+    expect(
+      await screen.findByText(/queued for a whole-simulation regrade/iu),
+    ).toBeTruthy();
+    expect(
+      sent.some(
+        (request) =>
+          request.path === "/v1/simulations/sim_1/regrade" && request.method === "POST",
       ),
     ).toBe(true);
   });
@@ -296,6 +692,25 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
+  });
+
+  it("does not claim that a pending run has started", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(
+        runDetail({
+          status: "pending",
+          startedAt: null,
+          finishedAt: null,
+          expectedSimulationCount: 0,
+        }),
+        { status: 200, body: { simulations: [], nextPageToken: null } },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const summary = await screen.findByRole("group", { name: "Run summary" });
+    expect(within(summary).getByText("Not started")).toBeTruthy();
   });
 
   it("shows a deleted suite as history, not as a live link", async () => {
@@ -311,7 +726,7 @@ describe("one run after suites", () => {
   it("loads more simulations with the cursor and keeps the first page", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(
-      detailStubs(runDetail(), [
+      detailStubs(runDetail({ expectedSimulationCount: 2 }), [
         {
           status: 200,
           body: { simulations: [simulation()], nextPageToken: "sim_next" },
@@ -329,9 +744,13 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
+    expect(await screen.findByText("2 simulations")).toBeTruthy();
+    expect(screen.queryByText("1 loaded")).toBeNull();
+    expect(screen.getByText("More simulations are available")).toBeTruthy();
+    expect(screen.queryByText(/simulations so far/iu)).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
-    expect(await screen.findByRole("link", { name: "Reschedules service" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Books service" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Reschedules service,/u })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Books service,/u })).toBeTruthy();
     expect(
       sent.some(
         (request) =>
@@ -344,24 +763,505 @@ describe("one run after suites", () => {
   it("keeps execution failure separate from grades without capability text", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(
-      detailStubs(runDetail(), {
-        status: 200,
-        body: {
-          simulations: [
-            simulation({
-              status: "failed",
-              gradingState: "not_requested",
-              reason: "not_answered",
-            }),
-          ],
-          nextPageToken: null,
+      detailStubs(
+        runDetail(),
+        {
+          status: 200,
+          body: {
+            simulations: [
+              simulation({
+                status: "failed",
+                gradingState: "not_requested",
+                combinedScore: null,
+                reason: "not_answered",
+              }),
+            ],
+            nextPageToken: null,
+          },
         },
-      }),
+        {
+          status: 200,
+          body: simulationEvidence({
+            status: "failed",
+            gradingState: "not_requested",
+            grades: [],
+            combinedScore: null,
+            reason: "not_answered",
+            gradingPlan: null,
+            transcript: null,
+          }),
+        },
+      ),
     );
     render(<RunDetailPage />);
 
-    expect(await screen.findByText(/execution problem, not a low grade/u)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Execution failed/u })).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Egma could not conduct this simulation. This is an execution problem, not a failed grade.",
+    );
+    expect(
+      document.querySelector('[data-slot="selected-simulation-header"]')?.textContent,
+    ).not.toContain("Execution failed");
+    expect(await screen.findByText("No grading was requested")).toBeTruthy();
+    expect(screen.queryByText("No score")).toBeNull();
     expect(screen.queryByText(/capabilit/u)).toBeNull();
+  });
+
+  it("does not expose a raw failure reason when older evidence has no detail", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(
+        runDetail(),
+        {
+          status: 200,
+          body: {
+            simulations: [
+              simulation({
+                status: "failed",
+                gradingState: "not_requested",
+                combinedScore: null,
+                reason: "simulator_error",
+              }),
+            ],
+            nextPageToken: null,
+          },
+        },
+        {
+          status: 200,
+          body: simulationEvidence({
+            status: "failed",
+            gradingState: "not_requested",
+            grades: [],
+            combinedScore: null,
+            reason: "simulator_error",
+            gradingPlan: null,
+            transcript: null,
+          }),
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Egma could not conduct this simulation.");
+    expect(alert.textContent).not.toContain("simulator_error");
+  });
+
+  it("switches simulations in place and ignores a slower first detail read", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const first = simulation();
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      combinedScore: 0.4,
+    });
+    answers({
+      ...detailStubs(
+        runDetail({ expectedSimulationCount: 2 }),
+        {
+          status: 200,
+          body: { simulations: [first, second], nextPageToken: null },
+        },
+        "never",
+      ),
+      "/v1/simulations/sim_2": {
+        status: 200,
+        body: simulationEvidence({
+          id: "sim_2",
+          position: 2,
+          combinedScore: 0.4,
+          test: {
+            id: "tst_2",
+            versionId: "tstv_2",
+            name: "Reschedules service",
+            scenario: "Move the appointment.",
+            expectedBehaviors: ["Moves the appointment"],
+          },
+          grades: [
+            {
+              projectGraderId: "grd_2",
+              graderDefinitionId: "grl_2",
+              graderDefinitionVersion: 1,
+              graderName: "policy_grader",
+              score: 0.4,
+              details: { rationale: "The requested day was not confirmed." },
+              passThreshold: 0.8,
+              result: "failed",
+              gradedAt: "2026-08-21T10:02:00.000Z",
+            },
+          ],
+          gradingPlan: {
+            state: "run_start",
+            capturedAt: "2026-08-21T10:00:00.000Z",
+            items: [
+              {
+                projectGraderId: "grd_2",
+                graderDefinitionId: "grl_2",
+                graderDefinitionVersion: 1,
+                graderName: "policy_grader",
+                passThreshold: 0.8,
+              },
+            ],
+          },
+        }),
+      },
+    });
+    render(<RunDetailPage />);
+
+    const firstChoice = await screen.findByRole("button", { name: /Books service,/u });
+    const secondChoice = screen.getByRole("button", { name: /Reschedules service,/u });
+    expect(firstChoice.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(secondChoice);
+
+    expect(await screen.findByRole("heading", { name: "Reschedules service" })).toBeTruthy();
+    const results = await screen.findByRole("region", { name: "Grader results" });
+    const policy = within(results).getByRole("region", { name: "Policy grader" });
+    expect(within(policy).getByText("The requested day was not confirmed.")).toBeTruthy();
+    expect(secondChoice.getAttribute("aria-pressed")).toBe("true");
+    expect(firstChoice.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("does not show ready evidence from the prior selection under a new heading", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+    });
+    answers({
+      ...detailStubs(
+        runDetail({ expectedSimulationCount: 2 }),
+        {
+          status: 200,
+          body: { simulations: [simulation(), second], nextPageToken: null },
+        },
+      ),
+      "/v1/simulations/sim_2": "never",
+    });
+    render(<RunDetailPage />);
+
+    expect(
+      await screen.findAllByText("The agent found and confirmed the appointment."),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Reschedules service,/u }));
+
+    expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
+    expect(screen.queryAllByText("The agent found and confirmed the appointment."))
+      .toHaveLength(0);
+    expect(screen.queryByRole("region", { name: "Grader results" })).toBeNull();
+  });
+
+  it("does not show a prior selection refusal under a new heading", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+    });
+    answers({
+      ...detailStubs(
+        runDetail({ expectedSimulationCount: 2 }),
+        {
+          status: 200,
+          body: { simulations: [simulation(), second], nextPageToken: null },
+        },
+        {
+          status: 500,
+          body: { error: "read_failed", message: "The old simulation is unavailable." },
+        },
+      ),
+      "/v1/simulations/sim_2": "never",
+    });
+    render(<RunDetailPage />);
+
+    expect(await screen.findByText("The old simulation is unavailable.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Reschedules service,/u }));
+
+    expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
+    expect(screen.queryByText("The old simulation is unavailable.")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Loading this simulation's results…" }),
+    ).toBeTruthy();
+  });
+
+  it("refreshes a non-selected row when its terminal feed event lands", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [first, second], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: {
+              simulations: [
+                first,
+                {
+                  ...second,
+                  status: "completed",
+                  gradingState: "complete",
+                  combinedScore: 0.7,
+                  endedAt: "2026-08-21T10:01:00.000Z",
+                },
+              ],
+              nextPageToken: null,
+            },
+          },
+        ],
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "completed",
+                reason: "persona_concluded",
+              },
+            ],
+            next: 1,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    const refreshed = await screen.findByRole("button", {
+      name: "Reschedules service, Patient caller, Completed",
+    });
+    expect(refreshed.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("stacks every grader as its own full-width result card", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const firstEvidence = simulationEvidence();
+    const policyGrade = {
+      ...firstEvidence.grades[0],
+      projectGraderId: "grd_policy",
+      graderDefinitionId: "grl_policy",
+      graderName: "policy_grader",
+      score: 0.65,
+      result: "failed",
+      details: { rationale: "The agent did not confirm consent." },
+    };
+    const policyPlan = {
+      ...firstEvidence.gradingPlan.items[0],
+      projectGraderId: "grd_policy",
+      graderDefinitionId: "grl_policy",
+      graderName: "policy_grader",
+    };
+    answers(
+      detailStubs(
+        runDetail(),
+        {
+          status: 200,
+          body: { simulations: [simulation()], nextPageToken: null },
+        },
+        {
+          status: 200,
+          body: simulationEvidence({
+            grades: [...firstEvidence.grades, policyGrade],
+            gradingPlan: {
+              ...firstEvidence.gradingPlan,
+              items: [...firstEvidence.gradingPlan.items, policyPlan],
+            },
+          }),
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const results = await screen.findByRole("region", { name: "Grader results" });
+    const expected = within(results).getByRole("region", {
+      name: "Expected behaviors",
+    });
+    const policy = within(results).getByRole("region", { name: "Policy grader" });
+    expect(within(expected).getByText("Total Score 1")).toBeTruthy();
+    expect(within(policy).getByText("Total Score 0.65")).toBeTruthy();
+    const failed = within(policy).getByText("Failed");
+    expect(failed.className).toContain("text-failure");
+    expect(failed.parentElement?.textContent).toBe("Result · Failed");
+    expect(within(policy).getByText("The agent did not confirm consent.")).toBeTruthy();
+  });
+
+  it("keeps transcript, speakers, audio, and tool calls in one ordered detail tab", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs());
+    render(<RunDetailPage />);
+
+    const transcriptTab = await screen.findByRole("tab", {
+      name: "Transcript & audio",
+    });
+    fireEvent.click(transcriptTab);
+
+    expect(await screen.findByRole("heading", { name: "Recording" })).toBeTruthy();
+    expect(screen.getByText("No audio was recorded.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
+    const conversation = screen.getByRole("list", { name: "Transcript messages" });
+    const events = within(conversation).getAllByRole("listitem");
+    expect(events).toHaveLength(3);
+    expect(events[0]?.getAttribute("aria-label")).toBe("Turn 1, User");
+    expect(events[1]?.getAttribute("aria-label")).toBe("Turn 2, Agent");
+    expect(events[2]?.getAttribute("aria-label")).toBe(
+      "Tool call, lookup_appointment",
+    );
+    const toolName = within(conversation).getByText("lookup_appointment");
+    const details = toolName.closest("details");
+    expect(details).not.toBeNull();
+    fireEvent.click(toolName.closest("summary")!);
+    expect(details?.open).toBe(true);
+    expect(
+      within(details!).getByRole("region", { name: "lookup_appointment request" })
+        .textContent,
+    ).toContain('{"customer":"Ada"}');
+    expect(
+      within(details!).getByRole("region", { name: "lookup_appointment response" })
+        .textContent,
+    ).toContain('{"appointment":"Tuesday at 10"}');
+  });
+
+  it("keeps a selected later-page simulation open while its row refreshes", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const refreshedSecond = {
+      ...second,
+      status: "completed",
+      gradingState: "complete",
+      combinedScore: 0.7,
+      endedAt: "2026-08-21T10:01:00.000Z",
+    };
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [first], nextPageToken: "sim_next" },
+          },
+          {
+            status: 200,
+            body: { simulations: [second], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: { simulations: [refreshedSecond], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: { simulations: [first], nextPageToken: "sim_next" },
+          },
+        ],
+        "never",
+      ),
+      "/v1/simulations/sim_2": "never",
+      "/v1/runs/run_1/events": [
+        { status: 200, body: { events: [], next: 0, done: false } },
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "completed",
+                reason: "persona_concluded",
+              },
+            ],
+            next: 1,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    const laterChoice = await screen.findByRole("button", {
+      name: /Reschedules service,/u,
+    });
+    fireEvent.click(laterChoice);
+    expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
+
+    await waitFor(
+      () => {
+        const refreshed = screen.getByRole("button", {
+          name: "Reschedules service, Patient caller, Completed",
+        });
+        expect(refreshed.getAttribute("aria-pressed")).toBe("true");
+        expect(screen.getByRole("heading", { name: "Reschedules service" })).toBeTruthy();
+      },
+      { timeout: 4000 },
+    );
   });
 
   it("still cancels an active run but offers no retry or rerun", async () => {
@@ -387,6 +1287,16 @@ describe("one run after suites", () => {
     });
     render(<RunDetailPage />);
 
+    const summary = await screen.findByRole("group", { name: "Run summary" });
+    const runningStatus = within(summary)
+      .getByText("Running")
+      .closest('[data-slot="run-status"]');
+    expect(runningStatus).not.toBeNull();
+    expect(runningStatus?.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(
+      runningStatus?.querySelector('[data-slot="run-status-loader"]'),
+    ).not.toBeNull();
+
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog", { name: "Cancel run “Release check”?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
@@ -397,6 +1307,11 @@ describe("one run after suites", () => {
             request.method === "POST" && request.path === "/v1/runs/run_1/cancel",
         ),
       ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        sent.filter((request) => request.path === "/v1/runs/run_1/simulations"),
+      ).toHaveLength(2);
     });
     expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
   });

@@ -32,6 +32,12 @@ class AudioFacts:
     """The stored recording produced by a voice simulation."""
 
     recording: str
+    started_unix_nano: int
+    """The shared origin of the recording and every transcript span.
+
+    VoiceConductor stamps turns as offsets from this instant. The simulator
+    emits it as recording trace evidence before the trace is sealed.
+    """
 
     def as_report(self) -> dict:
         """The contract's audio block, exactly."""

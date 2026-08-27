@@ -395,12 +395,22 @@ describe("nested page navigation", () => {
     const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     const runs = within(navigation).getByRole("link", { name: "Runs" });
     const run = within(navigation).getByRole("link", { name: "Nightly smoke" });
-    const current = within(navigation).getByText("Simulation 01");
+    const current = within(navigation).getByRole("heading", {
+      name: "Simulation 01",
+    });
 
     expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
     expect(run.getAttribute("href")).toBe("/projects/prj_1/runs/run_1");
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.closest("a")).toBeNull();
+    expect(current.classList.contains("text-sm")).toBe(true);
+    expect(current.classList.contains("font-normal")).toBe(true);
+    expect(runs.classList.contains("no-underline")).toBe(true);
+    expect(runs.classList.contains("pointer-hover:underline")).toBe(true);
+    expect(navigation.querySelector("ol")?.classList.contains("flex-wrap")).toBe(true);
+    expect(current.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(runs.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(within(navigation).getAllByText("/")).toHaveLength(2);
   });
 
   it("lets the breadcrumb own section context instead of repeating the eyebrow", () => {
@@ -415,8 +425,12 @@ describe("nested page navigation", () => {
       />,
     );
 
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(screen.getAllByText("Runs")).toHaveLength(1);
-    expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
+    expect(
+      within(navigation).getByRole("heading", { name: "Nightly smoke" }),
+    ).toBeTruthy();
+    expect(navigation.textContent).toBe("Runs/Nightly smoke");
   });
 
   /**
@@ -943,6 +957,7 @@ describe("a dialog", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeTruthy();
 
     // Inert is not a class on the page behind: the kit hides it from the
     // accessibility tree, so a control out there is no longer reachable at all.
@@ -982,7 +997,7 @@ describe("a dialog", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("uses the same modal layer for a right-side sheet", () => {
+  it("uses a right-side sheet without drawing a scrim", () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -1012,6 +1027,7 @@ describe("a dialog", () => {
       name: "Transcript and audio",
     });
     expect(sheet.getAttribute("data-kind")).toBe("sheet");
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeNull();
     expect(sheet.contains(document.activeElement)).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
 

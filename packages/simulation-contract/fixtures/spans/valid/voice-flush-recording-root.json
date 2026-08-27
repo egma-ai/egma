@@ -1,0 +1,36 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01K3XQ7M4E8YB2FVN0H9TZQWES" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d9",
+              "spanId": "cc30000000000002",
+              "parentSpanId": "cc30000000000001",
+              "name": "recording",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920405123456789",
+              "endTimeUnixNano": "1785920405123456789"
+            },
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d9",
+              "spanId": "cc30000000000001",
+              "name": "simulation",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920400000000000",
+              "endTimeUnixNano": "1785920450000000000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

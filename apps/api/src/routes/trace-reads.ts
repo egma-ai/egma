@@ -273,7 +273,13 @@ function describedFacts(facts: TraceFacts): Record<string, unknown> {
 }
 
 function describedSummary(summary: TraceSummary): Record<string, unknown> {
-  return { ...describedFacts(summary), preview: summary.preview };
+  return {
+    ...describedFacts(summary),
+    preview: summary.preview,
+    turnResponseLatencyP90Milliseconds:
+      summary.turnResponseLatencyP90Milliseconds,
+    turnResponseLatencyP90Partial: summary.turnResponseLatencyP90Partial,
+  };
 }
 
 /**

@@ -36,6 +36,7 @@ export type GraderLibraryEntry = {
   readonly owner: "egma" | "organization";
   readonly scopeEditable: boolean;
   readonly currentDefinitionVersion: number;
+  readonly definitionVersion: number;
   readonly type: GraderDefinitionType;
   readonly gradingInstructions: string | null;
   readonly parameterContract: readonly GraderParameter[];
@@ -130,6 +131,7 @@ function libraryEntryFromRow(row: {
     owner: row.organizationId === null ? "egma" : "organization",
     scopeEditable: row.scopeEditable,
     currentDefinitionVersion: row.currentDefinitionVersion,
+    definitionVersion: version.definitionVersion,
     type: version.type,
     gradingInstructions: version.prompt,
     parameterContract: version.parameterContract,

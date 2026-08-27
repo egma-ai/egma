@@ -35,7 +35,9 @@ export type PageNavigationItems = readonly [
  * where the current record sits inside that section: run, then simulation;
  * agent, then connection; Settings, then one settings page. Pages provide only
  * the ordered labels and parent addresses. List navigation, separators,
- * current-page semantics and narrow-screen wrapping stay here.
+ * current-page heading and narrow-screen wrapping stay here. Every segment is
+ * the same 14px / 400 text; colour and the slash communicate hierarchy without
+ * changing the current page's size or weight.
  *
  * Operational controls never belong here. Cancel, Retry, Edit, Archive and
  * Save remain page actions because they change the current record rather than
@@ -80,11 +82,19 @@ export function PageNavigation({ items }: { readonly items: PageNavigationItems 
                * carries the line's own type rather than a heading size: the
                * trail is one line of navigation, and a step in a different
                * size would say the two halves are different kinds of thing.
-               * It truncates, because the bar it sits in is one 56px line and
-               * a record's name is as long as somebody typed it.
+               *
+               * **It truncates only where the bar is one line.** Above 900px
+               * that bar is a fixed 56px strip, so a record name as long as
+               * somebody typed it has to end in an ellipsis or spill over the
+               * strip's own border. Under 900px the bar is `h-auto` and the
+               * trail is the page's first lines, so the name wraps there and
+               * a reader gets all of it.
                */
               <h1
-                className="m-0 min-w-0 truncate text-sm font-normal text-foreground"
+                className={cn(
+                  "m-0 min-w-0 max-w-full text-sm font-normal text-foreground",
+                  "[overflow-wrap:anywhere] min-[901px]:truncate",
+                )}
                 aria-current="page"
               >
                 {item.label}
@@ -92,9 +102,10 @@ export function PageNavigation({ items }: { readonly items: PageNavigationItems 
             ) : (
               <Link
                 className={cn(
-                  "max-w-full min-w-0 text-muted-foreground [overflow-wrap:anywhere]",
+                  "max-w-full min-w-0 text-muted-foreground no-underline [overflow-wrap:anywhere]",
                   "decoration-border-strong decoration-1 underline-offset-4",
-                  "pointer-hover:text-foreground pointer-hover:decoration-current",
+                  "pointer-hover:text-foreground pointer-hover:underline",
+                  "pointer-hover:decoration-current",
                   /* A real touch target, without changing what a mouse gets. */
                   "pointer-coarse:inline-flex pointer-coarse:min-h-(--tap-target)",
                   "pointer-coarse:items-center",
@@ -105,7 +116,7 @@ export function PageNavigation({ items }: { readonly items: PageNavigationItems 
               </Link>
             )}
             {index === items.length - 1 ? null : (
-              <span className="text-border-strong" aria-hidden="true">
+              <span className="text-faint" aria-hidden="true">
                 /
               </span>
             )}

@@ -551,7 +551,7 @@ describe("the two schemas, as one contract", () => {
     expect(stripped[2]).toEqual(stripped[0]);
   });
 
-  it("keeps a voice recording without a second sample-rate fact", async () => {
+  it("keeps a voice recording as one opaque reference, with no copied timing or sample-rate facts", async () => {
     const report = await readJson(
       "fixtures",
       "report",
@@ -563,22 +563,30 @@ describe("the two schemas, as one contract", () => {
     if (!event) throw new Error("the completed report has no event");
     const facts = event.facts as Record<string, unknown>;
     const audio = facts.audio as Record<string, unknown>;
-
-    delete audio.measured_sample_rate_hz;
+    expect(audio).toEqual({
+      recording:
+        "sim_01K3XQ7M4E8YB2FVN0H9TZQWES/dual-channel.wav",
+    });
     expect(
       validators.report(report),
       JSON.stringify(validators.report.errors),
     ).toBe(true);
 
-    audio.measured_sample_rate_hz = 8_000;
-    expect(validators.report(report)).toBe(false);
-    expect(validators.report.errors).toContainEqual(
-      expect.objectContaining({
-        instancePath: "/events/0/facts/audio",
-        keyword: "additionalProperties",
-        params: { additionalProperty: "measured_sample_rate_hz" },
-      }),
-    );
+    for (const [property, value] of [
+      ["started_at", "2026-08-05T09:00:17.123456789Z"],
+      ["measured_sample_rate_hz", 8_000],
+    ] as const) {
+      audio[property] = value;
+      expect(validators.report(report)).toBe(false);
+      expect(validators.report.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/events/0/facts/audio",
+          keyword: "additionalProperties",
+          params: { additionalProperty: property },
+        }),
+      );
+      delete audio[property];
+    }
   });
 
   it("gives each terminal status its own endings, sharing none", () => {

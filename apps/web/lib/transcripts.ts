@@ -138,6 +138,16 @@ export function agentPlatformLabel(value: string): string {
   }
 }
 
+/** The one monitoring latency figure, shown in seconds at useful precision. */
+export function shownTurnLatency(
+  milliseconds: number,
+  partialLabel?: string,
+): string {
+  if (!Number.isFinite(milliseconds)) return "Not recorded";
+  const shown = `${String(Number((Math.max(0, milliseconds) / 1000).toPrecision(3)))}s`;
+  return partialLabel === undefined ? shown : `${shown} · ${partialLabel}`;
+}
+
 export type Window = { readonly from: string; readonly to: string };
 
 /* ------------------------------------------------------------------ *

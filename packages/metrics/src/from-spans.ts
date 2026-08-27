@@ -176,6 +176,21 @@ const TIMING = "timing";
 const HUMAN_TURN = "turn:human";
 const AGENT_TURN = "turn:agent";
 const SPEAKING = "speaking";
+
+/**
+ * The conservative span-kind projection needed to compute turn-response
+ * latency through this module.
+ *
+ * A store may use this to avoid returning unrelated framework steps, but it
+ * does not get to restate which rows count. Timed rows are deliberately kept
+ * by kind rather than narrowed by name here: `measuresFromSpans` remains the
+ * only reader that decides whether a timing span is this measure. The root's
+ * reported-measurements block is not a span kind and must be fetched beside
+ * this projection when a caller wants the reported fallback.
+ */
+export function turnResponseLatencySpanKinds(): readonly string[] {
+  return [TIMING, HUMAN_TURN, AGENT_TURN, SPEAKING];
+}
 // The stage kinds the door assigns to a recognised framework's own steps —
 // LiveKit's llm_node/llm_request family lands as `model`, its tts family as
 // `tts` — read here for the platform-stage measures and vetted the same way

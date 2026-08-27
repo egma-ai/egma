@@ -94,6 +94,42 @@ describe("DataTable row links", () => {
         .stretchPrimaryLink,
     ).toBeUndefined();
   });
+
+  it("keeps a wide semantic table horizontally scrollable when asked", () => {
+    render(
+      <DataTable
+        label="Monitoring traces"
+        columns={COLUMNS}
+        rows={[ROW]}
+        keyOf={(row) => row.id}
+        narrowLayout="scroll"
+        tableMinWidth="62rem"
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "Monitoring traces" });
+    const panel = table.closest('[data-slot="table-panel"]');
+    const layout = panel?.parentElement;
+
+    expect(table.tagName).toBe("TABLE");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(table.style.minWidth).toBe("62rem");
+    expect(panel?.className).toContain("overflow-x-auto");
+    expect(panel?.className).toContain("relative");
+    expect(layout?.className).toContain("min-w-0");
+    expect(layout?.className).toContain("max-w-full");
+    expect(layout?.getAttribute("data-narrow-layout")).toBe("scroll");
+    expect(
+      [...(layout?.querySelectorAll("*") ?? [])].some((element) =>
+        element.className.includes("stacked:"),
+      ),
+    ).toBe(false);
+    expect(
+      within(table)
+        .getByRole("cell", { name: "2026-08-15" })
+        .getAttribute("data-mobile-hidden"),
+    ).toBeNull();
+  });
 });
 
 /**
@@ -185,14 +221,17 @@ const ACTIVATION_COLUMNS: readonly Column<Row>[] = [
 
 describe("DataTable row activation", () => {
   it("activates from the row surface and leaves control clicks alone", () => {
-    const activated: string[] = [];
+    const activated: {
+      readonly id: string;
+      readonly opener: HTMLElement | null;
+    }[] = [];
     render(
       <DataTable
         label="Graders"
         columns={ACTIVATION_COLUMNS}
         rows={[ROW]}
         keyOf={(row) => row.id}
-        onRowActivate={(row) => activated.push(row.id)}
+        onRowActivate={(row, opener) => activated.push({ id: row.id, opener })}
       />,
     );
     const table = screen.getByRole("table", { name: "Graders" });
@@ -200,19 +239,24 @@ describe("DataTable row activation", () => {
 
     /* Dead space on the row is the row's. */
     fireEvent.click(within(row).getByRole("cell", { name: "2026-08-15" }));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toEqual([
+      {
+        id: "agt_1",
+        opener: within(row).getByRole("button", { name: "Front desk" }),
+      },
+    ]);
 
     /* The name button and the menu trigger keep their own clicks. */
     fireEvent.click(within(row).getByRole("button", { name: "Front desk" }));
     fireEvent.click(within(row).getByRole("button", { name: "Open menu" }));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toHaveLength(1);
 
     /*
      * The open panel is portalled to `body`, so its clicks still bubble the
      * React tree into this row — and must not be the row's.
      */
     fireEvent.click(screen.getByTestId("portal-panel"));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toHaveLength(1);
   });
 
   it("keeps rows inert when no activation is asked for", () => {

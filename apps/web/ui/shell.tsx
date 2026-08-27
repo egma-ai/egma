@@ -58,10 +58,7 @@ import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
 import { Dialog } from "./dialog.tsx";
 import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
-import {
-  PageNavigation,
-  type PageNavigationItems,
-} from "./page-navigation.tsx";
+import { PageNavigation, type PageNavigationItems } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { Toolbar } from "./section.tsx";
 import { SessionLoading } from "./session-loading.tsx";
@@ -891,13 +888,13 @@ function ShellFrame({
  * The page itself: a 56px title bar, then the page's own toolbar, then its
  * content, all inside 24px gutters.
  *
- * **The board's page is not centred and this one stopped being centred with
- * it.** `6ZL-0` starts at the left gutter and runs to the right one. The
- * maximum survives — a settings form on a 2560px monitor is still held to a
- * readable width — but it is applied to the content rather than to the page,
- * and without `mx-auto`, so the title in the bar and the first cell of the
- * table under it are always on the same vertical line. Centring the page put
- * them 8px apart at 1440.
+ * **The content frame centres only after it reaches its maximum.** Below that
+ * point the ordinary 24px page gutters still own both edges. Above it, the
+ * unused width is split equally instead of collecting at the right edge. The
+ * title bar, toolbar and body all use the same frame, so centring never moves
+ * a title away from the table or form below it. This supersedes the earlier
+ * left-anchored capped frame after the 2026-08-26 browser review found the
+ * unequal trailing space across list pages.
  *
  * `wide` is for a page whose subject is wide by nature — a transcript beside
  * the timing of what happened during it, a run beside its simulations. It is a
@@ -914,11 +911,14 @@ function ShellFrame({
 export function ProductPage({
   wide = false,
   viewport = false,
+  desktopViewport = false,
   children,
 }: {
   readonly wide?: boolean;
   /** Keep the page header fixed and let its body own the available scroll. */
   readonly viewport?: boolean;
+  /** Use the viewport layout on desktop while mobile stays in document flow. */
+  readonly desktopViewport?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -942,10 +942,47 @@ export function ProductPage({
           "[&>[data-slot=page-body]]:overflow-hidden",
           "[&>[data-slot=page-body]]:pb-0",
         ],
+        desktopViewport && [
+          "min-[901px]:h-svh min-[901px]:min-h-0 min-[901px]:overflow-hidden",
+          "min-[901px]:[&>[data-slot=page-body]]:min-h-0",
+          "min-[901px]:[&>[data-slot=page-body]]:flex-1",
+          "min-[901px]:[&>[data-slot=page-body]]:overflow-hidden",
+          "min-[901px]:[&>[data-slot=page-body]]:pb-0",
+        ],
       )}
     >
       <SheetHost>{children}</SheetHost>
     </main>
+  );
+}
+
+/**
+ * One horizontal frame for the title, toolbar and page body.
+ *
+ * It is full-width while the page can keep its standard gutters. Once the
+ * content maximum is reached, `mx-auto` divides the spare width between both
+ * sides. Keeping this in one component prevents a list action, title and table
+ * from drifting onto three different left edges.
+ */
+function PageContentFrame({
+  children,
+  className,
+  slot,
+}: {
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly slot: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-(--page-content-max) min-w-0",
+        className,
+      )}
+      data-slot={slot}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -970,11 +1007,13 @@ export function ProductPage({
  *
  * **A page with a trail draws one line, and the record is the last step of
  * it.** "Tests / Livekit agent suite", every step in the trail's own type,
- * with the section linked and the record the `<h1>`. It used to be two things
- * in one bar — the trail cut short of the record, then the record beside it as
- * a larger heading — which read as a small link stuck to a big title with no
- * slash between them (developer decision, 2026-08-26). A page with no trail
- * keeps its own title bar, because there is no line for it to join.
+ * with the section linked and the record the `<h1>` — so the current page
+ * appears once and keeps the same 14px / 400 treatment as its parents. It used
+ * to be two things in one bar — the trail cut short of the record, then the
+ * record beside it as a larger heading — which read as a small link stuck to a
+ * big title with no slash between them (developer decision, 2026-08-26). A
+ * page with no trail keeps its own title bar, because there is no line for it
+ * to join.
  *
  * **So a page with a trail names itself in that trail's last step**, and
  * `title` is what a page without one draws. The two must say the same thing:
@@ -1037,7 +1076,7 @@ export function PageHeader({
       <div
         data-slot="page-topbar"
         className={cn(
-          "sticky top-0 z-10 flex min-w-0 flex-none items-center gap-3",
+          "sticky top-0 z-10 flex min-w-0 flex-none items-center",
           "h-(--topbar-height) border-b border-border bg-background",
           "px-(--page-gutter)",
           /*
@@ -1049,12 +1088,19 @@ export function PageHeader({
           "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        {breadcrumbs === undefined ? (
-          /* A heading carries no size of its own; the class is the size. */
-          <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
-        ) : (
-          <PageNavigation items={breadcrumbs} />
-        )}
+        <PageContentFrame className="items-center gap-3" slot="page-topbar-content">
+          {breadcrumbs === undefined ? (
+            /* A heading carries no size of its own; the class is the size. */
+            <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+          ) : (
+            /*
+             * Straight through: the trail a page passes already ends with that
+             * page, and `PageNavigationItems` is what holds it to that. There
+             * is nothing here to rebuild.
+             */
+            <PageNavigation items={breadcrumbs} />
+          )}
+        </PageContentFrame>
       </div>
 
       {hasBlock ? (
@@ -1065,29 +1111,31 @@ export function PageHeader({
             "max-[900px]:px-4 max-[900px]:pt-4",
           )}
         >
-          {label === undefined ? null : (
-            <p
-              className={cn(
-                "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
-                lead === undefined ? "" : "mb-1",
-              )}
-            >
-              {label}
-            </p>
-          )}
-          {lead === undefined ? null : (
-            <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
-              {lead}
-            </p>
-          )}
-          {(lead !== undefined || label !== undefined) &&
-          (toolbar !== undefined || action !== undefined) ? (
-            /* The gap to the toolbar row, when the block holds both. */
-            <div className="h-4" aria-hidden="true" />
-          ) : null}
-          {toolbar === undefined && action === undefined ? null : (
-            <Toolbar action={action}>{toolbar}</Toolbar>
-          )}
+          <PageContentFrame className="flex-col" slot="page-toolbar-content">
+            {label === undefined ? null : (
+              <p
+                className={cn(
+                  "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
+                  lead === undefined ? "" : "mb-1",
+                )}
+              >
+                {label}
+              </p>
+            )}
+            {lead === undefined ? null : (
+              <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
+                {lead}
+              </p>
+            )}
+            {(lead !== undefined || label !== undefined) &&
+            (toolbar !== undefined || action !== undefined) ? (
+              /* The gap to the toolbar row, when the block holds both. */
+              <div className="h-4" aria-hidden="true" />
+            ) : null}
+            {toolbar === undefined && action === undefined ? null : (
+              <Toolbar action={action}>{toolbar}</Toolbar>
+            )}
+          </PageContentFrame>
         </div>
       ) : null}
     </header>
@@ -1098,8 +1146,8 @@ export function PageHeader({
  * The page's content, under the bar and the toolbar.
  *
  * The gutters are the board's — 24px at the sides, 24px above and 40px below —
- * and the inner block is where `--page-content-max` is spent. It is not
- * centred: see `ProductPage`.
+ * and the inner block is where `--page-content-max` is spent. It shares the
+ * centred capped frame used by the title and toolbar: see `ProductPage`.
  *
  * **The top gutter goes when a toolbar row was drawn, because that row already
  * carries it.** `71N-0` is a 52px strip — a 36px control with 16px under it —
@@ -1125,9 +1173,12 @@ export function PageBody({ children }: { readonly children: ReactNode }) {
       )}
       data-slot="page-body"
     >
-      <div className="flex w-full max-w-(--page-content-max) min-h-0 flex-1 flex-col">
+      <PageContentFrame
+        className="min-h-0 flex-1 flex-col"
+        slot="page-body-content"
+      >
         {children}
-      </div>
+      </PageContentFrame>
     </div>
   );
 }

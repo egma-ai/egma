@@ -12,6 +12,7 @@ import {
   useGraderInProject,
 } from "../src/access/graders.ts";
 import {
+  getGraderDefinitionVersion,
   getGraderLibraryEntry,
   listGraderLibrary,
   reconcileGraderCatalog,
@@ -288,6 +289,18 @@ describe("shared definitions and project grader policy", () => {
     );
     expect(versions.rows.map((row) => row.version)).toEqual([1, 2]);
     expect(versions.rows[0]?.prompt).toBe(entry.prompt);
+    await expect(getGraderDefinitionVersion(auth, entry.id, 1)).resolves
+      .toMatchObject({
+        definitionId: entry.id,
+        definitionVersion: 1,
+        prompt: entry.prompt,
+      });
+    await expect(getGraderDefinitionVersion(auth, entry.id, 2)).resolves
+      .toMatchObject({
+        definitionId: entry.id,
+        definitionVersion: 2,
+        prompt: changed[0]?.prompt,
+      });
 
     const rows = await database.sql<{ count: string }>(
       `select count(*) as count

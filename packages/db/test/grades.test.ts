@@ -131,6 +131,7 @@ describe("one grader result on one trace", () => {
         runId,
         projectGraderId,
         errored: false,
+        score: 1,
       }]);
   });
 

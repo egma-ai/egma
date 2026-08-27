@@ -1,5 +1,7 @@
 "use client";
 
+import type { VariantProps } from "class-variance-authority";
+import { Loader2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -7,11 +9,9 @@ import {
   type RunStatusWord,
   type SimulationStatusWord,
 } from "../lib/runs.ts";
-import type { VariantProps } from "class-variance-authority";
 
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
 
 /**
  * The parts every surface that shows a run is built from — and the reason they
@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
  */
 
 /* ------------------------------------------------------------------------ *
- * The four facts, as words with a tone.
+ * Run state, as a word with motion only while work is active.
  * ------------------------------------------------------------------------ */
 
 /**
@@ -41,23 +41,6 @@ import { cn } from "@/lib/utils";
  * `completed` means the work finished, which is not the same as the work going
  * well. Painting it green would answer a question this word does not ask.
  */
-/**
- * The tones a state word can be said in, read off the chip that says them.
- *
- * It is the `Badge`'s own variant union rather than a list repeated here, so a
- * variant that is added or withdrawn from the chip cannot leave this file
- * naming one that no longer exists. `InlineState` is the same word without the
- * chip around it, so it takes the same vocabulary.
- */
-type StateTone = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
-
-const RUN_STATUS_TONE: Readonly<Record<RunStatusWord, StateTone>> = {
-  pending: "neutral",
-  running: "neutral",
-  completed: "neutral",
-  canceled: "warning",
-};
-
 const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
   pending: "Nothing has been claimed yet.",
   running: "Egma is conducting this run.",
@@ -65,6 +48,13 @@ const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
     "The run finished. Trace-level grade scores are separate facts.",
   canceled:
     "Somebody stopped this run, or the agent or connection it used was archived. Work already reported stays on the record.",
+};
+
+const RUN_STATUS_LABEL: Readonly<Record<RunStatusWord, string>> = {
+  pending: "Pending",
+  running: "Running",
+  completed: "Completed",
+  canceled: "Canceled",
 };
 
 export type StateMarkKind =
@@ -77,11 +67,11 @@ export type StateMarkKind =
   | "error";
 
 /**
- * A second, non-colour signal beside every state word.
+ * A second, non-colour signal for simulation, grading, and result states.
  *
- * The word remains the source of meaning. The small line mark makes nearby
- * badges easier to scan and keeps their difference visible without asking a
- * reader to learn the temporary green, amber, and red compatibility palette.
+ * The word remains the source of meaning. The same outline square anchors
+ * those states and keeps their marks distinct from radio controls and progress
+ * dots. A run uses plain text instead, with a loader only while it is running.
  */
 export function StateMark({
   kind,
@@ -91,75 +81,52 @@ export function StateMark({
   readonly moving?: boolean;
 }) {
   return (
-    <svg
-      className="block size-3 flex-none"
+    <span
+      className="block size-2.5 flex-none border border-current bg-transparent"
       data-slot="state-mark"
       data-state-mark={kind}
       data-motion={moving ? "active" : undefined}
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.4}
       aria-hidden="true"
-      focusable="false"
-    >
-      {kind === "waiting" ? <circle cx="6" cy="6" r="3.75" /> : null}
-      {kind === "active" ? <path d="M6 2a4 4 0 1 1-4 4" /> : null}
-      {kind === "complete" ? <path d="m2.5 6 2.25 2.25L9.5 3.5" /> : null}
-      {kind === "stopped" || kind === "failed" ? (
-        <path d="m3 3 6 6M9 3 3 9" />
-      ) : null}
-      {kind === "not-requested" ? <path d="M3 6h6" /> : null}
-      {kind === "error" ? (
-        <>
-          <circle cx="6" cy="6" r="4" />
-          <path d="M6 3.5v3M6 8.5h.01" />
-        </>
-      ) : null}
-    </svg>
+    />
   );
 }
-
-const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
-  pending: "waiting",
-  running: "active",
-  completed: "complete",
-  canceled: "stopped",
-};
 
 export function RunStatus({
   status,
-  compact = false,
 }: {
   readonly status: RunStatusWord;
-  readonly compact?: boolean;
 }) {
-  const mark = (
-    <StateMark
-      kind={RUN_STATUS_MARK[status]}
-      moving={status === "running"}
-    />
-  );
-  if (compact) {
-    return (
-      <InlineState
-        tone={RUN_STATUS_TONE[status]}
-        title={RUN_STATUS_MEANING[status]}
-      >
-        {mark}
-        {status}
-      </InlineState>
-    );
-  }
   return (
-    <Badge variant={RUN_STATUS_TONE[status]} title={RUN_STATUS_MEANING[status]}>
-      {mark}
-      {status}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-2 whitespace-nowrap text-sm text-foreground",
+        status === "canceled" && "text-warning",
+      )}
+      data-slot="run-status"
+      data-status={status}
+      title={RUN_STATUS_MEANING[status]}
+    >
+      {status === "running" ? (
+        <Loader2Icon
+          className="size-3.5 flex-none animate-spin motion-reduce:animate-none"
+          data-slot="run-status-loader"
+          aria-hidden="true"
+        />
+      ) : null}
+      {RUN_STATUS_LABEL[status]}
+    </span>
   );
 }
+
+/**
+ * The tones a state word can be said in, read off the chip that says them.
+ *
+ * It is the `Badge`'s own variant union rather than a list repeated here, so a
+ * variant that is added or withdrawn from the chip cannot leave this file
+ * naming one that no longer exists. `InlineState` is the same word without the
+ * chip around it, so it takes the same vocabulary.
+ */
+type StateTone = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
 /**
  * One simulation's machinery.
@@ -373,9 +340,17 @@ export function SimulationTally({
 }: {
   readonly counts: Readonly<Record<SimulationStatusWord, number>>;
 }) {
+  const label: Readonly<Record<SimulationStatusWord, string>> = {
+    queued: "queued",
+    claimed: "claimed",
+    running: "running",
+    completed: "completed",
+    failed: "execution failed",
+    canceled: "canceled",
+  };
   const said = (Object.keys(SIMULATION_STATUS_TONE) as SimulationStatusWord[])
     .filter((word) => (counts[word] ?? 0) > 0)
-    .map((word) => `${String(counts[word] ?? 0)} ${word}`);
+    .map((word) => `${String(counts[word] ?? 0)} ${label[word]}`);
   return (
     <span className="text-sm tabular-nums text-muted-foreground">
       {said.length === 0 ? "No simulations yet" : said.join(" · ")}

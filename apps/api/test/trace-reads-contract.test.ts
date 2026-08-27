@@ -305,6 +305,13 @@ describe.skipIf(!storage.available)("walking every page of a list", () => {
           ...(pageToken === undefined ? {} : { pageToken }),
         });
         expect(answered.traces.length).toBeLessThanOrEqual(size);
+        for (const trace of answered.traces) {
+          // Required even when zero: this synthetic exchange is answered at the
+          // exact instant its human turn ends, which is a real measured zero and
+          // must not be confused with an absent metric represented by null.
+          expect(trace.turnResponseLatencyP90Milliseconds).toBe(0);
+          expect(trace.turnResponseLatencyP90Partial).toBe(false);
+        }
         seen.push(...answered.traces.map((trace) => trace.traceId));
         pageToken = answered.nextPageToken ?? undefined;
         pages += 1;

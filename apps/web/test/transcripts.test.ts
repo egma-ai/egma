@@ -590,24 +590,13 @@ describe("the two kinds of audio a transcript can offer", () => {
 /**
  * The banned list, as the domain model writes it.
  *
- * `trace` and `span` are on it for these pages specifically: both are storage
- * words, correct in the API's paths and in the columns underneath, and never
- * something a person is shown. `session` is the one carve-out and it is not a
- * loophole — it names a signed-in browser session and never an exchange —
- * so it is checked for separately below.
- *
- * **The screen's own name is the second carve-out**, and it is one word wide.
- * The developer renamed the surface to Traces on 2026-08-25, so `LIST.title`
- * says it and the detail page's breadcrumb repeats it. `trace` stays banned in
- * every sentence around them: the artifact a person opens is a **transcript**,
- * and this rule is what keeps it one.
+ * `span` remains a storage word. Monitoring now deliberately names a Trace,
+ * Trace ID, Call overview, and Caller: these are the approved words on the
+ * compact list and the evidence sheet, not accidental API vocabulary.
  */
 const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SAID = [
-  "trace",
   "span",
-  "call",
-  "caller",
   "conversation",
   "eval",
   "evaluation",

@@ -1455,6 +1455,11 @@ export function TestsGrid(props: GridProps) {
             it was a picture of a test, and the way in was the line under it.
             The way in is now the only thing there (developer decision,
             2026-08-26).
+
+            The run-flow refinement answered the same complaint the other way,
+            by making that faint first cell open the entry row. The row is
+            gone instead, so there is nothing left to make clickable: a picture
+            of a test that opens a real one is still a picture of a test.
           */}
           {tests.map((test) => (
             <tr key={test.id}>
