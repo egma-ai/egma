@@ -38,6 +38,10 @@ import {
   type FolderTest,
   RepositoryValidationError,
 } from "../folder/egma-folder.ts";
+import {
+  portableSuiteDirectory,
+  withStablePathSuffix,
+} from "../folder/portable-path.ts";
 import type { DrivenAgent } from "../acp/driven-agent.ts";
 import type { Registered } from "../platform/agents.ts";
 import { listPersonas as listPersonasRequest } from "@egma/platform-api/client";
@@ -430,14 +434,19 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   );
 
   const repository = await readRepository(folder.paths);
-  const used = new Set(repository.suites.map((suite) => suite.directory));
-  let directory = "generated";
-  for (let suffix = 2; used.has(directory); suffix += 1) directory = `generated-${String(suffix)}`;
+  const used = new Set(
+    repository.suites.map((suite) => suite.directory.toLowerCase()),
+  );
   const name = `${options.registered.agent.name} tests`;
   const remote = await createTestSuite(
     options.signedIn,
     { projectId: project.id, name },
   );
+  const wanted = portableSuiteDirectory(remote.name);
+  let directory = wanted;
+  for (let suffix = 2; used.has(directory.toLowerCase()); suffix += 1) {
+    directory = withStablePathSuffix(wanted, String(suffix));
+  }
   const root = path.join(folder.paths.tests, directory);
   let createdRoot = false;
   try {
@@ -701,8 +710,8 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     });
   }
 
-  // Re-read the complete repository after the editor returns. Approval never
-  // means permission to omit a held-back file.
+  // Re-read the complete repository after approval. Approval never means
+  // permission to omit a held-back file.
   const reread = await contentsFor(paths, suite.id);
   const approved = gateFrom(reread, about, reread.mockTools, changed);
   if (approved.heldBack.length > 0) {

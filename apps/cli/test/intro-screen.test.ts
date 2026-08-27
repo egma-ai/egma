@@ -100,11 +100,12 @@ describe("the wizard's first screen", () => {
       const screen = await showingIn(
         terminal,
         asOneLine,
-        "Welcome to Egma",
-        "sign in and authorize this CLI",
-        "looks for a coding agent after that",
-        "[enter] continue",
+        "Welcome to egma",
+        "platform to test, monitor, and self-improve your voice agents",
+        "Press Enter to authenticate the CLI with your egma account",
+        "[q] quit",
       );
+      expect(asOneLine(screen)).not.toContain("[enter] authenticate");
 
       // The welcome is local. It has not contacted the configured platform or
       // looked for a coding agent yet.
@@ -129,9 +130,10 @@ describe("the wizard's first screen", () => {
       const screen = await showingIn(
         terminal,
         asOneLine,
-        "Welcome to Egma",
-        "[enter] continue",
+        "Welcome to egma",
+        "[q] quit",
       );
+      expect(asOneLine(screen)).not.toContain("[enter] authenticate");
       expect(asOneLine(screen)).not.toContain("already set up here");
       expect(platform.records).toEqual([]);
     } finally {

@@ -27,7 +27,7 @@ import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 async function authorizeStoredCli(terminal: ReturnType<typeof runInTerminal>): Promise<void> {
-  await showing(terminal, "Welcome to Egma", "[enter] continue");
+  await showing(terminal, "Welcome to egma", "Press Enter to authenticate");
   terminal.write("\r");
 }
 
@@ -88,12 +88,21 @@ describe("the wizard on a real terminal", () => {
     try {
       await showing(
         terminal,
-        "Welcome to Egma",
-        "This wizard uses a coding agent on this machine to set up Egma for your voice agent",
-        "[enter] continue",
+        "Welcome to egma",
+        "platform to test, monitor, and self-improve your voice agents",
+        "Press Enter to authenticate",
       );
       terminal.write("\r");
-      await showing(terminal, "Claude Code", "Codex", "Cursor", "OpenCode");
+      await showing(
+        terminal,
+        "egma will use a coding agent on your machine",
+        "We found the following coding agents on your machine.",
+        "Which one should we use?",
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "OpenCode",
+      );
       terminal.write("\u001b[B\u001b[B\r");
 
       await showing(terminal, "It reads this folder with Cursor", "[enter] begin");
@@ -145,6 +154,7 @@ describe("the wizard on a real terminal", () => {
         "[q] quit",
       );
       expect(intro.indexOf("[enter] begin")).toBeLessThan(intro.indexOf("[q] quit"));
+      expect(intro).not.toContain("For a different Egma instance");
 
       // It is drawn on the alternate screen, so scrollback is still untouched.
       expect(terminal.scrollback().trim()).toBe("");
@@ -153,15 +163,19 @@ describe("the wizard on a real terminal", () => {
 
       // Every action the agent takes, and every fact it reports, lands on
       // screen while it works.
-      await showing(terminal, "Read package.json", "┊ Framework  retell-sdk");
+      await showing(
+        terminal,
+        "Read package.json",
+        "node: egma:found framework retell-sdk",
+      );
 
       // The one question about what Egma is here to do, drawn on the same
       // alternate screen, once the agent and its platform are known.
       const goal = await showing(
         terminal,
-        "What should Egma do for this voice agent?",
-        "› Test it",
-        "Watch its production traffic",
+        "Setup",
+        "› Simulation testing",
+        "Setup production monitoring",
         "Both",
         "[enter] choose this one",
       );

@@ -2,24 +2,27 @@
  * The run, one line per simulation, moving.
  *
  * This is the payoff, and it is the only screen in the walk whose job is to be
- * watched rather than answered. A developer who has spent nine minutes being
- * told what egma is about to do now sees it happen: twelve lines, each moving
- * through execution and then trace-level grading.
+ * watched rather than answered. A developer who has been told what egma is
+ * about to do now sees it happen: one line per simulation, each moving through
+ * execution and then trace-level grading.
  *
  * **The first result is marked.** It is the first completed trace whose whole
  * grading work is terminal. A low grade is still a completed result. A grader
  * error is an operational error, not a quality verdict.
  *
- * **Nothing here waits for the suite.** The wizard leaves as soon as the first
- * first result is ready and the developer has answered the last question. The run
- * is on the platform; closing a terminal has never stopped one.
+ * **The screen stays for the full suite.** It follows execution and grading to
+ * their terminal states. The run is on the platform too; closing a terminal has
+ * never stopped one.
  */
 
-import { Box, Text } from "ink";
+import { useState } from "react";
+import { Box, Text, useInput } from "ink";
 
 import type { RunView, SimulationRow } from "../../../run/view.ts";
 import type { GradingState, SimulationStatus } from "../../../platform/runs.ts";
 import { isTerminalGrading } from "../../../run/follow.ts";
+import { FAILURE_MARK } from "../../../wizard/status.ts";
+import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import {
   assertionBehavior,
   assertionLabel,
@@ -27,10 +30,24 @@ import {
   scoreText,
 } from "../../../run/lines.ts";
 
-export type RunScreenProps = { readonly run: RunView };
+export type RunScreenProps = {
+  readonly run: RunView;
+  readonly onOpen: () => Promise<boolean>;
+};
 
 /** How many rows are on screen at once, the live ones always among them. */
 const VISIBLE_ROWS = 12;
+
+/** A clickable terminal link, using the OSC 8 sequence supported by modern terminals. */
+function terminalLink(url: string): string {
+  // A self-hosted platform owns this value. Keep terminal control bytes out of
+  // both the visible label and the OSC payload so it cannot close the link and
+  // inject another terminal command.
+  const safe = url.replaceAll(/[\p{Cc}\p{Cf}]/gu, "");
+  const start = `\u001B]8;;${safe}\u001B\\`;
+  const end = "\u001B]8;;\u001B\\";
+  return `${start}${safe}${end}`;
+}
 
 /** The mark in front of a simulation that has not ended yet. */
 const RUNNING_MARK = "▶";
@@ -133,7 +150,23 @@ export function GradeResult({ row }: { readonly row: SimulationRow }) {
   );
 }
 
-export function RunScreen({ run }: RunScreenProps) {
+export function RunScreen({ run, onOpen }: RunScreenProps) {
+  const [openStatus, setOpenStatus] = useState<"opened" | "failed" | null>(null);
+  const bindings: KeyBinding[] = [
+    {
+      match: ["return", "o"],
+      label: "enter",
+      action: "open results in browser",
+      handler: () => {
+        void onOpen().then((opened) => setOpenStatus(opened ? "opened" : "failed"));
+      },
+    },
+  ];
+
+  useInput((input, key) => {
+    dispatchKey(bindings, input, key);
+  });
+
   const width = columnWidth(run.rows.map((row) => row.name));
 
   // The window follows the work: whatever is moving now stays on screen, and
@@ -153,12 +186,13 @@ export function RunScreen({ run }: RunScreenProps) {
   const first = run.firstResult;
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
         {`run ${run.runId}  ·  ${progress.total} ${progress.total === 1 ? "simulation" : "simulations"}`}
       </Text>
+      <Text>{`Results: ${terminalLink(run.resultsUrl)}`}</Text>
       <Box height={1} />
       <Box flexDirection="column">
         {shown.map((row) => (
@@ -181,8 +215,12 @@ export function RunScreen({ run }: RunScreenProps) {
       </Text>
       <Box height={1} />
       <Text dimColor>The run continues on Egma whether this stays open or not.</Text>
+      {openStatus === "opened" ? <Text dimColor>Opened results in your browser.</Text> : null}
+      {openStatus === "failed" ? (
+        <Text>{`${FAILURE_MARK} Could not open a browser. Use the results link above.`}</Text>
+      ) : null}
       <Box height={1} />
-      <Text dimColor>[ctrl-c] stop</Text>
+      <Text dimColor>{`${hintBar(bindings)}   [ctrl-c] stop`}</Text>
     </Box>
   );
 }

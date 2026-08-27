@@ -34,7 +34,6 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 | `EGMA_PHONE_NUMBER` | Which phone number to dial, equivalent to `--phone-number` |
 | `EGMA_RETELL_URL` | The Retell API base URL. Default: `https://api.retellai.com` |
 | `EGMA_EXISTING_TESTS` | Path to your existing test cases, equivalent to `--existing-tests` |
-| `VISUAL`, `EDITOR` | The editor opened when you press `[e]` at the test-review gate |
 
 ---
 
@@ -42,11 +41,11 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
 <AccordionGroup>
   <Accordion title="egma — interactive wizard">
-    Opens the full interactive wizard. It signs you in and discovers your voice agent using your coding agent, then asks the one question it exists to ask: should Egma **test** the agent, **watch its production traffic**, or **both**.
+    Opens the full interactive wizard. It authorizes the CLI first, then finds your installed coding agents and asks which one to use. That coding agent discovers your voice agent. After discovery, the wizard asks for the setup goal: should Egma **test** the agent, **watch its production traffic**, or **both**.
 
     Testing connects the agent, generates a first test suite, and starts a run. Monitoring sets production capture up and ends there — no connection, no suite, no tests. Both sets monitoring up first and says so, then runs the whole testing lane in the same sitting: every shared question is asked once, one agent row serves both jobs, and the last screen points at the graded run and at Monitoring.
 
-    The wizard draws on your terminal's alternate screen. When it closes it leaves a single results URL and a plain summary in your normal terminal buffer, each item on its own line so a triple-click selects it whole.
+    The wizard draws on your terminal's alternate screen and follows the complete suite through execution and grading. Its results URL is clickable, and `[Enter]` opens it in your browser. When the wizard closes, it leaves the same plain URL and a summary in your normal terminal buffer, each item on its own line so a triple-click selects it whole.
 
     **Usage**
 
@@ -451,7 +450,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     SDK reads into `.env` when Git already ignores that file, and prints them
     either way for wherever the worker really runs. Running it again replaces
     those lines in place rather than adding a second copy. The code edit itself
-    belongs to your coding agent: see the `integrate-egma-sdk` skill.
+    belongs to your coding agent: see the `integrate-egma` skill.
 
     `disable` turns the switch off and keeps everything stored — the
     conversations, the platform binding, and the sealed key.

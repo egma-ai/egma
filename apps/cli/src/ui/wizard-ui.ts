@@ -166,13 +166,14 @@ export type MonitoringAgentOffer = DiscoveredAgent;
 
 /** What each answer to the goal question means, in one line each. */
 export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
-  testing: "Test it — write tests, run them, and grade what the agent did.",
-  monitoring: "Watch its production traffic — bring real transcripts into Egma.",
-  both: "Both — watch production traffic and test the agent.",
+  testing: "Simulation testing — write tests, run them, and grade what the agent did.",
+  monitoring:
+    "Setup production monitoring — monitor production traffic with Egma and self-improve the agent.",
+  both: "Both — set up simulation testing and production monitoring.",
 };
 
-/** The question itself, said the same way on a screen and in plain lines. */
-export const GOAL_ASK_LINE = "What should Egma do for this voice agent?";
+/** The heading itself, said the same way on a screen and in plain lines. */
+export const GOAL_ASK_LINE = "Setup";
 
 /**
  * Which egma a walk will use.
@@ -340,8 +341,8 @@ export interface WizardUI {
    * The tests waiting on one keystroke, or `null` when none are.
    *
    * Setting it is what opens the `run-tests` gate's screen. Nothing here reads
-   * a keystroke: the screen owns every key, including the one that opens a file
-   * in an editor, which the flow never sees at all.
+   * a keystroke: the screen owns Enter to start the run and q to leave the
+   * generated files in the repository.
    */
   setGate(gate: TestGate | null): void;
 
@@ -350,10 +351,10 @@ export interface WizardUI {
    *
    * A write and not a question, like every other pane. The flow says which
    * simulations there are, where execution and grading have got to, and which
-   * trace result became terminal first; whether that is drawn as a list that moves or printed as one line
-   * per change is the UI's business. The wizard never waits for the whole
-   * suite, so this is set for as long as the wizard is open and stops mattering
-   * the moment it closes — the run itself carries on either way.
+   * trace result became terminal first; whether that is drawn as a list that
+   * moves or printed as one line per change is the UI's business. The wizard
+   * keeps this view until the whole suite is terminal; the run and its evidence
+   * remain on Egma after the terminal closes.
    */
   setRun(run: RunView | null): void;
 
@@ -362,6 +363,15 @@ export interface WizardUI {
 
   /** One line describing something the driven agent did. */
   pushStatus(line: string): void;
+
+  /**
+   * The coding agent's own words, exactly as ACP delivers them.
+   *
+   * An interactive UI streams these words into the current activity view. A
+   * promptless UI may ignore them: there is nobody watching a live view, and
+   * the completed summary remains its stable output.
+   */
+  pushAgentMessage(chunk: string): void;
 
   /** The coding agent's own account of what it found. */
   setSummary(text: string): void;

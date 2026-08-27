@@ -1,7 +1,7 @@
 /** Whole-wizard proof for one platform-backed generated suite. */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 const KEY = "key_9c3b7a1e5d2f8064a3b1";
 const GENERATE_TASK = "## The words the agent is running on";
 const PROMPT = "You answer the order line for a bookbinding workshop.\nNever quote a price.\n";
+const SUITE_DIRECTORY = "order-line-tests";
 
 const ONE_AGENT: FakeRetellScript = {
   keys: [KEY],
@@ -74,7 +75,7 @@ function writes(name: string, behaviors: readonly string[]): FakeStep[] {
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/generated/${name}.md`,
+      path: `egma/tests/${SUITE_DIRECTORY}/${name}.md`,
       content: testFile(name, behaviors),
     },
     { kind: "say", text: `egma:wrote ${name}\n` },
@@ -144,7 +145,7 @@ describe("generated suite", () => {
     const repository = await readRepository(folderPathsIn(workspace.dir));
     expect(repository.suites).toHaveLength(1);
     const suite = repository.suites[0]!;
-    expect(suite.directory).toBe("generated");
+    expect(suite.directory).toBe(SUITE_DIRECTORY);
     expect(suite.manifest.name).toBe("order-line tests");
     expect(suite.tests.map((test) => test.test.name)).toEqual(["never-quotes-a-price"]);
     expect(await readFile(suite.manifestFile, "utf8")).toBe(
@@ -179,7 +180,7 @@ describe("generated suite", () => {
     ) as { instructions: string[] };
     expect(
       agentReport.instructions.some((instruction) =>
-        instruction.includes("egma/tests/generated"),
+        instruction.includes(`egma/tests/${SUITE_DIRECTORY}`),
       ),
     ).toBe(true);
 
@@ -231,6 +232,13 @@ describe("generated suite", () => {
     const repository = await readRepository(folderPathsIn(workspace.dir));
     expect(repository.suites.map((suite) => suite.manifest.id)).toContain(existing.id);
     expect(repository.suites).toHaveLength(2);
+    const generated = repository.suites.find(
+      (suite) => suite.manifest.name === "order-line tests",
+    );
+    expect(generated?.directory).toBe(SUITE_DIRECTORY);
+    expect(
+      await readdir(path.join(folderPathsIn(workspace.dir).tests, SUITE_DIRECTORY)),
+    ).toEqual(["never-quotes-a-price.md", "suite.yaml"]);
 
     const pushed = platform.records.find(
       (record) =>
@@ -277,7 +285,7 @@ describe("generated suite", () => {
 
     expect(result.report).toMatchObject({ kind: "failed" });
     expect(result.ui.record.gate?.heldBack.map((held) => held.shown)).toContain(
-      "egma/tests/generated/missing-behavior.md",
+      `egma/tests/${SUITE_DIRECTORY}/missing-behavior.md`,
     );
     expect(platform.suites.suites).toHaveLength(1);
     expect(platform.tests.tests).toHaveLength(0);
@@ -315,7 +323,7 @@ describe("generated suite", () => {
 
   it("does not remove a suite directory another process created after the remote write", async () => {
     await platform.close();
-    const root = path.join(folderPathsIn(workspace.dir).tests, "generated");
+    const root = path.join(folderPathsIn(workspace.dir).tests, SUITE_DIRECTORY);
     const marker = path.join(root, "owned-by-another-process.txt");
     platform = await startPlatform({
       afterSuiteCreate: () => {

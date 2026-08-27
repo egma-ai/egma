@@ -388,7 +388,6 @@ export function helpText(): string {
     `  ${NUMBER_VARIABLE}     Which number to dial, same as --phone-number.`,
     `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
     `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
-    "  VISUAL, EDITOR       What e opens a generated test in, at the gate.",
     "",
     "When Egma cannot use this machine's keys — the file is damaged, or another",
     `Egma process is holding it — every command prints status: ${KEYS_UNUSABLE} with the`,

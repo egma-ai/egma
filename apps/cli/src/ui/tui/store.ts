@@ -176,6 +176,8 @@ export class WizardStore {
   private readonly gates = new Map<GateId, Gate>();
   private readonly answers = new Map<AskId, OpenQuestion>();
   private connectionFields: OpenConnectionFields | null = null;
+  /** The status line currently receiving streamed ACP message chunks. */
+  private agentMessageAt: number | null = null;
   /** What the login screen has handed over and the flow has not taken yet. */
   private pastedLogin: string | null = null;
 
@@ -338,6 +340,11 @@ export class WizardStore {
   }
 
   setGeneration(generation: GenerationProgress | null): void {
+    if (generation !== null && this.state.generation === null) {
+      this.agentMessageAt = null;
+      this.change({ generation, activityFrom: this.state.statuses.length });
+      return;
+    }
     this.change({ generation });
   }
 
@@ -372,7 +379,13 @@ export class WizardStore {
   }
 
   taskStarted(): void {
-    this.change({ running: true });
+    this.agentMessageAt = null;
+    this.change({
+      running: true,
+      finished: false,
+      activityFrom: this.state.statuses.length,
+      summary: "",
+    });
   }
 
   taskFinished(): void {
@@ -380,8 +393,29 @@ export class WizardStore {
   }
 
   pushStatus(line: string): void {
-    const statuses = [...this.state.statuses, line];
-    this.change({ statuses: statuses.slice(-MAX_STATUS_LINES) });
+    this.agentMessageAt = null;
+    this.appendStatus(line);
+  }
+
+  /** Stream one ACP message into readable lines without turning tokens into rows. */
+  pushAgentMessage(chunk: string): void {
+    const safe = printableAgentText(chunk);
+    if (safe === "") return;
+
+    const parts = safe.split("\n");
+    for (const [index, part] of parts.entries()) {
+      if (part !== "") {
+        if (this.agentMessageAt === null) {
+          const name = this.state.drivenAgent?.name ?? "Coding agent";
+          this.agentMessageAt = this.appendStatus(`${name}: ${part}`);
+        } else {
+          const statuses = [...this.state.statuses];
+          statuses[this.agentMessageAt] = `${statuses[this.agentMessageAt] ?? ""}${part}`;
+          this.change({ statuses });
+        }
+      }
+      if (index < parts.length - 1) this.agentMessageAt = null;
+    }
   }
 
   setSummary(summary: string): void {
@@ -481,4 +515,33 @@ export class WizardStore {
     }
     for (const listener of this.listeners) listener();
   }
+
+  /** Append one line and keep task and stream indexes correct when old lines fall off. */
+  private appendStatus(line: string): number {
+    const all = [...this.state.statuses, line];
+    const dropped = Math.max(0, all.length - MAX_STATUS_LINES);
+    const statuses = all.slice(dropped);
+    const activityFrom = Math.max(0, this.state.activityFrom - dropped);
+    if (this.agentMessageAt !== null) {
+      this.agentMessageAt = Math.max(0, this.agentMessageAt - dropped);
+    }
+    this.change({ statuses, activityFrom });
+    return statuses.length - 1;
+  }
+}
+
+/** Keep terminal control bytes out of text that will be painted on screen. */
+function printableAgentText(chunk: string): string {
+  let safe = "";
+  const withoutTerminalSequences = chunk
+    .replaceAll(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/gu, "")
+    .replaceAll(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+  for (const character of withoutTerminalSequences
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")) {
+    if (character === "\n" || character === "\t" || !/[\p{Cc}\p{Cf}]/u.test(character)) {
+      safe += character;
+    }
+  }
+  return safe;
 }

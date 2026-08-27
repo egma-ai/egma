@@ -118,7 +118,7 @@ async function dispatched(): Promise<readonly string[]> {
 async function walk(
   goal: string | undefined,
   generated: { readonly directory: string; readonly name: string } = {
-    directory: "generated",
+    directory: "order-line-tests",
     name: "late-repair",
   },
 ) {
@@ -246,7 +246,7 @@ describe("a repository that has already been through the wizard", () => {
     expect(firstConfig.agents[0]?.connections).toHaveLength(1);
 
     const second = await walk("testing", {
-      directory: "generated-2",
+      directory: "order-line-tests-2",
       name: "wrong-address",
     });
     expect(second.report.kind).toBe("run-started");
@@ -257,8 +257,8 @@ describe("a repository that has already been through the wizard", () => {
 
     const repository = await readRepository(paths);
     expect(repository.suites.map((suite) => suite.directory)).toEqual([
-      "generated",
-      "generated-2",
+      "order-line-tests",
+      "order-line-tests-2",
     ]);
     expect(
       repository.suites.map((suite) => suite.tests.map((test) => test.test.name)),

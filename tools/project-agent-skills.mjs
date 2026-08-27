@@ -19,8 +19,7 @@ const PACKAGE_ROOT = path.join(CODE_ROOT, "apps", "cli", "skills");
 // accident, and this script never walks the private Planning repository.
 const PUBLIC_SKILLS = [
   "egma",
-  "find-voice-agent",
-  "integrate-egma-sdk",
+  "integrate-egma",
   "write-egma-tests",
 ];
 

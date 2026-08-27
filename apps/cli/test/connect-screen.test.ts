@@ -114,7 +114,7 @@ function asOneLine(screen: string): string {
 }
 
 /** The wizard, past the intro, with a scripted coding agent that finds one fact. */
-async function wizard(): Promise<TerminalRun> {
+async function wizard(suiteDirectory = "order-line-tests"): Promise<TerminalRun> {
   const script = await workspace.script({
     steps: [
       { kind: "say", text: "egma:found framework retell-sdk\n" },
@@ -128,25 +128,25 @@ async function wizard(): Promise<TerminalRun> {
         steps: [
           {
             kind: "write-file",
-            path: "egma/tests/generated/price-question.md",
+            path: `egma/tests/${suiteDirectory}/price-question.md`,
             content:
               "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
           },
           {
             kind: "write-file",
-            path: "egma/tests/generated/opening-hours.md",
+            path: `egma/tests/${suiteDirectory}/opening-hours.md`,
             content:
               "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
           },
           {
             kind: "write-file",
-            path: "egma/tests/generated/order-status.md",
+            path: `egma/tests/${suiteDirectory}/order-status.md`,
             content:
               "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
           },
           {
             kind: "write-file",
-            path: "egma/tests/generated/refund-policy.md",
+            path: `egma/tests/${suiteDirectory}/refund-policy.md`,
             content:
               "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
           },
@@ -178,7 +178,7 @@ async function wizard(): Promise<TerminalRun> {
   });
   terminal = run;
 
-  await showing(run, "Welcome to Egma", "[enter] continue");
+  await showing(run, "Welcome to egma", "Press Enter to authenticate");
   run.write("\r");
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
@@ -227,7 +227,7 @@ describe("the key screen", () => {
     // teardown's.
     await chooseNoExistingTests(run);
 
-    await showing(run, "price-question", "[enter] run", "[q] quit");
+    await showing(run, "price-question", "Press Enter to run.", "[q] quit");
     // The walk carries on into the run it starts, and results arrive when grading
     // arrive — so the fixture is given something that judges what is queued.
     const grading = gradeEveryRun(platform);
@@ -285,7 +285,7 @@ describe("the existing-tests choice", () => {
     await showing(run, "Enter the path to your test cases before continuing.");
 
     run.write("missing-tests.md\r");
-    await showing(run, "price-question", "[enter] run");
+    await showing(run, "price-question", "Press Enter to run.");
     run.write("\u0003");
     expect(await run.exited).toBe(130);
   });
@@ -329,7 +329,7 @@ describe("stopping at the key screen", () => {
 describe("the picker", () => {
   it("appears only when there is a choice, and connects the one chosen", async () => {
     retell = await startFakeRetell(TWO_AGENTS);
-    const run = await wizard();
+    const run = await wizard("after-hours-tests");
 
     await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
@@ -358,7 +358,7 @@ describe("the picker", () => {
 
     // Past the one question the generate step asks, and past its gate.
     await chooseNoExistingTests(run);
-    await showing(run, "price-question", "[enter] run");
+    await showing(run, "price-question", "Press Enter to run.");
     const grading = gradeEveryRun(platform);
     run.write("\r");
 
@@ -396,7 +396,7 @@ describe("the choice between text and phone", () => {
     run.write("\r");
 
     await chooseNoExistingTests(run);
-    await showing(run, "price-question", "[enter] run");
+    await showing(run, "price-question", "Press Enter to run.");
     const grading = gradeEveryRun(platform);
     run.write("\r");
 
@@ -454,7 +454,7 @@ describe("the choice between text and phone", () => {
     run.write("\r");
 
     await chooseNoExistingTests(run);
-    await showing(run, "price-question", "[enter] run");
+    await showing(run, "price-question", "Press Enter to run.");
     const grading = gradeEveryRun(platform);
     run.write("\r");
 

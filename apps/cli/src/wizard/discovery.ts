@@ -4,7 +4,7 @@
  * Nothing about a repository tells egma where a voice agent is. A person would
  * read the code to work it out, so egma has a coding agent read it — the
  * developer's own, on the developer's own machine, with the public
- * `find-voice-agent` skill saying what to look for. The task itself owns the
+ * `integrate-egma` skill saying what to look for. The task itself owns the
  * marker protocol. The repository never leaves the machine and no skill is
  * installed on it.
  *
@@ -60,7 +60,7 @@ export type DiscoveryOptions = {
 
 /** What Egma adds to the public skill for this one wizard run. */
 export function discoveryTask(where: string): string {
-  const resources = publicSkillDirectory("find-voice-agent");
+  const resources = publicSkillDirectory("integrate-egma");
   return [
     "# Your task",
     "",
@@ -85,14 +85,19 @@ export function discoveryTask(where: string): string {
     "```text",
     "egma:found framework retell-sdk",
     "egma:found agent-name front-desk",
+    "egma:found dispatch-name front-desk",
+    "egma:found entrypoint src/agent.py",
     "egma:found prompts prompts/greeter.md",
     "egma:found tools src/tools/ (2 definitions)",
     "egma:found deploy Retell-hosted, updated by scripts/deploy.ts",
     "egma:found agent-id src/config.ts",
     "```",
     "",
-    "Use only these fact names: `framework`, `agent-name`, `prompts`, `tools`,",
-    "`deploy`, and `agent-id`. Put every found line in one final block with",
+    "Use only these fact names: `framework`, `agent-name`, `dispatch-name`,",
+    "`entrypoint`, `prompts`, `tools`, `deploy`, and `agent-id`. For a LiveKit",
+    "worker, always report `entrypoint` and report `dispatch-name` as `unknown`",
+    "when committed source proves no explicit name. Put every found line in one",
+    "final block with",
     "nothing after it.",
     "Start every marker at the beginning of a line, end it with a line break,",
     "and put no ordinary words on that line.",
@@ -101,7 +106,7 @@ export function discoveryTask(where: string): string {
 
 /** The public finder followed by the wizard-specific reference path and protocol. */
 export function discoveryInstructions(where: string): string {
-  return instructionsWith([publicSkill("find-voice-agent")], discoveryTask(where));
+  return instructionsWith([publicSkill("integrate-egma")], discoveryTask(where));
 }
 
 /**

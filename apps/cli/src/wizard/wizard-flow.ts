@@ -19,10 +19,9 @@
  * target without replacing the targets already committed, and creates another
  * direct suite beside the suites already there.
  *
- * The last step is the only one that does not end when it is finished. It ends
- * when the developer has seen one trace reach terminal grading, which is the point of the ten
- * minutes before it; the suite carries on running on the platform, and closing
- * a terminal has never stopped one.
+ * The last step keeps the terminal and any local LiveKit worker open until all
+ * simulations and requested grades are terminal. Closing the terminal still
+ * does not cancel hosted work.
  */
 
 import process from "node:process";
@@ -36,6 +35,11 @@ import {
 } from "../acp/coding-agents.ts";
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
 import { folderPathsIn } from "../folder/egma-folder.ts";
+import {
+  startLocalLiveKitWorker,
+  type LocalLiveKitWorker,
+  type StartLocalLiveKitWorker,
+} from "../livekit/local-worker.ts";
 import {
   MonitoringTargetRecordError,
   recordMonitoringTarget,
@@ -62,7 +66,10 @@ import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { generateStep } from "./generate-step.ts";
 import { logInStep, type PlatformAccess, type WizardPlatform } from "./login-step.ts";
-import { liveKitConnectionSetupStep } from "./livekit-connection-setup-step.ts";
+import {
+  liveKitConnectionSetupStep,
+  type LiveKitConnected,
+} from "./livekit-connection-setup-step.ts";
 import { mockAuthoringStep } from "./mock-authoring-step.ts";
 import { runStep } from "./run-step.ts";
 import { ACTION_MARK } from "./status.ts";
@@ -111,6 +118,8 @@ type WizardFlowBaseOptions = {
    */
   readonly monitoringWaitMs?: number;
   readonly monitoringPollMs?: number;
+  /** Test seam for the foreground LiveKit worker owned by a testing walk. */
+  readonly startLiveKitWorker?: StartLocalLiveKitWorker;
 };
 
 export type WizardCodingAgent =
@@ -576,6 +585,7 @@ async function runWizardWithAgent(
     readonly connected: {
       readonly registered: Registered;
       readonly source: { readonly prompt: string | null; readonly toolCount: number | null };
+      readonly localWorker: NonNullable<LiveKitConnected["connected"]>["localWorker"];
     } | null;
   };
   if (agentPlatform === "retell") {
@@ -603,6 +613,7 @@ async function runWizardWithAgent(
                 prompt: retell.connected.config.prompt,
                 toolCount: retell.connected.config.tools.length,
               },
+              localWorker: null,
             },
     };
   } else {
@@ -612,6 +623,8 @@ async function runWizardWithAgent(
       cwd,
       signal,
       suggestedName: found.facts.get("agent-name") ?? path.basename(cwd),
+      dispatchName: found.facts.get("dispatch-name") ?? "",
+      entrypoint: found.facts.get("entrypoint") ?? "",
       // The row monitoring created, when it ran: one agent row for one voice
       // agent, so this connection attaches to it rather than starting a second.
       existingAgent:
@@ -685,21 +698,47 @@ async function runWizardWithAgent(
     return written.report;
   }
 
-  const report = await runStep({
-    ui,
-    signedIn,
-    // The last screen names both promises when the sitting kept both.
-    ...(monitored === null ? {} : { monitoringUrl: platform.url }),
-    agentId: connected.connected.registered.agent.id,
-    connectionId: connected.connected.registered.connection.id,
-    suiteId: written.suite.id,
-    expectedTestVersions: written.pushed,
-    drivenAgentId: drivenAgent.id,
-    cwd,
-    home: options.home ?? homeIn(process.env),
-    signal,
-    ...(options.runPollMs === undefined ? {} : { everyMs: options.runPollMs }),
-  });
+  let localWorker: LocalLiveKitWorker | null = null;
+  if (connected.connected.localWorker !== null) {
+    ui.pushStatus(
+      `${ACTION_MARK} Starting local LiveKit worker ${connected.connected.localWorker.dispatchName}.`,
+    );
+    const started = await (options.startLiveKitWorker ?? startLocalLiveKitWorker)({
+      cwd,
+      ...connected.connected.localWorker,
+      signal,
+      onOutput: (chunk) => log.write(chunk),
+    });
+    if (started.kind === "failed") {
+      const report: ExitReport = { kind: "failed", reason: started.reason };
+      ui.setExit(report);
+      return report;
+    }
+    localWorker = started.worker;
+    ui.pushStatus(`${ACTION_MARK} Local LiveKit worker is registered and ready.`);
+  }
+
+  let report: ExitReport;
+  try {
+    report = await runStep({
+      ui,
+      signedIn,
+      // The last screen names both promises when the sitting kept both.
+      ...(monitored === null ? {} : { monitoringUrl: platform.url }),
+      agentId: connected.connected.registered.agent.id,
+      connectionId: connected.connected.registered.connection.id,
+      suiteId: written.suite.id,
+      expectedTestVersions: written.pushed,
+      drivenAgentId: drivenAgent.id,
+      cwd,
+      home: options.home ?? homeIn(process.env),
+      signal,
+      ...(localWorker === null ? {} : { localWorker }),
+      ...(options.runPollMs === undefined ? {} : { everyMs: options.runPollMs }),
+    });
+  } finally {
+    await localWorker?.stop();
+  }
   if (report.kind === "run-started") advance({ type: "wizard-completed" });
   ui.setExit(report);
   return report;

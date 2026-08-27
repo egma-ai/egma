@@ -60,11 +60,13 @@ export function CodingAgentScreen({ state, onAnswer, onQuit }: CodingAgentScreen
   const shown = agents.slice(from, from + VISIBLE);
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
-      <Text bold>Choose the coding agent Egma should use.</Text>
-      <Text dimColor>Egma found these supported agents on this machine.</Text>
+      <Text>egma will use a coding agent on your machine to set everything up.</Text>
+      <Text>
+        We found the following coding agents on your machine. Which one should we use?
+      </Text>
       <Box height={1} />
       {agents.length === 0 ? (
         <Text>Looking for Claude Code, Codex, Cursor, and OpenCode…</Text>

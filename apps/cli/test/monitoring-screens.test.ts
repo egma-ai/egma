@@ -86,7 +86,7 @@ async function walkToTheGoal(): Promise<TerminalRun> {
   });
   terminal = run;
 
-  await showing(run, "Welcome to Egma", "[enter] continue", "[q] quit");
+  await showing(run, "Welcome to egma", "Press Enter to authenticate", "[q] quit");
   run.write("\r");
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
@@ -110,14 +110,14 @@ describe("watching production traffic, on a real terminal", () => {
   it("asks the question, takes the key, offers the account, and leaves one line", async () => {
     const run = await walkToTheGoal();
 
-    const defaultGoal = await showing(run, GOAL_ASK_LINE, "› Test it");
+    const defaultGoal = await showing(run, GOAL_ASK_LINE, "› Simulation testing");
     expect(defaultGoal).not.toContain("[m]");
     run.write("\u001b[B");
-    await showing(run, "› Watch its production traffic");
+    await showing(run, "› Setup production monitoring");
     run.write("\u001b[B");
     await showing(run, "› Both");
     run.write("\u001b[A");
-    await showing(run, "› Watch its production traffic");
+    await showing(run, "› Setup production monitoring");
     run.write("\r");
 
     // The key box is drawn in this phase too, with the custody line under it —

@@ -445,6 +445,10 @@ export class HeadlessUI implements WizardUI {
     this.write(line);
   }
 
+  pushAgentMessage(_chunk: string): void {
+    // A promptless run has no live view. Its completed summary is stable output.
+  }
+
   setSummary(text: string): void {
     this.record.summary = text;
     if (text.trim() !== "") this.write(text.trim());

@@ -16,6 +16,7 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
 import type { WizardUI } from "../ui/wizard-ui.ts";
+import { MarkerStream, type ParsedLine } from "../wizard/markers.ts";
 import { ActionStream, drivenAgentTextIn } from "../wizard/status.ts";
 import { FENCE_MESSAGE, fenceStatusLine, fencedReferenceIn, isFenced } from "./fence.ts";
 import { sessionMetaFor } from "./hardening.ts";
@@ -380,6 +381,14 @@ export async function withDrivenAgent<T>(
                   prompt.catch(() => undefined);
 
                   const actions = new ActionStream(cwd);
+                  const visibleWords = new MarkerStream();
+                  const showProse = (lines: readonly ParsedLine[]): void => {
+                    for (const line of lines) {
+                      if (line.kind === "prose" && line.text !== "") {
+                        ui.pushAgentMessage(`${line.text}\n`);
+                      }
+                    }
+                  };
                   let spoken = "";
                   let stoppedBecause: string | null = null;
                   for (;;) {
@@ -401,6 +410,7 @@ export async function withDrivenAgent<T>(
                       };
                     }
                     if (message.kind === "stop") {
+                      showProse(visibleWords.flush());
                       return stoppedBecause === null
                         ? { kind: "done", summary: spoken.trim() }
                         : { kind: "aborted", reason: stoppedBecause };
@@ -409,6 +419,7 @@ export async function withDrivenAgent<T>(
                     for (const line of actions.lines(message.update)) ui.pushStatus(line);
                     const said = drivenAgentTextIn(message.update);
                     if (said === "") continue;
+                    showProse(visibleWords.push(said));
                     spoken += said;
 
                     if (stoppedBecause !== null) continue;

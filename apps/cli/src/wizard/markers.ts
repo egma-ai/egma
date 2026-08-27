@@ -4,8 +4,9 @@
  * A coding agent writes prose, and prose is not a report. So every step that
  * egma dispatches asks for its answers on marker lines: one fact per line, at
  * the start of the line, beginning `egma:`. Those become status lines and the
- * step's result. Everything else the agent says is kept in the log and never
- * put on screen, because a wall of text is not visibility.
+ * step's result. Everything else the agent says remains ordinary prose for the
+ * live coding-agent activity and the task log. Marker lines are withheld from
+ * that prose view because the step already renders their structured meaning.
  *
  * Four markers, and they mean the same thing in every step:
  *

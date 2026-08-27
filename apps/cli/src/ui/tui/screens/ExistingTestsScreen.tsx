@@ -14,6 +14,7 @@
 import { useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
 
+import { FAILURE_MARK } from "../../../wizard/status.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 
 export type ExistingTestsScreenProps = {
@@ -119,7 +120,7 @@ export function ExistingTestsScreen({ onAnswer }: ExistingTestsScreenProps) {
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
@@ -139,7 +140,7 @@ export function ExistingTestsScreen({ onAnswer }: ExistingTestsScreenProps) {
           <Box height={1} />
           <Text>Path to existing tests *</Text>
           <Text>{`  › ${typed}`}</Text>
-          {problem === null ? null : <Text>{problem}</Text>}
+          {problem === null ? null : <Text>{`${FAILURE_MARK} ${problem}`}</Text>}
         </>
       )}
       <Box height={1} />

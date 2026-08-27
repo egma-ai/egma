@@ -150,6 +150,10 @@ export class InkUI implements WizardUI {
     this.store.pushStatus(line);
   }
 
+  pushAgentMessage(chunk: string): void {
+    this.store.pushAgentMessage(chunk);
+  }
+
   setSummary(text: string): void {
     this.store.setSummary(text);
   }

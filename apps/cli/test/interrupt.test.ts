@@ -109,13 +109,13 @@ function startWizard(script: string) {
 }
 
 async function authorizeStoredCli(terminal: ReturnType<typeof startWizard>): Promise<void> {
-  await showing(terminal, "Welcome to Egma", "[enter] continue");
+  await showing(terminal, "Welcome to egma", "Press Enter to authenticate");
   terminal.write("\r");
 }
 
 /** Every test file the folder holds, or none when there is no folder. */
 async function testsInFolder(): Promise<string[]> {
-  return (await readdir(path.join(workspace.dir, "egma", "tests", "generated")).catch(
+  return (await readdir(path.join(workspace.dir, "egma", "tests", "order-line-tests")).catch(
     () => [] as string[],
   )).filter((name) => name.endsWith(".md"));
 }
@@ -129,7 +129,7 @@ function writes(name: string): FakeStep[] {
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/generated/${name}.md`,
+      path: `egma/tests/order-line-tests/${name}.md`,
       content: [
         "---",
         "format: 4",
@@ -155,7 +155,7 @@ describe("Ctrl-C while the browser is being waited on", () => {
     const terminal = startWizard(script);
 
     try {
-      await showing(terminal, "Welcome to Egma", "[enter] continue");
+      await showing(terminal, "Welcome to egma", "Press Enter to authenticate");
       terminal.write("\r");
 
       // The login screen: a code to approve, an address it is already in, and
@@ -283,7 +283,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
 
       // The gate names the suite size and keeps all four files on disk. It shows
       // three rows at once and makes the fourth available through browsing.
-      await showing(terminal, "4 tests generated", "… 1 more", "[enter] run");
+      await showing(terminal, "4 tests", "Press Enter to run.");
 
       terminal.write(CTRL_C);
 
@@ -377,7 +377,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
 
       await chooseNoExistingTests(terminal);
 
-      await showing(terminal, "4 tests generated", "[enter] run");
+      await showing(terminal, "4 tests", "Press Enter to run.");
       terminal.write("\r");
 
       // The run is on the platform, and no trace result is ready: this is

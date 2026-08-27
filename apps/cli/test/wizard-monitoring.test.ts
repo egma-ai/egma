@@ -28,6 +28,7 @@ import {
 import { walkExitCode } from "../src/wizard/exit-code.ts";
 import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
 import { MintedSecret } from "../src/platform/api-keys.ts";
+import type { StartLocalLiveKitWorker } from "../src/livekit/local-worker.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, exitLines } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
@@ -50,6 +51,17 @@ const AGENT_NAME = "order-line";
 
 const LIVEKIT_API_KEY = "APIhx4bmvHnLcWXYZ";
 const LIVEKIT_API_SECRET = "livekit-secret-E5F6G7H8QRST";
+
+const startFakeLocalWorker: StartLocalLiveKitWorker = async () => {
+  let finish!: () => void;
+  const ended = new Promise<{ readonly kind: "stopped" }>((resolve) => {
+    finish = () => resolve({ kind: "stopped" });
+  });
+  return {
+    kind: "started",
+    worker: { ended, stop: async () => finish() },
+  };
+};
 
 /** The one fragment that names the monitoring dispatch and nothing else. */
 const MONITORING_EDIT_TASK = "send its production evidence to Egma";
@@ -173,6 +185,8 @@ function liveKitDiscovery(): FakeStep[] {
   return [
     { kind: "say", text: "egma:found framework livekit-agents\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+    { kind: "say", text: "egma:found entrypoint agent.py\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -202,12 +216,15 @@ function testFile(name: string): string {
   ].join("\n");
 }
 
-function writesOneTest(name: string): FakeStep[] {
+function writesOneTest(
+  name: string,
+  suiteDirectory = "order-line-tests",
+): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/generated/${name}.md`,
+      path: `egma/tests/${suiteDirectory}/${name}.md`,
       content: testFile(name),
     },
     { kind: "say", text: `egma:wrote ${name}\n` },
@@ -331,6 +348,7 @@ async function walk(options: WalkOptions) {
       }),
       ...(options.retell === undefined ? {} : { retell: { url: options.retell.url } }),
       connectionFetchImpl: connectionFetch(),
+      startLiveKitWorker: startFakeLocalWorker,
       home: path.join(workspace.dir, "pretend-home"),
       runPollMs: 20,
       howManyTests: 1,
@@ -831,7 +849,10 @@ describe("choosing both", () => {
       stepsByTask: [
         { contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() },
         { contains: MOCK_AUTHORING_TASK, steps: writesNoMockedWorld() },
-        { contains: GENERATE_TASK, steps: writesOneTest("late-repair") },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("late-repair", "front-desk-tests"),
+        },
       ],
       answers: {
         "connection:variant": "livekit_room.project_credentials",

@@ -55,11 +55,11 @@ export function GoalScreen({ ask, onAnswer, onQuit }: GoalScreenProps) {
       handler: () => onAnswer(ask.goals[atRef.current] ?? null),
     },
     {
-    match: ["q", "escape"],
-    label: "q",
-    action: "quit",
-    priority: 2,
-    handler: onQuit,
+      match: ["q", "escape"],
+      label: "q",
+      action: "quit",
+      priority: 2,
+      handler: onQuit,
     },
   ];
 
@@ -73,10 +73,10 @@ export function GoalScreen({ ask, onAnswer, onQuit }: GoalScreenProps) {
       : `${ask.agentName}, your ${ask.platformLabel} voice agent`;
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
-      <Text>{GOAL_ASK_LINE}</Text>
+      <Text bold>{GOAL_ASK_LINE}</Text>
       <Text dimColor>{`Egma found ${named}.`}</Text>
       <Box height={1} />
       {ask.goals.map((goal, index) => (

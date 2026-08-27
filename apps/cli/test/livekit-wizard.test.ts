@@ -12,6 +12,7 @@ import {
   LIVEKIT_KEY_PAIR_VARIANT,
   LIVEKIT_TOKEN_ENDPOINT_VARIANT,
 } from "../src/livekit/connect.ts";
+import type { StartLocalLiveKitWorker } from "../src/livekit/local-worker.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
 import { liveKitConnectionSetupStep } from "../src/wizard/livekit-connection-setup-step.ts";
@@ -34,6 +35,37 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 const API_KEY = "APIhx4bmvHnLcWXYZ";
 const API_SECRET = "livekit-secret-E5F6G7H8QRST";
 const HEADERS = '{"Authorization":"Bearer private-token"}';
+
+const localWorkerRuns: Array<{
+  readonly url: string;
+  readonly dispatchName: string;
+  readonly entrypoint: string;
+  stopped: boolean;
+}> = [];
+
+const startFakeLocalWorker: StartLocalLiveKitWorker = async (options) => {
+  const recorded = {
+    url: options.url,
+    dispatchName: options.dispatchName,
+    entrypoint: options.entrypoint,
+    stopped: false,
+  };
+  localWorkerRuns.push(recorded);
+  let finish!: () => void;
+  const ended = new Promise<{ readonly kind: "stopped" }>((resolve) => {
+    finish = () => resolve({ kind: "stopped" });
+  });
+  return {
+    kind: "started",
+    worker: {
+      ended,
+      stop: async () => {
+        recorded.stopped = true;
+        finish();
+      },
+    },
+  };
+};
 
 /**
  * The customer's worker before Egma touches it: an ordinary LiveKit job
@@ -192,6 +224,7 @@ let platform: Platform;
 let workspace: Workspace;
 
 beforeEach(async () => {
+  localWorkerRuns.length = 0;
   platform = await startPlatform();
   workspace = await makeWorkspace({
     "package.json": '{"name":"livekit-front-desk","dependencies":{"livekit-agents":"latest"}}\n',
@@ -288,7 +321,7 @@ function writingSteps(): FakeStep[] {
     { kind: "say", text: "egma:writing greets-a-new-customer\n" },
     {
       kind: "write-file",
-      path: "egma/tests/generated/greets-a-new-customer.md",
+      path: "egma/tests/front-desk-tests/greets-a-new-customer.md",
       content: testFile(),
     },
     { kind: "say", text: "egma:wrote greets-a-new-customer\n" },
@@ -313,7 +346,13 @@ class CorrectionUI extends HeadlessUI {
   }
 }
 
-function connectionSetupStep(ui: HeadlessUI) {
+function connectionSetupStep(
+  ui: HeadlessUI,
+  discovery: {
+    readonly dispatchName?: string;
+    readonly entrypoint?: string;
+  } = {},
+) {
   return liveKitConnectionSetupStep({
     ui,
     platform: {
@@ -323,6 +362,8 @@ function connectionSetupStep(ui: HeadlessUI) {
     cwd: workspace.dir,
     signal: new AbortController().signal,
     suggestedName: "front-desk",
+    dispatchName: discovery.dispatchName ?? "front-desk-worker",
+    entrypoint: discovery.entrypoint ?? "agent.py",
     fetchImpl: connectionFetch(),
   });
 }
@@ -333,6 +374,8 @@ describe("LiveKit in the wizard", () => {
       steps: [
         { kind: "say", text: "egma:found framework livekit-agents\n" },
         { kind: "say", text: "egma:found agent-name front-desk\n" },
+        { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+        { kind: "say", text: "egma:found entrypoint agent.py\n" },
         { kind: "stop", reason: "end_turn" },
       ],
     });
@@ -367,32 +410,67 @@ describe("LiveKit in the wizard", () => {
     };
 
     try {
-      await sees("Welcome to Egma", "[enter] continue", "[q] quit");
+      await sees("Welcome to egma", "Press Enter to authenticate", "[q] quit");
       terminal.write("\r");
       await sees("[enter] begin", "[q] quit");
       terminal.write("\r");
-      await sees("What should Egma do for this voice agent?", "› Test it");
-      terminal.write("\r");
-      await sees("Agent name on Egma *", "front-desk");
+      await sees("Setup", "› Simulation testing");
       terminal.write("\r");
       await sees("How should Egma get LiveKit room tokens?");
       terminal.write("\r");
 
       const form = await sees(
         "LiveKit connection details",
-        "Egma uses these values to connect each simulation to a LiveKit room.",
+        "Get these values from your LiveKit project settings.",
         "LiveKit WebSocket URL *",
+        "wss://your-project.livekit.cloud",
         "API key *",
+        "Enter LiveKit API key",
         "API secret *",
+        "Enter LiveKit API secret",
       );
       expect(form).not.toContain(API_KEY);
       expect(form).not.toContain(API_SECRET);
+      // The field frame can finish one render before Ink applies the measured
+      // caret position. Wait for the terminal-visible cursor itself rather
+      // than racing that layout effect.
+      expect(
+        await terminal.waitFor(() => terminal.raw().includes("\u001B[?25h"), 5_000),
+      ).toBe(true);
 
-      terminal.write("wss://acme.livekit.cloud\r");
+      const clickField = (label: string): void => {
+        const lines = terminal.screen().split("\n");
+        const labelRow = lines.findLastIndex((line) => line.includes(label));
+        expect(labelRow, `field ${label} is on screen`).toBeGreaterThanOrEqual(0);
+        // Label, top border, then the input row. SGR coordinates are one-based.
+        terminal.write(`\u001B[<0;10;${labelRow + 3}M`);
+      };
+
+      const fieldShows = async (label: string, value: string): Promise<void> => {
+        const shown = await terminal.waitFor(() => {
+          const lines = terminal.screen().split("\n");
+          const labelRow = lines.findLastIndex((line) => line.includes(label));
+          return labelRow >= 0 && (lines[labelRow + 2] ?? "").includes(value);
+        });
+        expect(shown, `field ${label} shows its entered value`).toBe(true);
+      };
+
+      clickField("API secret *");
+      await sees("› API secret *");
+      terminal.write(API_SECRET);
+      const secret = await sees("●".repeat(API_SECRET.length));
+      expect(secret).not.toContain(API_SECRET);
+      expect(terminal.raw()).not.toContain(API_SECRET);
+
+      clickField("API key *");
       await sees("› API key *");
       terminal.write(API_KEY);
-      const secret = await sees("●".repeat(API_KEY.length));
-      expect(secret).not.toContain(API_KEY);
+      await fieldShows("API key *", "●".repeat(API_KEY.length));
+
+      clickField("LiveKit WebSocket URL *");
+      await sees("› LiveKit WebSocket URL *");
+      terminal.write("wss://acme.livekit.clod\u001B[Du");
+      await sees("wss://acme.livekit.cloud");
       expect(terminal.raw()).not.toContain(API_KEY);
 
       terminal.write("\u0003");
@@ -408,15 +486,12 @@ describe("LiveKit in the wizard", () => {
       variant: LIVEKIT_KEY_PAIR_VARIANT,
       answers: {
         "connection:config:url": "wss://acme.livekit.cloud",
-        "connection:config:agentName": "front-desk-worker",
-        "connection:config:metadata": '{"tenant":"acme"}',
         "connection:credentials:apiKey": API_KEY,
         "connection:credentials:apiSecret": API_SECRET,
       },
       config: {
         url: "wss://acme.livekit.cloud",
         agentName: "front-desk-worker",
-        metadata: '{"tenant":"acme"}',
       },
       sealed: [API_KEY, API_SECRET],
     },
@@ -443,6 +518,8 @@ describe("LiveKit in the wizard", () => {
           steps: [
             { kind: "say", text: "egma:found framework livekit-agents\n" },
             { kind: "say", text: "egma:found agent-name front-desk\n" },
+            { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+            { kind: "say", text: "egma:found entrypoint agent.py\n" },
             { kind: "say", text: "egma:found prompts agent.ts\n" },
             { kind: "say", text: "egma:found tools agent.ts (1 definition)\n" },
             { kind: "stop", reason: "end_turn" },
@@ -454,7 +531,6 @@ describe("LiveKit in the wizard", () => {
     });
     const ui = new HeadlessUI({
       answers: {
-        "connection:agent-name": "front-desk",
         "connection:variant": shape.variant,
         ...shape.answers,
       },
@@ -473,6 +549,7 @@ describe("LiveKit in the wizard", () => {
           credentialsFile: workspace.credentialsFile,
         }),
         connectionFetchImpl: connectionFetch(),
+        startLiveKitWorker: startFakeLocalWorker,
         howManyTests: 1,
         runPollMs: 20,
       });
@@ -491,16 +568,29 @@ describe("LiveKit in the wizard", () => {
       config: shape.config,
     });
     expect(platform.registered.sealed).toEqual(shape.sealed);
+    expect(localWorkerRuns).toEqual(
+      shape.variant === LIVEKIT_KEY_PAIR_VARIANT
+        ? [
+            {
+              url: "wss://acme.livekit.cloud",
+              dispatchName: "front-desk-worker",
+              entrypoint: "agent.py",
+              stopped: true,
+            },
+          ]
+        : [],
+    );
     expect(ui.record.asked).not.toContain("retell-key");
     expect(ui.record.asked).not.toContain("reach");
     expect(ui.record.connectionAsks.map((ask) => ask.id)).toContain("connection:variant");
     expect(ui.record.connectionFieldGroups).toHaveLength(1);
     expect(ui.record.connectionFieldGroups[0]).toMatchObject({
       title: "LiveKit connection details",
-      help: "Egma uses these values to connect each simulation to a LiveKit room.",
+      help:
+        "For project credentials, get the WebSocket URL, API key, and API secret from LiveKit Cloud. Egma uses them to connect each simulation to a room.",
       notice:
-        "Credentials go straight to Egma, which stores them sealed. " +
-        "They are not sent to the coding agent or written to this repository.",
+        "Credentials are not sent to the coding agent or written to this repository. " +
+        "Egma stores them sealed; project credentials also reach the local worker only through its process environment.",
     });
     expect(ui.record.connectionFieldGroups[0]?.fields.map((field) => field.id)).toEqual(
       shape.variant === LIVEKIT_KEY_PAIR_VARIANT
@@ -519,9 +609,9 @@ describe("LiveKit in the wizard", () => {
       ui.record.connectionAsks.find((ask) => ask.id === "connection:variant"),
     ).toMatchObject({
       help:
-        "Project credentials (API key and secret) are Recommended and are the " +
-        "quickest setup. An Advanced customer token endpoint keeps the signing " +
-        "secret with you; Egma calls it for each simulation.",
+        "Project credentials (API key and secret) are Recommended and let Egma " +
+        "run this repository's worker locally. An Advanced customer token endpoint " +
+        "keeps the signing secret with you and requires an already-running worker.",
       defaultValue: LIVEKIT_KEY_PAIR_VARIANT,
       choices: [
         {
@@ -570,6 +660,8 @@ describe("LiveKit in the wizard", () => {
           steps: [
             { kind: "say", text: `egma:found framework ${options.framework}\n` },
             { kind: "say", text: "egma:found agent-name front-desk\n" },
+            { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+            { kind: "say", text: "egma:found entrypoint agent.py\n" },
             { kind: "say", text: "egma:found tools agent.py (1 definition)\n" },
             { kind: "stop", reason: "end_turn" },
           ],
@@ -580,7 +672,6 @@ describe("LiveKit in the wizard", () => {
     });
     const ui = new HeadlessUI({
       answers: {
-        "connection:agent-name": "front-desk",
         "connection:variant": LIVEKIT_KEY_PAIR_VARIANT,
         "connection:config:url": "wss://acme.livekit.cloud",
         "connection:credentials:apiKey": API_KEY,
@@ -600,6 +691,7 @@ describe("LiveKit in the wizard", () => {
           credentialsFile: workspace.credentialsFile,
         }),
         connectionFetchImpl: connectionFetch(),
+        startLiveKitWorker: startFakeLocalWorker,
         howManyTests: 1,
         runPollMs: 20,
       });
@@ -839,7 +931,36 @@ describe("LiveKit in the wizard", () => {
 });
 
 describe("LiveKit correction paths", () => {
-  it("shows a name collision, then registers the corrected name", async () => {
+  it.each([
+    {
+      fact: "dispatch name",
+      discovery: { dispatchName: "unknown", entrypoint: "agent.py" },
+      reason:
+        "Egma could not find the LiveKit dispatch name in this repository, so it did not create a connection. Set the worker's agent name in code and run Egma again.",
+    },
+    {
+      fact: "worker entrypoint",
+      discovery: { dispatchName: "front-desk-worker", entrypoint: "  UNKNOWN  " },
+      reason:
+        "Egma could not find the LiveKit worker entrypoint in this repository, so it did not create a connection. Make the worker startup path clear and run Egma again.",
+    },
+  ])("does not accept an unknown discovered $fact", async ({ discovery, reason }) => {
+    const ui = new HeadlessUI();
+
+    const result = await connectionSetupStep(ui, discovery);
+
+    expect(result).toEqual({
+      report: { kind: "failed", reason },
+      connected: null,
+    });
+    expect(ui.record.asked).toEqual([]);
+    expect(ui.record.connectionAsks).toEqual([]);
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.registered.sealed).toHaveLength(0);
+  });
+
+  it("reports a discovered-name collision without asking for another name", async () => {
     const existing = await connectLiveKit(
       {
         variant: LIVEKIT_KEY_PAIR_VARIANT,
@@ -855,73 +976,49 @@ describe("LiveKit correction paths", () => {
     expect(existing.kind).toBe("registered");
 
     const ui = new CorrectionUI({
-      "connection:agent-name": ["front-desk", "front-desk-2"],
-      "connection:variant": [LIVEKIT_KEY_PAIR_VARIANT, LIVEKIT_KEY_PAIR_VARIANT],
-      "connection:config:url": [
-        "wss://new.livekit.cloud",
-        "wss://new.livekit.cloud",
-      ],
-      "connection:config:agentName": [null, null],
-      "connection:config:metadata": [null, null],
-      "connection:credentials:apiKey": [API_KEY, API_KEY],
-      "connection:credentials:apiSecret": [API_SECRET, API_SECRET],
+      "connection:variant": [LIVEKIT_KEY_PAIR_VARIANT],
+      "connection:config:url": ["wss://new.livekit.cloud"],
+      "connection:credentials:apiKey": [API_KEY],
+      "connection:credentials:apiSecret": [API_SECRET],
     });
 
     const result = await connectionSetupStep(ui);
 
     const collision =
-      "An Egma agent already uses the name front-desk. Choose another name.";
-    expect(result.report).toEqual({
-      kind: "connected",
-      agentName: "front-desk-2",
-      connectionName: "livekit_room-1",
+      "An Egma agent already uses the name front-desk. Rename this voice agent in its source, then run Egma again.";
+    expect(result).toEqual({
+      report: { kind: "failed", reason: collision },
+      connected: null,
     });
-    expect(ui.record.statuses).toContain(collision);
-    expect(
-      ui.record.connectionAsks.filter((ask) => ask.id === "connection:agent-name")[1],
-    ).toMatchObject({ problem: collision });
-    expect(platform.registered.agents.map((agent) => agent.name)).toEqual([
-      "front-desk",
-      "front-desk-2",
-    ]);
-    expect(platform.registered.connections).toHaveLength(2);
+    expect(ui.record.connectionAsks.map((ask) => ask.id)).not.toContain(
+      "connection:agent-name",
+    );
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["front-desk"]);
+    expect(platform.registered.connections).toHaveLength(1);
   });
 
-  it("shows a platform refusal, then registers the corrected field", async () => {
+  it("reports a platform refusal without restarting credential collection", async () => {
     const ui = new CorrectionUI({
-      "connection:agent-name": ["front-desk", "front-desk"],
-      "connection:variant": [LIVEKIT_KEY_PAIR_VARIANT, LIVEKIT_KEY_PAIR_VARIANT],
-      "connection:config:url": ["not-a-url", "wss://acme.livekit.cloud"],
-      "connection:config:agentName": [null, null],
-      "connection:config:metadata": [null, null],
-      "connection:credentials:apiKey": [API_KEY, API_KEY],
-      "connection:credentials:apiSecret": [API_SECRET, API_SECRET],
+      "connection:variant": [LIVEKIT_KEY_PAIR_VARIANT],
+      "connection:config:url": ["not-a-url"],
+      "connection:credentials:apiKey": [API_KEY],
+      "connection:credentials:apiSecret": [API_SECRET],
     });
 
     const result = await connectionSetupStep(ui);
 
     const refusal =
       "the config's url must be a ws, wss, http or https URL, which looks like wss://example.livekit.cloud";
-    expect(result.report).toEqual({
-      kind: "connected",
-      agentName: "front-desk",
-      connectionName: "livekit_room-1",
+    expect(result).toEqual({
+      report: { kind: "failed", reason: refusal },
+      connected: null,
     });
-    expect(ui.record.statuses).toContain(refusal);
-    expect(
-      ui.record.connectionAsks.filter((ask) => ask.id === "connection:agent-name")[1],
-    ).toMatchObject({ problem: refusal });
-    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["front-desk"]);
-    expect(platform.registered.connections[0]?.config).toEqual({
-      url: "wss://acme.livekit.cloud",
-    });
-    // The refused request did not seal or keep anything.
-    expect(platform.registered.sealed).toEqual([API_KEY, API_SECRET]);
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.sealed).toHaveLength(0);
   });
 
   it("stops before registration when a required field is missing", async () => {
     const ui = new CorrectionUI({
-      "connection:agent-name": ["front-desk"],
       "connection:variant": [LIVEKIT_KEY_PAIR_VARIANT],
       "connection:config:url": [null],
     });

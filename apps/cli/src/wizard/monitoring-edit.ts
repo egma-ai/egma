@@ -260,9 +260,10 @@ function monitoringEditTask(cwd: string, facts: Facts): string {
     "",
     "## Where you may write",
     "",
-    `Work in ${cwd}. You may write exactly one file: the worker file where the`,
-    "LiveKit job entrypoint is. Read whatever committed source you need. Run no",
-    "command that reaches the network and install nothing.",
+    `Work in ${cwd}. You may write exactly two files: the worker file where the`,
+    "LiveKit job entrypoint is and the dependency manifest that already manages",
+    "the worker's Python packages. Read whatever committed source you need.",
+    "Run no command that reaches the network and install nothing.",
     "",
     "**Never open, write, or mention a `.env` file, or any other environment",
     "file.** Egma's own command writes the two variables the monitoring entry",
@@ -318,10 +319,10 @@ function monitoringEditTask(cwd: string, facts: Facts): string {
   ].join("\n");
 }
 
-/** The public SDK skill, then the run-specific task. */
+/** The public integration skill, then the run-specific task. */
 export function monitoringEditInstructions(cwd: string, facts: Facts): string {
   return instructionsWith(
-    [publicSkill("integrate-egma-sdk")],
+    [publicSkill("integrate-egma")],
     monitoringEditTask(cwd, facts),
   );
 }

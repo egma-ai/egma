@@ -106,19 +106,19 @@ describe("finding the voice agent", () => {
 
     // Every fact reached the screen while the agent worked.
     expect(ui.record.statuses).toContain("◆ Reading package.json");
-    expect(ui.record.statuses).toContain("┊ Framework  retell-sdk");
+    expect(ui.record.statuses).toContain("┊ Framework   retell-sdk");
     expect(ui.record.statuses).toContain(
-      "┊ Prompts    prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
+      "┊ Prompts     prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
     );
 
     // And the card at the end holds all of them, in one place, aligned.
     expect(ui.record.summary.split("\n")).toEqual([
       "Your voice agent",
-      "  Framework  retell-sdk",
-      "  Prompts    prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
-      "  Tools      src/tools/*.ts (2 definitions, registered as Retell custom tools)",
-      "  Deploy     Retell-hosted; scripts/deploy.ts updates the agent",
-      "  Agent id   src/config.ts",
+      "  Framework   retell-sdk",
+      "  Prompts     prompts/order-line.md (pushed to Retell by scripts/deploy.ts)",
+      "  Tools       src/tools/*.ts (2 definitions, registered as Retell custom tools)",
+      "  Deploy      Retell-hosted; scripts/deploy.ts updates the agent",
+      "  Agent id    src/config.ts",
     ]);
 
     expect(report).toEqual({
@@ -151,10 +151,10 @@ describe("finding the voice agent", () => {
     const instructions = (await observed()).instructions;
     expect(instructions).toHaveLength(1);
     const sent = instructions[0] as string;
-    expect(sent).toContain("name: find-voice-agent");
-    expect(sent).toContain("# Find the voice agent");
-    expect(sent).toContain("references/retell.md");
-    expect(sent).not.toContain("# Trace Retell repository evidence");
+    expect(sent).toContain("name: integrate-egma");
+    expect(sent).toContain("# Integrate Egma");
+    expect(sent).toContain("references/find-voice-agent.md");
+    expect(sent).not.toContain("# Connect a Retell agent");
     expect(sent).toContain("egma:found framework retell-sdk");
     expect(sent).toContain("# Your task");
     expect(sent).toContain(repo.dir);

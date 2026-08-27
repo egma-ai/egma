@@ -111,7 +111,7 @@ function codeOn(screen: string): string {
  * the narrow terminal one check here runs in without being wrapped.
  */
 async function past(terminal: TerminalRun): Promise<void> {
-  await showing(terminal, "Welcome to Egma", "[enter] continue", "[q] quit");
+  await showing(terminal, "Welcome to egma", "Press Enter to authenticate", "[q] quit");
   terminal.write("\r");
 }
 
@@ -163,7 +163,7 @@ function asOneLine(screen: string): string {
 }
 
 describe("the login screen", () => {
-  it("explains account creation and CLI authorization before opening the browser", async () => {
+  it("explains Egma and CLI authorization before opening the browser", async () => {
     const browser = await workspace.browser();
     const terminal = await wizard({ browser, cols: 120 });
 
@@ -171,9 +171,10 @@ describe("the login screen", () => {
       await showingIn(
         terminal,
         asOneLine,
-        "Next, sign in and authorize this CLI. Egma looks for a coding agent after that.",
-        "If you do not have an Egma account, you can create one in the browser.",
-        "[enter] continue",
+        "Welcome to egma, the platform to test, monitor, and self-improve your voice agents.",
+        "Through this wizard we will set up your egma in your repo for monitoring and/or simulations.",
+        "Press Enter to authenticate the CLI with your egma account.",
+        "[q] quit",
       );
       expect(await readFile(browser.opened, "utf8").catch(() => "")).toBe("");
 

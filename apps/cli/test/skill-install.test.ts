@@ -18,7 +18,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, readlink } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -111,7 +111,7 @@ describe("who the offer is aimed at", () => {
     expect(placesFor("claude")?.skills).toEqual(PUBLIC_SKILL_NAMES);
     expect(placesFor("claude")?.skills).toContain("egma");
     expect(placesFor("claude")?.skills).toContain("write-egma-tests");
-    expect(placesFor("claude")?.skills).toContain("integrate-egma-sdk");
+    expect(placesFor("claude")?.skills).toContain("integrate-egma");
   });
 
   it("reads the home from the environment the way every other tool does", () => {
@@ -158,6 +158,7 @@ describe("the installer egma runs", () => {
       "--skill",
       "*",
       "--agent",
+      "universal",
       "claude-code",
       "--yes",
     ]);
@@ -199,6 +200,18 @@ describe("the installer egma runs", () => {
       "./.claude/skills/write",
     ]);
   });
+
+  it("keeps canonical paths from the installer's symlink-mode output", () => {
+    expect(
+      landedLines(
+        [
+          "│  ✓ ./.agents/skills/egma        │",
+          "│    universal: Universal         │",
+          "│    symlinked: Claude Code       │",
+        ].join("\n"),
+      ),
+    ).toEqual(["./.agents/skills/egma"]);
+  });
 });
 
 describe("installing them", () => {
@@ -213,15 +226,22 @@ describe("installing them", () => {
     if (installed.kind !== "installed") throw new Error(installed.reason);
     expect(installed.scope).toBe("project");
     expect(installed.skills).toEqual(PUBLIC_SKILL_NAMES);
+    expect(installed.landed).toEqual(
+      PUBLIC_SKILL_NAMES.map((skill) => `./.agents/skills/${skill}`),
+    );
 
     const after = await everything();
     const written = after.repository.filter((file) => !before.repository.includes(file));
     for (const skill of PUBLIC_SKILL_NAMES) {
-      expect(written).toContain(`.claude/skills/${skill}/SKILL.md`);
+      expect(written).toContain(`.agents/skills/${skill}/SKILL.md`);
+      expect(written).toContain(`.claude/skills/${skill}`);
+      const alias = path.join(repository.dir, ".claude", "skills", skill);
+      expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+      expect(await readlink(alias)).toContain(path.join(".agents", "skills", skill));
     }
     expect(
       await readFile(
-        path.join(repository.dir, ".claude", "skills", "egma", "SKILL.md"),
+        path.join(repository.dir, ".agents", "skills", "egma", "SKILL.md"),
         "utf8",
       ),
     ).toContain(drivingSkill());

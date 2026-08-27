@@ -96,6 +96,8 @@ export type WizardState = {
   /** Where the skill would go, while the offer is open, or `null`. */
   readonly skillPlaces: SkillPlaces | null;
   readonly statuses: readonly string[];
+  /** First status line belonging to the coding-agent task now on screen. */
+  readonly activityFrom: number;
   readonly summary: string;
   readonly exit: ExitReport | null;
 };
@@ -132,6 +134,7 @@ export function emptyState(): WizardState {
     run: null,
     skillPlaces: null,
     statuses: [],
+    activityFrom: 0,
     summary: "",
     exit: null,
   };

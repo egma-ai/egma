@@ -184,7 +184,7 @@ describe("the egma command", () => {
 
     const lines = result.stdout.trimEnd().split("\n");
     expect(lines).toContain("◆ Read package.json");
-    expect(lines).toContain("┊ Framework  retell-sdk");
+    expect(lines).toContain("┊ Framework   retell-sdk");
 
     // Finding the agent is not reaching it. The walk goes on to ask for the
     // key that would reach it, and a run with nobody watching and nothing in

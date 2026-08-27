@@ -214,19 +214,20 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 
 `~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.
 
-It lists the installed Claude Code, Codex, Cursor, and OpenCode agents and asks
-which one to use. It then signs that machine in — a short code, approved in the
-browser you signed up in — registers your voice agent together with the way
-Egma reaches it, creates a real test suite, writes its tests with that coding
-agent, puts them on your instance, and starts one complete-suite run. Every
+It first authorizes the CLI — a short code, approved in the browser you signed
+up in. Only after authorization succeeds does it list the installed Claude
+Code, Codex, Cursor, and OpenCode agents and ask which one to use. That coding
+agent then discovers your voice agent. Egma registers the voice agent together
+with the way it reaches it, creates a real test suite, writes exactly four tests,
+puts them on your instance, and starts one complete-suite run. Every
 step is also a verb (`egma login`, `egma connect`, `egma suite create`,
 `egma push`, `egma run <suite-directory>`, `egma monitoring enable`) that prints
 one fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
 
-The wizard asks one question first: whether Egma should test the agent, watch
-its production traffic, or both. Watching is the same walk from the other end —
-on Retell one pasted key starts it, on LiveKit the coding agent adds the SDK's
+After discovery, the wizard asks for the setup goal: test the agent, watch its
+production traffic, or both. Watching is the same walk from the other end — on
+Retell one pasted key starts it, on LiveKit the coding agent adds the SDK's
 monitoring entry and Egma mints the project key its worker exports with.
 
 **What happens, said plainly.** The run is created and followed live, the
@@ -521,6 +522,11 @@ its LiveKit URL, API key and API secret, plus the agent's name if your worker
 registers one. They go on the connection rather than into this deployment's
 environment, because the project is yours and not Egma's.
 
+The CLI also finds the repository entrypoint and dispatch name, checks for
+LiveKit CLI 2.18.2 or newer, and starts the worker locally with `lk agent dev`.
+It waits for worker registration before starting the run and stops the local
+process when the run ends. It does not create or deploy a LiveKit Cloud agent.
+
 [`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a deliberately
 boring agent to try this path against before you point Egma at a real one. For
 teams that will not hand a testing tool their project's key pair, the
@@ -529,31 +535,27 @@ room's token.
 
 ## Agent Skills
 
-The public repository is the source for four Agent Skills:
+The public repository is the source for three Agent Skills:
 
 - `egma` operates the CLI, keeps repository tests in step with Egma, starts a
   run, and reads its grades.
-- `find-voice-agent` maps a repository's voice-agent framework, prompts, tools,
-  deployment path, and provider identifier location. Its provider references
-  currently include Retell and LiveKit, and it recognizes Pipecat and Vapi.
-- `integrate-egma-sdk` puts the Egma Python SDK into a LiveKit Agents worker:
-  the testing entry so simulations can be served mock tools, and the monitoring
-  entry so production traffic reaches Egma.
+- `integrate-egma` finds the repository's voice agent, connects a Retell agent,
+  puts the Egma Python SDK into a LiveKit worker, and can run that worker locally
+  for an Egma run. It also recognizes Pipecat and Vapi during discovery.
 - `write-egma-tests` writes and edits the Markdown tests in `egma/tests/`.
 
 Install any skill into a supported coding agent with:
 
 ```bash
 npx skills add egma-ai/egma --skill egma
-npx skills add egma-ai/egma --skill find-voice-agent
-npx skills add egma-ai/egma --skill integrate-egma-sdk
+npx skills add egma-ai/egma --skill integrate-egma
 npx skills add egma-ai/egma --skill write-egma-tests
 ```
 
-Leave out `--skill` to choose from all four.
+Leave out `--skill` to choose from all three.
 
 The CLI also carries the exact skill snapshot from its release tag. This lets
-the wizard use them without downloading anything, and offer all four for
+the wizard use them without downloading anything, and offer all three for
 installation after a run.
 
 ## Working on it

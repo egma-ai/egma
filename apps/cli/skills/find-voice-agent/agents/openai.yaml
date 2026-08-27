@@ -1,4 +1,0 @@
-interface:
-  display_name: "Find a Voice Agent"
-  short_description: "Map a repository voice agent and its source"
-  default_prompt: "Use $find-voice-agent to locate the voice agent in this repository and report its agent platform, prompts, tools, production path, and identifier location."

@@ -6,8 +6,7 @@
  * will be shown. Consent is earned afterwards by showing everything, not by
  * asking again.
  *
- * It also names the egma this CLI is already signed in to, and how to choose
- * another on a later run.
+ * It also names the egma this CLI is already signed in to.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -15,16 +14,6 @@ import { Box, Text, useInput } from "ink";
 import { FACTS } from "../../../wizard/facts.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
-
-/**
- * How to use a different egma, in the one way that selects one.
- *
- * `EGMA_TEST_DEFAULT_URL` is not a second way and never will be: it is a test
- * seam that stands in for the built-in address, not a way for a developer to
- * choose a platform.
- */
-export const ANOTHER_PLATFORM =
-  "For a different Egma instance, quit and run it again with --url <address>.";
 
 export type IntroScreenProps = {
   readonly state: WizardState;
@@ -45,7 +34,7 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
   const drivenAgentName = state.drivenAgent?.name ?? "your own coding agent";
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>Egma is about to find your voice agent.</Text>
@@ -66,7 +55,6 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
         <>
           <Box height={1} />
           <Text>{`This CLI is signed in to ${state.platform.url}.`}</Text>
-          <Text dimColor>{ANOTHER_PLATFORM}</Text>
         </>
       )}
       <Box height={1} />

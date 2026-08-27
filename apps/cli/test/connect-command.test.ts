@@ -593,25 +593,25 @@ describe("the whole walk, headless", () => {
             { kind: "say", text: "egma:plan price-question\n" },
             {
               kind: "write-file",
-              path: "egma/tests/generated/price-question.md",
+              path: "egma/tests/order-line-tests/price-question.md",
               content:
                 "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
             },
             {
               kind: "write-file",
-              path: "egma/tests/generated/opening-hours.md",
+              path: "egma/tests/order-line-tests/opening-hours.md",
               content:
                 "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
             },
             {
               kind: "write-file",
-              path: "egma/tests/generated/order-status.md",
+              path: "egma/tests/order-line-tests/order-status.md",
               content:
                 "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
             },
             {
               kind: "write-file",
-              path: "egma/tests/generated/refund-policy.md",
+              path: "egma/tests/order-line-tests/refund-policy.md",
               content:
                 "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
             },

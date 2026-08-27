@@ -270,7 +270,7 @@ export async function showing(
  * about the question itself asks for the screen by name instead.
  */
 export async function chooseTesting(terminal: TerminalRun): Promise<void> {
-  await showing(terminal, GOAL_ASK_LINE, "› Test it", "[enter] choose this one");
+  await showing(terminal, GOAL_ASK_LINE, "› Simulation testing", "[enter] choose this one");
   terminal.write("\r");
 }
 

@@ -117,8 +117,8 @@ export type TestGate = {
   /**
    * The number every simulation will dial, or `null` when nothing is dialled.
    *
-   * This is the one fact on the screen that costs money. Enter over twelve
-   * tests on a phone connection is twelve outbound calls to a real number on a
+   * This is the one fact on the screen that costs money. Enter over four
+   * tests on a phone connection is four outbound calls to a real number on a
    * real carrier, and a developer who is about to authorise that should be
    * reading the number rather than inferring it from a connection's name. It is
    * not a secret and never was: a destination number is the public half of a

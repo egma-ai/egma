@@ -13,13 +13,11 @@ import { fileURLToPath } from "node:url";
 
 export type PublicSkillName =
   | "egma"
-  | "find-voice-agent"
-  | "integrate-egma-sdk"
+  | "integrate-egma"
   | "write-egma-tests";
 export const PUBLIC_SKILL_NAMES: readonly PublicSkillName[] = [
   "egma",
-  "find-voice-agent",
-  "integrate-egma-sdk",
+  "integrate-egma",
   "write-egma-tests",
 ];
 

@@ -11,8 +11,8 @@
  *
  *   **the seam** — `await mockable(agent, ctx, session)` in the worker, put
  *   there by the developer's own coding agent under the public
- *   `integrate-egma-sdk` skill, as an edit they watch happen and approve at the
- *   gate with everything else;
+ *   `integrate-egma` skill's SDK phase, as an edit they watch happen and
+ *   approve at the gate with everything else;
  *
  *   **the world** — one grounded answer per real tool in `egma/mock-tools.md`,
  *   read out of the repository's own tool code, and the failure-branch
@@ -363,12 +363,13 @@ function mockAuthoringTask(context: MockAuthoringContext): string {
     "",
     "## Where you may write",
     "",
-    `Work in ${context.cwd}. You may write exactly three kinds of file and`,
+    `Work in ${context.cwd}. You may write exactly four kinds of file and`,
     "nothing else:",
     "",
     "- `egma/mock-tools.md`, the project's mocked world;",
     `- the test files in egma/tests/${context.suiteDirectory}/ that already exist;`,
-    "- the one worker file where the LiveKit job entrypoint is.",
+    "- the one worker file where the LiveKit job entrypoint is;",
+    "- the dependency manifest that already manages the worker's Python packages.",
     "",
     "Read whatever committed source you need. Run no command that reaches the",
     "network and install nothing.",
@@ -452,10 +453,10 @@ function mockAuthoringTask(context: MockAuthoringContext): string {
   ].join("\n");
 }
 
-/** The public SDK skill, the test format, then the run-specific task. */
+/** The public integration skill, then the run-specific task. */
 export function mockAuthoringInstructions(context: MockAuthoringContext): string {
   return instructionsWith(
-    [publicSkill("integrate-egma-sdk"), publicSkill("write-egma-tests")],
+    [publicSkill("integrate-egma")],
     mockAuthoringTask(context),
   );
 }

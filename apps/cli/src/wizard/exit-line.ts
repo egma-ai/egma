@@ -92,9 +92,9 @@ export type ExitReport =
   /** The tests are on egma, and they are files in the repository as well. */
   | { readonly kind: "tests-pushed"; readonly count: number }
   /**
-   * The whole walk, done: the tests are on egma, a run of them is going, and
-   * one completed trace has terminal grading. The wizard does not wait for
-   * the rest; the run stays on the platform without this terminal.
+   * The whole walk, done: the tests are on egma and every simulation in their
+   * run has terminal execution and grading. The run and its evidence remain
+   * on the platform without this terminal.
    */
   | {
       readonly kind: "run-started";
