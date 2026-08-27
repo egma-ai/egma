@@ -74,6 +74,8 @@ export type Platform = FixturePlatform & {
 export type StartPlatformOptions = {
   /** A synchronous race seam after remote creation and before the CLI writes. */
   readonly afterSuiteCreate?: (suite: import("./suites.ts").SeededSuite) => void;
+  /** Model an older platform that accepts but ignores monitoringAgentId. */
+  readonly ignoreMonitoringAgentId?: boolean;
 };
 
 export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
@@ -138,6 +140,9 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
         registered.bindMonitoringExportKey(agentId, keyProjectId, apiKeyId),
       unbindMonitoringExportKey: (apiKeyId) =>
         registered.unbindMonitoringExportKey(apiKeyId),
+      ...(options.ignoreMonitoringAgentId === undefined
+        ? {}
+        : { ignoreMonitoringAgentId: options.ignoreMonitoringAgentId }),
       organizationId,
       projectId,
     });

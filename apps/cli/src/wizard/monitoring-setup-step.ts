@@ -293,7 +293,18 @@ async function pushFromLiveKit(
   });
 
   if (wired.kind === "interrupted") {
-    return { report: stopReport(signal, null), monitored: null };
+    const stopped = stopReport(signal, null);
+    return {
+      report:
+        wired.retryTarget === undefined
+          ? stopped
+          : {
+              kind: "interrupted",
+              drivenAgentName: null,
+              monitoringAgentKept: wired.retryTarget.agentId,
+            },
+      monitored: null,
+    };
   }
   if (wired.kind === "already-configured") {
     ui.pushStatus(`${DETAIL_MARK} ${wired.reason}`);

@@ -142,6 +142,34 @@ function cleanAgent(agent: {
   };
 }
 
+/** A successful registration is useful only with its complete stable receipt. */
+function registrationReceipt(
+  value: unknown,
+): { readonly result: RegisterOutcome; readonly agent: RegisteredAgent } | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const result = record["result"];
+  const rawAgent = record["agent"];
+  if (
+    (result !== "created" &&
+      result !== "reused" &&
+      result !== "connection_added") ||
+    typeof rawAgent !== "object" ||
+    rawAgent === null
+  ) {
+    return null;
+  }
+  const agentRecord = rawAgent as Readonly<Record<string, unknown>>;
+  const agent = {
+    id: platformText(agentRecord["id"]),
+    name: platformText(agentRecord["name"]),
+    projectId: platformText(agentRecord["projectId"]),
+  };
+  return agent.id === "" || agent.name === "" || agent.projectId === ""
+    ? null
+    : { result, agent };
+}
+
 function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
   return {
     id: platformText(connection.id),
@@ -348,20 +376,28 @@ export async function registerBoundAgent(
   if (answer.response?.status === 409 && errorCode(answer.error) === "name_taken") {
     return { kind: "name-taken", name: registration.name };
   }
+  if (answer.response !== undefined && answer.response.status >= 500) {
+    return {
+      kind: "uncertain",
+      reason: platformRefusalMessage(answer.error, answer.response.status),
+    };
+  }
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;
 
-  const body = answer.data;
-  if (body === undefined) {
+  const receipt = registrationReceipt(answer.data);
+  if (receipt === null) {
     return {
-      kind: "refused",
-      reason: "Egma answered without saying what it wrote. Check that this Egma platform is up to date.",
+      kind: "uncertain",
+      reason:
+        `Egma answered ${String(answer.response?.status ?? 0)} without a complete ` +
+        "agent receipt.",
     };
   }
   return {
     kind: "registered",
-    result: body.result,
-    agent: cleanAgent(body.agent),
+    result: receipt.result,
+    agent: receipt.agent,
   };
 }
 
@@ -372,6 +408,7 @@ export type RegisterIdentityResult =
       readonly agent: RegisteredAgent;
     }
   | { readonly kind: "name-taken"; readonly name: string }
+  | { readonly kind: "uncertain"; readonly reason: string }
   | CommonFailure;
 
 /** Atomically write an agent and its first connection. */

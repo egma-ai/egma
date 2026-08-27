@@ -13,7 +13,10 @@
  * project key a project key rather than a claim about one.
  */
 
-import { createApiKey as createApiKeyRequest } from "@egma/platform-api/client";
+import {
+  createApiKey as createApiKeyRequest,
+  revokeApiKey as revokeApiKeyRequest,
+} from "@egma/platform-api/client";
 
 import {
   commonFailure,
@@ -21,7 +24,7 @@ import {
   type CommonFailure,
   type RegisterOptions,
 } from "./agents.ts";
-import { platformText } from "./client.ts";
+import { platformText, platformUnreachableMessage } from "./client.ts";
 
 /** What anything that is not `reveal` gets. */
 export const MASKED = "<an Egma key>";
@@ -72,8 +75,22 @@ export type MintedKey = {
 
 export type Minted =
   | { readonly kind: "minted"; readonly key: MintedKey }
+  | {
+      readonly kind: "minted-without-secret";
+      readonly keyId: string;
+      readonly reason: string;
+    }
+  | { readonly kind: "uncertain"; readonly reason: string }
   | { readonly kind: "already-bound" }
   | CommonFailure;
+
+export type Revoked = { readonly kind: "revoked" } | CommonFailure;
+
+function apiErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "error" in error
+    ? platformText(error.error)
+    : "";
+}
 
 /**
  * Mint one project-scoped key, named for the job it does.
@@ -99,42 +116,105 @@ export async function mintProjectKey(
     requestOptions(options),
   );
 
-  const errorCode =
-    typeof answer.error === "object" &&
-    answer.error !== null &&
-    "error" in answer.error
-      ? platformText(answer.error.error)
-      : "";
   if (
     answer.response?.status === 409 &&
-    errorCode === "monitoring_key_already_bound"
+    apiErrorCode(answer.error) === "monitoring_key_already_bound"
   ) {
     return { kind: "already-bound" };
   }
 
-  const failed = commonFailure(answer, options);
-  if (failed !== null) return failed;
-
-  const secret = typeof answer.data?.secret === "string" ? answer.data.secret : "";
-  if (answer.data === undefined || secret === "") {
+  if (answer.response === undefined) {
     return {
-      kind: "refused",
+      kind: "uncertain",
       reason:
-        "Egma minted a key and did not answer with its secret. Check that this Egma platform is up to date.",
+        `${platformUnreachableMessage(options.url)} The key request may still ` +
+        "have completed before its response was lost.",
+    };
+  }
+
+  const failed = commonFailure(answer, options);
+  if (failed !== null) {
+    return failed.kind === "refused" && answer.response.status >= 500
+      ? {
+          kind: "uncertain",
+          reason:
+            `${failed.reason} The key request may still have completed before ` +
+            "the server reported its failure.",
+        }
+      : failed;
+  }
+
+  const keyId = platformText(answer.data?.id);
+  const secret =
+    typeof answer.data?.secret === "string" ? answer.data.secret.trim() : "";
+  if (keyId !== "" && secret === "") {
+    return {
+      kind: "minted-without-secret",
+      keyId,
+      reason:
+        `Egma minted key ${keyId} but did not return its one-time secret. ` +
+        "The CLI will revoke that unusable key.",
+    };
+  }
+  if (answer.data === undefined || keyId === "" || secret === "") {
+    return {
+      kind: "uncertain",
+      reason:
+        "Egma answered without enough information to identify and use the new key. " +
+        "Key creation may have completed. Check the project's API keys before retrying.",
     };
   }
 
   return {
     kind: "minted",
     key: {
-      id: platformText(answer.data.id),
+      id: keyId,
       name: answer.data.name === null ? null : platformText(answer.data.name),
       projectId:
         answer.data.projectId === null ? null : platformText(answer.data.projectId),
       looksLike: platformText(answer.data.looksLike),
       // Trimmed rather than cleaned: a secret is compared byte for byte at the
       // door, so nothing here may quietly take a character out of it.
-      secret: new MintedSecret(secret.trim()),
+      secret: new MintedSecret(secret),
     },
+  };
+}
+
+/** Revoke only the non-secret id of a key the CLI just minted. */
+export async function revokeProjectKey(
+  apiKeyId: string,
+  options: RegisterOptions,
+): Promise<Revoked> {
+  const answer = await revokeApiKeyRequest(
+    { apiKeyId },
+    requestOptions(options),
+  );
+
+  // A retry after an uncertain response is also complete when this route says
+  // the key is already gone. A generic 404 may instead mean an older server
+  // has no revoke route, so its error code is part of the proof.
+  if (
+    answer.response?.status === 404 &&
+    apiErrorCode(answer.error) === "no_such_key"
+  ) {
+    return { kind: "revoked" };
+  }
+
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+
+  const revokedAt = answer.data?.revokedAt;
+  if (
+    platformText(answer.data?.id) === apiKeyId &&
+    typeof revokedAt === "string" &&
+    platformText(revokedAt) !== ""
+  ) {
+    return { kind: "revoked" };
+  }
+  return {
+    kind: "refused",
+    reason:
+      `Egma answered without confirming that key ${apiKeyId} was revoked. ` +
+      "Check the key in Egma before retrying.",
   };
 }

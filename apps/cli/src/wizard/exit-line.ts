@@ -224,6 +224,8 @@ export type ExitReport =
       readonly kind: "interrupted";
       readonly drivenAgentName: string | null;
       readonly testsKept?: number;
+      /** A fresh LiveKit agent saved after the stop, for a duplicate-free retry. */
+      readonly monitoringAgentKept?: string;
     }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -363,13 +365,17 @@ export function buildExitLine(report: ExitReport): string {
         report.drivenAgentName === null
           ? "Egma stopped before the task finished."
           : `Egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+      const monitoring =
+        report.monitoringAgentKept === undefined
+          ? ""
+          : ` Agent ${report.monitoringAgentKept} is saved in egma/config.yaml, so the next run will reuse it.`;
       const kept = report.testsKept ?? 0;
-      if (kept === 0) return stopped;
+      if (kept === 0) return `${stopped}${monitoring}`;
       // The folder is not empty, so the line says so. A developer who finds
       // files they were never told about has been told a half-truth.
       return kept === 1
-        ? `${stopped} Your 1 test is in ${TESTS_FOLDER}.`
-        : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
+        ? `${stopped}${monitoring} Your 1 test is in ${TESTS_FOLDER}.`
+        : `${stopped}${monitoring} Your ${kept} tests are in ${TESTS_FOLDER}.`;
     }
     case "failed":
       return `Egma could not finish: ${saidAndBlock(report.reason)[0]}`;

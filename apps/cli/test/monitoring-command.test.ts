@@ -338,7 +338,7 @@ describe("egma monitoring enable, on Retell", () => {
 });
 
 describe("egma monitoring enable, on LiveKit", () => {
-  it("reports an aborted key-mint request as interrupted", async () => {
+  it("reports an artificial mint transport failure without claiming cleanup", async () => {
     const agent = await unmonitoredAgent("livekit", "interruptible-livekit-agent");
     const controller = new AbortController();
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -364,8 +364,495 @@ describe("egma monitoring enable, on LiveKit", () => {
       say: () => undefined,
     });
 
-    expect(outcome).toEqual({ kind: "interrupted" });
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not answer"),
+    });
     expect(platform.keys.minted).toHaveLength(0);
+  });
+
+  it("warns when registration commits but its response is lost", async () => {
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (
+        request.method === "POST" &&
+        new URL(request.url).pathname === "/v1/agents"
+      ) {
+        await response.arrayBuffer();
+        throw new TypeError("fixture dropped the committed response");
+      }
+      return response;
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentName: "uncertain-registration",
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        'may have created an agent named "uncertain-registration"',
+      ),
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(0);
+    await expect(
+      readFile(folderPathsIn(workspace.dir).config, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("warns when registration commits but a proxy answers 502", async () => {
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (
+        request.method !== "POST" ||
+        new URL(request.url).pathname !== "/v1/agents"
+      ) {
+        return response;
+      }
+      await response.arrayBuffer();
+      return new Response(
+        JSON.stringify({
+          error: "bad_gateway",
+          message: "the proxy lost the committed response",
+        }),
+        {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentName: "uncertain-registration-502",
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        'may have created an agent named "uncertain-registration-502"',
+      ),
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(0);
+    await expect(
+      readFile(folderPathsIn(workspace.dir).config, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("warns when registration commits but its 201 receipt is malformed", async () => {
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (
+        request.method !== "POST" ||
+        new URL(request.url).pathname !== "/v1/agents"
+      ) {
+        return response;
+      }
+      await response.arrayBuffer();
+      return new Response(JSON.stringify({}), {
+        status: 201,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentName: "uncertain-registration-201",
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        'may have created an agent named "uncertain-registration-201"',
+      ),
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(0);
+    await expect(
+      readFile(folderPathsIn(workspace.dir).config, "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("records a fresh agent when the parent command stops after registration", async () => {
+    const controller = new AbortController();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (
+        request.method !== "POST" ||
+        new URL(request.url).pathname !== "/v1/agents"
+      ) {
+        return response;
+      }
+      const body = await response.arrayBuffer();
+      controller.abort("test interrupt after registration");
+      if (request.signal.aborted) {
+        throw new DOMException("This operation was aborted", "AbortError");
+      }
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+        signal: controller.signal,
+      },
+      cwd: workspace.dir,
+      signal: controller.signal,
+      agentName: "stopped-after-registration",
+      say: () => undefined,
+    });
+
+    expect(outcome).toEqual({
+      kind: "interrupted",
+      retryTarget: { agentId: platform.registered.agents[0]?.id },
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(0);
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({
+        id: platform.registered.agents[0]?.id,
+        name: "stopped-after-registration",
+      }),
+    ]);
+  });
+
+  it("revokes an unbound key when an older platform ignores the binding", async () => {
+    await platform.close();
+    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+    await workspace.signIn(platform.url, platform.device.mint());
+
+    const agent = await unmonitoredAgent("livekit", "older-platform-agent");
+    await onboarded(agent);
+    await gitRepository([ENV_FILE_NAME]);
+    const envFile = path.join(workspace.dir, ENV_FILE_NAME);
+    await writeFile(envFile, "OTHER=kept\n", "utf8");
+    const configFile = folderPathsIn(workspace.dir).config;
+    const configBefore = await readFile(configFile, "utf8");
+
+    const result = await egma(["monitoring", "enable", "--platform", "livekit"]);
+
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(
+      MONITORING_EXIT.unreachable,
+    );
+    expect(facts(result.stdout).status).toBe("failed");
+    expect(result.stderr).toContain("did not bind the new monitoring key");
+    expect(result.stderr).toContain("Update the Egma platform");
+    expect(every(result.stdout, "env")).toHaveLength(0);
+    expect(await readFile(envFile, "utf8")).toBe("OTHER=kept\n");
+    expect(await readFile(configFile, "utf8")).toBe(configBefore);
+
+    expect(platform.keys.minted).toHaveLength(1);
+    const minted = platform.keys.minted[0]!;
+    expect(minted.revokedAt).not.toBeNull();
+    expect(platform.device.keys).not.toContain(minted.secret);
+    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
+    expect(result.stdout).not.toContain(minted.secret);
+    expect(result.stderr).not.toContain(minted.secret);
+  });
+
+  it("revokes a response-confirmed key whose one-time secret is missing", async () => {
+    const agent = await unmonitoredAgent("livekit", "missing-secret");
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/keys") {
+        return response;
+      }
+      const body = (await response.json()) as Record<string, unknown>;
+      delete body["secret"];
+      return new Response(JSON.stringify(body), {
+        status: response.status,
+        headers: response.headers,
+      });
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    const minted = platform.keys.minted[0]!;
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(`minted key ${minted.id}`),
+    });
+    expect(minted.revokedAt).not.toBeNull();
+    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
+    expect(JSON.stringify(outcome)).not.toContain(minted.secret);
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("warns when key mint commits but its response is lost", async () => {
+    const agent = await unmonitoredAgent("livekit", "uncertain-mint");
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (request.method === "POST" && new URL(request.url).pathname === "/v1/keys") {
+        await response.arrayBuffer();
+        throw new TypeError("fixture dropped the committed response");
+      }
+      return response;
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+        fetchImpl,
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    const minted = platform.keys.minted[0]!;
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("may still have completed"),
+    });
+    if (outcome.kind !== "failed") throw new Error("expected uncertain mint");
+    expect(outcome.reason).toContain(minted.name ?? "");
+    expect(outcome.reason).toContain(agent.id);
+    expect(minted.revokedAt).toBeNull();
+    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBe(
+      minted.id,
+    );
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("revokes a bound key when the parent command is stopped after mint", async () => {
+    await platform.close();
+    platform = await startPlatform();
+    const terminalKey = platform.device.mint();
+    const agent = await unmonitoredAgent("livekit", "stopped-after-mint");
+    const controller = new AbortController();
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/keys") {
+        return response;
+      }
+      const body = await response.arrayBuffer();
+      controller.abort("test interrupt after mint");
+      if (request.signal.aborted) {
+        throw new DOMException("This operation was aborted", "AbortError");
+      }
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: terminalKey,
+        fetchImpl,
+        signal: controller.signal,
+      },
+      cwd: workspace.dir,
+      signal: controller.signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    expect(outcome).toEqual({ kind: "interrupted" });
+    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.keys.minted[0]?.revokedAt).not.toBeNull();
+    expect(platform.registered.agents[0]?.monitoringExportApiKeyId).toBeNull();
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("prints the non-secret key id when unbound-key cleanup cannot finish", async () => {
+    await platform.close();
+    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+    const terminalKey = platform.device.mint();
+    const agent = await unmonitoredAgent("livekit", "cleanup-refused");
+    let agentReads = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const response = await fetch(input, init);
+      if (
+        request.method !== "GET" ||
+        new URL(request.url).pathname !== `/v1/agents/${agent.id}` ||
+        (agentReads += 1) !== 2
+      ) {
+        return response;
+      }
+      const body = await response.arrayBuffer();
+      platform.device.reject(terminalKey);
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: { url: platform.url, key: terminalKey, fetchImpl },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    const minted = platform.keys.minted[0]!;
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        `could not confirm that key ${minted.id} was revoked`,
+      ),
+    });
+    expect(outcome).toMatchObject({
+      reason: expect.not.stringContaining(minted.secret),
+    });
+    expect(minted.revokedAt).toBeNull();
+    expect(platform.device.keys).toContain(minted.secret);
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([
+    {
+      answer: {
+        status: 404,
+        body: { error: "not_found", message: "nothing serves this route" },
+      },
+      caseName: "a generic 404",
+    },
+    {
+      answer: {
+        status: 200,
+        body: { id: "key_wrong", revokedAt: null },
+      },
+      caseName: "a malformed 200",
+    },
+  ])("does not call $caseName confirmed key cleanup", async ({ answer }) => {
+    await platform.close();
+    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+    const terminalKey = platform.device.mint();
+    const agent = await unmonitoredAgent("livekit", "cleanup-not-confirmed");
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (
+        request.method === "POST" &&
+        new URL(request.url).pathname.endsWith("/revoke")
+      ) {
+        return new Response(JSON.stringify(answer.body), {
+          status: answer.status,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return fetch(input, init);
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: { url: platform.url, key: terminalKey, fetchImpl },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    const minted = platform.keys.minted[0]!;
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        `could not confirm that key ${minted.id} was revoked`,
+      ),
+    });
+    expect(minted.revokedAt).toBeNull();
+    expect(platform.device.keys).toContain(minted.secret);
+  });
+
+  it("does not call a failed binding read an outdated platform", async () => {
+    const terminalKey = platform.device.keys[0] ?? "";
+    const agent = await unmonitoredAgent("livekit", "verification-unreachable");
+    let agentReads = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (
+        request.method === "GET" &&
+        new URL(request.url).pathname === `/v1/agents/${agent.id}` &&
+        (agentReads += 1) === 2
+      ) {
+        throw new TypeError("fixture connection dropped");
+      }
+      return fetch(input, init);
+    };
+
+    const outcome = await wireLiveKitMonitoring({
+      platform: { url: platform.url, key: terminalKey, fetchImpl },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("could not confirm the new monitoring key"),
+    });
+    if (outcome.kind !== "failed") throw new Error("expected failed verification");
+    expect(outcome.reason).not.toContain("Update the Egma platform");
+    expect(platform.keys.minted[0]?.revokedAt).not.toBeNull();
   });
 
   it("mints a project key, writes the two lines, and prints them", async () => {

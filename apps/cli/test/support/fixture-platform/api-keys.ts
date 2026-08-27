@@ -1,8 +1,9 @@
 /**
  * Minting a key, as the fixture platform answers it.
  *
- * One route, and the whole of what matters about it is in the answer: the
- * secret exists exactly once, in the 201 body, and no read ever says it again.
+ * The mint route's whole secret is in its answer: it exists exactly once, in
+ * the 201 body, and no read ever says it again. The revoke route proves that a
+ * failed local setup can retire that exact key without knowing its secret.
  * A key minted for a project is scoped to that project — the request names the
  * project and the scope is derived, because there is no scope field to send.
  *
@@ -46,10 +47,21 @@ export function apiKeyRoutes(options: {
     | { readonly kind: "already-bound"; readonly apiKeyId: string }
     | undefined;
   readonly unbindMonitoringExportKey: (apiKeyId: string) => void;
+  /** Model an older platform that accepts but ignores monitoringAgentId. */
+  readonly ignoreMonitoringAgentId?: boolean;
   readonly organizationId: string;
   readonly projectId: string;
 }): { readonly group: RouteGroup; readonly controls: ApiKeyControls } {
   const minted: MintedKey[] = [];
+
+  const revoke = (apiKeyId: string): MintedKey | undefined => {
+    const held = minted.find((key) => key.id === apiKeyId);
+    if (held === undefined || held.revokedAt !== null) return undefined;
+    held.revokedAt = new Date().toISOString();
+    options.reject(held.secret);
+    options.unbindMonitoringExportKey(apiKeyId);
+    return held;
+  };
 
   const authorized = (headers: Record<string, string | undefined>): boolean => {
     const offered = (headers["authorization"] ?? "").replace(/^Bearer\s+/iu, "");
@@ -96,7 +108,7 @@ export function apiKeyRoutes(options: {
             revokedAt: null,
           };
           const monitoringAgentId = given(text(body["monitoringAgentId"])) ?? null;
-          if (monitoringAgentId !== null) {
+          if (monitoringAgentId !== null && options.ignoreMonitoringAgentId !== true) {
             if (named === null) {
               return {
                 status: 422,
@@ -154,6 +166,38 @@ export function apiKeyRoutes(options: {
           };
         },
       },
+      {
+        method: "POST",
+        path: "/v1/keys/:apiKeyId/revoke",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          const key = revoke(request.params["apiKeyId"] ?? "");
+          if (key === undefined) {
+            return {
+              status: 404,
+              body: {
+                error: "no_such_key",
+                message: "no key of yours by that name is still live",
+              },
+            };
+          }
+          return {
+            status: 200,
+            body: {
+              id: key.id,
+              name: key.name,
+              scope: key.scope,
+              organizationId: options.organizationId,
+              projectId: key.projectId,
+              looksLike: `egma_sk_…${key.secret.slice(-4)}`,
+              createdByUserId: newId("usr"),
+              createdAt: new Date().toISOString(),
+              lastUsedAt: null,
+              revokedAt: key.revokedAt,
+            },
+          };
+        },
+      },
     ],
   };
 
@@ -162,11 +206,7 @@ export function apiKeyRoutes(options: {
     controls: {
       minted,
       revoke(apiKeyId) {
-        const held = minted.find((key) => key.id === apiKeyId);
-        if (held === undefined || held.revokedAt !== null) return;
-        held.revokedAt = new Date().toISOString();
-        options.reject(held.secret);
-        options.unbindMonitoringExportKey(apiKeyId);
+        revoke(apiKeyId);
       },
     },
   };

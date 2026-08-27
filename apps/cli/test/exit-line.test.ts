@@ -142,6 +142,11 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "quit" },
   { kind: "interrupted", drivenAgentName: "Claude Agent" },
   { kind: "interrupted", drivenAgentName: null },
+  {
+    kind: "interrupted",
+    drivenAgentName: null,
+    monitoringAgentKept: "agt_01K",
+  },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 1 },
   { kind: "failed", reason: "the agent stopped talking" },
@@ -186,6 +191,16 @@ describe("the exit line", () => {
       buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 }),
     ).toBe(
       "Egma stopped before the task finished, and shut Claude Agent down. Your 12 tests are in egma/tests/.",
+    );
+
+    expect(
+      buildExitLine({
+        kind: "interrupted",
+        drivenAgentName: null,
+        monitoringAgentKept: "agt_01K",
+      }),
+    ).toBe(
+      "Egma stopped before the task finished. Agent agt_01K is saved in egma/config.yaml, so the next run will reuse it.",
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");

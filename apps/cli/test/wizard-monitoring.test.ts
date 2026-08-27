@@ -1284,6 +1284,110 @@ describe("choosing both", () => {
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
   });
 
+  it("stops Both before testing when an older platform ignores the key binding", async () => {
+    await platform.close();
+    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+    await workspace.signIn(platform.url, platform.device.mint());
+    const created = await fetch(`${platform.url}/v1/agents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "front-desk", agentPlatform: "livekit" }),
+    });
+    const existing = (await created.json()) as {
+      agent: { readonly id: string; readonly name: string };
+    };
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        ...EMPTY_CONFIG,
+        platform: { origin: platform.url },
+        project: { id: platform.projectId, name: "Fixture project" },
+        agents: [
+          { id: existing.agent.id, name: existing.agent.name, connections: [] },
+        ],
+      },
+    });
+    const configFile = folderPathsIn(workspace.dir).config;
+    const configBefore = await readFile(configFile, "utf8");
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const { report } = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
+      ],
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not bind the new monitoring key"),
+    });
+    expect(walkExitCode(report)).toBe(1);
+    expect(await readFile(configFile, "utf8")).toBe(configBefore);
+    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.keys.minted[0]?.revokedAt).not.toBeNull();
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    await expect(
+      readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    const sent = await dispatched();
+    expect(sent.some((task) => task.includes(MOCK_AUTHORING_TASK))).toBe(false);
+    expect(sent.some((task) => task.includes(GENERATE_TASK))).toBe(false);
+  });
+
+  it("records a fresh failed setup so the next walk reuses its stable id", async () => {
+    await platform.close();
+    platform = await startPlatform({ ignoreMonitoringAgentId: true });
+    await workspace.signIn(platform.url, platform.device.mint());
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const first = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
+      ],
+    });
+    expect(first.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("next run will reuse it"),
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+    const firstAgent = platform.registered.agents[0];
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
+    ]);
+
+    const second = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker(),
+        },
+      ],
+    });
+    expect(second.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("did not bind the new monitoring key"),
+    });
+    if (second.report.kind !== "failed") throw new Error("expected a failure");
+    expect(second.report.reason).not.toContain("already uses the name");
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toHaveLength(2);
+    expect(platform.keys.minted.every((key) => key.revokedAt !== null)).toBe(true);
+  });
+
   it("does not start a Both run when a later task removes monitoring", async () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);

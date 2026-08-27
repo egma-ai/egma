@@ -20,6 +20,7 @@ export type RecordMonitoringTargetOptions = {
   readonly signedIn: SignedIn;
   readonly target: MonitoredTarget;
   readonly fetchImpl?: Fetch | undefined;
+  readonly signal?: AbortSignal | undefined;
 };
 
 export type MonitoringTargetRecordStage =
@@ -66,6 +67,7 @@ export async function recordMonitoringTarget(
       options.signedIn,
       options.target.projectId,
       options.fetchImpl,
+      options.signal,
     );
   } catch (cause) {
     throw new MonitoringTargetRecordError("project-read", cause);
