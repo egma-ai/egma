@@ -317,6 +317,23 @@
   --table-action-labelled-width: 96px;
 
   /*
+   * The narrowest the suite grid may be drawn before it scrolls sideways.
+   *
+   * That grid is the one table in the product with no narrow layout: its cells
+   * are edited in place, so the stacked label-and-value form every list uses
+   * on a phone is a screen of its own rather than a variant, and it is not
+   * written yet. Until it is, four percentage columns and a 96px lane share
+   * whatever width there is, and below about 660px the last of them stops
+   * holding a readable word.
+   *
+   * 720px is the floor and it is chosen to be under the 768px tablet width, so
+   * every screen from a tablet upwards draws the whole grid and only a phone
+   * scrolls it. A table that scrolls inside its own panel is the honest
+   * failure here; columns squeezed to two letters each are not.
+   */
+  --tests-grid-min-width: 720px;
+
+  /*
    * How wide each surface is. Every one of these lived in a class list as a
    * bare number until 2026-08-23; a size is a design value like a colour is,
    * and `DESIGN.md` says a component holds neither.

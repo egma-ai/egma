@@ -1389,7 +1389,25 @@ export function TestsGrid(props: GridProps) {
         askToDiscard();
       }}
     >
-      <table className="w-full table-fixed border-collapse border border-border bg-surface text-sm">
+      {/*
+        The grid scrolls sideways rather than squeezing, the way every other
+        table's `TablePanel` already does. Four percentage columns and a fixed
+        lane share whatever width there is, and this grid has no narrow layout
+        to fall back to, so under `--tests-grid-min-width` the columns stopped
+        holding a readable word. A phone scrolls it; a tablet and up does not.
+
+        **It stops scrolling while a persona picker is open, and that is not a
+        detail.** The shared table may hold its rows in a scrolling panel
+        because its ⋮ opens in a portal; this grid's picker is an absolutely
+        positioned panel inside the cell it belongs to, and a scroll container
+        clips exactly that. `overflow-x: auto` also computes `overflow-y` to
+        `auto`, so the naive wrapper would have cut a 240px picker off at the
+        table's own bottom edge. The choice is one class or the other, never
+        both: while a picker is open the grid may overflow, which costs a
+        person nothing, and when it is shut the grid scrolls.
+      */}
+      <div className={picking === null ? "overflow-x-auto" : "overflow-visible"}>
+      <table className="w-full min-w-(--tests-grid-min-width) table-fixed border-collapse border border-border bg-surface text-sm">
         <caption className="sr-only">Tests in this suite</caption>
         <colgroup>
           {COLUMNS.map((column) => (
@@ -1478,6 +1496,7 @@ export function TestsGrid(props: GridProps) {
           ) : null}
         </tbody>
       </table>
+      </div>
 
       {more}
 
