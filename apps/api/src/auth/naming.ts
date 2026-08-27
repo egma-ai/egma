@@ -17,13 +17,58 @@
 export const DEFAULT_PROJECT_NAME = "Default";
 
 /**
+ * The domains where the first label is a mail provider rather than a company.
+ *
+ * **A list is the cheap half of this, and it used to be the reason there was
+ * none.** The argument against it was that free-mail providers have to be kept
+ * up to date forever, so `ada@gmail.com` was offered `Gmail` and the editable
+ * field was left to carry it. What that missed is that a wrong default is not
+ * neutral: an organization actually called `Gmail` is what a person accepts on
+ * the fastest path through the shortest form in the product, and then lives
+ * with. Twenty names cover very nearly every personal address, the field still
+ * decides, and a provider missing from this list falls back to exactly the
+ * behaviour that was there before.
+ *
+ * The first label, not the whole domain, so `hotmail.co.uk` needs no line of
+ * its own. Ambiguous labels a company could also own — `mail`, `email` — are
+ * deliberately absent.
+ */
+const PERSONAL_MAIL = new Set([
+  "gmail",
+  "googlemail",
+  "outlook",
+  "hotmail",
+  "live",
+  "msn",
+  "yahoo",
+  "ymail",
+  "icloud",
+  "me",
+  "mac",
+  "aol",
+  "proton",
+  "protonmail",
+  "pm",
+  "gmx",
+  "zoho",
+  "yandex",
+  "fastmail",
+  "hey",
+]);
+
+function capitalized(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+/**
  * `ada@acme.example` becomes `Acme`. The first label of the domain, because
  * that is what a person calls their company, and title case because that is how
  * they write it down.
  *
- * A personal address becomes `Gmail`, which is wrong and does not matter: the
- * field is editable, and the alternative is a list of free-mail providers to
- * keep up to date forever.
+ * `ada.lovelace@gmail.com` becomes `Ada's organization`, because a personal
+ * address names no company and the person is the only thing in it. The first
+ * run of letters and digits in the local part is the given name closely enough
+ * for a value somebody is about to read and can change.
  */
 export function organizationNameFromEmail(email: string): string {
   const at = email.lastIndexOf("@");
@@ -31,10 +76,13 @@ export function organizationNameFromEmail(email: string): string {
   const label = domain.split(".")[0] ?? "";
   const cleaned = label.replaceAll(/[^\p{L}\p{N}]+/gu, " ").trim();
   if (cleaned === "") return "My organization";
-  return cleaned
-    .split(" ")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+
+  if (PERSONAL_MAIL.has(cleaned.toLowerCase())) {
+    const first = email.slice(0, at).split(/[^\p{L}\p{N}]+/u)[0] ?? "";
+    return first === "" ? "My organization" : `${capitalized(first)}'s organization`;
+  }
+
+  return cleaned.split(" ").map(capitalized).join(" ");
 }
 
 /** How long a slug is allowed to get before it stops being readable. */

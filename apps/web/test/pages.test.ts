@@ -49,9 +49,19 @@ describe("the names the signup form offers", () => {
     ["ada@localhost", "Localhost"],
     ["ada@", "My organization"],
     ["not-an-email", "My organization"],
+    /*
+     * A personal address names no company, so what is offered is the person
+     * rather than their mail provider. An organization called `Gmail` is what
+     * the fastest path through this form used to produce, and what somebody
+     * then lived with.
+     */
+    ["ada@gmail.com", "Ada's organization"],
+    ["ada.lovelace@GMAIL.com", "Ada's organization"],
+    ["ada+egma@hotmail.co.uk", "Ada's organization"],
+    ["-@icloud.com", "My organization"],
   ];
 
-  it.each(cases)("takes the organization from the email domain: %s", (email, expected) => {
+  it.each(cases)("takes the organization from the email: %s", (email, expected) => {
     expect(organizationNameFromEmail(email)).toBe(expected);
   });
 
