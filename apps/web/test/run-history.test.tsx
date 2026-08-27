@@ -245,7 +245,6 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
     gradeHistory: [],
     combinedScore: 1,
     reason: null,
-    failureDetail: null,
     modality: "chat",
     createdAt: "2026-08-21T10:00:00.000Z",
     startedAt: "2026-08-21T10:00:01.000Z",
@@ -788,7 +787,6 @@ describe("one run after suites", () => {
             grades: [],
             combinedScore: null,
             reason: "not_answered",
-            failureDetail: "The agent did not answer the test call.",
             gradingPlan: null,
             transcript: null,
           }),
@@ -799,7 +797,7 @@ describe("one run after suites", () => {
 
     expect(await screen.findByRole("button", { name: /Execution failed/u })).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "The agent did not answer the test call. This is an execution problem, not a failed grade.",
+      "Egma could not conduct this simulation. This is an execution problem, not a failed grade.",
     );
     expect(
       document.querySelector('[data-slot="selected-simulation-header"]')?.textContent,
@@ -836,7 +834,6 @@ describe("one run after suites", () => {
             grades: [],
             combinedScore: null,
             reason: "simulator_error",
-            failureDetail: null,
             gradingPlan: null,
             transcript: null,
           }),

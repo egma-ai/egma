@@ -1,2 +1,0 @@
-ALTER TABLE "simulation" ADD COLUMN "failure_detail" text;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_failure_detail_agrees" CHECK ("simulation"."failure_detail" is null or "simulation"."status" = 'failed');

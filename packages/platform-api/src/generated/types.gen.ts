@@ -4555,7 +4555,6 @@ export type GetSimulationResponses = {
         }>;
         combinedScore: number | null;
         reason: string | null;
-        failureDetail: string | null;
         modality: 'voice' | 'chat';
         createdAt: string;
         startedAt: string | null;

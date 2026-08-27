@@ -279,7 +279,7 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
   if (evidence.status !== "completed") {
     const failed = evidence.status === "failed";
     const message = failed
-      ? `${evidence.failureDetail ?? "Egma could not conduct this simulation."} This is an execution problem, not a failed grade.`
+      ? "Egma could not conduct this simulation. This is an execution problem, not a failed grade."
       : evidence.status === "canceled"
         ? "This simulation stopped before it finished. Any evidence recorded before it stopped remains below."
         : "This simulation is still in progress. Results update here as evidence arrives.";

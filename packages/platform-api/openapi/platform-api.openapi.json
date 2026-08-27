@@ -16561,16 +16561,6 @@
                         }
                       ]
                     },
-                    "failureDetail": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "modality": {
                       "type": "string",
                       "enum": [
@@ -17217,7 +17207,6 @@
                     "gradeHistory",
                     "combinedScore",
                     "reason",
-                    "failureDetail",
                     "modality",
                     "createdAt",
                     "startedAt",

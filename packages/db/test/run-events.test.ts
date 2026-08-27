@@ -257,7 +257,6 @@ describe("every lifecycle change", () => {
     });
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "agent_never_joined",
-      detail: "The agent never joined.",
     });
 
     const feed = await feedOf(started.id);
@@ -448,7 +447,6 @@ describe("a follower that crashes and comes back", () => {
 
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "simulator_error",
-      detail: "The simulator could not continue.",
     });
     const last = await follow();
 

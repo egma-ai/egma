@@ -335,13 +335,6 @@ export const simulation = pgTable(
      */
     endingReason: text("ending_reason"),
     /**
-     * The simulator's safe, credential-redacted explanation of a failed run.
-     * The ending reason classifies the failure; this tells a person what to
-     * fix. It is null for every non-failed simulation and for older failures
-     * that landed before this fact was retained.
-     */
-    failureDetail: text("failure_detail"),
-    /**
      * Claim bookkeeping. The claimant is the simulator instance's own name
      * for itself — an operational label, never an identity in egma's tables
      * — and the heartbeat is what the orphan sweep reads.
@@ -424,10 +417,6 @@ export const simulation = pgTable(
         )}
         else ${table.endingReason} is null
       end`,
-    ),
-    check(
-      "simulation_failure_detail_agrees",
-      sql`${table.failureDetail} is null or ${table.status} = 'failed'`,
     ),
     // The three claim columns are one fact and arrive together.
     check(

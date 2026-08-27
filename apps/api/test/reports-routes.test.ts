@@ -684,7 +684,6 @@ describe("the lifecycle lands", () => {
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("simulator_error");
-    expect(row?.failureDetail).toBe("the platform refused the exchange");
     expect(row?.turnCount).toBe(3);
 
     // No completed trace exists, so the execution failure creates no grade job.

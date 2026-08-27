@@ -72,7 +72,6 @@ export function reportPathFor(simulationId: string): string {
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
   readonly status: "running" | "completed" | "failed" | "canceled";
-  readonly reason: string | null;
   readonly facts?: {
     readonly ending: string;
     readonly started_at: string;
@@ -469,12 +468,8 @@ async function applyLanding(
       // a schema drift fails a request, never the process.
       throw new Error(`"${ending}" is not a failed ending the wire carries`);
     }
-    if (event.reason === null) {
-      throw new Error("a failed simulation report has no failure detail");
-    }
     return failSimulation(standing.auth, standing.id, conductor, {
       reason,
-      detail: event.reason,
       ...facts,
     });
   }

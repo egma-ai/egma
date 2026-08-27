@@ -147,7 +147,6 @@ export type Simulation = {
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
-  readonly failureDetail: string | null;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
@@ -184,7 +183,6 @@ export type SimulationReport = SimulationSummaryFacts & {
 
 export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
-  readonly detail: string;
 };
 
 const RUN_COLUMNS = {
@@ -221,7 +219,6 @@ const SIMULATION_COLUMNS = {
   modality: simulation.modality,
   status: simulation.status,
   endingReason: simulation.endingReason,
-  failureDetail: simulation.failureDetail,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
   heartbeatAt: simulation.heartbeatAt,
@@ -1908,7 +1905,6 @@ export async function failSimulation(
     write: {
       status: "failed",
       endingReason: failure.reason,
-      failureDetail: failure.detail,
       ...summaryFactsWrite(failure),
     },
   });

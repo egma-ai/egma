@@ -315,9 +315,7 @@ function EvidenceView({
 
         {read.status !== "failed" ? null : (
           <Problem>
-            <span className="block">
-              {read.failureDetail ?? "Egma could not conduct this simulation."}
-            </span>
+            <span className="block">Egma could not conduct this simulation.</span>
             <span className="mt-1 block">
               This is an execution problem, not a failed grade, and it says
               nothing about the agent.
