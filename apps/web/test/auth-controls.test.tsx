@@ -58,7 +58,7 @@ describe("the screen egma shows while the session is unresolved", () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(401, {})));
     render(<RootPage />);
 
-    expect(waiting().dataset.slot).toBe("route-loading");
+    expect(waiting().dataset.slot).toBe("session-loading");
     expect(waiting().textContent).toBe("Opening Egma");
     // The three things a signed-out person was being shown a moment ago.
     expect(screen.queryByText("Checking your session.")).toBeNull();
@@ -67,7 +67,7 @@ describe("the screen egma shows while the session is unresolved", () => {
 
     await waitFor(() => expect(routed.replace).toHaveBeenCalledWith("/sign-in"));
     // And still nothing guessed on the way out.
-    expect(waiting().dataset.slot).toBe("route-loading");
+    expect(waiting().dataset.slot).toBe("session-loading");
   });
 
   it("covers signing in with the same screen rather than a form that has stopped answering", async () => {
@@ -85,7 +85,7 @@ describe("the screen egma shows while the session is unresolved", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() => expect(waiting().textContent).toBe("Signing in"));
-    expect(waiting().dataset.slot).toBe("route-loading");
+    expect(waiting().dataset.slot).toBe("session-loading");
     // The form is gone rather than sitting there with a greyed-out button for
     // the length of a whole document load.
     expect(screen.queryByLabelText("Password")).toBeNull();

@@ -17,10 +17,13 @@
  * gives a loading state — and its motion lives in `tailwind-theme.css` beside
  * the run mark's turn, keyed on the `session-progress` slot below.
  *
- * It carries `route-loading` so it inherits that file's wait before drawing: a
- * session that answers inside `--duration-popover-in` is never covered by this
- * at all, because a screen that appears and vanishes inside a fifth of a second
- * reads as a fault rather than as speed.
+ * **It is opaque on its first frame, and deliberately does not take the wait
+ * every other loading state here takes.** A route fallback fades in after
+ * `--duration-popover-in` so that a warm route is never covered by a box that
+ * appears and vanishes. This one has the opposite job: the persistent product
+ * boundary keeps a shell mounted at the root address, so a screen that spent a
+ * fifth of a second transparent would show exactly the guess it exists to
+ * cover. Being early is what it is for.
  *
  * `fixed` rather than a page layout, so the same component is both the whole of
  * an entrance and the cover over a shell that is being signed out of.
@@ -28,7 +31,7 @@
 export function SessionLoading({ label }: { readonly label: string }) {
   return (
     <div
-      data-slot="route-loading"
+      data-slot="session-loading"
       className="fixed inset-0 z-50 grid place-items-center bg-background px-6"
       role="status"
     >
