@@ -1407,19 +1407,14 @@ export function TestsGrid(props: GridProps) {
           </tr>
         </thead>
         <tbody>
-          {tests.length === 0 && entry === null ? (
-            <tr>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                One situation to put the agent in…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                …what should happen…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>…and who calls.</td>
-              <td className={cn(CELL, PAD)} />
-              <td className={ACTION} />
-            </tr>
-          ) : null}
+          {/*
+            An empty suite draws no teaching row. The faint "One situation to
+            put the agent in…" row looked like a row to type in, so the first
+            thing a person did on an empty suite was click it and get nothing:
+            it was a picture of a test, and the way in was the line under it.
+            The way in is now the only thing there (developer decision,
+            2026-08-26).
+          */}
           {tests.map((test) => (
             <tr key={test.id}>
               {COLUMNS.map((column) => cell(test, column.field))}
@@ -1451,6 +1446,22 @@ export function TestsGrid(props: GridProps) {
                 >
                   + Write a test
                 </button>
+              </td>
+            </tr>
+          ) : null}
+          {/*
+            A reader who cannot write gets the line the author's way in would
+            have stood on. Without it an empty suite is column headings over
+            nothing, which is the one state that says neither what is here nor
+            why nothing is.
+          */}
+          {tests.length === 0 && entry === null && !mayAuthor ? (
+            <tr>
+              <td
+                className={cn(CELL, PAD, TEXT, "border-b-0 text-faint")}
+                colSpan={COLUMNS.length + 1}
+              >
+                {why ?? "No tests in this suite yet."}
               </td>
             </tr>
           ) : null}
