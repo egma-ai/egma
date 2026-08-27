@@ -823,6 +823,20 @@
 }
 
 /*
+ * The segment crossing the track on the screen that stands in for a session
+ * nobody has answered for yet.
+ *
+ * `translate` and nothing else, for the reason the drawer's keyframes give: it
+ * is composited, and it leaves the segment's own width to the class list rather
+ * than replacing it. It starts and ends clear of the track, so the crossing has
+ * no visible beginning and no visible end to read as a stall.
+ */
+@keyframes egma-session-progress {
+  from { translate: -100% 0; }
+  to { translate: 300% 0; }
+}
+
+/*
  * The skeleton's breath: one dip and back, so a bar never leaves the page.
  *
  * It is written here rather than borrowed from Tailwind's own pulse, which is
@@ -953,6 +967,24 @@
     [data-slot="state-mark"][data-motion="active"] {
       animation: none;
     }
+  }
+
+  /*
+   * The same rule for the screen that stands in while a session is unresolved.
+   *
+   * The Egma mark above this never moves — `DESIGN.md` forbids animating the
+   * logo — so one segment crossing a hairline track is the whole of the quiet
+   * indicator. Four drawer-enters for a crossing: a token rather than a number,
+   * and slow enough to read as work rather than as alarm.
+   *
+   * Reduced motion is answered once, in `globals.css`, which holds every
+   * animation to a single frame. What is left is a segment standing in its
+   * track — the same trade the skeleton bars make — and the sentence this
+   * screen announces carries the meaning either way.
+   */
+  [data-slot="session-progress"] > * {
+    animation: egma-session-progress calc(var(--duration-drawer-in) * 4)
+      var(--ease-in-out) infinite;
   }
 
   /*

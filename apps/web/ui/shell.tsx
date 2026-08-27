@@ -25,6 +25,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { SheetHost } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   SidebarBrand,
@@ -39,9 +40,9 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 
-import { readJson } from "../lib/api.ts";
 import {
   organizationOf,
+  readSession,
   roleOf,
   type Me,
   type Organization,
@@ -63,6 +64,7 @@ import {
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { Toolbar } from "./section.tsx";
+import { SessionLoading } from "./session-loading.tsx";
 import { settingsPath } from "./settings-nav.tsx";
 import { useTheme } from "./theme.tsx";
 
@@ -123,7 +125,14 @@ export function useSession(initial?: Me): Session {
   const refresh = useCallback(async () => {
     const thisRequest = request.current + 1;
     request.current = thisRequest;
-    const answer = await readJson<Me>("/api/me");
+    /*
+     * Bounded, and `settled` below is why. A read that never answers used to
+     * leave a shell with empty slots in it; it now leaves a cover with the
+     * document behind it inert, so a server that accepts the connection and
+     * then says nothing would freeze the page rather than degrade it. The
+     * deadline turns that into an ordinary failure, and this line runs.
+     */
+    const answer = await readSession();
     if (!mounted.current || request.current !== thisRequest) return;
 
     if (answer.status === "ready") setMe(answer.value);
@@ -350,9 +359,23 @@ function OrganizationMenu({
           className="flex min-h-(--control-lg) min-w-0 flex-1 items-center px-2"
           data-slot="organization-status"
         >
-          <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
-            {settled ? "No organization" : "Checking your session…"}
-          </span>
+          {/*
+           * **A bar, not a sentence, while nobody has answered.** This slot
+           * used to say "Checking your session…" — the sentence the developer
+           * met on opening the product, one control down. It is also a claim
+           * this bar has no business making: the session is the whole
+           * application's business, `SessionLoading` is what says it, and a
+           * sidebar row saying it too is the same news twice from a place that
+           * cannot act on it. What belongs here is what belongs in any slot
+           * whose value has not arrived: the shape of the value.
+           */}
+          {settled ? (
+            <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
+              No organization
+            </span>
+          ) : (
+            <Skeleton className="h-3 w-28" />
+          )}
         </div>
       </>
     );
@@ -467,7 +490,17 @@ function AccountMenu({
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
-  const standing = me !== null ? email : settled ? "Session unavailable" : "Checking your session…";
+  /**
+   * The control's own name for whoever it stands for.
+   *
+   * Three states, and the middle one used to be "Checking your session…" —
+   * the application's news, said by a control that is not the application. It
+   * is "Loading account" now: this control is loading this account, which is
+   * both true and the only part of it this control knows. The visible slot
+   * draws a bar rather than the words, because a sentence in a name slot is a
+   * value that is not a name.
+   */
+  const standing = me !== null ? email : settled ? "Session unavailable" : "Loading account";
   const initial = me !== null ? (email.trim().slice(0, 1).toUpperCase() || "E") : "·";
 
   async function signOut(): Promise<void> {
@@ -481,80 +514,93 @@ function AccountMenu({
   }
 
   return (
-    <Menu
-      label={`Account ${standing}. Open the account menu`}
-      triggerClassName={cn(
-        "grid w-full min-w-0 items-center gap-3",
-        /*
-         * **7px, and the missing pixel is the plate's own hairline.** This
-         * trigger reserves its hover border as a transparent one so hovering
-         * shifts nothing, and `box-sizing: border-box` means that border spends
-         * a pixel of the inset before the padding starts. Written as 8px it put
-         * the avatar on 17 while every nav icon stood on 16 — the one thing
-         * still out of the bar's lane. Written as 8 minus the hairline it lands
-         * on 16 exactly, and the gap from the plate's visible edge to the
-         * avatar is a true 8px, which is what a borderless nav row already
-         * draws between its plate and its icon.
-         */
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
-        "px-[calc(var(--space-2)-1px)]",
-        "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
-        "transition-transform duration-(--duration-press) ease-out",
-        "pointer-coarse:min-h-(--tap-target)",
-        "pointer-hover:border-border pointer-hover:bg-surface",
-        "[&:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:transition-none",
-        "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-        compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
-      )}
-      openClassName="border-border bg-surface"
-      placement={placement}
-      trigger={
-        <>
-          <span
-            className={cn(
-              "grid size-(--control-md) flex-none place-items-center",
-              "rounded-none border border-border bg-surface-soft text-sm",
-              compact && "size-(--tap-target)",
-            )}
-            data-slot="account-avatar"
-            aria-hidden="true"
-          >
-            {initial}
-          </span>
-          {compact ? null : (
-            <span className="min-w-0">
-              <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
-                {standing}
-              </span>
-              {role === null ? null : (
-                /* 12px: the micro label the boards give the role line (`720-0`). */
-                <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
-                  {canAuthor(role) ? role : VIEW_ONLY}
-                </span>
+    <>
+      {/*
+       * Signing out is a document load away from the sign-in page, and until
+       * this cover existed the whole of it was a menu item that said
+       * "Signing out…" behind a shell still showing the session being ended.
+       * It is the entrance's own screen, so the two ends of a visit look alike.
+       */}
+      {signingOut ? <SessionLoading label="Signing out" /> : null}
+      <Menu
+        label={`Account ${standing}. Open the account menu`}
+        triggerClassName={cn(
+          "grid w-full min-w-0 items-center gap-3",
+          /*
+           * **7px, and the missing pixel is the plate's own hairline.** This
+           * trigger reserves its hover border as a transparent one so hovering
+           * shifts nothing, and `box-sizing: border-box` means that border spends
+           * a pixel of the inset before the padding starts. Written as 8px it put
+           * the avatar on 17 while every nav icon stood on 16 — the one thing
+           * still out of the bar's lane. Written as 8 minus the hairline it lands
+           * on 16 exactly, and the gap from the plate's visible edge to the
+           * avatar is a true 8px, which is what a borderless nav row already
+           * draws between its plate and its icon.
+           */
+          "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
+          "px-[calc(var(--space-2)-1px)]",
+          "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          "transition-transform duration-(--duration-press) ease-out",
+          "pointer-coarse:min-h-(--tap-target)",
+          "pointer-hover:border-border pointer-hover:bg-surface",
+          "[&:active:not(:focus-visible)]:scale-97",
+          "motion-reduce:transition-none",
+          "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+          compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
+        )}
+        openClassName="border-border bg-surface"
+        placement={placement}
+        trigger={
+          <>
+            <span
+              className={cn(
+                "grid size-(--control-md) flex-none place-items-center",
+                "rounded-none border border-border bg-surface-soft text-sm",
+                compact && "size-(--tap-target)",
               )}
+              data-slot="account-avatar"
+              aria-hidden="true"
+            >
+              {initial}
             </span>
-          )}
-        </>
-      }
-    >
-      {(close) => (
-        <>
-          <MenuLabel>{standing}</MenuLabel>
-          <MenuItem
-            {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
-            onClick={close}
-          >
-            Settings
-          </MenuItem>
-          <MenuDivider />
-          <ThemeItem />
-          <MenuItem disabled={signingOut} onClick={() => void signOut()}>
-            {signingOut ? "Signing out…" : "Sign out"}
-          </MenuItem>
-        </>
-      )}
-    </Menu>
+            {compact ? null : (
+              <span className="min-w-0">
+                {me === null && !settled ? (
+                  <Skeleton className="h-3 w-24" />
+                ) : (
+                  <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
+                    {standing}
+                  </span>
+                )}
+                {role === null ? null : (
+                  /* 12px: the micro label the boards give the role line (`720-0`). */
+                  <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
+                    {canAuthor(role) ? role : VIEW_ONLY}
+                  </span>
+                )}
+              </span>
+            )}
+          </>
+        }
+      >
+        {(close) => (
+          <>
+            <MenuLabel>{standing}</MenuLabel>
+            <MenuItem
+              {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
+              onClick={close}
+            >
+              Settings
+            </MenuItem>
+            <MenuDivider />
+            <ThemeItem />
+            <MenuItem disabled={signingOut} onClick={() => void signOut()}>
+              {signingOut ? "Signing out…" : "Sign out"}
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+    </>
   );
 }
 
@@ -697,9 +743,26 @@ function ShellFrame({
     />
   );
 
+  /**
+   * A cold load of a product address, before the session read has answered.
+   *
+   * Opening `/projects/…` from a bookmark, or pressing reload on one, mounts
+   * this whole frame with nobody in it — an organization bar, a project
+   * selector and an account control all standing there with no facts behind
+   * them. That is the same guessed screen the entrance used to draw, on every
+   * other address in the product, so it takes the same cover.
+   *
+   * **The entrance is left to draw its own**, and that is the one exception. It
+   * has to stay covered past the moment the session settles, because `/` never
+   * stops there: it is on its way to a project or to sign-in, and a shell
+   * uncovered between those two moments is the flash all of this removes.
+   */
+  const unresolved = !session.settled && pathname !== "/";
+
   return (
     <SessionContext.Provider value={session}>
     <DraftNavigationProvider>
+    {unresolved ? <SessionLoading label="Opening Egma" /> : null}
     <div
       className={cn(
         "grid min-h-svh bg-background",
