@@ -394,6 +394,7 @@ describe("what lands on the platform", () => {
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
       "agentPlatform",
+      "archivedAt",
       "createdAt",
       "id",
       "lastReceivedAt",

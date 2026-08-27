@@ -87,10 +87,7 @@ const EXPECTED_BEHAVIORS = [
   "confirms the new time back before finishing",
   "checks that an afternoon next week is acceptable",
   "keeps the existing booking until the new time is confirmed",
-  "states the day of the rescheduled cleaning",
-  "states the time of the rescheduled cleaning",
   "does not create a second booking",
-  "explains what happens to the Thursday booking",
 ] as const;
 
 const EXPECTED_BEHAVIORS_GRADE: FixtureGrade = {
@@ -98,15 +95,15 @@ const EXPECTED_BEHAVIORS_GRADE: FixtureGrade = {
   graderDefinitionId: "gdf_expected_behaviors",
   graderDefinitionVersion: 1,
   graderName: "expected_behaviors",
-  score: 0.86,
+  score: 0.75,
   details: {
-    rationale: "Six of seven expected behaviors were present.",
+    rationale: "Three of four expected behaviors were present.",
     assertions: EXPECTED_BEHAVIORS.map((behavior, at) => ({
       key: `behavior_${String(at + 1)}`,
       score: at === EXPECTED_BEHAVIORS.length - 1 ? 0 : 1,
       rationale:
         at === EXPECTED_BEHAVIORS.length - 1
-          ? "The transcript did not explain what happened to the Thursday booking."
+          ? "The transcript did not prove that it avoided a second booking."
           : `The transcript supports: ${behavior}`,
       ...(at === EXPECTED_BEHAVIORS.length - 1
         ? {}
@@ -266,7 +263,7 @@ const INTEGRATION_SKILL_PATH = path.join(
 const CLAUDE_SKILL_LINK = path.join(".claude", "skills", "egma");
 
 describe("the run screen", () => {
-  it("shows one Expected behaviors grade, its seven assertion details, and one combined score", async () => {
+  it("shows one Expected behaviors grade, its four assertion details, and one combined score", async () => {
     const run = await toTheRun(200, 45);
 
     // Every simulation is on screen the moment the run exists, queued.
@@ -311,26 +308,26 @@ describe("the run screen", () => {
       simulation: TESTS[0],
       state: "complete",
       grades: [EXPECTED_BEHAVIORS_GRADE],
-      combinedScore: 0.86,
+      combinedScore: 0.75,
     });
     const landed = await showing(
       run,
       `First result: ${TESTS[0]}`,
-      "Combined score 0.86",
+      "Combined score 0.75",
       "Expected behaviors",
-      "score 0.86",
+      "score 0.75",
       "pass threshold 0.62",
-      "Six of seven expected behaviors were present.",
+      "Three of four expected behaviors were present.",
       "Assertion 01",
-      "Assertion 07",
+      "Assertion 04",
       EXPECTED_BEHAVIORS[0],
-      EXPECTED_BEHAVIORS[6],
-      "The transcript did not explain what happened to the Thursday booking.",
+      EXPECTED_BEHAVIORS[3],
+      "The transcript did not prove that it avoided a second booking.",
     );
     // The result stays visible while the final choice waits. It is not a frame
     // that disappears before a developer can read it.
     expect(landed).toContain(`First result: ${TESTS[0]}`);
-    expect(landed.match(/Assertion \d{2}/gu)).toHaveLength(7);
+    expect(landed.match(/Assertion \d{2}/gu)).toHaveLength(4);
     expect(landed).not.toMatch(/overall verdict|\bgate\b|\brequired\b|latency/iu);
 
     const held = platform.running.simulationsOf();
