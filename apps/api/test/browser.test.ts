@@ -1174,11 +1174,11 @@ describe("what a project recorded in production", () => {
           cells.map((cell) => cell.textContent?.trim() ?? ""),
         );
       expect(headings).toEqual([
+        "Agent",
         "Time",
         "Duration",
         "P90 turn latency",
         "Trace ID",
-        "Agent",
         "Actions",
       ]);
       expect(
