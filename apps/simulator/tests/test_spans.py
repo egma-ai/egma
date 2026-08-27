@@ -475,6 +475,20 @@ def test_a_turn_nobody_spoke_is_an_instant():
     assert duration_ns(only) == 0
 
 
+def test_a_recording_origin_is_trace_evidence_on_the_media_clock():
+    """The player aligns speech to the recording from this span, not a run row."""
+    spans, sink, clock = emitter()
+    spans.opened()
+    media_origin = clock.at + 500_000_000
+
+    spans.recording(started_unix_nano=media_origin)
+    spans.flush()
+
+    recording = named(sink.documents[0], "recording")[0]
+    assert int(recording["startTimeUnixNano"]) == media_origin
+    assert duration_ns(recording) == 0
+
+
 # -- The trace's own shape ------------------------------------------------
 
 

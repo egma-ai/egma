@@ -98,6 +98,62 @@ export const COLUMNS = {
   platform: "Platform",
 } as const;
 
+/** The compact production-call index approved for the Monitoring list. */
+export const TRACE_COLUMNS = {
+  time: "Time",
+  duration: "Duration",
+  p90TurnLatency: "P90 turn latency",
+  traceId: "Trace ID",
+  agent: "Agent",
+  actions: "Actions",
+} as const;
+
+/** One opened production trace, as a continuous summary and transcript sheet. */
+export const TRACE_SHEET = {
+  title: "Trace",
+  completed: "Completed",
+  pending: "Pending",
+  navigation: "Trace sections",
+  sections: {
+    summary: "Summary",
+    transcript: "Transcript",
+  },
+  overview: {
+    title: "Call overview",
+    started: "Started",
+    duration: "Duration",
+    turns: "Turns",
+    p90TurnLatency: "P90 turn latency",
+    notRecorded: "Not recorded",
+    partial: "partial",
+  },
+  grading: {
+    title: "Grading",
+    emptyTitle: "No grades for this trace",
+    emptyLead:
+      "No project grader was active when this trace was recorded.",
+    pendingTitle: "Grading is still running",
+    pendingLead: "Project grades appear here as they finish.",
+    errorTitle: "Grading could not be completed",
+    errorLead: "Egma could not complete the requested grades for this trace.",
+  },
+  recording: {
+    sectionTitle: "Recording",
+    title: "Call recording",
+    caller: "Caller",
+    agent: "Agent",
+    absent: "No audio recording is available for this trace.",
+  },
+  transcript: {
+    title: "Transcript",
+    nothingTitle: "Nothing was said",
+    nothingLead: "Egma recorded no spoken turns for this trace.",
+  },
+  actions: {
+    openFullTranscript: "Open full transcript",
+  },
+} as const;
+
 /**
  * What a quiet Monitoring page says, in four states that never overlap.
  *

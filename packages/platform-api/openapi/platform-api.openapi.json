@@ -5019,6 +5019,10 @@
                             "type": "integer",
                             "minimum": 1
                           },
+                          "definitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
                           "modalities": {
                             "type": "array",
                             "items": {
@@ -5146,6 +5150,7 @@
                           "type",
                           "scopeEditable",
                           "currentDefinitionVersion",
+                          "definitionVersion",
                           "modalities",
                           "gradingInstructions",
                           "requiredEvidence",
@@ -5283,6 +5288,15 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          {
+            "name": "definitionVersion",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         ],
         "responses": {
@@ -5328,6 +5342,10 @@
                       "type": "boolean"
                     },
                     "currentDefinitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "definitionVersion": {
                       "type": "integer",
                       "minimum": 1
                     },
@@ -5458,6 +5476,7 @@
                     "type",
                     "scopeEditable",
                     "currentDefinitionVersion",
+                    "definitionVersion",
                     "modalities",
                     "gradingInstructions",
                     "requiredEvidence",
@@ -6200,6 +6219,10 @@
                           "type": "integer",
                           "minimum": 1
                         },
+                        "definitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
                         "modalities": {
                           "type": "array",
                           "items": {
@@ -6327,6 +6350,7 @@
                         "type",
                         "scopeEditable",
                         "currentDefinitionVersion",
+                        "definitionVersion",
                         "modalities",
                         "gradingInstructions",
                         "requiredEvidence",
@@ -15414,6 +15438,18 @@
                               }
                             ]
                           },
+                          "combinedScore": {
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "reason": {
                             "anyOf": [
                               {
@@ -15429,6 +15465,28 @@
                                   "orphaned",
                                   "dispatch_failed"
                                 ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "startedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "endedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
                               },
                               {
                                 "type": "null"
@@ -15493,7 +15551,10 @@
                           "personaVersionId",
                           "status",
                           "gradingState",
+                          "combinedScore",
                           "reason",
+                          "startedAt",
+                          "endedAt",
                           "modality",
                           "hasRecording",
                           "mockToolCoverage"
@@ -20471,6 +20532,19 @@
                           },
                           "preview": {
                             "type": "string"
+                          },
+                          "turnResponseLatencyP90Milliseconds": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "turnResponseLatencyP90Partial": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -20493,7 +20567,9 @@
                           "platformAgentVersion",
                           "runId",
                           "agentId",
-                          "preview"
+                          "preview",
+                          "turnResponseLatencyP90Milliseconds",
+                          "turnResponseLatencyP90Partial"
                         ],
                         "additionalProperties": false
                       }

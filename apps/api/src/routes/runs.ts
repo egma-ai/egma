@@ -233,6 +233,7 @@ async function headerOf(
 function describedSimulation(
   simulation: ConductedSimulation,
   gradingState: TraceGradingState | null,
+  combinedScore: number | null,
 ): Record<string, unknown> {
   return {
     id: simulation.id,
@@ -245,7 +246,10 @@ function describedSimulation(
     personaVersionId: simulation.personaVersionId,
     status: simulation.status,
     gradingState,
+    combinedScore,
     reason: simulation.endingReason,
+    startedAt: simulation.startedAt?.toISOString() ?? null,
+    endedAt: simulation.endedAt?.toISOString() ?? null,
     modality: simulation.modality,
     hasRecording: simulation.recordingReference !== null,
     mockToolCoverage:
@@ -567,12 +571,17 @@ export async function runRoutes(
         })),
       );
       const states = new Map(
-        stateRows.map((state) => [state.simulationId, state.state] as const),
+        stateRows.map((state) => [state.simulationId, state] as const),
       );
       return reply.send({
-        simulations: found.items.map((simulation) =>
-          describedSimulation(simulation, states.get(simulation.id) ?? null),
-        ),
+        simulations: found.items.map((simulation) => {
+          const grading = states.get(simulation.id);
+          return describedSimulation(
+            simulation,
+            grading?.state ?? null,
+            grading?.combinedScore ?? null,
+          );
+        }),
         nextPageToken: found.nextCursor ?? null,
       });
     },

@@ -17,6 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { LANE_X } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
   platformAnswer,
@@ -129,7 +130,22 @@ const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
  */
 const ACTION =
   "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-top";
-const PAD = "px-2.5 py-2";
+/**
+ * The lane's padding, and it is the house table's rather than this grid's own.
+ *
+ * This is the one table in the product that is not drawn from
+ * `components/ui/table.tsx`, and it had been reading from 10px where every
+ * other list reads from `--row-padding-x`. Six pixels is enough to see: a
+ * person who walks Agents, Runs, Personas and then a suite watches the first
+ * column step left, and 10px is not on `DESIGN.md`'s spacing scale to begin
+ * with. Header and cells both read this, so the column keeps one edge from the
+ * heading to the last row — which is the same promise the shared table makes.
+ *
+ * The edge itself is imported rather than copied: this grid is the one table
+ * that inherits nothing from `components/ui/table.tsx`, and two files naming
+ * the same edge separately is how it drifted off it the first time.
+ */
+const PAD = `${LANE_X} py-(--row-padding-y)`;
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
 /*
  * A woken cell wears its 2px ink edge as an inset shadow rather than a border,
@@ -1373,7 +1389,26 @@ export function TestsGrid(props: GridProps) {
         askToDiscard();
       }}
     >
-      <table className="w-full table-fixed border-collapse border border-border bg-surface text-sm">
+      {/*
+        The grid scrolls sideways rather than squeezing, the way every other
+        table's `TablePanel` already does. Four percentage columns and a fixed
+        lane share whatever width there is, and this grid has no narrow layout
+        to fall back to, so under `--tests-grid-min-width` the columns stopped
+        holding a readable word. A phone scrolls it; a tablet and up does not.
+
+        **It stops scrolling while a persona picker is open, and that is not a
+        detail.** The shared table may hold its rows in a scrolling panel
+        because its ⋮ opens in a portal; this grid's picker is an absolutely
+        positioned panel inside the cell it belongs to, and a scroll container
+        clips exactly that. `overflow-x: auto` also computes `overflow-y` to
+        `auto`, so the naive wrapper would have cut a 240px picker off at the
+        table's own bottom edge. The choice is one class or the other, never
+        both: while a picker is open the grid may overflow, and when it shuts
+        the grid scrolls again. On a phone the toggle also resets the sideways
+        scroll — the price of this grid having no narrow layout yet.
+      */}
+      <div className={picking === null ? "overflow-x-auto" : "overflow-visible"}>
+      <table className="w-full min-w-(--tests-grid-min-width) table-fixed border-collapse border border-border bg-surface text-sm">
         <caption className="sr-only">Tests in this suite</caption>
         <colgroup>
           {COLUMNS.map((column) => (
@@ -1385,7 +1420,10 @@ export function TestsGrid(props: GridProps) {
           <tr className="bg-surface-soft">
             {COLUMNS.map((column) => (
               <th
-                className="border-r border-b border-border px-2.5 py-2 text-left text-sm font-normal text-faint last:border-r-0"
+                className={cn(
+                  PAD,
+                  "border-r border-b border-border text-left text-sm font-normal text-faint last:border-r-0",
+                )}
                 key={column.field}
                 scope="col"
               >
@@ -1399,7 +1437,10 @@ export function TestsGrid(props: GridProps) {
               is what it holds, and every reader gets the same word now.
             */}
             <th
-              className="w-(--table-action-labelled-width) border-b border-border px-4 py-2 text-center text-sm font-normal whitespace-nowrap text-faint"
+              className={cn(
+                PAD,
+                "w-(--table-action-labelled-width) border-b border-border text-center text-sm font-normal whitespace-nowrap text-faint",
+              )}
               scope="col"
             >
               Actions
@@ -1407,19 +1448,19 @@ export function TestsGrid(props: GridProps) {
           </tr>
         </thead>
         <tbody>
-          {tests.length === 0 && entry === null ? (
-            <tr>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                One situation to put the agent in…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>
-                …what should happen…
-              </td>
-              <td className={cn(CELL, PAD, TEXT, "text-faint")}>…and who calls.</td>
-              <td className={cn(CELL, PAD)} />
-              <td className={ACTION} />
-            </tr>
-          ) : null}
+          {/*
+            An empty suite draws no teaching row. The faint "One situation to
+            put the agent in…" row looked like a row to type in, so the first
+            thing a person did on an empty suite was click it and get nothing:
+            it was a picture of a test, and the way in was the line under it.
+            The way in is now the only thing there (developer decision,
+            2026-08-26).
+
+            The run-flow refinement answered the same complaint the other way,
+            by making that faint first cell open the entry row. The row is
+            gone instead, so there is nothing left to make clickable: a picture
+            of a test that opens a real one is still a picture of a test.
+          */}
           {tests.map((test) => (
             <tr key={test.id}>
               {COLUMNS.map((column) => cell(test, column.field))}
@@ -1454,8 +1495,25 @@ export function TestsGrid(props: GridProps) {
               </td>
             </tr>
           ) : null}
+          {/*
+            A reader who cannot write gets the line the author's way in would
+            have stood on. Without it an empty suite is column headings over
+            nothing, which is the one state that says neither what is here nor
+            why nothing is.
+          */}
+          {tests.length === 0 && entry === null && !mayAuthor ? (
+            <tr>
+              <td
+                className={cn(CELL, PAD, TEXT, "border-b-0 text-faint")}
+                colSpan={COLUMNS.length + 1}
+              >
+                {why ?? "No tests in this suite yet."}
+              </td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
+      </div>
 
       {more}
 

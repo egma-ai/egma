@@ -203,6 +203,7 @@ describe("the platform API operation registry", () => {
       [
         "createdAt",
         "currentDefinitionVersion",
+        "definitionVersion",
         "description",
         "activeProjectGraderId",
         "gradingInstructions",
@@ -223,6 +224,12 @@ describe("the platform API operation registry", () => {
     expect(definition.properties.type.enum).toEqual(["llm_as_judge", "code"]);
     expect(definition.properties.settingDefinitions.items.properties.valueType)
       .toEqual({ type: "string", enum: ["integer"] });
+    expect(
+      platformOperations.getGraderLibraryEntry.request.query.properties,
+    ).toEqual({
+      projectId: { type: "string", minLength: 1 },
+      definitionVersion: { type: "integer", minimum: 1 },
+    });
   });
 
   it("generates exactly the same method, path, and operation ID set", () => {
@@ -417,6 +424,18 @@ describe("the platform API operation registry", () => {
         },
         { type: "null" },
       ],
+    });
+    expect(simulation.properties.combinedScore).toEqual({
+      anyOf: [
+        { type: "number", minimum: 0, maximum: 1 },
+        { type: "null" },
+      ],
+    });
+    expect(simulation.properties.startedAt).toEqual({
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    });
+    expect(simulation.properties.endedAt).toEqual({
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
     });
     expect(simulationEvent.properties).not.toHaveProperty("verdict");
   });

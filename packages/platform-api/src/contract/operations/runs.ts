@@ -8,7 +8,7 @@ import {
   refusalResponse,
   stringIdSchema,
 } from "../schemas.ts";
-import { gradingStateSchema } from "./grades.ts";
+import { gradingStateSchema, normalizedScoreSchema } from "./grades.ts";
 
 const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
@@ -221,7 +221,10 @@ const runSimulationSchema = {
     personaVersionId: stringIdSchema,
     status: simulationStatusSchema,
     gradingState: nullable(gradingStateSchema),
+    combinedScore: nullable(normalizedScoreSchema),
     reason: nullable(endingReasonSchema),
+    startedAt: nullable(dateTimeSchema),
+    endedAt: nullable(dateTimeSchema),
     modality: modalitySchema,
     hasRecording: booleanSchema,
     mockToolCoverage: nullable(mockToolCoverageSchema),
@@ -237,7 +240,10 @@ const runSimulationSchema = {
     "personaVersionId",
     "status",
     "gradingState",
+    "combinedScore",
     "reason",
+    "startedAt",
+    "endedAt",
     "modality",
     "hasRecording",
     "mockToolCoverage",

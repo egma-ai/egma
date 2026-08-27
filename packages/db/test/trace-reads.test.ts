@@ -738,6 +738,7 @@ describe("a parent cycle longer than one span", () => {
  */
 describe("a trace with more spans than one read returns", () => {
   const ENORMOUS = "9999111111111111111111111111aaaa";
+  const ENORMOUS_REPORTED = "9999222222222222222222222222bbbb";
   const TOTAL = MAXIMUM_SPANS_PER_TRACE + 1;
 
   beforeAll(async () => {
@@ -746,15 +747,50 @@ describe("a trace with more spans than one read returns", () => {
       span({
         traceId: ENORMOUS,
         spanId: (0x100000 + index).toString(16).padStart(16, "0"),
-        name: "tts_request",
-        kind: "tts",
+        // Put a usable metric immediately after the detail prefix. The page
+        // projection must rank before it filters, so this late timing span does
+        // not appear in the list when it would not appear in trace detail.
+        name:
+          index === MAXIMUM_SPANS_PER_TRACE
+            ? "turn_response_latency"
+            : "tts_request",
+        kind: index === MAXIMUM_SPANS_PER_TRACE ? "timing" : "tts",
         // Spread across the minute, so time order is a real order.
         startedAtMicroseconds: BigInt(WHEN.getTime() + index) * 1000n,
       });
 
     const all = Array.from({ length: TOTAL }, (_, index) => minimal(index));
+    const reported = Array.from({ length: TOTAL }, (_, index) =>
+      span({
+        traceId: ENORMOUS_REPORTED,
+        spanId: (0x200000 + index).toString(16).padStart(16, "0"),
+        name: index === 0 ? "retell_call" : "tts_request",
+        kind: index === 0 ? "conversation" : "tts",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + index) * 1000n,
+        payload:
+          index === 0
+            ? JSON.stringify({
+                egma_normalised: {
+                  reported_measurements: {
+                    version: 1,
+                    reported_by: "retell",
+                    measurements: [
+                      {
+                        measure: "turn_response_latency",
+                        unit: "milliseconds",
+                        values: [517, 2145],
+                      },
+                    ],
+                  },
+                },
+              })
+            : "{}",
+      }),
+    );
     await appendSpans(at(acme, SUPPORT), all.slice(0, half));
     await appendSpans(at(acme, SUPPORT), all.slice(half));
+    await appendSpans(at(acme, SUPPORT), reported.slice(0, half));
+    await appendSpans(at(acme, SUPPORT), reported.slice(half));
   });
 
   it("says the transcript is a prefix, and counts the whole trace anyway", async () => {
@@ -790,6 +826,25 @@ describe("a trace with more spans than one read returns", () => {
     expect(listed?.startedAt).toBe(detail?.startedAt);
     expect(listed?.endedAt).toBe(detail?.endedAt);
     expect(listed?.durationNanoseconds).toBe(detail?.durationNanoseconds);
+    expect(listed?.turnResponseLatencyP90Milliseconds).toBeNull();
+    expect(listed?.turnResponseLatencyP90Partial).toBe(false);
+  });
+
+  it("keeps a platform-reported P90 complete when the trace is truncated", async () => {
+    const list = await listTraces(at(acme, SUPPORT), {
+      window: WINDOW,
+      limit: 200,
+    });
+    const listed = list.traces.find(
+      (trace) => trace.traceId === ENORMOUS_REPORTED,
+    );
+    const detail = await readTrace(at(acme, SUPPORT), ENORMOUS_REPORTED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.truncated).toBe(true);
+    expect(listed?.turnResponseLatencyP90Milliseconds).toBe(2145);
+    expect(listed?.turnResponseLatencyP90Partial).toBe(false);
   });
 });
 
@@ -921,6 +976,30 @@ describe("the block a platform reported on the root span", () => {
     });
   });
 
+  it("projects a reported P90 for the page and null when no usable metric exists", async () => {
+    const listed = await listTraces(at(acme, SUPPORT), {
+      window: WINDOW,
+      limit: 200,
+    });
+    const byId = new Map(listed.traces.map((trace) => [trace.traceId, trace]));
+
+    // Nearest-rank P90 of [517, 2145] is the second reported sample. The
+    // malformed and missing blocks are both an honestly absent measurement,
+    // not a made-up zero.
+    expect(
+      byId.get(REPORTED)?.turnResponseLatencyP90Milliseconds,
+    ).toBe(2145);
+    expect(
+      byId.get(UNREPORTED)?.turnResponseLatencyP90Milliseconds,
+    ).toBeNull();
+    expect(
+      byId.get(MALFORMED)?.turnResponseLatencyP90Milliseconds,
+    ).toBeNull();
+    expect(byId.get(REPORTED)?.turnResponseLatencyP90Partial).toBe(false);
+    expect(byId.get(UNREPORTED)?.turnResponseLatencyP90Partial).toBe(false);
+    expect(byId.get(MALFORMED)?.turnResponseLatencyP90Partial).toBe(false);
+  });
+
   it("is absent on a root that carries no block, and the trace reads as ever", async () => {
     const detail = await readTrace(at(acme, SUPPORT), UNREPORTED, {
       window: WINDOW,
@@ -968,7 +1047,7 @@ describe("a page token", () => {
 
     const second = await listTraces(context, {
       window: WINDOW,
-      limit: 10,
+      limit: 20,
       cursor: first.nextCursor,
     });
 

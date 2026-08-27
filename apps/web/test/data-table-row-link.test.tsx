@@ -94,69 +94,90 @@ describe("DataTable row links", () => {
         .stretchPrimaryLink,
     ).toBeUndefined();
   });
-});
 
-const ALIGNED_COLUMNS: readonly Column<Row>[] = [
-  {
-    key: "name",
-    header: "Grader",
-    primary: true,
-    cell: (row) => row.name,
-  },
-  {
-    key: "threshold",
-    header: "Pass threshold",
-    align: "end",
-    cell: () => "0.80",
-  },
-  {
-    key: "registered",
-    header: "Registered",
-    cell: (row) => row.registered,
-  },
-];
-
-/** The one class token, read off the element rather than out of a string. */
-function alignsRight(element: HTMLElement): boolean {
-  return element.classList.contains("text-right");
-}
-
-function valueOf(cell: HTMLElement): HTMLElement {
-  return cell.querySelector("[data-slot=cell]") as HTMLElement;
-}
-
-describe("DataTable numeric columns", () => {
-  it("keeps an aligned column's header on the edge its values read from", () => {
+  it("keeps a wide semantic table horizontally scrollable when asked", () => {
     render(
       <DataTable
-        label="Graders"
-        columns={ALIGNED_COLUMNS}
+        label="Monitoring traces"
+        columns={COLUMNS}
+        rows={[ROW]}
+        keyOf={(row) => row.id}
+        narrowLayout="scroll"
+        tableMinWidth="62rem"
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "Monitoring traces" });
+    const panel = table.closest('[data-slot="table-panel"]');
+    const layout = panel?.parentElement;
+
+    expect(table.tagName).toBe("TABLE");
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(table.style.minWidth).toBe("62rem");
+    expect(panel?.className).toContain("overflow-x-auto");
+    expect(panel?.className).toContain("relative");
+    expect(layout?.className).toContain("min-w-0");
+    expect(layout?.className).toContain("max-w-full");
+    expect(layout?.getAttribute("data-narrow-layout")).toBe("scroll");
+    expect(
+      [...(layout?.querySelectorAll("*") ?? [])].some((element) =>
+        element.className.includes("stacked:"),
+      ),
+    ).toBe(false);
+    expect(
+      within(table)
+        .getByRole("cell", { name: "2026-08-15" })
+        .getAttribute("data-mobile-hidden"),
+    ).toBeNull();
+  });
+});
+
+/**
+ * One left edge per column, header and values on it.
+ *
+ * The rule is written once in `components/ui/table.tsx` and every table in the
+ * product inherits it, so this asserts the token rather than a pixel: a header
+ * and the cells under it name the same padding, and the two deliberate
+ * exceptions — the row's own control lane, and the stacked layout's
+ * right-aligned values — are the ones `components/ui/table.tsx` names.
+ *
+ * The lane's own `px-0` is written unconditionally and applied by the
+ * `data-action` attribute, so the attribute is what proves which cell is the
+ * lane. The class is still read back once, on the lane itself, because the
+ * mark strips nothing unless the rule stays written on the shared parts.
+ */
+describe("DataTable column alignment", () => {
+  const LANE = "px-(--row-padding-x)";
+
+  it("puts every header and its cells on one edge", () => {
+    render(
+      <DataTable
+        label="Agents"
+        columns={[...COLUMNS.slice(0, 2), { ...COLUMNS[2]!, action: true }]}
         rows={[ROW]}
         keyOf={(row) => row.id}
       />,
     );
-    const table = screen.getByRole("table", { name: "Graders" });
+    const table = screen.getByRole("table", { name: "Agents" });
+    const headers = within(table).getAllByRole("columnheader");
+    const cells = within(table).getAllByRole("cell");
 
-    expect(
-      alignsRight(
-        within(table).getByRole("columnheader", { name: "Pass threshold" }),
-      ),
-    ).toBe(true);
-    expect(
-      alignsRight(valueOf(within(table).getByRole("cell", { name: "0.80" }))),
-    ).toBe(true);
+    /* The facts: header and value read from the same declared edge, and
+     * neither is marked as the lane that leaves it. */
+    for (const element of [...headers.slice(0, 2), ...cells.slice(0, 2)]) {
+      expect(element.className, element.textContent ?? "").toContain(LANE);
+      expect(element.dataset.action, element.textContent ?? "").toBeUndefined();
+    }
 
-    /* A column that asked for nothing keeps the table's own left edge. */
-    expect(
-      alignsRight(
-        within(table).getByRole("columnheader", { name: "Registered" }),
-      ),
-    ).toBe(false);
-    expect(
-      alignsRight(
-        valueOf(within(table).getByRole("cell", { name: "2026-08-15" })),
-      ),
-    ).toBe(false);
+    /* The control lane, marked in the header as well as in the row: the mark
+     * is what takes the side padding off both. */
+    expect(headers[2]!.dataset.action).toBe("true");
+    expect(cells[2]!.dataset.action).toBe("true");
+
+    /* And the rule the mark applies. Without this pair the attribute could
+     * stand while the padding it strips quietly returns. */
+    expect(headers[2]!.className).toContain("data-[action=true]:px-0");
+    expect(cells[2]!.className).toContain("data-[action=true]:px-0");
   });
 });
 
@@ -200,14 +221,17 @@ const ACTIVATION_COLUMNS: readonly Column<Row>[] = [
 
 describe("DataTable row activation", () => {
   it("activates from the row surface and leaves control clicks alone", () => {
-    const activated: string[] = [];
+    const activated: {
+      readonly id: string;
+      readonly opener: HTMLElement | null;
+    }[] = [];
     render(
       <DataTable
         label="Graders"
         columns={ACTIVATION_COLUMNS}
         rows={[ROW]}
         keyOf={(row) => row.id}
-        onRowActivate={(row) => activated.push(row.id)}
+        onRowActivate={(row, opener) => activated.push({ id: row.id, opener })}
       />,
     );
     const table = screen.getByRole("table", { name: "Graders" });
@@ -215,19 +239,24 @@ describe("DataTable row activation", () => {
 
     /* Dead space on the row is the row's. */
     fireEvent.click(within(row).getByRole("cell", { name: "2026-08-15" }));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toEqual([
+      {
+        id: "agt_1",
+        opener: within(row).getByRole("button", { name: "Front desk" }),
+      },
+    ]);
 
     /* The name button and the menu trigger keep their own clicks. */
     fireEvent.click(within(row).getByRole("button", { name: "Front desk" }));
     fireEvent.click(within(row).getByRole("button", { name: "Open menu" }));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toHaveLength(1);
 
     /*
      * The open panel is portalled to `body`, so its clicks still bubble the
      * React tree into this row — and must not be the row's.
      */
     fireEvent.click(screen.getByTestId("portal-panel"));
-    expect(activated).toEqual(["agt_1"]);
+    expect(activated).toHaveLength(1);
   });
 
   it("keeps rows inert when no activation is asked for", () => {

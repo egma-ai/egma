@@ -110,7 +110,7 @@ export function LiveKitDispatchSetup({
             onModeChange(event.target.value as LiveKitDispatch)
           }
         >
-          <option value="named">Named agent — Recommended</option>
+          <option value="named">Named agent [Recommended]</option>
           <option value="automatic">Automatic dispatch</option>
         </Select>
       </Field>

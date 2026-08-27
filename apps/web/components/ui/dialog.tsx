@@ -62,13 +62,15 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  showOverlay = true,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
   readonly showCloseButton?: boolean;
+  readonly showOverlay?: boolean;
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {showOverlay ? <DialogOverlay /> : null}
       {/*
        * The panel is centred by `-translate-x-1/2 -translate-y-1/2`, which
        * Tailwind puts on the `translate` property. Keep it there. The theme

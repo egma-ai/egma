@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { measuresFromSpans, type TraceSpan } from "../src/index.ts";
+import {
+  measuresFromSpans,
+  turnResponseLatencySpanKinds,
+  type TraceSpan,
+} from "../src/index.ts";
 
 /**
  * The Retell derivations, pinned to the live validation of 2026-08-22.
@@ -16,6 +20,15 @@ import { measuresFromSpans, type TraceSpan } from "../src/index.ts";
  */
 
 const STARTED = "2026-08-22T10:00:00.000000Z";
+
+it("owns the store projection needed for turn-response latency", () => {
+  expect(turnResponseLatencySpanKinds()).toEqual([
+    "timing",
+    "turn:human",
+    "turn:agent",
+    "speaking",
+  ]);
+});
 
 function at(secondsIn: number): string {
   const base = Date.parse("2026-08-22T10:00:00.000Z");

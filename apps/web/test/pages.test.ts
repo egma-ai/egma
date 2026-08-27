@@ -1,14 +1,17 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
+  PERSONAL_MAIL as API_PERSONAL_MAIL,
 } from "../../api/src/auth/naming.ts";
 import { safeReturnPath as apiSafeReturnPath } from "../../api/src/auth/password-reset.ts";
 import { CODES } from "../../api/src/http/refusals.ts";
+import { readJson } from "../lib/api.ts";
+import { readSession, SESSION_READ_TIMEOUT_MS } from "../lib/me.ts";
 import {
   NOTHING_TO_HEAR,
   offersNothing,
@@ -28,6 +31,7 @@ import {
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
+  PERSONAL_MAIL,
 } from "../lib/signup-defaults.ts";
 
 /**
@@ -41,6 +45,97 @@ const WEB = path.join(import.meta.dirname, "..");
 const TRANSCRIPT_PAGE =
   "app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
 
+/**
+ * The one read in this application with a deadline on it.
+ *
+ * While it is in flight the whole document is covered and everything behind
+ * the cover is inert, so this read failing to answer is not the same kind of
+ * event as any other read failing to answer: it is a page nobody can touch.
+ * A refused or dropped connection rejects and always ended the wait. A server
+ * that accepts the connection and then says nothing does neither, and that is
+ * the one these hold.
+ */
+describe("reading who is signed in", () => {
+  /** A connection that is open and silent: no response, and no error either. */
+  function stalls(): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_path: string, init?: RequestInit) =>
+          new Promise<Response>((_keep, give) => {
+            init?.signal?.addEventListener("abort", () => {
+              give((init.signal as AbortSignal).reason);
+            });
+          }),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("gives up on a server that accepts the connection and then says nothing", async () => {
+    stalls();
+
+    const answer = await readSession(5);
+
+    // The ordinary failure every page already answers: the shell settles on
+    // it and lifts the cover, and the entrance offers a way to try again.
+    expect(answer.status).toBe("failed");
+    expect(answer).toMatchObject({ refusal: { error: "unreachable" } });
+  });
+
+  it("waits long enough that a slow answer is still an answer", () => {
+    expect(SESSION_READ_TIMEOUT_MS).toBeGreaterThanOrEqual(8_000);
+    expect(SESSION_READ_TIMEOUT_MS).toBeLessThanOrEqual(15_000);
+  });
+
+  /**
+   * The deadline belongs to this read and not to reading JSON. Every other
+   * request in the product fails into a page that is already drawn and stays
+   * usable around it, and a deadline in the shared helper would be one they
+   * all silently inherited.
+   */
+  it("puts no deadline on any other read", async () => {
+    stalls();
+
+    void readJson("/v1/agents");
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect((init as RequestInit | undefined)?.signal).toBeUndefined();
+  });
+
+  /**
+   * A deadline is only worth anything if every session read goes through it,
+   * and the invitation page is why this is written down: it asked `/api/me`
+   * with a plain fetch of its own, so it kept the exact stall the shell and
+   * the entrance had just been given a bound for — on the one page where the
+   * person waiting has no account yet and nowhere else to go.
+   *
+   * A page that asks this question again with a fetch of its own is that bug
+   * again, and this is what says so while it is being written.
+   */
+  it("is the only way any page asks who is signed in", async () => {
+    const allowed = new Set([
+      // Where the read and its deadline live.
+      "lib/me.ts",
+      // Names the path so this process forwards it, and reads nothing.
+      "next.config.ts",
+    ]);
+
+    for (const [file, source] of await pageSources()) {
+      if (allowed.has(file)) continue;
+      // Comments name the address all over this application. What matters is
+      // that no line of code asks for it.
+      const code = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+      expect(code, `${file} reads the session without a deadline`).not.toContain(
+        "/api/me",
+      );
+    }
+  });
+});
+
 describe("the names the signup form offers", () => {
   const cases: readonly [string, string][] = [
     ["ada@acme.example", "Acme"],
@@ -49,9 +144,21 @@ describe("the names the signup form offers", () => {
     ["ada@localhost", "Localhost"],
     ["ada@", "My organization"],
     ["not-an-email", "My organization"],
+    /*
+     * A personal address names no company, so what is offered is the person
+     * rather than their mail provider. An organization called `Gmail` is what
+     * the fastest path through this form used to produce, and what somebody
+     * then lived with.
+     */
+    ["ada@gmail.com", "Ada's organization"],
+    ["ada.lovelace@GMAIL.com", "Ada's organization"],
+    ["ada+egma@hotmail.co.uk", "Ada's organization"],
+    // An address typed in capitals is the same person, not a shouted one.
+    ["ADA@GMAIL.COM", "Ada's organization"],
+    ["-@icloud.com", "My organization"],
   ];
 
-  it.each(cases)("takes the organization from the email domain: %s", (email, expected) => {
+  it.each(cases)("takes the organization from the email: %s", (email, expected) => {
     expect(organizationNameFromEmail(email)).toBe(expected);
   });
 
@@ -72,6 +179,23 @@ describe("the names the signup form offers", () => {
       );
     }
     expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
+  });
+
+  /**
+   * The cases above sample the rule; this holds the whole of it.
+   *
+   * The two copies decide which addresses are personal from a list of twenty
+   * names, and a sample of three cannot see a nineteenth added on one side
+   * only. Comparing the sets is what makes a one-sided edit fail here rather
+   * than in front of somebody whose organization is called `Fastmail`.
+   */
+  it("knows the same personal mail providers on both sides", () => {
+    expect([...PERSONAL_MAIL].sort()).toEqual([...API_PERSONAL_MAIL].sort());
+    for (const provider of PERSONAL_MAIL) {
+      const email = `ada.lovelace@${provider}.example`;
+      expect(organizationNameFromEmail(email)).toBe("Ada's organization");
+      expect(apiOrganizationNameFromEmail(email)).toBe("Ada's organization");
+    }
   });
 });
 /** Every source file under the web application, excluding what it did not write. */
@@ -461,31 +585,24 @@ describe("the pages", () => {
     expect(home).not.toContain("Sign out");
   });
 
-  /**
-   * **Simulation runs is a label, and only a label.**
-   *
-   * Monitoring gave production traffic a surface of its own, so the surface
-   * beside it has to say which traffic *it* holds. What changed is the words on
-   * four pages and one navigation item. What did not change is anything a
-   * machine reads: the addresses stay at `/projects/{projectId}/runs`, and the
-   * stored word stays `run` — which is why this reads the page headings rather
-   * than sweeping the sources for the word.
-   */
-  it("labels every runs surface Simulation runs, without moving one address", async () => {
+  it("uses Runs as the one section label without moving an address", async () => {
     for (const page of [
-      "app/projects/[projectId]/runs/page.tsx",
-      "app/projects/[projectId]/runs/new/page.tsx",
+      "app/projects/[projectId]/runs/runs-screen.tsx",
+      "app/projects/[projectId]/runs/loading.tsx",
+      "app/projects/[projectId]/runs/new/loading.tsx",
       "app/projects/[projectId]/runs/[runId]/page.tsx",
       "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
-      expect(source, page).toContain('"Simulation runs"');
-      expect(source, page).not.toContain('eyebrow="Runs"');
-      expect(source, page).not.toContain('title="Runs"');
-      // And the addresses are where they were: every link is still built from
-      // the `runs` section, which is the stored word and stays one.
+      expect(source, page).not.toContain('"Simulation runs"');
       expect(source, page).not.toContain("simulation-runs");
     }
+
+    const list = await readFile(
+      path.join(WEB, "app/projects/[projectId]/runs/runs-screen.tsx"),
+      "utf8",
+    );
+    expect(list).toContain('title="Runs"');
   });
 
   it("keeps simulation execution and grading progress separate", async () => {
@@ -500,18 +617,27 @@ describe("the pages", () => {
       ),
       "utf8",
     );
+    const runWorkbench = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/run-scenario-workbench.tsx",
+      ),
+      "utf8",
+    );
     const grades = await readFile(
       path.join(WEB, "ui/simulation-evidence.tsx"),
       "utf8",
     );
-    // A simulation Egma could not conduct is an execution failure. It does not
-    // become a zero score or an errored grader.
-    for (const page of [run, simulation]) {
-      expect(page).toContain("Egma could not conduct this simulation.");
-    }
-    // The run reports grading progress, while the simulation reads its own
-    // trace-level grading state and grade results.
-    expect(run).toContain("read.gradedCount");
+    // The run list names the execution state. The simulation page explains it.
+    // Neither turns that failure into a zero score or an errored grader.
+    expect(runWorkbench).toContain("Execution failed");
+    expect(simulation).toContain("Egma could not conduct this simulation.");
+    expect(simulation).toContain("This is an execution problem, not a failed grade");
+    // The simulation choice names execution only. The selected evidence keeps
+    // grading progress and score as separate facts in the results summary.
+    expect(runWorkbench).toContain("EXECUTION_LABEL");
+    expect(runWorkbench).toContain("evidence.gradingState");
+    expect(runWorkbench).toContain("selectedEvidence.combinedScore");
     expect(simulation).toContain('evidence.gradingState === "pending"');
     expect(grades).toContain("evidence.grades");
     expect(grades).toContain("evidence.gradeHistory");

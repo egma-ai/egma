@@ -175,7 +175,8 @@ export function Dialog({
    * beside a page — and does nothing to the other two kinds.
    */
   readonly size?: "default" | "wide";
-  readonly title: string;
+  /** Text for ordinary dialogs, or structured title content for evidence sheets. */
+  readonly title: ReactNode;
   readonly onClose: () => void;
   /** A known trigger to restore when the surface closes. */
   readonly returnFocusTo?: HTMLElement | null;
@@ -256,6 +257,7 @@ export function Dialog({
     >
       <DialogContent
         className={cn(PANEL_SHAPE[kind], size === "wide" && PANEL_WIDE[kind])}
+        showOverlay={TAKES_THE_SCREEN[kind]}
         data-kind={kind}
         /*
          * Every caller writes its own body, and most bodies are not one

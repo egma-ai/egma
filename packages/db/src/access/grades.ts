@@ -58,6 +58,7 @@ export type CurrentSimulationGradeFact = {
   readonly runId: string;
   readonly projectGraderId: string;
   readonly errored: boolean;
+  readonly score: number | null;
 };
 
 export type TraceGradeRef = {
@@ -423,7 +424,11 @@ export async function readCurrentSimulationGradeFacts(
               argMax(
                 isNull(score),
                 tuple(grading_sequence, graded_at)
-              ) as errored
+              ) as errored,
+              tupleElement(
+                argMax(tuple(score), tuple(grading_sequence, graded_at)),
+                1
+              ) as current_score
             from ${GRADES_TABLE}
             where organization_id = {organization_id:String}
               ${auth.projectId === undefined
@@ -446,12 +451,14 @@ export async function readCurrentSimulationGradeFacts(
     readonly run_id: string;
     readonly project_grader_id: string;
     readonly errored: number | boolean;
+    readonly current_score: number | null;
   }>();
   return rows.map((row) => ({
     traceId: row.trace_id,
     runId: row.run_id,
     projectGraderId: row.project_grader_id,
     errored: row.errored === true || Number(row.errored) === 1,
+    score: row.current_score === null ? null : Number(row.current_score),
   }));
 }
 

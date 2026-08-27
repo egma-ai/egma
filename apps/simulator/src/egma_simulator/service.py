@@ -329,7 +329,14 @@ class RunningSimulation:
             finally:
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
-                reporter.audio = assembled.audio
+                recording = assembled.recording
+                reporter.audio = (
+                    None if recording is None else recording.as_report()
+                )
+                if recording is not None:
+                    self._spans.recording(
+                        started_unix_nano=recording.started_unix_nano
+                    )
                 # The same moment for the same reason: the exchange is
                 # over, so what egma was asked about the agent's tools and
                 # what it answered are both settled. Drained before the

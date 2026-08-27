@@ -85,11 +85,24 @@ export function unreachable<T>(): Answer<T> {
   };
 }
 
-/** One read, with the project named in it where the caller named one. */
-export async function readJson<T>(path: string): Promise<Answer<T>> {
+/**
+ * One read, with the project named in it where the caller named one.
+ *
+ * **The signal is optional and nothing here decides one.** A read that has to
+ * be bounded says so at the call, because how long a wait is worth depends on
+ * what is waiting on it — a deadline written here would be one that every
+ * request in the product silently inherited. An abort lands in the same catch
+ * as a refused connection, and means the same thing to a page: egma did not
+ * answer.
+ */
+export async function readJson<T>(
+  path: string,
+  options?: { readonly signal?: AbortSignal },
+): Promise<Answer<T>> {
   try {
     const response = await fetch(path, {
       cache: "no-store",
+      ...(options?.signal === undefined ? {} : { signal: options.signal }),
     });
     const body = await response.json().catch(() => null);
     return answerFor<T>(response.status, body);

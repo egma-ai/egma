@@ -566,8 +566,13 @@ export const listGraderLibrary = <ThrowOnError extends boolean = false>(paramete
 export const getGraderLibraryEntry = <ThrowOnError extends boolean = false>(parameters: {
     graderDefinitionId: string;
     projectId?: string;
+    definitionVersion?: number;
 }, options?: Options<never, ThrowOnError>): RequestResult<GetGraderLibraryEntryResponses, GetGraderLibraryEntryErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'graderDefinitionId' }, { in: 'query', key: 'projectId' }] }]);
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'graderDefinitionId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'definitionVersion' }
+            ] }]);
     return (options?.client ?? client).get<GetGraderLibraryEntryResponses, GetGraderLibraryEntryErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',

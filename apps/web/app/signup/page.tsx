@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { Field } from "../../ui/form.tsx";
+import { SessionLoading } from "../../ui/session-loading.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
@@ -49,6 +50,18 @@ export default function SignUpPage() {
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * The address a confirmation link was posted to, once one has been.
+   *
+   * **The step that used to be invisible.** Where the instance has a mail
+   * transport, the provider deliberately opens no session until the address is
+   * confirmed — so the page that went straight on to the product sent people to
+   * a door that turned them around, with nothing anywhere saying a message was
+   * waiting for them. This is that message, said on the page that caused it.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  /** Signed in already, and the browser is on its way to the product. */
+  const [leaving, setLeaving] = useState(false);
   /**
    * Where to go afterwards. Somebody who arrived here from a terminal's
    * approval page goes back to it with their code intact, rather than landing
@@ -95,6 +108,14 @@ export default function SignUpPage() {
         body: JSON.stringify({ email, password, organizationName, projectName }),
       });
       if (response.ok) {
+        const created = (await response.json().catch(() => ({}))) as {
+          emailVerificationRequired?: boolean;
+        };
+        if (created.emailVerificationRequired === true) {
+          setConfirming(email);
+          return;
+        }
+        setLeaving(true);
         window.location.assign(returnTo ?? DEFAULT_SIGNED_IN_PATH);
         return;
       }
@@ -109,13 +130,49 @@ export default function SignUpPage() {
     }
   }
 
-  if (availability === null) {
+  if (leaving) return <SessionLoading label="Setting up Egma" />;
+
+  /*
+   * The account exists and the address has not been confirmed. This is the end
+   * of the page rather than a notice on it: there is nothing left to type here,
+   * and the next thing to do is not on this screen at all.
+   */
+  if (confirming !== null) {
     return (
-      <StatePage
-        title="Loading Egma"
-        lead="Checking whether this instance is ready for setup."
-      />
+      <AuthShell
+        eyebrow="One step left"
+        title="Check your inbox"
+        lead={
+          <>
+            Egma sent a confirmation link to{" "}
+            <strong className="font-medium text-foreground">{confirming}</strong>.
+            Open it to confirm the address, then sign in.
+          </>
+        }
+      >
+        <LinkLine>
+          Confirmed it?{" "}
+          <a
+            href={
+              returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)
+            }
+          >
+            Sign in
+          </a>
+          .
+        </LinkLine>
+        <LinkLine>
+          Nothing arrived after a few minutes? Look in your spam folder, or ask
+          whoever runs this Egma instance.
+        </LinkLine>
+      </AuthShell>
     );
+  }
+
+  if (availability === null) {
+    // Its own sentence, because this is its own question: not who is here, but
+    // whether this instance still takes a first account at all.
+    return <SessionLoading label="Checking whether this instance is ready for setup" />;
   }
 
   if (!availability.open) {

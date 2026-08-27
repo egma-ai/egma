@@ -24,13 +24,29 @@ export function useProjectRead<T>(
   /** Ask again without replacing the current page with a loading state. */
   readonly refresh: () => void;
 } {
-  const [answer, setAnswer] = useState<Answer<T> | null>(null);
+  const [settled, setSettled] = useState<{
+    readonly project: string;
+    readonly requestKey: string;
+    readonly answer: Answer<T>;
+  } | null>(null);
   const [attempt, setAttempt] = useState({ number: 0, quiet: false });
   const readNow = useRef(read);
   readNow.current = read;
 
+  /*
+   * An effect clears an old answer only after React paints once. Keep the
+   * identity that produced each answer so a route or selection change returns
+   * loading immediately, including when the old answer was a refusal.
+   */
+  const answer =
+    settled !== null &&
+    settled.project === project &&
+    settled.requestKey === requestKey
+      ? settled.answer
+      : null;
+
   const reload = useCallback(() => {
-    setAnswer(null);
+    setSettled(null);
     setAttempt((one) => ({ number: one.number + 1, quiet: false }));
   }, []);
 
@@ -41,10 +57,10 @@ export function useProjectRead<T>(
   useEffect(() => {
     if (project === null) return undefined;
     let current = true;
-    if (!attempt.quiet) setAnswer(null);
+    if (!attempt.quiet) setSettled(null);
 
     void readNow.current(project).then((next) => {
-      if (current) setAnswer(next);
+      if (current) setSettled({ project, requestKey, answer: next });
     });
 
     return () => {

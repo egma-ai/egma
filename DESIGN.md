@@ -6,7 +6,7 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
-The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. The palette and the logo's own treatment rules did not move.
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. On 2026-08-26, the run-flow refinement removed decorative markers from settled run states, reserved a spinner for active work, and moved grader verdict meaning into explicit `Result · Passed` or `Result · Failed` text. The palette and the logo's own treatment rules did not move.
 
 ## Product context
 
@@ -113,8 +113,9 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 | Warning | `#9a691c` | Skipped, limited, or needs attention |
 | Failure | `#b44444` | Failed, errored, invalid, or destructive |
 
-- Every state includes a word and an icon or shape. Color is supporting information.
-- **A status marker is a square.** Every small mark that stands for a state — a step marker beside a transcript line, a dot on a row — is a square of the same size, never a circle. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24.)
+- Every state includes a word. An icon or shape is optional supporting information, not a second code the reader must learn. Color is supporting information.
+- **Run execution status is text first.** `Completed`, `Pending`, and `Canceled` use plain text with no marker. `Running` adds a spinner because motion communicates active work. A failed run may color the word `Failed`; it does not add a decorative marker. Grader verdicts use `Result · Passed` or `Result · Failed`, with color only on the verdict word. (Developer decision, 2026-08-26, from Paper page `05 — Run flow iterations`.)
+- **A status marker is a square when a marker is useful.** Small static marks that stand for state elsewhere — for example, a step marker beside a transcript line — are squares of the same size, never circles. It follows the one-radius rule rather than sitting outside it, and it keeps the single round shape in the system meaning one thing: a radio button. (Developer decision, 2026-08-24; narrowed for run surfaces on 2026-08-26.)
 - Brand orange does not mean passed, failed, skipped, or errored.
 - Destructive actions use the failure color inside a clear confirmation flow.
 - Dark theme uses lighter status values that keep the same meanings.
@@ -219,10 +220,11 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
 - Every page has a title bar of its own, the same height as the wordmark bar, holding the page title alone. A purpose statement, where a form or settings page needs one, is the first quiet line of the page body; list screens carry none (read off the boards, 2026-08-23). Page actions are not in that bar.
-- A page below a section carries the trail into its record in that bar, and **the trail never repeats the title beside it**. A page passes the real trail, ending with the record's own name; the bar draws every step but the last, because the heading beside it is that last step. There is no separator after the step that is left. (Read off the boards, 2026-08-23.)
+- A page below a section carries one uniform trail into its record in that bar, and **the trail is one line that ends with the record** — `Tests / Livekit agent suite`. A page passes the real trail, ending with the record's own name; `PageNavigation` draws that final step as the page's only `h1`. Every segment and separator uses the 14px / 400 step, so the current page never jumps in size or weight. Parent steps are muted links, `/` separates every adjacent step, pointer hover reveals an underline, and keyboard focus uses the standard two-pixel Ember indicator. Page changes are immediate and carry no transition. The bar used to draw the trail short of the record and the record beside it as a larger heading, which read as a small underlined link stuck to a big title with no separator between them. (Developer decision, 2026-08-26, from the selected Paper PageHeader refinement. This replaces the never-repeat-the-title rule read off the boards on 2026-08-23. A page with no trail still draws its title alone in the bar.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
 - The toolbar row is 52px, and the last 16px of it is the gap to whatever it stands over. The page body adds no gutter of its own under a toolbar row, so a list's panel begins 132px down the page: the 56px title bar, the 24px gutter, and the 52px row. A page whose header draws no toolbar row keeps the 24px gutter, because then nothing above it carries one. (Read off `71N-0` and `6ZM-0` on `6ZJ-0`, 2026-08-23; the application had been drawing the panel at 156.)
-- Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
+- Page content is held to the page maximum and centered when the viewport has spare width. The title bar, toolbar and page body share that frame, so both outer gutters are equal and the title stays aligned with the first column below it. (Developer decision, 2026-08-26, from the Runs alignment review.)
+- A run detail is a bounded workbench on desktop. The run facts, simulation list, selected-simulation heading and tab rail stay in place; only the active Results or Transcript panel scrolls. At 900px and below it returns to normal document flow so the stacked run facts do not consume the usable viewport. (Developer decision, 2026-08-26, from the run-detail results review.)
 
 The measurements, all of them theme values:
 
@@ -259,6 +261,7 @@ The measurements, all of them theme values:
 - Pointer press feedback uses a subtle scale. Keyboard activation is immediate.
 - A link inside a table cell is underlined in the text colour and turns Ember under a pointer.
 - **A segmented control's chosen segment carries a two-pixel Ember line on its top edge**, over a plain fill, plus weight 500 so the state is not colour alone. It is the narrow active edge this file already asks Ember for, moved to the edge a person reads first. A wash fill is not used here: the wash is the primary action's own surface, and a segment wearing it reads as a button to press rather than a choice already made. (Developer decision, 2026-08-24.)
+- A rail tab at the top of a page or panel carries its two-pixel Ember line on the bottom edge, where the tab meets its content. This does not change the segmented control above. (Developer decision, 2026-08-26, from the run-detail review.)
 
 ### Forms and Settings
 
@@ -286,6 +289,12 @@ The measurements, all of them theme values:
 - Empty, loading, failed, and filtered-empty are separate states.
 - The empty state is a solid Pure Paper card inside one hairline, with 40px of padding, a 16px weight-500 title, one 14px supporting sentence, and the page's action under them as the wash button. It is a fact about the project rather than about egma, so it sits on the page like anything else. Loading, failed, and not-available are interruptions and stay set apart from it. (Read off `AN8-0`, 2026-08-23.)
 - A list's date column is the absolute short date — `Aug 16, 2026` — in tabular numerals, with the exact instant kept on the element. A relative age belongs in a sentence ("started just now", "last received 2 min ago") and never in a column: a column of ages cannot be scanned, and two rows a minute apart read the same for the whole of the first hour. One column names a moment rather than a day, and it keeps its precision in the same shape. (Read off `6ZJ-0`, `8TQ-0` and `8P4-0`, 2026-08-23.)
+
+### Run evidence
+
+- Results begin with one compact row above every grader: Combined score, Duration, Total turns and P90 turn latency. Keep all four facts on one desktop row, stacking each fact's label over its value when the detail pane is narrow. The latency is the platform's recorded `turn_response_latency.p90`, shown in milliseconds with at most three significant digits; mark it as partial when the trace was truncated. Do not repeat the full latency list or the frozen grading plan on this surface; each grader card already carries its definition and pass threshold. (Developer decision, 2026-08-26.)
+- Expected-behavior tables say `Expected behavior`, `Grader result` and `Total Score`. A grader result is evidence returned by the grader, not a claim about which model produced it. (Developer decision, 2026-08-26.)
+- A highlighted transcript event already means it is current. Do not repeat that state with a `Playing` label. Its timestamp remains visible and selecting the event seeks the shared recording. Recording-backed timestamps use the recorded media clock origin when one was captured; historical evidence without that origin stays on its existing trace clock rather than using a guessed offset. (Developer decision, 2026-08-26.)
 
 ### Side sheets
 

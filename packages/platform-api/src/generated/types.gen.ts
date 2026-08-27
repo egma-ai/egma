@@ -1378,6 +1378,7 @@ export type ListGraderLibraryResponses = {
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
+            definitionVersion: number;
             modalities: Array<'chat' | 'voice'>;
             gradingInstructions: string | null;
             requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
@@ -1407,6 +1408,7 @@ export type GetGraderLibraryEntryData = {
     };
     query?: {
         projectId?: string;
+        definitionVersion?: number;
     };
     url: '/v1/grader-library/{graderDefinitionId}';
 };
@@ -1452,6 +1454,7 @@ export type GetGraderLibraryEntryResponses = {
         type: 'llm_as_judge' | 'code';
         scopeEditable: boolean;
         currentDefinitionVersion: number;
+        definitionVersion: number;
         modalities: Array<'chat' | 'voice'>;
         gradingInstructions: string | null;
         requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
@@ -1650,6 +1653,7 @@ export type CreateCustomGraderResponses = {
             type: 'llm_as_judge' | 'code';
             scopeEditable: boolean;
             currentDefinitionVersion: number;
+            definitionVersion: number;
             modalities: Array<'chat' | 'voice'>;
             gradingInstructions: string | null;
             requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
@@ -4294,7 +4298,10 @@ export type ListRunSimulationsResponses = {
             personaVersionId: string;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
             gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
+            combinedScore: number | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            startedAt: string | null;
+            endedAt: string | null;
             modality: 'voice' | 'chat';
             hasRecording: boolean;
             mockToolCoverage: {
@@ -5668,6 +5675,8 @@ export type ListTracesResponses = {
             runId: string;
             agentId: string;
             preview: string;
+            turnResponseLatencyP90Milliseconds: number | null;
+            turnResponseLatencyP90Partial: boolean;
         }>;
         nextPageToken: string | null;
         window: {

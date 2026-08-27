@@ -25,6 +25,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { SheetHost } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   SidebarBrand,
@@ -39,9 +40,9 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar";
 
-import { readJson } from "../lib/api.ts";
 import {
   organizationOf,
+  readSession,
   roleOf,
   type Me,
   type Organization,
@@ -57,13 +58,10 @@ import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
 import { Dialog } from "./dialog.tsx";
 import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
-import {
-  PageNavigation,
-  trailWithoutTitle,
-  type PageNavigationItems,
-} from "./page-navigation.tsx";
+import { PageNavigation, type PageNavigationItems } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
 import { Toolbar } from "./section.tsx";
+import { SessionLoading } from "./session-loading.tsx";
 import { settingsPath } from "./settings-nav.tsx";
 import { useTheme } from "./theme.tsx";
 
@@ -124,7 +122,14 @@ export function useSession(initial?: Me): Session {
   const refresh = useCallback(async () => {
     const thisRequest = request.current + 1;
     request.current = thisRequest;
-    const answer = await readJson<Me>("/api/me");
+    /*
+     * Bounded, and `settled` below is why. A read that never answers used to
+     * leave a shell with empty slots in it; it now leaves a cover with the
+     * document behind it inert, so a server that accepts the connection and
+     * then says nothing would freeze the page rather than degrade it. The
+     * deadline turns that into an ordinary failure, and this line runs.
+     */
+    const answer = await readSession();
     if (!mounted.current || request.current !== thisRequest) return;
 
     if (answer.status === "ready") setMe(answer.value);
@@ -351,9 +356,23 @@ function OrganizationMenu({
           className="flex min-h-(--control-lg) min-w-0 flex-1 items-center px-2"
           data-slot="organization-status"
         >
-          <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
-            {settled ? "No organization" : "Checking your session…"}
-          </span>
+          {/*
+           * **A bar, not a sentence, while nobody has answered.** This slot
+           * used to say "Checking your session…" — the sentence the developer
+           * met on opening the product, one control down. It is also a claim
+           * this bar has no business making: the session is the whole
+           * application's business, `SessionLoading` is what says it, and a
+           * sidebar row saying it too is the same news twice from a place that
+           * cannot act on it. What belongs here is what belongs in any slot
+           * whose value has not arrived: the shape of the value.
+           */}
+          {settled ? (
+            <span className="min-w-0 overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
+              No organization
+            </span>
+          ) : (
+            <Skeleton className="h-3 w-28" />
+          )}
         </div>
       </>
     );
@@ -468,7 +487,17 @@ function AccountMenu({
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
-  const standing = me !== null ? email : settled ? "Session unavailable" : "Checking your session…";
+  /**
+   * The control's own name for whoever it stands for.
+   *
+   * Three states, and the middle one used to be "Checking your session…" —
+   * the application's news, said by a control that is not the application. It
+   * is "Loading account" now: this control is loading this account, which is
+   * both true and the only part of it this control knows. The visible slot
+   * draws a bar rather than the words, because a sentence in a name slot is a
+   * value that is not a name.
+   */
+  const standing = me !== null ? email : settled ? "Session unavailable" : "Loading account";
   const initial = me !== null ? (email.trim().slice(0, 1).toUpperCase() || "E") : "·";
 
   async function signOut(): Promise<void> {
@@ -482,80 +511,93 @@ function AccountMenu({
   }
 
   return (
-    <Menu
-      label={`Account ${standing}. Open the account menu`}
-      triggerClassName={cn(
-        "grid w-full min-w-0 items-center gap-3",
-        /*
-         * **7px, and the missing pixel is the plate's own hairline.** This
-         * trigger reserves its hover border as a transparent one so hovering
-         * shifts nothing, and `box-sizing: border-box` means that border spends
-         * a pixel of the inset before the padding starts. Written as 8px it put
-         * the avatar on 17 while every nav icon stood on 16 — the one thing
-         * still out of the bar's lane. Written as 8 minus the hairline it lands
-         * on 16 exactly, and the gap from the plate's visible edge to the
-         * avatar is a true 8px, which is what a borderless nav row already
-         * draws between its plate and its icon.
-         */
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
-        "px-[calc(var(--space-2)-1px)]",
-        "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
-        "transition-transform duration-(--duration-press) ease-out",
-        "pointer-coarse:min-h-(--tap-target)",
-        "pointer-hover:border-border pointer-hover:bg-surface",
-        "[&:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:transition-none",
-        "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-        compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
-      )}
-      openClassName="border-border bg-surface"
-      placement={placement}
-      trigger={
-        <>
-          <span
-            className={cn(
-              "grid size-(--control-md) flex-none place-items-center",
-              "rounded-none border border-border bg-surface-soft text-sm",
-              compact && "size-(--tap-target)",
-            )}
-            data-slot="account-avatar"
-            aria-hidden="true"
-          >
-            {initial}
-          </span>
-          {compact ? null : (
-            <span className="min-w-0">
-              <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
-                {standing}
-              </span>
-              {role === null ? null : (
-                /* 12px: the micro label the boards give the role line (`720-0`). */
-                <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
-                  {canAuthor(role) ? role : VIEW_ONLY}
-                </span>
+    <>
+      {/*
+       * Signing out is a document load away from the sign-in page, and until
+       * this cover existed the whole of it was a menu item that said
+       * "Signing out…" behind a shell still showing the session being ended.
+       * It is the entrance's own screen, so the two ends of a visit look alike.
+       */}
+      {signingOut ? <SessionLoading label="Signing out" /> : null}
+      <Menu
+        label={`Account ${standing}. Open the account menu`}
+        triggerClassName={cn(
+          "grid w-full min-w-0 items-center gap-3",
+          /*
+           * **7px, and the missing pixel is the plate's own hairline.** This
+           * trigger reserves its hover border as a transparent one so hovering
+           * shifts nothing, and `box-sizing: border-box` means that border spends
+           * a pixel of the inset before the padding starts. Written as 8px it put
+           * the avatar on 17 while every nav icon stood on 16 — the one thing
+           * still out of the bar's lane. Written as 8 minus the hairline it lands
+           * on 16 exactly, and the gap from the plate's visible edge to the
+           * avatar is a true 8px, which is what a borderless nav row already
+           * draws between its plate and its icon.
+           */
+          "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
+          "px-[calc(var(--space-2)-1px)]",
+          "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          "transition-transform duration-(--duration-press) ease-out",
+          "pointer-coarse:min-h-(--tap-target)",
+          "pointer-hover:border-border pointer-hover:bg-surface",
+          "[&:active:not(:focus-visible)]:scale-97",
+          "motion-reduce:transition-none",
+          "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+          compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
+        )}
+        openClassName="border-border bg-surface"
+        placement={placement}
+        trigger={
+          <>
+            <span
+              className={cn(
+                "grid size-(--control-md) flex-none place-items-center",
+                "rounded-none border border-border bg-surface-soft text-sm",
+                compact && "size-(--tap-target)",
               )}
+              data-slot="account-avatar"
+              aria-hidden="true"
+            >
+              {initial}
             </span>
-          )}
-        </>
-      }
-    >
-      {(close) => (
-        <>
-          <MenuLabel>{standing}</MenuLabel>
-          <MenuItem
-            {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
-            onClick={close}
-          >
-            Settings
-          </MenuItem>
-          <MenuDivider />
-          <ThemeItem />
-          <MenuItem disabled={signingOut} onClick={() => void signOut()}>
-            {signingOut ? "Signing out…" : "Sign out"}
-          </MenuItem>
-        </>
-      )}
-    </Menu>
+            {compact ? null : (
+              <span className="min-w-0">
+                {me === null && !settled ? (
+                  <Skeleton className="h-3 w-24" />
+                ) : (
+                  <span className="block overflow-hidden text-sm text-ellipsis whitespace-nowrap">
+                    {standing}
+                  </span>
+                )}
+                {role === null ? null : (
+                  /* 12px: the micro label the boards give the role line (`720-0`). */
+                  <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
+                    {canAuthor(role) ? role : VIEW_ONLY}
+                  </span>
+                )}
+              </span>
+            )}
+          </>
+        }
+      >
+        {(close) => (
+          <>
+            <MenuLabel>{standing}</MenuLabel>
+            <MenuItem
+              {...(settingsHref === null ? { disabled: true } : { href: settingsHref })}
+              onClick={close}
+            >
+              Settings
+            </MenuItem>
+            <MenuDivider />
+            <ThemeItem />
+            <MenuItem disabled={signingOut} onClick={() => void signOut()}>
+              {signingOut ? "Signing out…" : "Sign out"}
+            </MenuItem>
+          </>
+        )}
+      </Menu>
+    </>
   );
 }
 
@@ -698,9 +740,26 @@ function ShellFrame({
     />
   );
 
+  /**
+   * A cold load of a product address, before the session read has answered.
+   *
+   * Opening `/projects/…` from a bookmark, or pressing reload on one, mounts
+   * this whole frame with nobody in it — an organization bar, a project
+   * selector and an account control all standing there with no facts behind
+   * them. That is the same guessed screen the entrance used to draw, on every
+   * other address in the product, so it takes the same cover.
+   *
+   * **The entrance is left to draw its own**, and that is the one exception. It
+   * has to stay covered past the moment the session settles, because `/` never
+   * stops there: it is on its way to a project or to sign-in, and a shell
+   * uncovered between those two moments is the flash all of this removes.
+   */
+  const unresolved = !session.settled && pathname !== "/";
+
   return (
     <SessionContext.Provider value={session}>
     <DraftNavigationProvider>
+    {unresolved ? <SessionLoading label="Opening Egma" /> : null}
     <div
       className={cn(
         "grid min-h-svh bg-background",
@@ -829,13 +888,13 @@ function ShellFrame({
  * The page itself: a 56px title bar, then the page's own toolbar, then its
  * content, all inside 24px gutters.
  *
- * **The board's page is not centred and this one stopped being centred with
- * it.** `6ZL-0` starts at the left gutter and runs to the right one. The
- * maximum survives — a settings form on a 2560px monitor is still held to a
- * readable width — but it is applied to the content rather than to the page,
- * and without `mx-auto`, so the title in the bar and the first cell of the
- * table under it are always on the same vertical line. Centring the page put
- * them 8px apart at 1440.
+ * **The content frame centres only after it reaches its maximum.** Below that
+ * point the ordinary 24px page gutters still own both edges. Above it, the
+ * unused width is split equally instead of collecting at the right edge. The
+ * title bar, toolbar and body all use the same frame, so centring never moves
+ * a title away from the table or form below it. This supersedes the earlier
+ * left-anchored capped frame after the 2026-08-26 browser review found the
+ * unequal trailing space across list pages.
  *
  * `wide` is for a page whose subject is wide by nature — a transcript beside
  * the timing of what happened during it, a run beside its simulations. It is a
@@ -852,11 +911,14 @@ function ShellFrame({
 export function ProductPage({
   wide = false,
   viewport = false,
+  desktopViewport = false,
   children,
 }: {
   readonly wide?: boolean;
   /** Keep the page header fixed and let its body own the available scroll. */
   readonly viewport?: boolean;
+  /** Use the viewport layout on desktop while mobile stays in document flow. */
+  readonly desktopViewport?: boolean;
   readonly children: ReactNode;
 }) {
   return (
@@ -880,10 +942,47 @@ export function ProductPage({
           "[&>[data-slot=page-body]]:overflow-hidden",
           "[&>[data-slot=page-body]]:pb-0",
         ],
+        desktopViewport && [
+          "min-[901px]:h-svh min-[901px]:min-h-0 min-[901px]:overflow-hidden",
+          "min-[901px]:[&>[data-slot=page-body]]:min-h-0",
+          "min-[901px]:[&>[data-slot=page-body]]:flex-1",
+          "min-[901px]:[&>[data-slot=page-body]]:overflow-hidden",
+          "min-[901px]:[&>[data-slot=page-body]]:pb-0",
+        ],
       )}
     >
       <SheetHost>{children}</SheetHost>
     </main>
+  );
+}
+
+/**
+ * One horizontal frame for the title, toolbar and page body.
+ *
+ * It is full-width while the page can keep its standard gutters. Once the
+ * content maximum is reached, `mx-auto` divides the spare width between both
+ * sides. Keeping this in one component prevents a list action, title and table
+ * from drifting onto three different left edges.
+ */
+function PageContentFrame({
+  children,
+  className,
+  slot,
+}: {
+  readonly children: ReactNode;
+  readonly className?: string;
+  readonly slot: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-(--page-content-max) min-w-0",
+        className,
+      )}
+      data-slot={slot}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -906,12 +1005,21 @@ export function ProductPage({
  * purpose statement `DESIGN.md` asks for, kept where somebody reads it rather
  * than squeezed into a 56px strip beside the title it explains.
  *
- * **A trail never repeats the title beside it.** A page passes the real trail
- * into its record, ending with the record's own name, and this header takes
- * that last step off before drawing it — because the `<h1>` beside it is that
- * step. Without the rule every record page read its own name twice in one bar
- * ("Tests / Default   Default"), and the two workarounds for it left either a
- * dangling separator or the kind of record where its name belonged.
+ * **A page with a trail draws one line, and the record is the last step of
+ * it.** "Tests / Livekit agent suite", every step in the trail's own type,
+ * with the section linked and the record the `<h1>` — so the current page
+ * appears once and keeps the same 14px / 400 treatment as its parents. It used
+ * to be two things in one bar — the trail cut short of the record, then the
+ * record beside it as a larger heading — which read as a small link stuck to a
+ * big title with no slash between them (developer decision, 2026-08-26). A
+ * page with no trail keeps its own title bar, because there is no line for it
+ * to join.
+ *
+ * **So a page with a trail names itself in that trail's last step**, and
+ * `title` is what a page without one draws. The two must say the same thing:
+ * a page whose last step and `title` differ shows the step and hides the
+ * title, which is why the transcript's two state pages carry their state
+ * sentence in the trail rather than beside it.
  *
  * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
  * block. **It is not decoration on every page**: the transcript screen puts the
@@ -952,12 +1060,6 @@ export function PageHeader({
    * twice is the thing this suppression has always been for.
    */
   const label = breadcrumbs === undefined ? eyebrow : undefined;
-  /*
-   * The trail, with this page's own name taken off the end. See
-   * `trailWithoutTitle`: the trail and the heading sit in one 56px bar, so a
-   * trail that ended with the page said its name twice.
-   */
-  const trail = trailWithoutTitle(breadcrumbs, title);
   const hasBlock =
     toolbar !== undefined ||
     action !== undefined ||
@@ -974,7 +1076,7 @@ export function PageHeader({
       <div
         data-slot="page-topbar"
         className={cn(
-          "sticky top-0 z-10 flex min-w-0 flex-none items-center gap-3",
+          "sticky top-0 z-10 flex min-w-0 flex-none items-center",
           "h-(--topbar-height) border-b border-border bg-background",
           "px-(--page-gutter)",
           /*
@@ -986,9 +1088,19 @@ export function PageHeader({
           "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        {trail === undefined ? null : <PageNavigation items={trail} />}
-        {/* A heading carries no size of its own; the class is the size. */}
-        <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+        <PageContentFrame className="items-center gap-3" slot="page-topbar-content">
+          {breadcrumbs === undefined ? (
+            /* A heading carries no size of its own; the class is the size. */
+            <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+          ) : (
+            /*
+             * Straight through: the trail a page passes already ends with that
+             * page, and `PageNavigationItems` is what holds it to that. There
+             * is nothing here to rebuild.
+             */
+            <PageNavigation items={breadcrumbs} />
+          )}
+        </PageContentFrame>
       </div>
 
       {hasBlock ? (
@@ -999,29 +1111,31 @@ export function PageHeader({
             "max-[900px]:px-4 max-[900px]:pt-4",
           )}
         >
-          {label === undefined ? null : (
-            <p
-              className={cn(
-                "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
-                lead === undefined ? "" : "mb-1",
-              )}
-            >
-              {label}
-            </p>
-          )}
-          {lead === undefined ? null : (
-            <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
-              {lead}
-            </p>
-          )}
-          {(lead !== undefined || label !== undefined) &&
-          (toolbar !== undefined || action !== undefined) ? (
-            /* The gap to the toolbar row, when the block holds both. */
-            <div className="h-4" aria-hidden="true" />
-          ) : null}
-          {toolbar === undefined && action === undefined ? null : (
-            <Toolbar action={action}>{toolbar}</Toolbar>
-          )}
+          <PageContentFrame className="flex-col" slot="page-toolbar-content">
+            {label === undefined ? null : (
+              <p
+                className={cn(
+                  "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
+                  lead === undefined ? "" : "mb-1",
+                )}
+              >
+                {label}
+              </p>
+            )}
+            {lead === undefined ? null : (
+              <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
+                {lead}
+              </p>
+            )}
+            {(lead !== undefined || label !== undefined) &&
+            (toolbar !== undefined || action !== undefined) ? (
+              /* The gap to the toolbar row, when the block holds both. */
+              <div className="h-4" aria-hidden="true" />
+            ) : null}
+            {toolbar === undefined && action === undefined ? null : (
+              <Toolbar action={action}>{toolbar}</Toolbar>
+            )}
+          </PageContentFrame>
         </div>
       ) : null}
     </header>
@@ -1032,8 +1146,8 @@ export function PageHeader({
  * The page's content, under the bar and the toolbar.
  *
  * The gutters are the board's — 24px at the sides, 24px above and 40px below —
- * and the inner block is where `--page-content-max` is spent. It is not
- * centred: see `ProductPage`.
+ * and the inner block is where `--page-content-max` is spent. It shares the
+ * centred capped frame used by the title and toolbar: see `ProductPage`.
  *
  * **The top gutter goes when a toolbar row was drawn, because that row already
  * carries it.** `71N-0` is a 52px strip — a 36px control with 16px under it —
@@ -1059,9 +1173,12 @@ export function PageBody({ children }: { readonly children: ReactNode }) {
       )}
       data-slot="page-body"
     >
-      <div className="flex w-full max-w-(--page-content-max) min-h-0 flex-1 flex-col">
+      <PageContentFrame
+        className="min-h-0 flex-1 flex-col"
+        slot="page-body-content"
+      >
         {children}
-      </div>
+      </PageContentFrame>
     </div>
   );
 }

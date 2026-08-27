@@ -6,6 +6,7 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
+  MAXIMUM_SPANS_PER_TRACE,
   readProductionGradingPlan,
   type NewSpan,
 } from "@egma/db";
@@ -237,6 +238,22 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     expect(trace?.startedAt).toBe("2026-08-02T18:04:40.281989Z");
     expect(trace?.durationNs).toBe("73494876403");
     expect(trace?.endedAt).toBe("2026-08-02T18:05:53.776865Z");
+  });
+
+  it("projects the same derived P90 turn latency as trace detail", async () => {
+    const [trace] = (await listed()).traces;
+    const detail = await transcript();
+    const turnLatency = detail.metrics.find(
+      (metric) => metric.measure === "turn_response_latency",
+    );
+
+    // This production capture has no Egma timing span. Both endpoints derive
+    // the series from the same recognised framework spans, then use the shared
+    // nearest-rank percentile.
+    expect(turnLatency?.derived).toBe(true);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(1994.917806);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
+    expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });
 
   it("says which platform produced it without inventing a connection type", async () => {
@@ -633,6 +650,7 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
 describe.skipIf(!storage.available)("what one measure looks like on the wire", () => {
   const SIMULATED = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a";
   const REPORTED = "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b";
+  const TRUNCATED = "1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c";
 
   /** A day of its own, holding nothing the rest of this file reads. */
   const THE_NEXT_DAY = {
@@ -689,6 +707,16 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     const only = body.metrics[0];
     if (only === undefined) throw new Error("the read measured nothing");
     return only;
+  }
+
+  async function summaries() {
+    const response = await listTracesOverHttp(
+      api.app,
+      acme.secret,
+      THE_NEXT_DAY,
+    );
+    expect(response.statusCode, response.body).toBe(200);
+    return (response.json() as ListedPage).traces;
   }
 
   beforeAll(async () => {
@@ -750,6 +778,41 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
         }),
       }),
     ]);
+
+    // The list computes a metric from the same bounded prefix as detail. Keep a
+    // usable timing inside that prefix and one extra span beyond it so the HTTP
+    // contract must say that the otherwise real P90 is partial.
+    const oversized = Array.from(
+      { length: MAXIMUM_SPANS_PER_TRACE + 1 },
+      (_, index) =>
+        span({
+          traceId: TRUNCATED,
+          spanId: (0x5300000000000000n + BigInt(index)).toString(16),
+          parentSpanId: index === 0 ? "" : "5300000000000000",
+          name:
+            index === 0
+              ? "agent_session"
+              : index === 1
+                ? "turn_response_latency"
+                : "tts_request",
+          kind: index === 0 ? "root" : index === 1 ? "timing" : "tts",
+          startedAtMicroseconds: AT + BigInt(index),
+          durationNanoseconds:
+            index === 1 ? 4_780_000_000n : 1_000_000_000n,
+        }),
+    );
+    const half = Math.ceil(oversized.length / 2);
+    await appendSpans(auth, oversized.slice(0, half));
+    await appendSpans(auth, oversized.slice(half));
+  });
+
+  it("marks only a P90 computed from a truncated trace as partial", async () => {
+    const byId = new Map((await summaries()).map((trace) => [trace.traceId, trace]));
+
+    expect(byId.get(SIMULATED)?.turnResponseLatencyP90Partial).toBe(false);
+    expect(byId.get(REPORTED)?.turnResponseLatencyP90Partial).toBe(false);
+    expect(byId.get(TRUNCATED)?.turnResponseLatencyP90Milliseconds).toBe(4780);
+    expect(byId.get(TRUNCATED)?.turnResponseLatencyP90Partial).toBe(true);
   });
 
   it("carries no platform field at all on a simulation's own measure", async () => {

@@ -61,12 +61,6 @@ export type Column<Row> = {
   readonly hideOnMobile?: boolean;
   /** Identifiers, counts and times, which read straight in the mono face. */
   readonly mono?: boolean;
-  /**
-   * Numbers read from their right edge, so a column of them may say so. The
-   * header moves with its values: a label left on the other edge of the lane
-   * floats away from the figures it names.
-   */
-  readonly align?: "end";
   /** A row control. It stays at the trailing edge in both table layouts. */
   readonly action?: boolean;
   /**
@@ -119,6 +113,8 @@ export function DataTable<Row>({
   onRowActivate,
   currentKey,
   stackWhenConstrained = false,
+  narrowLayout = "stack",
+  tableMinWidth,
   more,
   pagination,
 }: {
@@ -142,7 +138,10 @@ export function DataTable<Row>({
    * lands on a control inside the row — the ⋮ menu, the name button itself —
    * is that control's, not the row's.
    */
-  readonly onRowActivate?: (row: Row) => void;
+  readonly onRowActivate?: (
+    row: Row,
+    primaryControl: HTMLElement | null,
+  ) => void;
   /**
    * The row whose record is open in the sheet beside the list.
    *
@@ -164,9 +163,23 @@ export function DataTable<Row>({
    * rather than the browser viewport, is too narrow for all of its columns.
    */
   readonly stackWhenConstrained?: boolean;
+  /**
+   * What the one semantic table does when the viewport is narrow.
+   *
+   * Most product lists become labelled rows. Evidence tables whose columns
+   * must stay aligned may instead keep their table layout and let the panel
+   * scroll sideways.
+   */
+  readonly narrowLayout?: "stack" | "scroll";
+  /**
+   * The route-owned width below which a scrolling table must not compress.
+   * It has no effect on the default stacked layout.
+   */
+  readonly tableMinWidth?: string;
   readonly more?: More;
   readonly pagination?: Pagination;
 }) {
+  const stacks = narrowLayout === "stack";
   const primary = columns.find((column) => column.primary) ?? columns[0];
   const pageLabel = pagination?.pageLabel(pagination.page);
   /**
@@ -212,24 +225,38 @@ export function DataTable<Row>({
     return column !== primary && column.hideOnMobile === true;
   }
   function mobileHidden(column: Column<Row>): "true" | undefined {
-    return hiddenWhenStacked(column) ? "true" : undefined;
+    return stacks && hiddenWhenStacked(column) ? "true" : undefined;
   }
 
   return (
-    <div className={stackWhenConstrained ? "@container/data-table" : undefined}>
+    <div
+      className={cn(
+        "min-w-0 max-w-full",
+        stacks && stackWhenConstrained && "@container/data-table",
+      )}
+      data-narrow-layout={narrowLayout}
+    >
       <TablePanel
         className={cn(
           /* Stacked rows are not a scrolling region; they are the page. */
-          "stacked:overflow-visible",
+          stacks && "stacked:overflow-visible",
         )}
       >
-        <Table className="stacked:block" aria-label={label}>
+        <Table
+          className={cn(stacks && "stacked:block")}
+          aria-label={label}
+          style={
+            !stacks && tableMinWidth !== undefined
+              ? { minWidth: tableMinWidth }
+              : undefined
+          }
+        >
           {/*
            * The headers are read out in both layouts and drawn in one. Stacked
            * rows carry their own label on each cell, so a visible header row
            * would be the same word twice.
            */}
-          <TableHeader className="stacked:sr-only">
+          <TableHeader className={cn(stacks && "stacked:sr-only")}>
             <TableRow>
               {columns.map((column) => (
                 <TableHead
@@ -240,8 +267,9 @@ export function DataTable<Row>({
                      * ⋮, which is where a person's eye starts down it.
                      */
                     "data-[action=true]:px-0",
-                    hiddenWhenStacked(column) && "stacked:hidden",
-                    column.align === "end" && "text-right",
+                    stacks &&
+                      hiddenWhenStacked(column) &&
+                      "stacked:hidden",
                   )}
                   data-action={column.action === true ? "true" : undefined}
                   data-mobile-hidden={mobileHidden(column)}
@@ -257,7 +285,7 @@ export function DataTable<Row>({
               ))}
             </TableRow>
           </TableHeader>
-          <TableBody className="stacked:block">
+          <TableBody className={cn(stacks && "stacked:block")}>
             {rows.map((row) => {
               const current =
                 currentKey !== undefined && keyOf(row) === currentKey;
@@ -266,9 +294,11 @@ export function DataTable<Row>({
                 aria-current={current ? "true" : undefined}
                 className={cn(
                   "[&:first-child>td]:border-t-0",
-                  "stacked:flex stacked:flex-col stacked:gap-1",
-                  "stacked:border-t stacked:border-border stacked:px-(--row-padding-x) stacked:py-3",
-                  "stacked:first:border-t-0",
+                  stacks && [
+                    "stacked:flex stacked:flex-col stacked:gap-1",
+                    "stacked:border-t stacked:border-border stacked:px-(--row-padding-x) stacked:py-3",
+                    "stacked:first:border-t-0",
+                  ],
                   onRowActivate !== undefined && [
                     "cursor-pointer transition-colors duration-(--duration-hover) ease-out",
                     "motion-reduce:transition-none",
@@ -310,7 +340,12 @@ export function DataTable<Row>({
                         ) {
                           return;
                         }
-                        onRowActivate(row);
+                        onRowActivate(
+                          row,
+                          event.currentTarget.querySelector<HTMLElement>(
+                            '[data-primary="true"] button, [data-primary="true"] a',
+                          ),
+                        );
                       }
                 }
               >
@@ -337,15 +372,17 @@ export function DataTable<Row>({
                        * has always meant "the narrow layout may leave this
                        * out", and `stacked` is what "narrow layout" means.
                        */
-                      hiddenWhenStacked(column)
+                      stacks && hiddenWhenStacked(column)
                         ? "stacked:hidden"
-                        : [
+                        : stacks
+                          ? [
                             "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
                             "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
-                          ],
-                      column === primary
+                            ]
+                          : undefined,
+                      stacks && column === primary
                         ? "stacked:mb-1"
-                        : column.action === true
+                        : stacks && column.action === true
                           ? /*
                              * **The lane carries no label, in either layout.**
                              * The header cell is empty by the boards' own
@@ -356,17 +393,21 @@ export function DataTable<Row>({
                              * the trailing edge, which is the lane.
                              */
                             "stacked:justify-end"
-                          : [
+                          : stacks
+                            ? [
                               /* The header is the label, said again beside the fact. */
                               "stacked:before:flex-none stacked:before:text-xs",
                               "stacked:before:tracking-(--tracking-label) stacked:before:text-faint",
                               "stacked:before:uppercase",
                               "stacked:before:content-[attr(data-label)]",
-                            ],
-                      "data-[action=true]:stacked:mt-2 data-[action=true]:stacked:items-center",
+                              ]
+                            : undefined,
+                      stacks &&
+                        "data-[action=true]:stacked:mt-2 data-[action=true]:stacked:items-center",
                       /* A row control that drew nothing leaves no empty line. */
-                      "data-[action=true]:max-[900px]:has-[[data-slot=cell]:empty]:hidden",
-                      column.header === "" && [
+                      stacks &&
+                        "data-[action=true]:max-[900px]:has-[[data-slot=cell]:empty]:hidden",
+                      stacks && column.header === "" && [
                         "@max-[60rem]/data-table:justify-end",
                         "@max-[60rem]/data-table:has-[[data-slot=cell]:empty]:hidden",
                       ],
@@ -396,8 +437,6 @@ export function DataTable<Row>({
                          */
                         column === primary && "text-foreground",
                         column.mono === true && "font-mono text-sm",
-                        /* The values' edge, which the header cell above shares. */
-                        column.align === "end" && "text-right",
                         /*
                          * The action cell's own shape, read off the cell it
                          * sits in rather than off a prop this file re-tested.
@@ -408,9 +447,10 @@ export function DataTable<Row>({
                         "in-data-[action=true]:flex in-data-[action=true]:items-center",
                         "in-data-[action=true]:justify-center",
                         "in-data-[action=true]:overflow-visible in-data-[action=true]:text-clip",
-                        column !== primary &&
+                        stacks &&
+                          column !== primary &&
                           "stacked:min-w-0 stacked:max-w-[70%] stacked:text-right",
-                        "in-data-[action=true]:stacked:max-w-none",
+                        stacks && "in-data-[action=true]:stacked:max-w-none",
                       )}
                       data-slot="cell"
                     >

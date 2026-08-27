@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readFile } from "node:fs/promises";
@@ -29,6 +29,7 @@ import { Failure, Loading, NotFound } from "../ui/page-state.tsx";
 import { PageNavigation } from "../ui/page-navigation.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
 import { RunProgress } from "../ui/run-status.tsx";
+import { SessionLoading } from "../ui/session-loading.tsx";
 import { useUnsavedChanges } from "../ui/settings-read.ts";
 import {
   AppShell,
@@ -395,12 +396,22 @@ describe("nested page navigation", () => {
     const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     const runs = within(navigation).getByRole("link", { name: "Runs" });
     const run = within(navigation).getByRole("link", { name: "Nightly smoke" });
-    const current = within(navigation).getByText("Simulation 01");
+    const current = within(navigation).getByRole("heading", {
+      name: "Simulation 01",
+    });
 
     expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
     expect(run.getAttribute("href")).toBe("/projects/prj_1/runs/run_1");
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.closest("a")).toBeNull();
+    expect(current.classList.contains("text-sm")).toBe(true);
+    expect(current.classList.contains("font-normal")).toBe(true);
+    expect(runs.classList.contains("no-underline")).toBe(true);
+    expect(runs.classList.contains("pointer-hover:underline")).toBe(true);
+    expect(navigation.querySelector("ol")?.classList.contains("flex-wrap")).toBe(true);
+    expect(current.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(runs.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+    expect(within(navigation).getAllByText("/")).toHaveLength(2);
   });
 
   it("lets the breadcrumb own section context instead of repeating the eyebrow", () => {
@@ -415,8 +426,92 @@ describe("nested page navigation", () => {
       />,
     );
 
+    const navigation = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(screen.getAllByText("Runs")).toHaveLength(1);
-    expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
+    expect(
+      within(navigation).getByRole("heading", { name: "Nightly smoke" }),
+    ).toBeTruthy();
+    expect(navigation.textContent).toBe("Runs/Nightly smoke");
+  });
+
+  /**
+   * The trail and the page's name are one line, in one type.
+   *
+   * They used to be two things in one bar: a small underlined "Tests" beside a
+   * larger "Livekit agent suite", with no separator between them. That is the
+   * mismatch the developer read off production on 2026-08-26, and this is the
+   * shape that answers it — one line, one type, the section linked and the
+   * page the last step of its own trail.
+   */
+  it("draws the trail and the page as one line, ending in the page", () => {
+    render(
+      <PageHeader
+        title="Livekit agent suite"
+        breadcrumbs={[
+          { label: "Tests", href: "/projects/prj_1/tests" },
+          { label: "Livekit agent suite" },
+        ]}
+      />,
+    );
+
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    const tests = within(trail).getByRole("link", { name: "Tests" });
+    const page = within(trail).getByRole("heading", {
+      name: "Livekit agent suite",
+    });
+
+    expect(tests.getAttribute("href")).toBe("/projects/prj_1/tests");
+    expect(trail.textContent).toBe("Tests/Livekit agent suite");
+    /* The page's own name carries the trail's size, not a heading's. */
+    expect(page.className).toContain("text-sm");
+    expect(page.className).toContain("font-normal");
+  });
+
+  /**
+   * One page, one name — the invariant the first cut of this line broke.
+   *
+   * A header that appended its title whenever the trail's last step said
+   * something else drew two steps with no address, and this file draws every
+   * addressless step as an `<h1 aria-current="page">`. Three real pages ended
+   * up with two headings and two current steps, the settled simulation among
+   * them. The trail's type now allows one current step, and this holds the
+   * render to it: a deep trail, a short one, and a page with no trail at all.
+   */
+  it("names itself once, whatever shape of page it is", () => {
+    /* `steps` is 1 for a page inside a trail and 0 for a page with none. */
+    function namesItselfOnce(page: ReactElement, steps: 0 | 1): void {
+      const { container, unmount } = render(page);
+      expect(container.querySelectorAll("h1")).toHaveLength(1);
+      expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(steps);
+      unmount();
+    }
+
+    // The settled simulation: Runs, the run, then the test it executed.
+    namesItselfOnce(
+      <PageHeader
+        eyebrow="Simulation runs"
+        title="Reschedules a booked appointment"
+        breadcrumbs={[
+          { label: "Runs", href: "/projects/prj_1/runs" },
+          { label: "Nightly smoke", href: "/projects/prj_1/runs/run_1" },
+          { label: "Reschedules a booked appointment" },
+        ]}
+      />,
+      1,
+    );
+    // A transcript state page, whose heading is the state it is in.
+    namesItselfOnce(
+      <PageHeader
+        title="Open this from the list"
+        breadcrumbs={[
+          { label: "Traces", href: "/projects/prj_1/monitoring/transcripts" },
+          { label: "Open this from the list" },
+        ]}
+      />,
+      1,
+    );
+    // A list page: one name, and no trail for a current step to sit in.
+    namesItselfOnce(<PageHeader title="Tests" />, 0);
   });
 
   /**
@@ -863,6 +958,7 @@ describe("a dialog", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeTruthy();
 
     // Inert is not a class on the page behind: the kit hides it from the
     // accessibility tree, so a control out there is no longer reachable at all.
@@ -902,7 +998,7 @@ describe("a dialog", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("uses the same modal layer for a right-side sheet", () => {
+  it("uses a right-side sheet without drawing a scrim", () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -932,6 +1028,7 @@ describe("a dialog", () => {
       name: "Transcript and audio",
     });
     expect(sheet.getAttribute("data-kind")).toBe("sheet");
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeNull();
     expect(sheet.contains(document.activeElement)).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
 
@@ -1424,15 +1521,11 @@ describe("what the router draws while a page is still coming", () => {
       "/projects/prj_1/tests",
     );
     /*
-     * The current page is the `<h1>` beside the trail rather than a second copy
-     * inside it. `PageHeader` draws both in one 56px bar, so a trail that
-     * ended with the page said its name twice — "Tests / Test   Test" — which
-     * is not what `9VT-0` and `B9M-0` draw. The fallback and the page it
-     * stands in for both stop the trail at the parent (ui-refresh ticket 05);
-     * the shape they have to share is what this case is about, and they still
-     * share it.
+     * The current page is the last step of the trail, and that step is the
+     * `<h1>`: one line, one type, one name. The fallback and the page it
+     * stands in for draw the same line, which is the shape this case is about.
      */
-    expect(screen.getByRole("heading", { name: "Test" })).toBeTruthy();
+    expect(within(crumbs).getByRole("heading", { name: "Test" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });
 });
@@ -1757,6 +1850,15 @@ describe("the role the shell shows", () => {
     );
   });
 
+  /**
+   * A cold load of a product address: a bookmark opened, or reload pressed.
+   *
+   * The frame mounts with nobody in it, and what used to stand in the two slots
+   * that had no value yet was the sentence "Checking your session…" — the
+   * application's own news, said twice, by two controls that cannot act on it.
+   * The cover says it once now, and each slot draws the shape of the value it
+   * is waiting for.
+   */
   it("claims nothing at all while the session read is in flight", async () => {
     apiAnswers({ "/api/me": "never", "/v1/agents": "never" });
     render(
@@ -1767,7 +1869,17 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
     expect(screen.queryByText(/view only/i)).toBeNull();
-    expect(screen.getAllByText(/Checking your session/).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/Checking your session/)).toHaveLength(0);
+
+    // One cover, and nothing behind it left in reach of a Tab step.
+    const covering = screen.getByRole("status");
+    expect(covering.dataset.slot).toBe("session-loading");
+    expect(covering.getAttribute("aria-busy")).toBe("true");
+    expect(
+      [...document.body.children]
+        .filter((one) => !one.contains(covering))
+        .filter((one) => !one.hasAttribute("inert")),
+    ).toEqual([]);
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
     const settings = screen.getByRole("menuitem", { name: "Settings" });
@@ -2144,5 +2256,64 @@ describe("the Agents page", () => {
     expect((refused as HTMLButtonElement).disabled).toBe(true);
     expect(refused.getAttribute("title")).toContain("viewer role cannot");
     expect(screen.queryByRole("link", { name: "Connect an agent" })).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Who owns the `inert` marks the session cover puts on the document.
+ *
+ * The cover hides the application from eyes; `inert` is what takes it out of
+ * reach of a Tab step and a screen reader as well, and the two have to end
+ * together. Each cover holding its own list of what it marked does not end them
+ * together: the second cover to mount skips everything the first already
+ * marked — which is what keeps a surface Radix made inert from being taken over
+ * — so the first cover to leave hands the whole document back while the second
+ * is still standing opaque in front of it.
+ *
+ * Nothing produces that overlap today, and every reason is a timing invariant
+ * written nowhere near the component. These hold the guarantee itself instead.
+ */
+describe("the session cover's hold on the document", () => {
+  /** The application's own container, rather than a cover's portal host. */
+  function appRoot(): Element {
+    const root = [...document.body.children].find(
+      (one) => one.getAttribute("data-slot") !== "session-loading-host",
+    );
+    expect(root, "nothing in the body for a cover to cover").toBeDefined();
+    return root!;
+  }
+
+  it("hands the document back only when the last cover leaves", () => {
+    const first = render(<SessionLoading label="Opening Egma" />);
+    const root = appRoot();
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    const second = render(<SessionLoading label="Signing out" />);
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    first.unmount();
+    // The whole of it: a cover is still there, opaque, in front of a document
+    // that would otherwise have just become reachable again.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(root.hasAttribute("inert")).toBe(true);
+
+    second.unmount();
+    expect(root.hasAttribute("inert")).toBe(false);
+  });
+
+  it("gives back what it took, and nothing else", () => {
+    const theirs = document.createElement("div");
+    theirs.setAttribute("inert", "");
+    document.body.append(theirs);
+
+    const cover = render(<SessionLoading label="Opening Egma" />);
+    cover.unmount();
+
+    // Somebody else's, made inert for a reason of their own before the cover
+    // arrived. It was never the cover's to hand back.
+    expect(theirs.hasAttribute("inert")).toBe(true);
+    theirs.remove();
   });
 });
