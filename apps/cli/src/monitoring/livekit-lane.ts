@@ -86,6 +86,7 @@ export type LiveKitWired = {
 
 export type LiveKitOutcome =
   | LiveKitWired
+  | { readonly kind: "refused"; readonly reason: string }
   | {
       readonly kind: "already-configured";
       readonly agent: RegisteredAgent;
@@ -198,12 +199,21 @@ async function theAgent(
       readonly reason: string;
       readonly uncertainMutation?: boolean;
     }
+  | { readonly kind: "refused"; readonly reason: string }
 > {
   const held = options.agentId?.trim() ?? "";
   if (held !== "") {
     const read = await readAgentMonitoring(held, options.platform);
     switch (read.kind) {
       case "monitoring":
+        if (read.monitoring.archived) {
+          return {
+            kind: "refused",
+            reason:
+              `Agent ${read.monitoring.agentId} is archived and cannot be enabled for monitoring. ` +
+              "Restore it, then run enable again. No key was created and no environment file was changed.",
+          };
+        }
         return {
           kind: "agent",
           agent: {
@@ -254,6 +264,14 @@ async function theAgent(
           ...options.platform,
           signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
         });
+        if (read.kind === "monitoring" && read.monitoring.archived) {
+          return {
+            kind: "refused",
+            reason:
+              `Agent ${read.monitoring.agentId} is archived and cannot be enabled for monitoring. ` +
+              "Restore it, then run enable again. No key was created and no environment file was changed.",
+          };
+        }
         if (
           read.kind === "monitoring" &&
           read.monitoring.agentPlatform === LIVEKIT
@@ -305,6 +323,7 @@ export async function wireLiveKitMonitoring(
   if (options.signal.aborted) return { kind: "interrupted" };
 
   const resolved = await theAgent(options);
+  if (resolved.kind === "refused") return resolved;
   if (resolved.kind === "failed") {
     return options.signal.aborted && resolved.uncertainMutation !== true
       ? { kind: "interrupted" }

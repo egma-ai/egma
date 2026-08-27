@@ -890,6 +890,24 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(platform.keys.minted[0]?.revokedAt).toBeNull();
   });
 
+  it("refuses an archived LiveKit agent even while its worker key is active", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+    const first = await egma(["monitoring", "enable", "--platform", "livekit"]);
+    expect(first.code).toBe(MONITORING_EXIT.done);
+
+    const agent = platform.registered.agents[0];
+    if (agent === undefined) throw new Error("expected the registered agent");
+    agent.archivedAt = new Date("2026-08-27T12:00:00.000Z").toISOString();
+
+    const second = await egma(["monitoring", "enable", "--platform", "livekit"]);
+
+    expect(second.code).toBe(MONITORING_EXIT.refused);
+    expect(facts(second.stdout).status).toBe("no-monitoring-setup");
+    expect(facts(second.stdout).repository_record).toBeUndefined();
+    expect(second.stderr).toContain("is archived");
+    expect(platform.keys.minted).toHaveLength(1);
+  });
+
   it("honors a project-wide active key even when this member cannot list it", async () => {
     const agent = await unmonitoredAgent("livekit", "another-members-worker-key");
     await onboarded({ id: agent.id, name: agent.name });

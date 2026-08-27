@@ -729,6 +729,8 @@ async function enableLiveKit(
   });
 
   switch (wired.kind) {
+    case "refused":
+      return refuseMissingMonitoring(options, wired.reason);
     case "wired": {
       options.out(`agent_id: ${wired.agent.id}`);
       options.out(`agent_name: ${wired.agent.name}`);

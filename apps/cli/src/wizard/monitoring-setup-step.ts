@@ -306,6 +306,7 @@ async function pushFromLiveKit(
       monitored: null,
     };
   }
+  if (wired.kind === "refused") return ending(wired.reason);
   if (wired.kind === "already-configured") {
     ui.pushStatus(`${DETAIL_MARK} ${wired.reason}`);
     return {
