@@ -721,7 +721,11 @@ describe("recording evidence", () => {
       currentTime: 5,
       duration: 60,
       playing: false,
-      waveform: { human: [0.2, 0.6, 0.3], agent: [0.1, 0.4, 0.2] },
+      waveform: {
+        kind: "stereo",
+        human: [0.2, 0.6, 0.3],
+        agent: [0.1, 0.4, 0.2],
+      },
       waveformLoading: false,
       seek,
       onTimeUpdate: vi.fn(),
@@ -799,6 +803,155 @@ describe("recording evidence", () => {
     expect(
       screen.getByRole("slider", { name: "Seek the recording" }).className,
     ).toContain("h-(--tap-target)");
+    expect(
+      screen.queryByText(
+        "The recording is playable, but its stereo channel map is unavailable.",
+      ),
+    ).toBeNull();
+  });
+
+  it("draws one mono waveform and colors it from spoken-turn timestamps", () => {
+    const recording: SimulationEvidenceRecording = {
+      status: "ready",
+      message: null,
+      url: "https://recordings.example/trace.wav",
+      audioRef: { current: null },
+      currentTime: 5,
+      duration: 10,
+      playing: false,
+      waveform: { kind: "mono", peaks: [0.2, 0.6, 0.3] },
+      waveformLoading: false,
+      seek: vi.fn(),
+      onTimeUpdate: vi.fn(),
+      onLoadedMetadata: vi.fn(),
+      onError: vi.fn(),
+      onPlay: vi.fn(),
+      onPause: vi.fn(),
+    };
+    render(
+      <RecordingEvidence
+        recording={recording}
+        active={false}
+        labels={{ human: "Caller", agent: "Agent" }}
+        speakerTimeline={{
+          startedAt: "2026-08-15T10:00:00.000Z",
+          endedAt: "2026-08-15T10:00:10.000Z",
+          turns: [
+            turn("human", "turn:human", "Hello", 1),
+            turn("agent", "turn:agent", "Hi", 4),
+          ],
+        }}
+      />,
+    );
+
+    const seek = screen.getByRole("slider", { name: "Seek the recording" });
+    const mono = seek.parentElement?.querySelector(
+      '[data-waveform-channels="mono"]',
+    );
+    expect(mono).not.toBeNull();
+    expect(mono?.querySelectorAll('rect[data-speaker="human"]')).toHaveLength(1);
+    expect(mono?.querySelectorAll('rect[data-speaker="agent"]')).toHaveLength(1);
+    expect(
+      mono?.querySelector('rect[data-speaker="human"]')?.getAttribute("x"),
+    ).toBe("100");
+    expect(
+      mono?.querySelector('rect[data-speaker="agent"]')?.getAttribute("x"),
+    ).toBe("400");
+    const humanRange = mono?.querySelector('rect[data-speaker="human"]');
+    const agentRange = mono?.querySelector('rect[data-speaker="agent"]');
+    expect(humanRange?.getAttribute("width")).toBe("100");
+    expect(agentRange?.getAttribute("width")).toBe("100");
+    expect(
+      Number(agentRange?.getAttribute("x")) -
+        Number(humanRange?.getAttribute("x")) -
+        Number(humanRange?.getAttribute("width")),
+    ).toBe(200);
+    expect(mono?.querySelector("path.fill-faint")).not.toBeNull();
+    expect(screen.getByText("Caller")).toBeTruthy();
+    expect(screen.getByText("Agent")).toBeTruthy();
+  });
+
+  it("uses the next turn only when a mono speaker duration is unavailable", () => {
+    const recording: SimulationEvidenceRecording = {
+      status: "ready",
+      message: null,
+      url: "https://recordings.example/trace.wav",
+      audioRef: { current: null },
+      currentTime: 0,
+      duration: 10,
+      playing: false,
+      waveform: { kind: "mono", peaks: [0.2, 0.6, 0.3] },
+      waveformLoading: false,
+      seek: vi.fn(),
+      onTimeUpdate: vi.fn(),
+      onLoadedMetadata: vi.fn(),
+      onError: vi.fn(),
+      onPlay: vi.fn(),
+      onPause: vi.fn(),
+    };
+    render(
+      <RecordingEvidence
+        recording={recording}
+        active={false}
+        speakerTimeline={{
+          startedAt: "2026-08-15T10:00:00.000Z",
+          endedAt: "2026-08-15T10:00:10.000Z",
+          turns: [
+            {
+              ...turn("human", "turn:human", "Hello", 1),
+              durationNs: "unavailable",
+            },
+            turn("agent", "turn:agent", "Hi", 4),
+          ],
+        }}
+      />,
+    );
+
+    const mono = screen
+      .getByRole("slider", { name: "Seek the recording" })
+      .parentElement?.querySelector('[data-waveform-channels="mono"]');
+    expect(
+      mono?.querySelector('rect[data-speaker="human"]')?.getAttribute("width"),
+    ).toBe("300");
+  });
+
+  it("keeps a decoded mono channel as waveform evidence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      })),
+    );
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        async decodeAudioData(): Promise<AudioBuffer> {
+          return {
+            duration: 10,
+            numberOfChannels: 1,
+            getChannelData: () => new Float32Array([0.2, -0.7, 0.4]),
+          } as unknown as AudioBuffer;
+        }
+
+        async close(): Promise<void> {}
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useDirectEvidenceRecording("https://recordings.example/trace.wav"),
+    );
+
+    await waitFor(() => expect(result.current.waveformLoading).toBe(false));
+    expect(result.current.waveform?.kind).toBe("mono");
+    if (result.current.waveform?.kind !== "mono") {
+      throw new Error("The mono recording lost its waveform.");
+    }
+    expect(result.current.waveform.peaks.slice(0, 3)).toEqual([
+      expect.closeTo(0.2),
+      expect.closeTo(0.7),
+      expect.closeTo(0.4),
+    ]);
   });
 
   it("keeps a direct recording playable when waveform decoding is unavailable", async () => {

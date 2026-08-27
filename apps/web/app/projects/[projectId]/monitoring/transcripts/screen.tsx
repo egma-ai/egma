@@ -757,22 +757,34 @@ function Nothing() {
  * same order by hand — a table whose eighth heading names its ninth value is a
  * bug nobody sees in a diff.
  *
- * The order is a judgement about scanning. What somebody looking down this list
- * is trying to find is the exchange they mean, so when it happened, how long it
- * ran, how much was said and **what the human opened with** come first; how it
- * was recorded and reached comes after.
+ * The order is a judgement about scanning. The agent leads because it is the
+ * quickest way to find the family of calls somebody means. The call's time,
+ * duration and turn latency follow as one compact timing story, then the exact
+ * trace id. The id remains the row's primary control: it opens the sheet and is
+ * where focus returns when that sheet closes.
  *
- * The link is on the first column and it carries the project and the window
- * this exchange happened in, taken from the two instants this very row is
- * showing. That is what makes the transcript a place somebody can be sent: the
- * endpoint under it requires both, and this row already knows the answers, so
- * nobody has to.
+ * The trace-id control carries the project and the window this exchange
+ * happened in, taken from the two instants this very row is showing. That is
+ * what makes the transcript a place somebody can be sent: the endpoint under
+ * it requires both, and this row already knows the answers, so nobody has to.
  */
 function columnsFor(
   projectId: string,
   openTrace: (row: Listed, opener?: HTMLElement | null) => void,
 ): readonly Column<Listed>[] {
   return [
+    {
+      key: "agent",
+      header: TRACE_COLUMNS.agent,
+      width: "203px",
+      cell: (row) => {
+        const name =
+          row.platformAgentName.trim() ||
+          row.platformAgentId.trim() ||
+          row.agentId.trim();
+        return name === "" ? <Nothing /> : name;
+      },
+    },
     {
       key: "time",
       header: TRACE_COLUMNS.time,
@@ -822,18 +834,6 @@ function columnsFor(
           {row.traceId}
         </button>
       ),
-    },
-    {
-      key: "agent",
-      header: TRACE_COLUMNS.agent,
-      width: "203px",
-      cell: (row) => {
-        const name =
-          row.platformAgentName.trim() ||
-          row.platformAgentId.trim() ||
-          row.agentId.trim();
-        return name === "" ? <Nothing /> : name;
-      },
     },
     {
       key: "actions",

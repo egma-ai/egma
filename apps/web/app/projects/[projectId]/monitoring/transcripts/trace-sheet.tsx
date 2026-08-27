@@ -253,7 +253,7 @@ export function TraceSheet({
                 >
                   {TRACE_SHEET.overview.title}
                 </h2>
-                <dl className="mt-4 grid grid-cols-4 border border-border bg-surface max-[36rem]:grid-cols-2">
+                <dl className="mt-4 grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.95fr)_minmax(0,0.65fr)_minmax(11rem,1.25fr)] border border-border bg-surface max-[36rem]:grid-cols-2 max-[24rem]:grid-cols-1">
                   <OverviewFact
                     label={TRACE_SHEET.overview.started}
                     value={asCallOverviewInstant(answer.value.trace.startedAt)}
@@ -342,6 +342,11 @@ export function TraceSheet({
                   <RecordingEvidence
                     active={false}
                     recording={recording}
+                    speakerTimeline={{
+                      startedAt: recorded?.startedAt ?? evidence.startedAt,
+                      endedAt: evidence.endedAt,
+                      turns: evidence.turns,
+                    }}
                     labels={{
                       title: TRACE_SHEET.recording.title,
                       human: TRACE_SHEET.recording.caller,
@@ -392,8 +397,8 @@ function OverviewFact({
   readonly value: string;
 }) {
   return (
-    <div className="min-w-0 border-e border-border p-4 last:border-e-0 max-[36rem]:nth-[2n]:border-e-0 max-[36rem]:nth-[n+3]:border-t">
-      <dt className="font-mono text-xs tracking-(--tracking-label) text-faint uppercase">
+    <div className="min-w-0 border-e border-border p-4 last:border-e-0 max-[36rem]:nth-[2n]:border-e-0 max-[36rem]:nth-[n+3]:border-t max-[24rem]:border-e-0 max-[24rem]:nth-[n+2]:border-t">
+      <dt className="whitespace-nowrap font-mono text-xs tracking-(--tracking-label) text-faint uppercase">
         {label}
       </dt>
       <dd className="m-0 mt-1 truncate font-mono text-sm tabular-nums text-foreground">

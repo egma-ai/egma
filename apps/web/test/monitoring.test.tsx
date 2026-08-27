@@ -386,11 +386,11 @@ describe("what the Monitoring list shows", () => {
       .map((cell) => cell.textContent);
 
     expect(headings).toEqual([
+      TRACE_COLUMNS.agent,
       TRACE_COLUMNS.time,
       TRACE_COLUMNS.duration,
       TRACE_COLUMNS.p90TurnLatency,
       TRACE_COLUMNS.traceId,
-      TRACE_COLUMNS.agent,
       TRACE_COLUMNS.actions,
     ]);
     expect(within(table).getByText("4.78s")).toBeDefined();
@@ -496,6 +496,12 @@ describe("what the Monitoring list shows", () => {
       "Turns",
       "P90 turn latency",
     ]);
+    expect(
+      within(sheet)
+        .getAllByRole("term")
+        .find((term) => term.textContent === "P90 turn latency")
+        ?.classList.contains("whitespace-nowrap"),
+    ).toBe(true);
     expect(within(sheet).queryByRole("heading", { name: "Latency" })).toBeNull();
     expect(within(sheet).getByText("No grades for this trace")).toBeDefined();
     expect(

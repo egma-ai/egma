@@ -8,6 +8,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -51,6 +52,20 @@ import {
 import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
+
+export type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
+
+export type RecordingSpeakerTimeline = {
+  /** The instant the first audio sample represents. */
+  readonly startedAt: string;
+  /** The end of the trace, used to close the final speaker range. */
+  readonly endedAt: string;
+  /** Spoken turns only. Extra span fields are accepted and ignored. */
+  readonly turns: readonly Pick<
+    EvidenceStep,
+    "kind" | "startedAt" | "durationNs"
+  >[];
+};
 
 function durationOf(evidence: SimulationEvidence): number | null {
   const measured = evidence.measures.durationMs;
@@ -249,10 +264,17 @@ export type SimulationEvidenceRecording = {
   readonly currentTime: number;
   readonly duration: number;
   readonly playing: boolean;
-  readonly waveform: {
-    readonly human: readonly number[];
-    readonly agent: readonly number[];
-  } | null;
+  readonly waveform:
+    | {
+        readonly kind: "stereo";
+        readonly human: readonly number[];
+        readonly agent: readonly number[];
+      }
+    | {
+        readonly kind: "mono";
+        readonly peaks: readonly number[];
+      }
+    | null;
   readonly waveformLoading: boolean;
   readonly seek: (seconds: number, play?: boolean) => void;
   readonly onTimeUpdate: () => void;
@@ -279,6 +301,20 @@ function peaksOf(
     }
     return peak;
   });
+}
+
+/** Keep a decoded mono recording visible without guessing that it is stereo. */
+function waveformOf(
+  buffer: AudioBuffer,
+): NonNullable<SimulationEvidenceRecording["waveform"]> {
+  if (buffer.numberOfChannels === 2) {
+    return {
+      kind: "stereo",
+      human: peaksOf(buffer, 0),
+      agent: peaksOf(buffer, 1),
+    };
+  }
+  return { kind: "mono", peaks: peaksOf(buffer, 0) };
 }
 
 /**
@@ -409,14 +445,7 @@ export function useSimulationEvidenceRecording(
         const decoded = await context.decodeAudioData(bytes);
         if (!current) return;
         setDuration(decoded.duration);
-        setWaveform(
-          decoded.numberOfChannels === 2
-            ? {
-                human: peaksOf(decoded, 0),
-                agent: peaksOf(decoded, 1),
-              }
-            : null,
-        );
+        setWaveform(waveformOf(decoded));
         markReady(attempt, "decode");
       })
       .catch(() => {
@@ -635,13 +664,7 @@ export function useDirectEvidenceRecording(
         );
         setWaveform({
           url,
-          value:
-            decoded.numberOfChannels === 2
-              ? {
-                  human: peaksOf(decoded, 0),
-                  agent: peaksOf(decoded, 1),
-                }
-              : null,
+          value: waveformOf(decoded),
           loading: false,
         });
       })
@@ -869,6 +892,7 @@ function CombinedWaveform({
         "relative h-16 min-w-0 overflow-hidden border border-border bg-background",
         "bg-[linear-gradient(to_bottom,transparent_49.5%,var(--border)_49.5%,var(--border)_50.5%,transparent_50.5%)]",
       )}
+      data-waveform-channels="stereo"
     >
       <svg
         className="block h-full w-full"
@@ -888,6 +912,165 @@ function CombinedWaveform({
         <path
           className="fill-waveform-agent"
           d={waveformPath(agent, 48, 13)}
+        />
+      </svg>
+      <span
+        className="pointer-events-none absolute top-0 bottom-0 left-(--playhead) z-1 w-0.5 bg-brand"
+        style={{ "--playhead": `${String(progress)}%` } as CSSProperties}
+        aria-hidden="true"
+      />
+    </div>
+  );
+}
+
+type RecordingSpeakerRange = {
+  readonly speaker: "human" | "agent";
+  readonly startedSeconds: number;
+  readonly endedSeconds: number;
+};
+
+function recordedDurationSeconds(nanoseconds: string): number | null {
+  if (!/^\d+$/u.test(nanoseconds)) return null;
+  const seconds = milliseconds(nanoseconds) / 1000;
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+/**
+ * A mono file has no channel identity. The spoken-turn timestamps are still a
+ * useful source of speaker identity. Each turn owns only its recorded duration,
+ * capped at the next turn. A missing duration falls back to the next turn.
+ * Time outside those ranges stays neutral.
+ */
+function recordingSpeakerRanges(
+  timeline: RecordingSpeakerTimeline | null | undefined,
+  duration: number,
+): readonly RecordingSpeakerRange[] {
+  if (timeline === null || timeline === undefined || duration <= 0) return [];
+  const origin = Date.parse(timeline.startedAt);
+  if (!Number.isFinite(origin)) return [];
+  const ended = Date.parse(timeline.endedAt);
+  const timelineEnd = Number.isFinite(ended)
+    ? Math.min(duration, Math.max(0, (ended - origin) / 1000))
+    : duration;
+  const turns = timeline.turns
+    .flatMap((turn) => {
+      const speaker: RecordingSpeakerRange["speaker"] | null =
+        turn.kind === "turn:human"
+          ? "human"
+          : turn.kind === "turn:agent"
+            ? "agent"
+            : null;
+      const started = Date.parse(turn.startedAt);
+      if (speaker === null || !Number.isFinite(started)) return [];
+      return [
+        {
+          speaker,
+          durationSeconds: recordedDurationSeconds(turn.durationNs),
+          startedSeconds: Math.min(
+            duration,
+            Math.max(0, (started - origin) / 1000),
+          ),
+        },
+      ];
+    })
+    .sort((left, right) => left.startedSeconds - right.startedSeconds);
+
+  const ranges: RecordingSpeakerRange[] = [];
+  for (let at = 0; at < turns.length; at += 1) {
+    const turn = turns[at];
+    if (turn === undefined) continue;
+    const next = turns[at + 1];
+    const nextBoundary = Math.min(
+      duration,
+      next?.startedSeconds ?? timelineEnd,
+      timelineEnd,
+    );
+    const endedSeconds = Math.max(
+      turn.startedSeconds,
+      turn.durationSeconds === null
+        ? nextBoundary
+        : Math.min(
+            turn.startedSeconds + turn.durationSeconds,
+            nextBoundary,
+          ),
+    );
+    if (endedSeconds <= turn.startedSeconds) continue;
+    const prior = ranges.at(-1);
+    if (
+      prior !== undefined &&
+      prior.speaker === turn.speaker &&
+      prior.endedSeconds >= turn.startedSeconds
+    ) {
+      ranges[ranges.length - 1] = { ...prior, endedSeconds };
+      continue;
+    }
+    ranges.push({ ...turn, endedSeconds });
+  }
+  return ranges;
+}
+
+function MonoWaveform({
+  peaks,
+  progress,
+  duration,
+  speakerRanges,
+}: {
+  readonly peaks: readonly number[];
+  readonly progress: number;
+  readonly duration: number;
+  readonly speakerRanges: readonly RecordingSpeakerRange[];
+}) {
+  const id = useId().replaceAll(":", "");
+  const humanClip = `${id}-human`;
+  const agentClip = `${id}-agent`;
+  const path = waveformPath(peaks);
+  const clipRectangles = (speaker: RecordingSpeakerRange["speaker"]) =>
+    speakerRanges
+      .filter((range) => range.speaker === speaker)
+      .map((range, at) => {
+        const x = (range.startedSeconds / duration) * 1000;
+        const width =
+          ((range.endedSeconds - range.startedSeconds) / duration) * 1000;
+        return (
+          <rect
+            data-speaker={speaker}
+            height="64"
+            key={`${speaker}:${String(at)}`}
+            width={width}
+            x={x}
+            y="0"
+          />
+        );
+      });
+
+  return (
+    <div
+      className={cn(
+        "relative h-16 min-w-0 overflow-hidden border border-border bg-background",
+        "bg-[linear-gradient(to_bottom,transparent_49.5%,var(--border)_49.5%,var(--border)_50.5%,transparent_50.5%)]",
+      )}
+      data-waveform-channels="mono"
+    >
+      <svg
+        className="block h-full w-full"
+        aria-hidden="true"
+        preserveAspectRatio="none"
+        viewBox="0 0 1000 64"
+      >
+        <defs>
+          <clipPath id={humanClip}>{clipRectangles("human")}</clipPath>
+          <clipPath id={agentClip}>{clipRectangles("agent")}</clipPath>
+        </defs>
+        <path className="fill-faint" d={path} />
+        <path
+          className="fill-waveform-user"
+          clipPath={`url(#${humanClip})`}
+          d={path}
+        />
+        <path
+          className="fill-waveform-agent"
+          clipPath={`url(#${agentClip})`}
+          d={path}
         />
       </svg>
       <span
@@ -933,10 +1116,12 @@ export function RecordingEvidence({
   recording,
   active,
   labels,
+  speakerTimeline,
 }: {
   readonly recording: SimulationEvidenceRecording;
   readonly active: boolean;
   readonly labels?: Partial<RecordingEvidenceLabels>;
+  readonly speakerTimeline?: RecordingSpeakerTimeline | null;
 }) {
   const title = labels?.title ?? DEFAULT_RECORDING_LABELS.title;
   const human = labels?.human ?? DEFAULT_RECORDING_LABELS.human;
@@ -978,6 +1163,11 @@ export function RecordingEvidence({
   );
   const elapsed = clockText(recording.currentTime);
   const total = clockText(recording.duration);
+  const speakerRanges = recording.waveform?.kind === "mono"
+    ? recordingSpeakerRanges(speakerTimeline, limit)
+    : [];
+  const showsSpeakerLegend = recording.waveform?.kind === "stereo" ||
+    speakerRanges.length > 0;
 
   function toggle(): void {
     const audio = recording.audioRef.current;
@@ -1034,7 +1224,7 @@ export function RecordingEvidence({
           Drawing the audio waveform…
         </p>
       ) : recording.waveform === null ? (
-        <div className="border-t border-border px-3 py-3">
+        <div className="border-t border-border p-3">
           <input
             className="block h-(--tap-target) w-full cursor-ew-resize accent-brand"
             type="range"
@@ -1047,9 +1237,6 @@ export function RecordingEvidence({
             disabled={recording.duration <= 0}
             onChange={(event) => recording.seek(Number(event.currentTarget.value))}
           />
-          <p className="m-0 mt-2 text-sm text-muted-foreground">
-            The recording is playable, but its stereo channel map is unavailable.
-          </p>
         </div>
       ) : (
         <div className="border-t border-border p-3">
@@ -1060,11 +1247,20 @@ export function RecordingEvidence({
               "has-[input:focus-visible]:outline-brand",
             )}
           >
-            <CombinedWaveform
-              human={recording.waveform.human}
-              agent={recording.waveform.agent}
-              progress={progress}
-            />
+            {recording.waveform.kind === "stereo" ? (
+              <CombinedWaveform
+                human={recording.waveform.human}
+                agent={recording.waveform.agent}
+                progress={progress}
+              />
+            ) : (
+              <MonoWaveform
+                duration={limit}
+                peaks={recording.waveform.peaks}
+                progress={progress}
+                speakerRanges={speakerRanges}
+              />
+            )}
             <input
               className={cn(
                 "absolute inset-0 z-2 m-0 h-full w-full",
@@ -1089,26 +1285,32 @@ export function RecordingEvidence({
               onChange={(event) => recording.seek(Number(event.currentTarget.value))}
             />
           </div>
-          <div
-            className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
-            aria-label="Waveform speakers"
-          >
-            <span className="inline-flex items-center gap-2">
-              <span className="size-2.5 flex-none bg-foreground" aria-hidden="true" />
-              {human}
-            </span>
-            <span className="inline-flex items-center gap-2">
-              <span className="size-2.5 flex-none bg-brand" aria-hidden="true" />
-              {agent}
-            </span>
-          </div>
+          {showsSpeakerLegend ? (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground"
+              aria-label="Waveform speakers"
+            >
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="size-2.5 flex-none bg-foreground"
+                  aria-hidden="true"
+                />
+                {human}
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="size-2.5 flex-none bg-brand"
+                  aria-hidden="true"
+                />
+                {agent}
+              </span>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
   );
 }
-
-export type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
 
 /** Every recorded tool call, once, in the order it happened. */
 export function transcriptToolCalls(
@@ -1843,6 +2045,15 @@ function SimulationEvidencePanel({
               <RecordingEvidence
                 active={simulationActive}
                 recording={recording}
+                speakerTimeline={
+                  evidence.transcript === null
+                    ? null
+                    : {
+                        startedAt: evidence.transcript.startedAt,
+                        endedAt: evidence.transcript.endedAt,
+                        turns: evidence.transcript.turns,
+                      }
+                }
               />
             </section>
             <section
