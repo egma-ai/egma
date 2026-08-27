@@ -1449,6 +1449,22 @@ export function TestsGrid(props: GridProps) {
               </td>
             </tr>
           ) : null}
+          {/*
+            A reader who cannot write gets the line the author's way in would
+            have stood on. Without it an empty suite is column headings over
+            nothing, which is the one state that says neither what is here nor
+            why nothing is.
+          */}
+          {tests.length === 0 && entry === null && !mayAuthor ? (
+            <tr>
+              <td
+                className={cn(CELL, PAD, TEXT, "border-b-0 text-faint")}
+                colSpan={COLUMNS.length + 1}
+              >
+                {why ?? "No tests in this suite yet."}
+              </td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
 

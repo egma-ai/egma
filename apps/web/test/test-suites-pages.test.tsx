@@ -318,6 +318,32 @@ describe("the suite-first Tests route", () => {
     expect(screen.queryByRole("button", { name: "Open the suite menu" })).toBeNull();
   });
 
+  /**
+   * The one state that would otherwise say nothing at all.
+   *
+   * An author reads an empty suite off the line that writes the first test.
+   * A viewer has no such line, so the grid was column headings over nothing —
+   * neither what is here nor why it cannot be added to.
+   */
+  it("tells a viewer why an empty suite is empty for them", async () => {
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("viewer") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": { status: 200, body: { tests: [], nextPageToken: null } },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(
+      await screen.findByText(
+        "Your viewer role cannot write tests. Ask an organization admin to change your role.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "+ Write a test" })).toBeNull();
+  });
+
   it("lets a viewer read a suite while every test write stays inert", async () => {
     routed.pathname = "/projects/prj_1/tests/suites/ste_1";
     routed.params = { projectId: "prj_1", suiteId: "ste_1" };
