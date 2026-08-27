@@ -20,7 +20,10 @@ import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { MONITORING_EXIT } from "../src/commands/monitoring.ts";
+import {
+  MONITORING_EXIT,
+  runMonitoringCommand,
+} from "../src/commands/monitoring.ts";
 import {
   createEgmaFolder,
   EMPTY_CONFIG,
@@ -993,7 +996,9 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(second.code).toBe(MONITORING_EXIT.refused);
     expect(facts(second.stdout).agent_registration).toBe("reused");
     expect(facts(second.stdout).status).toBe("already-configured");
-    expect(second.stderr).toContain("No key was rotated and no file was changed");
+    expect(second.stderr).toContain(
+      "No key was rotated and no environment file was changed",
+    );
 
     // One row, one key, one file, and the developer's own line untouched.
     expect(platform.registered.agents).toHaveLength(1);
@@ -1055,6 +1060,80 @@ describe("egma monitoring enable, on LiveKit", () => {
     await expect(
       readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("records another member's active worker and retries the local write", async () => {
+    const agent = await unmonitoredAgent("livekit", "another-members-worker");
+    const seeded = await wireLiveKitMonitoring({
+      platform: {
+        url: platform.url,
+        key: platform.device.keys[0] ?? "",
+      },
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      agentId: agent.id,
+      agentName: agent.name,
+      say: () => undefined,
+    });
+    expect(seeded).toMatchObject({ kind: "wired" });
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET" && new URL(request.url).pathname === "/v1/keys") {
+        return new Response(JSON.stringify({ keys: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return fetch(input, init);
+    };
+    const runHiddenMember = async (): Promise<Result> => {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      const code = await runMonitoringCommand({
+        access: {
+          url: platform.url,
+          credentialsFile: workspace.credentialsFile,
+        },
+        cwd: workspace.dir,
+        action: "enable",
+        agent: null,
+        platform: "livekit",
+        platformAgentId: null,
+        name: agent.name,
+        signal: new AbortController().signal,
+        out: (line) => stdout.push(line),
+        fail: (line) => stderr.push(line),
+        fetchImpl,
+      });
+      return {
+        code,
+        stdout: `${stdout.join("\n")}\n`,
+        stderr: `${stderr.join("\n")}\n`,
+      };
+    };
+
+    const unlock = await lockEgmaFolder();
+    let failed: Result;
+    try {
+      failed = await runHiddenMember();
+    } finally {
+      await unlock();
+    }
+    expect(failed.code).toBe(MONITORING_EXIT.repositoryRecordFailed);
+    expect(failed.stderr).toContain(
+      "run the same egma monitoring enable command again",
+    );
+    expect(failed.stderr).not.toContain("egma monitoring record --agent");
+
+    const recovered = await runHiddenMember();
+    expect(recovered.code).toBe(MONITORING_EXIT.refused);
+    expect(facts(recovered.stdout).repository_record).toBe("recorded");
+    expect(facts(recovered.stdout).status).toBe("already-configured");
+    expect((await readConfig(folderPathsIn(workspace.dir).config)).agents).toEqual([
+      { id: agent.id, name: agent.name, connections: [] },
+    ]);
+    expect(platform.keys.minted).toHaveLength(1);
   });
 
   it("refuses an unsafe duplicate-key state instead of choosing one", async () => {

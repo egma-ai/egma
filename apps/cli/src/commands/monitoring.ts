@@ -296,7 +296,9 @@ async function recordMonitoringReceipt(
   options: MonitoringCommandOptions,
   platform: RegisterOptions,
   target: MonitoredTarget,
-  proof?: { readonly monitoringKeyId: string },
+  recovery?:
+    | { readonly kind: "record"; readonly monitoringKeyId: string }
+    | { readonly kind: "repeat-livekit-enable" },
 ): Promise<number | null> {
   try {
     await recordMonitoringTarget({
@@ -311,12 +313,13 @@ async function recordMonitoringReceipt(
       cause instanceof MonitoringTargetRecordError
         ? cause.message
         : `could not finish the repository record: ${cause instanceof Error ? cause.message : String(cause)}`;
-    const recoveryProof =
-      proof === undefined ? "" : ` --monitoring-key-id ${proof.monitoringKeyId}`;
+    const recoveryInstruction =
+      recovery?.kind === "repeat-livekit-enable"
+        ? "After the repository issue is fixed, run the same egma monitoring enable command again. That retry rechecks the existing worker key and retries this repository record without minting or rotating a key."
+        : `After the repository or Egma connection is fixed, run egma monitoring record --agent ${target.id}${recovery === undefined ? "" : ` --monitoring-key-id ${recovery.monitoringKeyId}`} --url ${platform.url}. That recovery command does not create an agent or mint a key.`;
     const reason =
       `Egma finished remote monitoring setup for agent ${target.id}, but ${detail} The remote setup remains active. ` +
-      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${target.id}${recoveryProof} --url ${platform.url}. ` +
-      "That recovery command does not create an agent or mint a key.";
+      `Keep the receipt above. ${recoveryInstruction}`;
     options.out("status: repository-record-failed");
     options.out(`reason: ${reason}`);
     options.fail(reason);
@@ -746,7 +749,7 @@ async function enableLiveKit(
           name: wired.agent.name,
           projectId: wired.agent.projectId,
         },
-        { monitoringKeyId: wired.keyId },
+        { kind: "record", monitoringKeyId: wired.keyId },
       );
       if (localFailure !== null) return localFailure;
       options.out("status: wired");
@@ -758,6 +761,22 @@ async function enableLiveKit(
       options.out(`project_id: ${wired.agent.projectId}`);
       options.out("agent_registration: reused");
       if (wired.keyId !== null) options.out(`monitoring_key_id: ${wired.keyId}`);
+      {
+        const localFailure = await recordMonitoringReceipt(
+          options,
+          platform,
+          {
+            id: wired.agent.id,
+            name: wired.agent.name,
+            projectId: wired.agent.projectId,
+          },
+          wired.keyId === null
+            ? { kind: "repeat-livekit-enable" }
+            : { kind: "record", monitoringKeyId: wired.keyId },
+        );
+        if (localFailure !== null) return localFailure;
+      }
+      options.out("repository_record: recorded");
       options.out("status: already-configured");
       options.out(`reason: ${wired.reason}`);
       options.fail(wired.reason);

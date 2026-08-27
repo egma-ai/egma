@@ -355,7 +355,7 @@ export async function wireLiveKitMonitoring(
       keyId: current.id,
       reason:
         `LiveKit monitoring already has an active project key for ${agent.name} ` +
-        `(${current.looksLike || current.id}). No key was rotated and no file was changed. ` +
+        `(${current.looksLike || current.id}). No key was rotated and no environment file was changed. ` +
         "Revoke that key in Egma before running enable to replace it.",
     };
   }
@@ -463,7 +463,7 @@ export async function wireLiveKitMonitoring(
         reason:
           `LiveKit monitoring already has an active project key for ${agent.name}. ` +
           "It may belong to another project member, so Egma does not show its details here. " +
-          "No key was minted and no file was changed. Revoke that worker key in Egma before running enable to replace it.",
+          "No key was minted and no environment file was changed. Revoke that worker key in Egma before running enable to replace it.",
       };
     case "refused":
       return {
