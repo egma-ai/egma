@@ -318,7 +318,9 @@ export default function TranscriptPage({
         lead={DETAIL.needsWindowLead}
         breadcrumbs={[
           { label: LIST.title, href: transcriptsPath(projectId) },
-          { label: DETAIL.title },
+          /* The trail's last step is the page's heading, and this page is the
+             state rather than the transcript it could not open. */
+          { label: DETAIL.needsWindow },
         ]}
       />
     );
@@ -331,7 +333,7 @@ export default function TranscriptPage({
         lead={DETAIL.missingLead}
         breadcrumbs={[
           { label: LIST.title, href: transcriptsPath(projectId) },
-          { label: DETAIL.title },
+          { label: DETAIL.missing },
         ]}
       />
     );

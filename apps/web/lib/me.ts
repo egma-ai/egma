@@ -1,3 +1,4 @@
+import { readJson, type Answer } from "./api.ts";
 import { roleFrom, type Role } from "./roles.ts";
 
 /**
@@ -67,4 +68,38 @@ export function roleOf(me: Me): Role {
 /** The project an entry address with none in it opens. */
 export function firstProjectOf(me: Me): Project | undefined {
   return me.projects[0];
+}
+
+/**
+ * How long the session read may take before egma calls it a failure.
+ *
+ * **It is the one read in this product with a deadline, and what is standing on
+ * it is the reason.** Every other request fails into a page that is already
+ * drawn: a list says it could not load, and the application stays usable around
+ * it. This one holds a cover over the whole document with everything behind it
+ * inert — which is right while the answer is on its way, and a frozen page if
+ * it never comes.
+ *
+ * A connection refused, dropped or reset rejects, and that path always worked.
+ * What this closes is a server that accepts the connection and then says
+ * nothing: no error, no response, and a browser limit of its own measured in
+ * minutes. Twelve seconds is long enough that no real answer is thrown away and
+ * short enough that nobody waits in front of a page they cannot touch.
+ */
+export const SESSION_READ_TIMEOUT_MS = 12_000;
+
+/**
+ * Who is signed in, bounded.
+ *
+ * Both readers of `/api/me` — the shell's session and the entrance — come
+ * through here, so the deadline is one value rather than two that could drift,
+ * and neither of them can be the one that forgets it. A read that runs out
+ * arrives as an ordinary failure, which lands the pages on the states they
+ * already have for one: `Session unavailable` in the shell, and the entrance's
+ * own sentence with a way to try again.
+ */
+export async function readSession(
+  timeoutMs: number = SESSION_READ_TIMEOUT_MS,
+): Promise<Answer<Me>> {
+  return readJson<Me>("/api/me", { signal: AbortSignal.timeout(timeoutMs) });
 }

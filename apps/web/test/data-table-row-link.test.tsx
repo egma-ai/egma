@@ -132,6 +132,55 @@ describe("DataTable row links", () => {
   });
 });
 
+/**
+ * One left edge per column, header and values on it.
+ *
+ * The rule is written once in `components/ui/table.tsx` and every table in the
+ * product inherits it, so this asserts the token rather than a pixel: a header
+ * and the cells under it name the same padding, and the two deliberate
+ * exceptions — the row's own control lane, and the stacked layout's
+ * right-aligned values — are the ones `components/ui/table.tsx` names.
+ *
+ * The lane's own `px-0` is written unconditionally and applied by the
+ * `data-action` attribute, so the attribute is what proves which cell is the
+ * lane. The class is still read back once, on the lane itself, because the
+ * mark strips nothing unless the rule stays written on the shared parts.
+ */
+describe("DataTable column alignment", () => {
+  const LANE = "px-(--row-padding-x)";
+
+  it("puts every header and its cells on one edge", () => {
+    render(
+      <DataTable
+        label="Agents"
+        columns={[...COLUMNS.slice(0, 2), { ...COLUMNS[2]!, action: true }]}
+        rows={[ROW]}
+        keyOf={(row) => row.id}
+      />,
+    );
+    const table = screen.getByRole("table", { name: "Agents" });
+    const headers = within(table).getAllByRole("columnheader");
+    const cells = within(table).getAllByRole("cell");
+
+    /* The facts: header and value read from the same declared edge, and
+     * neither is marked as the lane that leaves it. */
+    for (const element of [...headers.slice(0, 2), ...cells.slice(0, 2)]) {
+      expect(element.className, element.textContent ?? "").toContain(LANE);
+      expect(element.dataset.action, element.textContent ?? "").toBeUndefined();
+    }
+
+    /* The control lane, marked in the header as well as in the row: the mark
+     * is what takes the side padding off both. */
+    expect(headers[2]!.dataset.action).toBe("true");
+    expect(cells[2]!.dataset.action).toBe("true");
+
+    /* And the rule the mark applies. Without this pair the attribute could
+     * stand while the padding it strips quietly returns. */
+    expect(headers[2]!.className).toContain("data-[action=true]:px-0");
+    expect(cells[2]!.className).toContain("data-[action=true]:px-0");
+  });
+});
+
 /** A row control whose open panel lives in `body`, the way the ⋮ menu does. */
 function PortalMenu() {
   const [open, setOpen] = useState(false);

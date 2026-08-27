@@ -518,7 +518,11 @@ function RunDetailView({
     <ProductPage wide desktopViewport>
       <PageHeader
         title={displayTitle}
-        /* The real trail: the Runs section, then this run as the page heading. */
+        /*
+         * The real trail: Runs, then this run. The last step is the page's own
+         * heading, so it carries the run's name rather than the kind of record
+         * this is — "Runs / Run" named nothing a person could tell apart.
+         */
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           { label: displayTitle },

@@ -3307,9 +3307,14 @@ describe("the complete product, walked in order in a second project", () => {
         ),
       );
       suiteAddress = walk.url();
-      // An empty suite is the grid and its one teaching row.
-      await saysWithin(walk, "One situation to put the agent in…");
-      expect(await walk.innerText("main")).toContain("Support reception");
+      // An empty suite is the grid and its one way in. The teaching row above
+      // it went on 2026-08-26: it was a picture of a test in a grid of
+      // editable cells, and it was clicked instead of the line that opens a
+      // real one.
+      await saysWithin(walk, "+ Write a test");
+      const empty = await walk.innerText("main");
+      expect(empty).toContain("Support reception");
+      expect(empty).not.toContain("One situation to put the agent in…");
     },
     SETTLE,
   );

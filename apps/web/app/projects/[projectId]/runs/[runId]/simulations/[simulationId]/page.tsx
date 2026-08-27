@@ -248,6 +248,13 @@ function EvidenceView({
             label: read.runName ?? "Run",
             href: projectPath(projectId, "runs", runId),
           },
+          /*
+           * The test this simulation executed is the last step, because it is
+           * the one name for this page and the page says it nowhere else.
+           * `Simulation NN` was the step until 2026-08-26 and left with the
+           * separate heading beside it: the position is read on the run's own
+           * list of simulations, which is the step before this one.
+           */
           { label: title },
         ]}
         lead={

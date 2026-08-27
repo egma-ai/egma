@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { readJson, type Answer } from "../lib/api.ts";
-import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
+import type { Answer } from "../lib/api.ts";
+import { firstProjectOf, readSession, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { Actions } from "../ui/section.tsx";
+import { SessionLoading } from "../ui/session-loading.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
@@ -36,7 +37,14 @@ export default function RootPage() {
     let current = true;
     setAnswer(null);
 
-    void readJson<Me>("/api/me").then((next) => {
+    /*
+     * Bounded, for the reason the shell's own read is: the branch below
+     * covers the whole document and makes it inert, so a read that never
+     * answers would be a page nobody can touch rather than one saying it
+     * could not reach egma. Running out lands on the failure state, which
+     * has a way to try again.
+     */
+    void readSession().then((next) => {
       if (!current) return;
 
       if (next.status === "signed-out") {
@@ -60,13 +68,24 @@ export default function RootPage() {
     };
   }, [attempt, router]);
 
+  /*
+   * Nothing is guessed while the read is in flight. The product shell this
+   * used to draw in the meantime was a dashboard shown to somebody who may
+   * have no account open at all.
+   *
+   * **The entrance covers itself rather than leaving it to the shell**, and
+   * the reason is what happens after the answer arrives: `/` is the one
+   * address that never stops here, and the shell's own cover comes down the
+   * moment the session settles — which is the moment *before* the redirect
+   * lands, not after it.
+   *
+   * `signed-out` is written beside `null` for that same reason, and it is a
+   * lock rather than a live branch: the redirect above returns before
+   * `setAnswer`, so no render reaches this holding that status today. It costs
+   * one word, and it is the one state that must never uncover.
+   */
   if (answer === null || answer.status === "signed-out") {
-    return (
-      <ProductStatePage
-        title="Opening Egma"
-        lead="Checking your session."
-      />
-    );
+    return <SessionLoading label="Opening Egma" />;
   }
 
   /**

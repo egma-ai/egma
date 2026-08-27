@@ -1,25 +1,19 @@
-import { ProductStatePage } from "../ui/shell.tsx";
+import { SessionLoading } from "../ui/session-loading.tsx";
 
 /**
- * What the router draws between the press and
- * `/` arriving.
+ * What the router draws between the press and `/` arriving.
  *
- * **No indicator, deliberately.** The entrance's own waiting state is this
- * header and nothing under it, so a fallback that added a card would put one
- * on screen for the length of the route change and take it away again the
- * moment the page mounted — the shape-change every other file here exists to
- * remove. What the boundary buys is that the entrance paints at once instead
- * of the previous page being held.
- *
- * Its header is the page's own down to its shape — the same eyebrow or the
- * same crumbs, never one standing in for the other — so nothing is redrawn a
- * second way when the page arrives. `agents/loading.tsx` carries the
- * reasoning every one of these shares.
+ * It is the entrance's own waiting state, which is now the same one the
+ * entrance shows while the session read is in flight — so the route change and
+ * the read behind it are one wait rather than two screens replacing each other.
+ * **It has no delay, and that is a trade rather than an oversight.** The other
+ * route fallbacks in this application wait `--duration-popover-in` before
+ * drawing anything, so a warm route is never covered by a box that appears and
+ * vanishes. This one is opaque on its first frame instead: a shell is mounted
+ * at the root address, and a fifth of a second of transparency here is a fifth
+ * of a second of the dashboard showing to somebody who may not be signed in.
+ * Being early costs a brief mark on a warm load; being late costs the guess.
  */
 export default function EntranceLoading() {
-  return (
-    <div data-slot="route-loading">
-      <ProductStatePage title="Opening Egma" lead="Checking your session." />
-    </div>
-  );
+  return <SessionLoading label="Opening Egma" />;
 }

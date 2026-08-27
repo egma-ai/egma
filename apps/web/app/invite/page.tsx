@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState } from "react";
 
+import { readSession } from "../../lib/me.ts";
 import {
   DEFAULT_SIGNED_IN_PATH,
   withReturnTo,
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { Field } from "../../ui/form.tsx";
+import { SessionLoading } from "../../ui/session-loading.tsx";
 import { AuthForm, AuthShell, LinkLine, Notice, StatePage } from "../ui.tsx";
 
 /**
@@ -53,6 +55,19 @@ export default function InvitePage() {
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  /**
+   * The address a confirmation link was posted to, once one has been.
+   *
+   * **This is the likeliest page in the product to meet it, not the least.**
+   * An invitation can only be delivered by an instance with a mail transport,
+   * and that is exactly the instance on which the provider requires the
+   * address to be confirmed and issues no session for a new identity. So the
+   * colleague who accepted an invitation was the one being walked into a
+   * product they could not open, and turned around at the sign-in door.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  /** Accepted with a session in hand, and on the way to the product. */
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     const given = new URLSearchParams(window.location.search).get("token") ?? "";
@@ -76,28 +91,26 @@ export default function InvitePage() {
         return;
       }
 
-      // Somebody already signed in is offered the button rather than the form.
-      // Somebody signed in as a different person is told so by the refusal, and
-      // that is better than this page guessing what they meant.
-      const me = await fetch("/api/me").catch(() => null);
+      /*
+       * Somebody already signed in is offered the button rather than the form.
+       * Somebody signed in as a different person is told so by the refusal, and
+       * that is better than this page guessing what they meant.
+       *
+       * **Through the bounded read, like every other session read.** This one
+       * decides whether the page leaves `loading`, and `loading` now draws the
+       * cover with the document behind it inert — so a server that accepts the
+       * connection and then says nothing would leave the invited colleague on
+       * a page they cannot retry from, navigate away from, or accept on. It
+       * also stops this page hand-checking the shape of an answer the rest of
+       * the product reads through one type.
+       */
+      const me = await readSession();
       if (!current) return;
-      if (me === null || (me.status !== 401 && !me.ok)) {
+      if (me.status !== "ready" && me.status !== "signed-out") {
         setState({ status: "failed" });
         return;
       }
-      let signedInAs: string | null = null;
-      if (me.ok) {
-        signedInAs = await me
-          .json()
-          .then((body: { user?: { email?: unknown } }) =>
-            typeof body.user?.email === "string" ? body.user.email : null,
-          )
-          .catch(() => null);
-        if (signedInAs === null) {
-          setState({ status: "failed" });
-          return;
-        }
-      }
+      const signedInAs = me.status === "ready" ? me.value.user.email : null;
 
       setState({
         status: "ready",
@@ -126,6 +139,16 @@ export default function InvitePage() {
         body: JSON.stringify(body),
       });
       if (response.ok) {
+        // Only signing up can leave without a session; accepting as somebody
+        // already signed in is done with the session they arrived holding.
+        const accepted = (await response.json().catch(() => ({}))) as {
+          emailVerificationRequired?: boolean;
+        };
+        if (accepted.emailVerificationRequired === true) {
+          setConfirming(String(body.email ?? ""));
+          return;
+        }
+        setLeaving(true);
         window.location.assign(DEFAULT_SIGNED_IN_PATH);
         return;
       }
@@ -140,13 +163,39 @@ export default function InvitePage() {
     }
   }
 
-  if (state.status === "loading") {
+  if (leaving) return <SessionLoading label="Joining" />;
+
+  /*
+   * The account exists and the address has not been confirmed. It is the end
+   * of the page rather than a notice on it: there is nothing left to type, and
+   * the next thing to do is not on this screen at all.
+   */
+  if (confirming !== null) {
     return (
-      <StatePage
-        title="Loading invitation"
-        lead="Checking the invitation link."
-      />
+      <AuthShell
+        eyebrow="One step left"
+        title="Check your inbox"
+        lead={
+          <>
+            Egma sent a confirmation link to{" "}
+            <strong className="font-medium text-foreground">{confirming}</strong>.
+            Open it to confirm the address, then sign in.
+          </>
+        }
+      >
+        <LinkLine>
+          Confirmed it? <a href="/sign-in">Sign in</a>.
+        </LinkLine>
+        <LinkLine>
+          Nothing arrived after a few minutes? Look in your spam folder, or ask
+          whoever invited you.
+        </LinkLine>
+      </AuthShell>
     );
+  }
+
+  if (state.status === "loading") {
+    return <SessionLoading label="Checking the invitation link" />;
   }
 
   if (state.status === "failed") {

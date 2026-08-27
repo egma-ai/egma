@@ -70,6 +70,9 @@ async function bothDoors(answer: () => Response): Promise<FastifyInstance> {
     authBasePath: "/api/auth",
     baseUrl: config.baseUrl,
     singleOrganization: false,
+    // Nothing here reaches a successful signup, and the transport this stands
+    // in for is the log one, which posts nothing and requires nothing.
+    emailVerificationRequired: false,
   });
   await app.ready();
   return app;

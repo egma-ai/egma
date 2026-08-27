@@ -14,7 +14,14 @@ type CurrentNavigationItem = {
   readonly href?: never;
 };
 
-/** At least one linked parent, followed by the current page. */
+/**
+ * At least one linked parent, followed by the current page.
+ *
+ * **Exactly one step has no address, and it is the last one.** That step is
+ * the page: this file draws it as the page's `<h1>` and the one
+ * `aria-current="page"`, so a trail carrying two of them would be a page with
+ * two names. The type is what stops that, at every call site.
+ */
 export type PageNavigationItems = readonly [
   ParentNavigationItem,
   ...ParentNavigationItem[],
@@ -50,7 +57,13 @@ export type PageNavigationItems = readonly [
 export function PageNavigation({ items }: { readonly items: PageNavigationItems }) {
   return (
     <nav
-      className="min-w-0"
+      /*
+       * **The room under the trail is for the width where it wraps.** In the
+       * 56px bar the trail is the whole line and needs no room under it. Under
+       * 900px the bar becomes the page's first lines and the trail takes a
+       * line of its own, which is where the 12px belongs.
+       */
+      className="mb-0 min-w-0 max-[900px]:mb-3"
       data-slot="page-navigation"
       aria-label="Breadcrumb"
     >
@@ -64,8 +77,24 @@ export function PageNavigation({ items }: { readonly items: PageNavigationItems 
             key={`${item.href ?? "current"}-${item.label}`}
           >
             {item.href === undefined ? (
+              /*
+               * The last step is the page, so it is the page's `<h1>`. It
+               * carries the line's own type rather than a heading size: the
+               * trail is one line of navigation, and a step in a different
+               * size would say the two halves are different kinds of thing.
+               *
+               * **It truncates only where the bar is one line.** Above 900px
+               * that bar is a fixed 56px strip, so a record name as long as
+               * somebody typed it has to end in an ellipsis or spill over the
+               * strip's own border. Under 900px the bar is `h-auto` and the
+               * trail is the page's first lines, so the name wraps there and
+               * a reader gets all of it.
+               */
               <h1
-                className="m-0 min-w-0 max-w-full text-sm font-normal text-foreground [overflow-wrap:anywhere]"
+                className={cn(
+                  "m-0 min-w-0 max-w-full text-sm font-normal text-foreground",
+                  "[overflow-wrap:anywhere] min-[901px]:truncate",
+                )}
                 aria-current="page"
               >
                 {item.label}

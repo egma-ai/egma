@@ -6,9 +6,25 @@ import ApproveDevicePage from "../app/device/approve/page.tsx";
 import DeviceCodePage from "../app/device/page.tsx";
 import ForgotPasswordPage from "../app/forgot-password/page.tsx";
 import InvitePage from "../app/invite/page.tsx";
+import RootPage from "../app/page.tsx";
 import ResetPasswordPage from "../app/reset-password/page.tsx";
 import SignInPage from "../app/sign-in/page.tsx";
 import SignUpPage from "../app/signup/page.tsx";
+
+/**
+ * The entrance redirects, so the only thing it needs from the router is that.
+ * One object for the whole run, because that is what Next hands back and
+ * because the entrance's effect names the router among its dependencies.
+ */
+const routed = vi.hoisted(() => {
+  const replace = vi.fn();
+  return { replace, router: { replace } };
+});
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => routed.router,
+  usePathname: () => "/",
+}));
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -20,7 +36,61 @@ function json(status: number, body: unknown): Response {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  routed.replace.mockClear();
   window.history.replaceState({}, "", "/");
+});
+
+/**
+ * One screen for every moment egma does not yet know who is here.
+ *
+ * The four moments were four different screens, and two of them were a guess:
+ * opening the product drew the signed-in shell — sidebar, navigation, account
+ * menu — over the sentence "Checking your session", and then replaced the whole
+ * of it with the sign-in page. What these hold is that no page is chosen before
+ * the answer arrives, and that the same component covers all four.
+ */
+describe("the screen egma shows while the session is unresolved", () => {
+  function waiting(): HTMLElement {
+    return screen.getByRole("status");
+  }
+
+  it("draws no product shell at the entrance while the session read is in flight", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(401, {})));
+    render(<RootPage />);
+
+    expect(waiting().dataset.slot).toBe("session-loading");
+    expect(waiting().textContent).toBe("Opening Egma");
+    // The three things a signed-out person was being shown a moment ago.
+    expect(screen.queryByText("Checking your session.")).toBeNull();
+    expect(document.querySelector("aside")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+
+    await waitFor(() => expect(routed.replace).toHaveBeenCalledWith("/sign-in"));
+    // And still nothing guessed on the way out.
+    expect(waiting().dataset.slot).toBe("session-loading");
+  });
+
+  it("covers signing in with the same screen rather than a form that has stopped answering", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign, search: "", href: "" });
+    vi.stubGlobal("fetch", vi.fn(async () => json(200, {})));
+    render(<SignInPage />);
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "ada@acme.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct horse" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(waiting().textContent).toBe("Signing in"));
+    expect(waiting().dataset.slot).toBe("session-loading");
+    // The form is gone rather than sitting there with a greyed-out button for
+    // the length of a whole document load.
+    expect(screen.queryByLabelText("Password")).toBeNull();
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("the shared controls on access pages", () => {
@@ -102,6 +172,45 @@ describe("the shared controls on access pages", () => {
     expect(document.querySelector("canvas")).toBeNull();
   });
 
+  /**
+   * Where the instance posts mail, the provider deliberately opens no session
+   * until the address is confirmed. The page used to walk straight on into the
+   * product, which turned everybody around at the sign-in door with nothing
+   * anywhere saying a message was waiting for them.
+   */
+  it("sends somebody to their inbox when the address has to be confirmed first", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign, search: "", href: "" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) =>
+        String(input) === "/api/signup"
+          ? json(201, { emailVerificationRequired: true })
+          : json(200, { open: true }),
+      ),
+    );
+    render(<SignUpPage />);
+
+    fireEvent.change(await screen.findByLabelText("Email"), {
+      target: { value: "ada@acme.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct horse" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create my Egma instance" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Check your inbox" }),
+    ).toBeTruthy();
+    // Which inbox, because that is the one thing somebody has to know.
+    expect(screen.getByText("ada@acme.example").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeTruthy();
+    // And nobody was sent into a product their session cannot open yet.
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it("keeps a claimed instance invitation clear and does not repeat the heading", async () => {
     vi.stubGlobal(
       "fetch",
@@ -156,6 +265,57 @@ describe("the shared controls on access pages", () => {
     const password = screen.getByLabelText("Choose a password");
     expect(password.getAttribute("minlength")).toBe("8");
     expect(screen.getByRole("button", { name: "Join Acme" })).toBeTruthy();
+  });
+
+  /**
+   * An invitation can only be delivered by an instance that posts mail, and
+   * that is precisely the instance where the provider requires the address to
+   * be confirmed and issues no session for a new identity. So the invited
+   * colleague is the likeliest person in the product to meet this, and the one
+   * this page used to walk into a product they could not open.
+   */
+  it("sends an invited colleague to their inbox when the address has to be confirmed first", async () => {
+    window.history.replaceState({}, "", "/invite?token=inv_1");
+    const assign = vi.fn();
+    vi.stubGlobal("location", {
+      assign,
+      search: "?token=inv_1",
+      href: "http://egma.test/invite?token=inv_1",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input), "http://egma.test").pathname;
+        if (path === "/api/invitations/lookup") {
+          return json(200, {
+            state: "pending",
+            email: "ada@example.com",
+            role: "member",
+            organization: { name: "Acme" },
+          });
+        }
+        if (path === "/api/me") return json(401, {});
+        if (path === "/api/signup") {
+          return json(201, { emailVerificationRequired: true });
+        }
+        throw new Error(`nothing stubbed for ${path}`);
+      }),
+    );
+
+    render(<InvitePage />);
+
+    fireEvent.change(await screen.findByLabelText("Choose a password"), {
+      target: { value: "correct horse" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Join Acme" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Check your inbox" }),
+    ).toBeTruthy();
+    // The invitation's own address, which is the one the link went to.
+    expect(screen.getByText("ada@example.com").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeTruthy();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("keeps password recovery and completion native to the browser", async () => {
