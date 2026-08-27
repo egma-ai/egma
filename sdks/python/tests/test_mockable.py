@@ -38,6 +38,27 @@ def failure(message: str) -> dict:
 # -- The census ---------------------------------------------------------------
 
 
+async def test_a_simulation_connects_before_it_reports_tools(session):
+    agent = ReceptionAgent()
+    room = StubRoom(connected=False)
+    ctx = in_a_simulation(room)
+
+    await mockable(agent, ctx, session)
+
+    assert ctx.connect_calls == 1
+    assert room.methods_asked == [seam.HELLO_METHOD]
+
+
+async def test_an_already_connected_simulation_does_not_connect_again(session):
+    agent = ReceptionAgent()
+    room = StubRoom()
+    ctx = in_a_simulation(room)
+
+    await mockable(agent, ctx, session)
+
+    assert ctx.connect_calls == 0
+
+
 async def test_the_census_goes_first_and_names_every_tool(session):
     agent = ReceptionAgent()
     room = StubRoom(mocked_tools=("check_calendar",))

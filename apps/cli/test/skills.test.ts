@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   PUBLIC_SKILL_NAMES,
   drivingSkill,
+  integrateEgmaReference,
   instructionsWith,
   publicSkill,
   publicSkillDirectory,
@@ -29,6 +30,7 @@ import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
 import { generateInstructions } from "../src/wizard/test-generation.ts";
 import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
+import { workerIntegrationInstructions } from "../src/wizard/worker-integration-step.ts";
 import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
 
 const run = promisify(execFile);
@@ -236,12 +238,8 @@ describe("Egma's instruction content", () => {
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
   });
 
-  /**
-   * The mock-authoring dispatch is the wizard's, and the marker protocol stays
-   * in it: the public skill has to make sense installed on its own.
-   */
-  it("keeps the mock-authoring markers in the task, not in the SDK skill", () => {
-    const integration = publicSkill("integrate-egma");
+  /** The mock-world task owns no worker file or SDK instructions. */
+  it("keeps mock authoring on mock files and test overrides", () => {
     const authoring = mockAuthoringInstructions({
       cwd: "/repo",
       suiteDirectory: "generated",
@@ -250,10 +248,13 @@ describe("Egma's instruction content", () => {
       tests: ["greets-a-new-customer"],
     });
 
-    expect(authoring.indexOf(integration)).toBe(0);
+    expect(authoring.startsWith("# Your task")).toBe(true);
+    expect(authoring).not.toContain(publicSkill("integrate-egma"));
     expect(authoring).not.toContain(publicSkill("write-egma-tests"));
     expect(authoring).toContain("egma/mock-tools.md");
-    expect(authoring).toContain("egma:found sdk-entry");
+    expect(authoring).not.toContain("worker file where");
+    expect(authoring).not.toContain("dependency manifest");
+    expect(authoring).not.toContain("egma:found worker-entry");
     for (const marker of [
       "egma:plan",
       "egma:writing",
@@ -263,8 +264,24 @@ describe("Egma's instruction content", () => {
     ]) {
       expect(authoring).toContain(marker);
     }
-    // And the monitoring entry is never asked for in the testing lane.
-    expect(authoring).toContain("add **only the testing entry**");
+  });
+
+  it("gives one worker owner the selected SDK reference and final mode", () => {
+    const router = publicSkill("integrate-egma");
+    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const integration = workerIntegrationInstructions(
+      "/repo",
+      new Map([["framework", "livekit-agents"]]),
+      "both",
+    );
+
+    expect(integration.indexOf(router)).toBe(0);
+    expect(integration).toContain(sdk);
+    expect(integration.split(sdk)).toHaveLength(2);
+    expect(integration).toContain("final mode is **both**");
+    expect(integration).toContain("egma:found worker-entry");
+    expect(integration).toContain("worker file where");
+    expect(integration).toContain("dependency manifest");
   });
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {

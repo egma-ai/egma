@@ -36,6 +36,7 @@ export type StartLocalLiveKitWorkerOptions = {
   readonly credentials: ConnectionCredentials;
   readonly dispatchName: string;
   readonly entrypoint: string;
+  readonly dependencyManifest: string;
   readonly signal: AbortSignal;
   /** Receives helper and worker output after exact credential redaction. */
   readonly onOutput?: ((chunk: string) => void) | undefined;
@@ -137,6 +138,8 @@ export const startLocalLiveKitWorker: StartLocalLiveKitWorker = async (options) 
     options.cwd,
     "--entrypoint",
     options.entrypoint.trim(),
+    "--dependency-manifest",
+    options.dependencyManifest.trim(),
     "--dispatch-name",
     options.dispatchName.trim(),
   ];

@@ -15,6 +15,11 @@ export type PublicSkillName =
   | "egma"
   | "integrate-egma"
   | "write-egma-tests";
+export type IntegrateEgmaReferenceName =
+  | "connect-retell"
+  | "find-voice-agent"
+  | "integrate-egma-sdk"
+  | "run-livekit-agent-locally";
 export const PUBLIC_SKILL_NAMES: readonly PublicSkillName[] = [
   "egma",
   "integrate-egma",
@@ -59,6 +64,13 @@ function contentAt(file: string): string {
 
 export function publicSkill(name: PublicSkillName): string {
   return contentAt(publicSkillFile(name));
+}
+
+/** One selected reference from the packaged integration skill. */
+export function integrateEgmaReference(name: IntegrateEgmaReferenceName): string {
+  return contentAt(
+    packageFile(`${SKILLS_DIRECTORY}/integrate-egma/references/${name}.md`),
+  );
 }
 
 /** The public skill that teaches a coding agent to drive Egma afterwards. */

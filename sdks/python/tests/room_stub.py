@@ -99,9 +99,19 @@ class StubRoom:
     refuses_tool_with: RpcError | None = None
     hello_reply: str | None = None
     asked: list[Asked] = field(default_factory=list)
+    connected: bool = True
 
     def __post_init__(self) -> None:
-        self.local_participant = StubParticipant(self)
+        self._local_participant = StubParticipant(self)
+
+    @property
+    def local_participant(self) -> StubParticipant:
+        if not self.connected:
+            raise Exception("cannot access local participant before connecting")
+        return self._local_participant
+
+    def isconnected(self) -> bool:
+        return self.connected
 
     async def answer(self, asked: Asked) -> str:
         self.asked.append(asked)
@@ -153,6 +163,11 @@ class StubContext:
     def __init__(self, room: StubRoom, metadata: str) -> None:
         self.room = room
         self.job = StubJob(metadata=metadata)
+        self.connect_calls = 0
+
+    async def connect(self) -> None:
+        self.connect_calls += 1
+        self.room.connected = True
 
 
 def egma_metadata(

@@ -10,14 +10,21 @@ Use the entrypoint and dispatch name proved during discovery. From this skill
 directory, run:
 
 ```text
-node scripts/livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-entrypoint> --dispatch-name <discovered-dispatch-name>
+node scripts/livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-entrypoint> --dependency-manifest <verified-python-manifest> --dispatch-name <discovered-dispatch-name>
 ```
 
 The process requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 `LIVEKIT_API_SECRET` in its environment. Keep their values out of command-line
 arguments and output.
 
-The helper checks for LiveKit CLI 2.18.2 or newer. Version 2.18.2 is the
+Before the worker starts, the helper checks the same Python environment that
+LiveKit will use for Egma SDK 0.1.0 or newer. When it is missing, the helper
+installs the dependency through the verified project manifest without changing
+the manifest or its lock file, then checks the import again. The helper runs
+from that manifest's project directory, which must also contain the worker.
+A worker never starts with only an uninstalled declaration.
+
+The helper also checks for LiveKit CLI 2.18.2 or newer. Version 2.18.2 is the
 minimum because `lk agent dev` passes connection details to the worker through
 environment variables. When needed, the helper uses
 LiveKit's documented installer for the current operating system, checks the

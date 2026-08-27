@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 const MINIMUM_VERSION = [2, 18, 2];
+const MINIMUM_EGMA_VERSION = [0, 1, 0];
 const LIVEKIT_INSTALLER = "https://get.livekit.io/cli";
 const REQUIRED_ENV = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"];
+const PREPARATION_SECRETS = [...REQUIRED_ENV, "EGMA_URL", "EGMA_API_KEY"];
 const READY_MARKER = "egma:livekit-worker ready";
 const ANSI_ESCAPE = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/gu;
 
 const usage = `Usage:
-  node livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-file> --dispatch-name <agent-name>
+  node livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-file> --dependency-manifest <repository-relative-file> --dispatch-name <agent-name>
 
 The LiveKit credentials must be supplied through LIVEKIT_URL, LIVEKIT_API_KEY,
 and LIVEKIT_API_SECRET. They are never accepted as command-line arguments.`;
@@ -27,10 +29,16 @@ function parseArguments(argv) {
   if (argv.includes("--help") || argv.includes("-h")) return { help: true };
   let cwd = null;
   let entrypoint = null;
+  let dependencyManifest = null;
   let dispatchName = null;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
-    if (flag !== "--cwd" && flag !== "--entrypoint" && flag !== "--dispatch-name") {
+    if (
+      flag !== "--cwd" &&
+      flag !== "--entrypoint" &&
+      flag !== "--dependency-manifest" &&
+      flag !== "--dispatch-name"
+    ) {
       throw new Error(`unknown argument ${flag ?? ""}`.trim());
     }
     const value = argv[index + 1];
@@ -39,28 +47,38 @@ function parseArguments(argv) {
     }
     if (flag === "--cwd") cwd = value;
     else if (flag === "--entrypoint") entrypoint = value;
+    else if (flag === "--dependency-manifest") dependencyManifest = value;
     else dispatchName = value;
     index += 1;
   }
   if (cwd === null) throw new Error("--cwd is required");
   if (entrypoint === null) throw new Error("--entrypoint is required");
+  if (dependencyManifest === null) {
+    throw new Error("--dependency-manifest is required");
+  }
   if (dispatchName === null || dispatchName.trim() === "") {
     throw new Error("--dispatch-name is required");
   }
-  return { help: false, cwd, entrypoint, dispatchName: dispatchName.trim() };
+  return {
+    help: false,
+    cwd,
+    entrypoint,
+    dependencyManifest,
+    dispatchName: dispatchName.trim(),
+  };
 }
 
 function executable(name) {
   return process.platform === "win32" ? `${name}.exe` : name;
 }
 
-function withoutLiveKitCredentials(env = process.env) {
+function withoutRuntimeCredentials(env = process.env) {
   const safe = { ...env };
-  for (const name of REQUIRED_ENV) delete safe[name];
+  for (const name of PREPARATION_SECRETS) delete safe[name];
   return safe;
 }
 
-const PREPARATION_ENV = withoutLiveKitCredentials();
+const PREPARATION_ENV = withoutRuntimeCredentials();
 
 function commandOutput(command, args) {
   const result = spawnSync(command, args, {
@@ -188,17 +206,229 @@ async function prepareLiveKitCli() {
   process.stderr.write(`livekit-local: using LiveKit CLI ${versionText(version)}.\n`);
 }
 
-async function workerArguments(cwdValue, entrypointValue) {
-  const cwd = path.resolve(cwdValue);
-  if (!(await stat(cwd)).isDirectory()) throw new Error(`${cwd} is not a directory`);
-
-  const entrypoint = path.resolve(cwd, entrypointValue);
-  const below = path.relative(cwd, entrypoint);
+async function fileInside(cwd, value, label) {
+  const candidate = path.resolve(cwd, value);
+  const below = path.relative(cwd, candidate);
   if (below === "" || below.startsWith("..") || path.isAbsolute(below)) {
-    throw new Error("--entrypoint must name a file inside --cwd");
+    throw new Error(`${label} must name a file inside --cwd`);
   }
-  if (!(await stat(entrypoint)).isFile()) throw new Error(`${entrypoint} is not a file`);
-  return { cwd, entrypoint: below };
+  if (!(await stat(candidate)).isFile()) throw new Error(`${candidate} is not a file`);
+  return { absolute: candidate, relative: below };
+}
+
+async function workerArguments(cwdValue, entrypointValue, dependencyValue) {
+  const repository = path.resolve(cwdValue);
+  if (!(await stat(repository)).isDirectory()) {
+    throw new Error(`${repository} is not a directory`);
+  }
+  const entrypoint = await fileInside(
+    repository,
+    entrypointValue,
+    "--entrypoint",
+  );
+  const dependency = await fileInside(
+    repository,
+    dependencyValue,
+    "--dependency-manifest",
+  );
+  const dependencyName = path.basename(dependency.absolute).toLowerCase();
+  if (
+    dependencyName !== "pyproject.toml" &&
+    dependencyName !== "requirements.txt"
+  ) {
+    throw new Error(
+      "--dependency-manifest must be pyproject.toml or requirements.txt",
+    );
+  }
+  const projectDir = path.dirname(dependency.absolute);
+  const projectEntrypoint = path.relative(projectDir, entrypoint.absolute);
+  if (
+    projectEntrypoint === "" ||
+    projectEntrypoint.startsWith("..") ||
+    path.isAbsolute(projectEntrypoint)
+  ) {
+    throw new Error(
+      "--dependency-manifest must be in the LiveKit worker's project directory",
+    );
+  }
+  return {
+    cwd: projectDir,
+    entrypoint: projectEntrypoint,
+    dependencyManifest: dependency,
+  };
+}
+
+async function exists(file) {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function egmaVersionProbe() {
+  return [
+    "import importlib.metadata as m",
+    "import re",
+    'match = re.fullmatch(r"(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?(?:\\.post\\d+)?(?:\\+[a-z0-9]+(?:[._-][a-z0-9]+)*)?", m.version("egma"), re.I)',
+    "found = tuple(int(part or 0) for part in match.groups()) if match else ()",
+    `raise SystemExit(0 if found >= (${MINIMUM_EGMA_VERSION.join(", ")}) else 1)`,
+  ].join("; ");
+}
+
+async function localPython(projectDir) {
+  const names =
+    process.platform === "win32"
+      ? [path.join("Scripts", "python.exe")]
+      : [path.join("bin", "python")];
+  const roots = [
+    process.env.VIRTUAL_ENV ?? "",
+    path.join(projectDir, ".venv"),
+    path.join(projectDir, "venv"),
+  ].filter((value) => value !== "");
+  for (const root of roots) {
+    for (const name of names) {
+      const candidate = path.join(root, name);
+      if (await exists(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+async function uvProjectPython(uv, projectDir) {
+  const result = spawnSync(
+    uv,
+    [
+      "run",
+      "--no-sync",
+      "python",
+      "-c",
+      "import sys; print(sys.executable)",
+    ],
+    {
+      cwd: projectDir,
+      env: PREPARATION_ENV,
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  if (result.error !== undefined || result.status !== 0) {
+    throw new Error("uv could not resolve the LiveKit worker's Python runtime");
+  }
+  const printed = `${result.stdout ?? ""}`
+    .trim()
+    .split(/\r?\n/u)
+    .filter((line) => line.trim() !== "")
+    .at(-1);
+  if (printed === undefined) {
+    throw new Error("uv reported no Python runtime for the LiveKit worker");
+  }
+  const python = path.resolve(projectDir, printed.trim());
+  if (!(await exists(python))) {
+    throw new Error(`uv reported a Python runtime that does not exist: ${python}`);
+  }
+  return python;
+}
+
+async function isUvProject(worker, uvLock) {
+  if (await exists(uvLock)) return true;
+  if (
+    path.basename(worker.dependencyManifest.absolute).toLowerCase() !==
+    "pyproject.toml"
+  ) {
+    return false;
+  }
+  const source = await readFile(worker.dependencyManifest.absolute, "utf8");
+  return /(?:^|\n)\s*\[tool\.uv\]\s*(?:#.*)?(?:\n|$)/u.test(source);
+}
+
+function availableCommand(name) {
+  return commandOutput(executable(name), ["--version"]) === null
+    ? null
+    : executable(name);
+}
+
+async function pythonEnvironment(worker) {
+  const projectDir = path.dirname(worker.dependencyManifest.absolute);
+  const uvLock = path.join(projectDir, "uv.lock");
+  const uv = availableCommand("uv");
+  const usesUv = await isUvProject(worker, uvLock);
+  if (usesUv && uv === null) {
+    throw new Error("uv is required to run this LiveKit worker project");
+  }
+  if (usesUv && uv !== null) {
+    const python = await uvProjectPython(uv, projectDir);
+    return {
+      command: python,
+      prefix: [],
+      installCommand: uv,
+      installArguments: ["pip", "install", "--python", python, "-e", "."],
+      projectDir,
+    };
+  }
+
+  let python = await localPython(projectDir);
+  if (python === null) {
+    const system = availableCommand("python3") ?? availableCommand("python");
+    if (system === null) {
+      throw new Error(
+        "no Python runtime is available for the LiveKit worker; install Python and run Egma again",
+      );
+    }
+    const environment = path.join(projectDir, ".venv");
+    await run(system, ["-m", "venv", environment], {
+      cwd: projectDir,
+      env: PREPARATION_ENV,
+    });
+    python = await localPython(projectDir);
+    if (python === null) {
+      throw new Error("Python did not create the expected .venv for the LiveKit worker");
+    }
+  }
+
+  const manifest = path.basename(worker.dependencyManifest.absolute).toLowerCase();
+  const requirements = manifest === "requirements.txt";
+  return {
+    command: python,
+    prefix: [],
+    installCommand: python,
+    installArguments: requirements
+      ? ["-m", "pip", "install", "-r", worker.dependencyManifest.absolute]
+      : ["-m", "pip", "install", "-e", "."],
+    projectDir,
+  };
+}
+
+function pythonSucceeds(runtime, args) {
+  const result = spawnSync(runtime.command, [...runtime.prefix, ...args], {
+    cwd: runtime.projectDir,
+    env: PREPARATION_ENV,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return result.error === undefined && result.status === 0;
+}
+
+async function prepareEgmaDependency(worker) {
+  const runtime = await pythonEnvironment(worker);
+  const probe = ["-c", egmaVersionProbe()];
+  if (pythonSucceeds(runtime, probe)) {
+    process.stderr.write("livekit-local: Egma Python SDK 0.1.0 or newer is ready.\n");
+    return;
+  }
+
+  process.stderr.write(
+    "livekit-local: installing the declared Egma Python SDK into this worker environment.\n",
+  );
+  await run(runtime.installCommand, runtime.installArguments, {
+    cwd: runtime.projectDir,
+    env: PREPARATION_ENV,
+  });
+  if (!pythonSucceeds(runtime, probe)) {
+    throw new Error(
+      "the worker environment still cannot import Egma Python SDK 0.1.0 or newer after dependency installation",
+    );
+  }
 }
 
 function redact(text) {
@@ -410,8 +640,13 @@ async function main() {
     throw new Error(`missing required environment variables: ${missing.join(", ")}`);
   }
 
-  const worker = await workerArguments(parsed.cwd, parsed.entrypoint);
+  const worker = await workerArguments(
+    parsed.cwd,
+    parsed.entrypoint,
+    parsed.dependencyManifest,
+  );
   await prepareLiveKitCli();
+  await prepareEgmaDependency(worker);
   await runWorker(worker.cwd, worker.entrypoint, parsed.dispatchName);
 }
 

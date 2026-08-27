@@ -5,7 +5,6 @@ Call it once, after the agent is built and before the session starts::
     from egma import mockable
 
     async def entrypoint(ctx: agents.JobContext) -> None:
-        await ctx.connect()
         agent = Agent(instructions=..., tools=[...])
         session = AgentSession(...)
         await mockable(agent, ctx, session)
@@ -18,6 +17,11 @@ it — every production room — is where this returns having touched
 nothing at all: no wrapping, no side table, no call. That inertness is
 the whole safety story, and it is a test in this package rather than a
 promise in a document.
+
+In a simulation it connects the job to its LiveKit room, if the agent's
+normal startup has not already done so. This uses ``JobContext.connect``
+before reading the room's local participant; an already-connected job is
+left alone.
 
 In a simulation it sends the **census** first: every tool the agent has,
 by name and schema, read off the agent object. That is the first message
@@ -151,6 +155,9 @@ async def mockable(agent: Agent, ctx: JobContext, session: AgentSession) -> None
             too_much,
         )
         return
+
+    if not ctx.room.isconnected():
+        await ctx.connect()
 
     seat = _Seat(room=ctx.room, identity=context.identity)
     try:

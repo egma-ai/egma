@@ -32,6 +32,7 @@ import type { StartLocalLiveKitWorker } from "../src/livekit/local-worker.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, exitLines } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
+import { publicSkillDirectory } from "../src/skills/index.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import type { StartRefusalReason } from "./support/fixture-platform/index.ts";
@@ -63,11 +64,13 @@ const startFakeLocalWorker: StartLocalLiveKitWorker = async () => {
   };
 };
 
-/** The one fragment that names the monitoring dispatch and nothing else. */
-const MONITORING_EDIT_TASK = "send its production evidence to Egma";
+/** The one task that owns the worker and dependency manifest for every mode. */
+const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mocked-world dispatch and nothing else. */
-const MOCK_AUTHORING_TASK = "run isolated from its real";
+const MOCK_AUTHORING_TASK = "Write the mocked world for";
 const GENERATE_TASK = "## The words the agent is running on";
+const REQUIREMENTS_BEFORE = "livekit-agents\n";
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.0\n`;
 
 /**
  * The Retell account behind the wizard's own discovery, for the both lane.
@@ -122,6 +125,38 @@ const WORKER_MONITORED = WORKER_BEFORE.replace(
   "from egma import monitor_livekit\nfrom livekit import agents",
 );
 
+/** The worker after one Both-mode integration edit. */
+const WORKER_BOTH = WORKER_BEFORE.replace(
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)\n    await ctx.connect()",
+)
+  .replace(
+    "    await session.start(agent=agent, room=ctx.room)",
+    "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+  )
+  .replace(
+    "from livekit import agents",
+    "from egma import mockable, monitor_livekit\nfrom livekit import agents",
+  );
+
+/** A testing-only rewrite, used to prove the final Both check catches clobbering. */
+const WORKER_TESTING_ONLY = WORKER_BEFORE.replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
+).replace(
+  "from livekit import agents",
+  "from egma import mockable\nfrom livekit import agents",
+);
+
+/** A monitoring call that exists, but is too late to be valid. */
+const WORKER_MONITORING_LATE = WORKER_BEFORE.replace(
+  "    await ctx.connect()",
+  "    await ctx.connect()\n    monitor_livekit(ctx)",
+).replace(
+  "from livekit import agents",
+  "from egma import monitor_livekit\nfrom livekit import agents",
+);
+
 let platform: Platform;
 let workspace: Workspace;
 
@@ -152,6 +187,11 @@ async function lockEgmaFolder(): Promise<() => Promise<void>> {
 beforeEach(async () => {
   platform = await startPlatform();
   workspace = await makeWorkspace({ "package.json": MANIFEST });
+  await writeFile(
+    path.join(workspace.dir, "requirements.txt"),
+    REQUIREMENTS_BEFORE,
+    "utf8",
+  );
   await workspace.signIn(platform.url, platform.device.mint());
   platform.monitoring.account(KEY, [{ id: PLATFORM_AGENT, name: AGENT_NAME }]);
 });
@@ -191,13 +231,60 @@ function liveKitDiscovery(): FakeStep[] {
   ];
 }
 
+function nodeLiveKitDiscovery(): FakeStep[] {
+  return liveKitDiscovery().map((step) =>
+    step.kind === "say" && step.text.includes("framework livekit-agents")
+      ? { kind: "say" as const, text: "egma:found framework @livekit/agents\n" }
+      : step,
+  );
+}
+
 /** The coding agent applying the monitoring entry, and naming the agent. */
 function appliesMonitorEntry(): FakeStep[] {
   return [
     { kind: "write-file", path: "agent.py", content: WORKER_MONITORED },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
     { kind: "say", text: "egma:note Added monitor_livekit(ctx) to agent.py\n" },
-    { kind: "say", text: "egma:found monitor-entry agent.py\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** The coding agent applying the complete final integration in one edit. */
+function appliesBothEntries(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_BOTH },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:note Added both Egma entries to agent.py\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function appliesLateMonitorEntry(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_MONITORING_LATE },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function clobbersMonitoringDuringMockAuthoring(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_TESTING_ONLY },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -413,7 +500,7 @@ describe("choosing monitoring on Retell", () => {
     // entry is LiveKit's, and a Retell repository is never asked for it.
     const sent = await dispatched();
     expect(sent).toHaveLength(1);
-    expect(sent.some((task) => task.includes(MONITORING_EDIT_TASK))).toBe(false);
+    expect(sent.some((task) => task.includes(WORKER_INTEGRATION_TASK))).toBe(false);
 
     // The committed catalog names the monitored target. Monitoring alone has
     // no simulation connection, so its connection list is deliberately empty.
@@ -524,6 +611,24 @@ describe("choosing monitoring on LiveKit", () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
   });
 
+  it("stops a Node worker before monitoring creates remote resources", async () => {
+    const { report } = await walk({
+      goal: "monitoring",
+      steps: nodeLiveKitDiscovery(),
+    });
+
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected Node refusal");
+    expect(report.reason).toContain("Egma SDK is Python only today");
+    expect(report.reason).toContain("did not create remote resources");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+
+    const sent = await dispatched();
+    expect(sent.some((task) => task.includes(WORKER_INTEGRATION_TASK))).toBe(false);
+  });
+
   /**
    * The coding-agent edit, the minted key, and the safe automatic file write —
    * with no separate approval screen and no wait for production traffic.
@@ -534,7 +639,7 @@ describe("choosing monitoring on LiveKit", () => {
     const { report, ui } = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
-      stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
     });
 
     expect(report).toMatchObject({
@@ -600,7 +705,7 @@ describe("choosing monitoring on LiveKit", () => {
     // The coding agent was told, in the dispatch itself, never to touch an
     // environment file — the key is Egma's own code's to write.
     const sent = await dispatched();
-    const edit = sent.find((task) => task.includes(MONITORING_EDIT_TASK)) ?? "";
+    const edit = sent.find((task) => task.includes(WORKER_INTEGRATION_TASK)) ?? "";
     expect(edit).toContain("Never open, write, or mention a `.env` file");
     expect(edit).not.toContain(minted.secret);
 
@@ -617,7 +722,7 @@ describe("choosing monitoring on LiveKit", () => {
       walked = await walk({
         goal: "monitoring",
         steps: liveKitDiscovery(),
-        stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+        stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
       });
     } finally {
       await unlock();
@@ -652,7 +757,7 @@ describe("choosing monitoring on LiveKit", () => {
     const { report } = await walk({
       goal: "monitoring",
       steps: liveKitDiscovery(),
-      stepsByTask: [{ contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() }],
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
     });
 
     expect(report).toMatchObject({ kind: "monitoring-wired", envFile: null });
@@ -671,8 +776,8 @@ describe("choosing monitoring on LiveKit", () => {
 
   /**
    * A coding agent that reports the edit and did not make it is not believed:
-   * Egma opens the file and looks. The walk still ends well, with the lines to
-   * add by hand and a key minted for when they are.
+   * Egma opens the file and looks, prints the manual lines, and stops before it
+   * creates a monitoring target or key.
    */
   it("does not take a reported edit on trust", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
@@ -682,9 +787,9 @@ describe("choosing monitoring on LiveKit", () => {
       steps: liveKitDiscovery(),
       stepsByTask: [
         {
-          contains: MONITORING_EDIT_TASK,
+          contains: WORKER_INTEGRATION_TASK,
           steps: [
-            { kind: "say", text: "egma:found monitor-entry agent.py\n" },
+            { kind: "say", text: "egma:found worker-entry agent.py\n" },
             { kind: "say", text: "egma:found agent-name front-desk\n" },
             { kind: "stop", reason: "end_turn" },
           ],
@@ -692,11 +797,61 @@ describe("choosing monitoring on LiveKit", () => {
       ],
     });
 
-    expect(report).toMatchObject({ kind: "monitoring-wired", wired: false });
-    expect(ui.record.statuses.join("\n")).toContain("found no monitor_livekit()");
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected integration refusal");
+    expect(report.reason).toContain("did not create remote resources");
+    expect(ui.record.statuses.join("\n")).toContain(
+      "expected exactly one monitor_livekit() call after integration and found 0",
+    );
     expect(ui.record.statuses.join("\n")).toContain("monitor_livekit(ctx)");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
     // The worker is exactly as the developer left it.
     expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(WORKER_BEFORE);
+  });
+
+  it("does not call a monitoring edit wired when it removes existing testing", async () => {
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_TESTING_ONLY, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const { report, ui } = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      // This helper adds monitoring but rewrites away the existing mockable().
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected preservation refusal");
+    expect(report.reason).toContain("removed a pre-existing mockable() call");
+    expect(report.reason).toContain("did not create remote resources");
+    expect(ui.record.statuses.join("\n")).toContain(
+      "removed a pre-existing mockable() call",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+  });
+
+  it("does not accept monitoring after the first executable statement", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const { report, ui } = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesLateMonitorEntry() },
+      ],
+    });
+
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected ordering refusal");
+    expect(report.reason).toContain("not the first executable statement");
+    expect(ui.record.statuses.join("\n")).toContain(
+      "monitor_livekit() is not the first executable statement",
+    );
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(0);
   });
 });
 
@@ -839,7 +994,7 @@ describe("choosing both", () => {
    * and the connection the testing half needs is added to that row rather than
    * to a second one.
    */
-  it("wires the worker and reuses its row for the LiveKit connection", async () => {
+  it("integrates both worker hooks once and reuses its row for the LiveKit connection", async () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
 
@@ -847,7 +1002,7 @@ describe("choosing both", () => {
       goal: "both",
       steps: liveKitDiscovery(),
       stepsByTask: [
-        { contains: MONITORING_EDIT_TASK, steps: appliesMonitorEntry() },
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
         { contains: MOCK_AUTHORING_TASK, steps: writesNoMockedWorld() },
         {
           contains: GENERATE_TASK,
@@ -896,14 +1051,84 @@ describe("choosing both", () => {
       "connection:agent-name",
     );
 
-    // The `.env` holds the two lines and the worker holds the entry.
+    // The `.env` holds the two lines and one worker edit holds both requested
+    // hooks in the order the public SDK reference teaches.
     const env = await readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8");
     expect(env).toContain("EGMA_API_KEY=");
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(
-      "monitor_livekit(ctx)",
+    const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+    expect(worker).toContain("monitor_livekit(ctx)");
+    expect(worker).toContain("await mockable(agent, ctx, session)");
+    expect(worker.indexOf("monitor_livekit(ctx)")).toBeLessThan(
+      worker.indexOf("await ctx.connect()"),
+    );
+    expect(worker.indexOf("await ctx.connect()")).toBeLessThan(
+      worker.indexOf("await mockable(agent, ctx, session)"),
+    );
+    expect(worker.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+      worker.indexOf("await session.start"),
     );
 
+    // The final mode reaches one worker owner with the exact public SDK
+    // reference. The later mock-world task owns only mock answers and test
+    // overrides, so it cannot contradict or undo the integration.
+    const sent = await dispatched();
+    const workerOwners = sent.filter(
+      (task) => task.includes("worker file where") && task.includes("dependency manifest"),
+    );
+    expect(workerOwners).toHaveLength(1);
+    const integration = workerOwners[0] ?? "";
+    expect(integration).toContain(WORKER_INTEGRATION_TASK);
+    expect(integration).toContain("final mode is **both**");
+    const sdkReference = (
+      await readFile(
+        path.join(
+          publicSkillDirectory("integrate-egma"),
+          "references",
+          "integrate-egma-sdk.md",
+        ),
+        "utf8",
+      )
+    ).trimEnd();
+    expect(integration).toContain(sdkReference);
+
+    const mockAuthoring = sent.find((task) => task.includes(MOCK_AUTHORING_TASK)) ?? "";
+    expect(mockAuthoring).not.toContain("worker file where");
+    expect(mockAuthoring).not.toContain("dependency manifest");
+    expect(mockAuthoring).not.toContain("Put the Egma testing entry in the worker");
+
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
+  });
+
+  it("does not start a Both run when a later task removes monitoring", async () => {
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const { report, ui } = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
+        { contains: MOCK_AUTHORING_TASK, steps: clobbersMonitoringDuringMockAuthoring() },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("late-repair", "front-desk-tests"),
+        },
+      ],
+      answers: {
+        "connection:variant": "livekit_room.project_credentials",
+        "connection:config:url": "wss://acme.livekit.cloud",
+        "connection:credentials:apiKey": LIVEKIT_API_KEY,
+        "connection:credentials:apiSecret": LIVEKIT_API_SECRET,
+      },
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected the final verification");
+    expect(report.reason).toContain("worker changed after integration approval");
+    expect(report.reason).toContain("did not open review, push tests");
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
   });
 });
 

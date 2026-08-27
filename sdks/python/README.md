@@ -132,8 +132,6 @@ from egma import mockable
 
 ```python
 async def entrypoint(ctx: agents.JobContext) -> None:
-    await ctx.connect()
-
     agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar, book_appointment])
     session = AgentSession(stt=..., llm=..., tts=...)
 
@@ -143,6 +141,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 ```
 
 That is the whole simulation integration.
+
+`mockable` uses LiveKit's `JobContext.connect()` before its in-room RPC
+when an Egma simulation reaches it before the normal session connection.
+It does not reconnect an already-connected room, and it does not connect
+a production room.
 
 In a simulation, `mockable` reports your agent's tools to Egma — names
 and schemas, read off the agent object, so mock authoring starts from
@@ -172,8 +175,9 @@ covered.
 
 ### What a call to a mocked tool does
 
-- Goes to Egma over the room you are already in. No new endpoint, no new
-  credential, nothing new to expose.
+- Goes to Egma over the same LiveKit room. No new endpoint, no new
+  credential, nothing new to expose. If needed, `mockable` connects that
+  room through the job context before sending the first RPC.
 - Comes back with the authored answer, or raises the authored error as
   the tool's own error, so your agent handles it exactly as it would
   handle a real backend failing.

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -34,9 +34,39 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
     const bin = path.join(root, "bin");
     const observed = path.join(root, "observed.json");
     const observedPreparation = path.join(root, "observed-preparation.jsonl");
+    const observedPython = path.join(root, "observed-python.jsonl");
+    const installedEgma = path.join(root, "egma-installed");
     await mkdir(path.join(repository, "src"), { recursive: true });
+    await mkdir(path.join(repository, ".venv", "bin"), { recursive: true });
     await mkdir(bin);
     await writeFile(path.join(repository, "src", "agent.py"), "# fixture\n", "utf8");
+    const requirements = path.join(repository, "requirements.txt");
+    await writeFile(requirements, "livekit-agents>=1.6.7\negma>=0.1.0\n", "utf8");
+
+    const fakePython = path.join(repository, ".venv", "bin", "python");
+    await writeFile(
+      fakePython,
+      `#!/usr/bin/env node
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+appendFileSync(process.env.OBSERVED_PYTHON_FILE, JSON.stringify({
+  args,
+  cwd: process.cwd(),
+  url: process.env.LIVEKIT_URL ?? null,
+  key: process.env.LIVEKIT_API_KEY ?? null,
+  secret: process.env.LIVEKIT_API_SECRET ?? null,
+}) + "\\n");
+if (args[0] === "-c") process.exit(existsSync(process.env.EGMA_INSTALLED_MARKER) ? 0 : 1);
+if (args[0] === "-m" && args[1] === "pip" && args[2] === "install" && args[3] === "-r") {
+  writeFileSync(process.env.EGMA_INSTALLED_MARKER, "0.1.0\\n");
+  process.exit(0);
+}
+process.exit(2);
+`,
+      { mode: 0o755 },
+    );
+    await chmod(fakePython, 0o755);
 
     const fakeLiveKit = path.join(bin, "lk");
     await writeFile(
@@ -106,6 +136,8 @@ setInterval(() => {}, 1_000);
         repository,
         "--entrypoint",
         "src/agent.py",
+        "--dependency-manifest",
+        "requirements.txt",
         "--dispatch-name",
         "front-desk",
       ],
@@ -115,6 +147,8 @@ setInterval(() => {}, 1_000);
           PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
           OBSERVED_FILE: observed,
           OBSERVED_PREPARATION_FILE: observedPreparation,
+          OBSERVED_PYTHON_FILE: observedPython,
+          EGMA_INSTALLED_MARKER: installedEgma,
           LIVEKIT_URL: "wss://example.livekit.cloud",
           LIVEKIT_API_KEY: "livekit-secret",
           LIVEKIT_API_SECRET: secret,
@@ -194,6 +228,39 @@ setInterval(() => {}, 1_000);
       expect(command).toMatchObject({ url: null, key: null, secret: null });
     }
 
+    const python = (await readFile(observedPython, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(python.map((command) => command.args)).toEqual([
+      expect.arrayContaining(["-c"]),
+      ["-m", "pip", "install", "-r", requirements],
+      expect.arrayContaining(["-c"]),
+    ]);
+    for (const command of python) {
+      expect(command).toMatchObject({ url: null, key: null, secret: null });
+    }
+
+    const probe = (python[0]?.args as string[] | undefined)?.[1];
+    expect(probe).toEqual(expect.any(String));
+    const probeVersion = async (version: string): Promise<number | null> => {
+      const site = path.join(root, `site-${version}`);
+      const metadata = path.join(site, `egma-${version}.dist-info`);
+      await mkdir(metadata, { recursive: true });
+      await writeFile(
+        path.join(metadata, "METADATA"),
+        `Metadata-Version: 2.1\nName: egma\nVersion: ${version}\n`,
+        "utf8",
+      );
+      return spawnSync("python3", ["-c", probe as string], {
+        env: { ...process.env, PYTHONPATH: site },
+      }).status;
+    };
+    expect(await probeVersion("0.1.0.dev1")).toBe(1);
+    expect(await probeVersion("0.1.0")).toBe(0);
+    expect(await probeVersion("0.1.0.post1")).toBe(0);
+    expect(await probeVersion("0.1.0+local.1")).toBe(0);
+
     const mismatched = spawn(
       process.execPath,
       [
@@ -202,6 +269,8 @@ setInterval(() => {}, 1_000);
         repository,
         "--entrypoint",
         "src/agent.py",
+        "--dependency-manifest",
+        "requirements.txt",
         "--dispatch-name",
         "some-other-worker",
       ],
@@ -211,6 +280,8 @@ setInterval(() => {}, 1_000);
           PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
           OBSERVED_FILE: observed,
           OBSERVED_PREPARATION_FILE: observedPreparation,
+          OBSERVED_PYTHON_FILE: observedPython,
+          EGMA_INSTALLED_MARKER: installedEgma,
           LIVEKIT_URL: "wss://example.livekit.cloud",
           LIVEKIT_API_KEY: "livekit-secret",
           LIVEKIT_API_SECRET: secret,
@@ -238,5 +309,192 @@ setInterval(() => {}, 1_000);
       'registered worker AW_123 as "front-desk", but Egma will dispatch "some-other-worker"',
     );
     expect(`${mismatchOut}\n${mismatchError}`).not.toContain(secret);
+  });
+
+  it.each([
+    { marker: "uv.lock", hasLock: true },
+    { marker: "[tool.uv]", hasLock: false },
+  ])("prepares the exact nested uv project marked by $marker", async ({ hasLock }) => {
+    const root = await mkdtemp(path.join(tmpdir(), "egma-livekit-uv-helper-"));
+    temporary.push(root);
+    const repository = path.join(root, "repository");
+    const project = path.join(repository, "service");
+    const bin = path.join(root, "bin");
+    const marker = path.join(root, "egma-installed");
+    const observedUv = path.join(root, "observed-uv.json");
+    const observedWorker = path.join(root, "observed-worker.json");
+    const uvEnvironment = path.join(root, "uv-environment");
+    const unrelatedEnvironment = path.join(root, "unrelated-environment");
+    const lock = path.join(project, "uv.lock");
+    const lockSource = "version = 1\nrevision = 42\n";
+    await mkdir(path.join(project, "src"), { recursive: true });
+    await mkdir(path.join(uvEnvironment, "bin"), { recursive: true });
+    await mkdir(path.join(unrelatedEnvironment, "bin"), { recursive: true });
+    await mkdir(bin);
+    await writeFile(path.join(project, "src", "agent.py"), "# fixture\n", "utf8");
+    await writeFile(
+      path.join(project, "pyproject.toml"),
+      '[project]\nname = "fixture-agent"\nversion = "0.0.0"\ndependencies = ["livekit-agents>=1.6.7", "egma>=0.1.0"]\n' +
+        (hasLock ? "" : "\n[tool.uv]\n"),
+      "utf8",
+    );
+    if (hasLock) await writeFile(lock, lockSource, "utf8");
+
+    const fakePython = path.join(uvEnvironment, "bin", "python");
+    await writeFile(
+      fakePython,
+      `#!/usr/bin/env node
+import { existsSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[0] === "-c") process.exit(existsSync(process.env.EGMA_INSTALLED_MARKER) ? 0 : 1);
+process.exit(2);
+`,
+      { mode: 0o755 },
+    );
+    await chmod(fakePython, 0o755);
+    const unrelatedPython = path.join(unrelatedEnvironment, "bin", "python");
+    await writeFile(unrelatedPython, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await chmod(unrelatedPython, 0o755);
+
+    const fakeUv = path.join(bin, "uv");
+    await writeFile(
+      fakeUv,
+      `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args.join(" ") === "--version") {
+  process.stdout.write("uv 0.8.0\\n");
+  process.exit(0);
+}
+if (args.slice(0, 4).join(" ") === "run --no-sync python -c") {
+  process.stdout.write(process.env.FAKE_UV_PYTHON + "\\n");
+  process.exit(0);
+}
+writeFileSync(process.env.OBSERVED_UV_FILE, JSON.stringify({
+  args,
+  cwd: process.cwd(),
+  url: process.env.LIVEKIT_URL ?? null,
+  key: process.env.LIVEKIT_API_KEY ?? null,
+  secret: process.env.LIVEKIT_API_SECRET ?? null,
+}));
+writeFileSync(process.env.EGMA_INSTALLED_MARKER, "0.1.0\\n");
+`,
+      { mode: 0o755 },
+    );
+    await chmod(fakeUv, 0o755);
+
+    const fakeLiveKit = path.join(bin, "lk");
+    await writeFile(
+      fakeLiveKit,
+      `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args.join(" ") === "--version") {
+  process.stdout.write("lk version 2.18.3\\n");
+  process.exit(0);
+}
+if (args.join(" ") === "agent dev --help") process.exit(0);
+writeFileSync(process.env.OBSERVED_WORKER_FILE, JSON.stringify({
+  args,
+  cwd: process.cwd(),
+}));
+process.stdout.write(JSON.stringify({
+  message: "registered worker",
+  id: "AW_uv",
+  agent_name: "front-desk",
+}) + "\\n");
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1_000);
+`,
+      { mode: 0o755 },
+    );
+    await chmod(fakeLiveKit, 0o755);
+
+    const child = spawn(
+      process.execPath,
+      [
+        HELPER,
+        "--cwd",
+        repository,
+        "--entrypoint",
+        "service/src/agent.py",
+        "--dependency-manifest",
+        "service/pyproject.toml",
+        "--dispatch-name",
+        "front-desk",
+      ],
+      {
+        env: {
+          ...process.env,
+          PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+          EGMA_INSTALLED_MARKER: marker,
+          OBSERVED_UV_FILE: observedUv,
+          OBSERVED_WORKER_FILE: observedWorker,
+          FAKE_UV_PYTHON: fakePython,
+          VIRTUAL_ENV: unrelatedEnvironment,
+          UV_PROJECT_ENVIRONMENT: uvEnvironment,
+          LIVEKIT_URL: "wss://example.livekit.cloud",
+          LIVEKIT_API_KEY: "livekit-secret",
+          LIVEKIT_API_SECRET: "livekit-secret-value",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(`uv helper did not become ready\n${stdout}\n${stderr}`)),
+        5_000,
+      );
+      child.stdout.on("data", () => {
+        if (!stdout.includes("egma:livekit-worker ready")) return;
+        clearTimeout(timeout);
+        resolve();
+      });
+      child.once("exit", (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`uv helper exited before readiness with ${String(code)}`));
+      });
+    });
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    child.kill("SIGTERM");
+    await exited;
+
+    const uv = JSON.parse(await readFile(observedUv, "utf8")) as {
+      args: string[];
+      cwd: string;
+      url: string | null;
+      key: string | null;
+      secret: string | null;
+    };
+    expect(uv).toMatchObject({
+      args: ["pip", "install", "--python", fakePython, "-e", "."],
+      url: null,
+      key: null,
+      secret: null,
+    });
+    expect(await realpath(uv.cwd)).toBe(await realpath(project));
+    if (hasLock) expect(await readFile(lock, "utf8")).toBe(lockSource);
+    else await expect(readFile(lock, "utf8")).rejects.toThrow();
+    const worker = JSON.parse(await readFile(observedWorker, "utf8")) as {
+      args: string[];
+      cwd: string;
+    };
+    expect(worker.args).toEqual([
+      "agent",
+      "dev",
+      "--no-reload",
+      "src/agent.py",
+    ]);
+    expect(await realpath(worker.cwd)).toBe(await realpath(project));
   });
 });

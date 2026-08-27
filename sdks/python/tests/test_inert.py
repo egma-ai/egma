@@ -37,9 +37,10 @@ NO_EGMA = [
 async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     agent = ReceptionAgent()
     before = agent.tools
-    room = StubRoom()
+    room = StubRoom(connected=False)
+    ctx = StubContext(room, metadata)
 
-    await mockable(agent, StubContext(room, metadata), session)
+    await mockable(agent, ctx, session)
 
     # The very same objects. Not equal, not equivalent — the identical
     # callables the agent was built with, which is the only claim that
@@ -55,6 +56,7 @@ async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     # which discovered egma's absence by asking — a call that costs a
     # production room a round trip on every session start.
     assert room.asked == []
+    assert ctx.connect_calls == 0
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 /** LiveKit through the real wizard flow, from repository discovery to a run. */
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -17,8 +17,8 @@ import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
 import { liveKitConnectionSetupStep } from "../src/wizard/livekit-connection-setup-step.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
-import { sdkEntryInstructions } from "../src/wizard/mock-authoring-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
+import { workerEntryInstructions } from "../src/wizard/worker-integration-step.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
@@ -40,6 +40,7 @@ const localWorkerRuns: Array<{
   readonly url: string;
   readonly dispatchName: string;
   readonly entrypoint: string;
+  readonly dependencyManifest: string;
   stopped: boolean;
 }> = [];
 
@@ -48,6 +49,7 @@ const startFakeLocalWorker: StartLocalLiveKitWorker = async (options) => {
     url: options.url,
     dispatchName: options.dispatchName,
     entrypoint: options.entrypoint,
+    dependencyManifest: options.dependencyManifest,
     stopped: false,
   };
   localWorkerRuns.push(recorded);
@@ -100,6 +102,24 @@ const WORKER_AFTER = WORKER_BEFORE.replace(
   ].join("\n"),
 ).replace("from livekit import agents", "from egma import mockable\nfrom livekit import agents");
 
+/** A worker that already sends monitoring evidence before Testing is chosen. */
+const WORKER_MONITORED_BEFORE = WORKER_BEFORE.replace(
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)\n    await ctx.connect()",
+).replace(
+  "from livekit import agents",
+  "from egma import monitor_livekit\nfrom livekit import agents",
+);
+
+/** Testing added without deleting a pre-existing monitoring hook or adding connect. */
+const WORKER_TESTING_PRESERVES_MONITORING = WORKER_AFTER.replace(
+  "from egma import mockable",
+  "from egma import mockable, monitor_livekit",
+).replace(
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
+  "async def entrypoint(ctx: agents.JobContext) -> None:\n    monitor_livekit(ctx)",
+);
+
 /** The project's mocked world, as the driven agent would write the file. */
 const MOCK_TOOLS_FILE = [
   "# The mock tools this project answers with",
@@ -112,8 +132,12 @@ const MOCK_TOOLS_FILE = [
   "",
 ].join("\n");
 
+/** The one task that owns the worker and dependency manifest. */
+const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mock-authoring task and nothing else. */
-const MOCK_AUTHORING_TASK = "run isolated from its real";
+const MOCK_AUTHORING_TASK = "Write the mocked world for";
+const REQUIREMENTS_BEFORE = "livekit-agents\n";
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.0\n`;
 
 /**
  * A scripted agent that reports the edit and does not make it.
@@ -124,9 +148,8 @@ const MOCK_AUTHORING_TASK = "run isolated from its real";
  */
 function claimsWithoutEditing(): FakeStep[] {
   return [
-    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
-    { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
-    { kind: "say", text: "egma:wrote check_availability\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -166,7 +189,8 @@ const MENTIONED_NOT_CALLED = [
 function claimsAMentionOnly(lines: readonly string[]): FakeStep[] {
   return [
     { kind: "write-file", path: "agent.py", content: workerWith(...lines) },
-    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -187,7 +211,14 @@ function claimsARealCallBesideAMention(): FakeStep[] {
   ).replace("from livekit import agents", "from egma import mockable\nfrom livekit import agents");
   return [
     { kind: "write-file", path: "agent.py", content: wired },
-    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -195,7 +226,8 @@ function claimsARealCallBesideAMention(): FakeStep[] {
 /** A scripted agent that names a file outside the repository altogether. */
 function claimsAPathOutsideTheRepository(): FakeStep[] {
   return [
-    { kind: "say", text: "egma:found sdk-entry ../../etc/passwd\n" },
+    { kind: "say", text: "egma:found worker-entry ../../etc/passwd\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -208,13 +240,80 @@ function cannotFindTheWorker(): FakeStep[] {
   ];
 }
 
-/** What the scripted agent does when Egma sends it the mock-authoring task. */
+/** What the scripted agent does when Egma sends the worker-integration task. */
+function integrationSteps(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function integrationPreservingMonitoringWithoutConnect(): FakeStep[] {
+  return [
+    {
+      kind: "write-file",
+      path: "agent.py",
+      content: WORKER_TESTING_PRESERVES_MONITORING,
+    },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function integrationWithoutEgmaDependency(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function integrationWithoutDependencyReport(): FakeStep[] {
+  return integrationSteps().filter(
+    (step) => !(step.kind === "say" && step.text.includes("dependency-manifest")),
+  );
+}
+
+function laterRemovesMonitoring(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function laterRemovesEgmaDependency(): FakeStep[] {
+  return [
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_BEFORE,
+    },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** What the scripted agent does when Egma sends the mock-world task. */
 function mockingSteps(): FakeStep[] {
   return [
     { kind: "say", text: "egma:plan check_availability\n" },
     { kind: "say", text: "egma:writing check_availability\n" },
-    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
-    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
     { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
     { kind: "say", text: "egma:wrote check_availability\n" },
     { kind: "stop", reason: "end_turn" },
@@ -229,6 +328,7 @@ beforeEach(async () => {
   platform = await startPlatform();
   workspace = await makeWorkspace({
     "package.json": '{"name":"livekit-front-desk","dependencies":{"livekit-agents":"latest"}}\n',
+    "requirements.txt": REQUIREMENTS_BEFORE,
     "agent.ts": "// LiveKit AgentSession with a front desk prompt\n",
     "agent.py": WORKER_BEFORE,
   });
@@ -379,6 +479,9 @@ describe("LiveKit in the wizard", () => {
         { kind: "say", text: "egma:found entrypoint agent.py\n" },
         { kind: "stop", reason: "end_turn" },
       ],
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: integrationSteps() },
+      ],
     });
     const terminal = runInTerminal({
       command: process.execPath,
@@ -526,6 +629,7 @@ describe("LiveKit in the wizard", () => {
             { kind: "stop", reason: "end_turn" },
           ],
         },
+        { contains: WORKER_INTEGRATION_TASK, steps: integrationSteps() },
         { contains: MOCK_AUTHORING_TASK, steps: mockingSteps() },
         { contains: "Write 1 test", steps: writingSteps() },
       ],
@@ -576,6 +680,7 @@ describe("LiveKit in the wizard", () => {
               url: "wss://acme.livekit.cloud",
               dispatchName: "front-desk-worker",
               entrypoint: "agent.py",
+              dependencyManifest: "requirements.txt",
               stopped: true,
             },
           ]
@@ -635,10 +740,10 @@ describe("LiveKit in the wizard", () => {
     ) as { processIds: number[]; sessionIds: string[]; promptSessionIds: string[] };
     expect(new Set(driven.processIds).size).toBe(1);
     expect(driven.sessionIds).toHaveLength(1);
-    // Three dispatches now — find the agent, write the tests, write the world
-    // those tests run in — and all of them in the one process and the one
-    // protocol connection the wizard opened.
+    // Four dispatches — find the agent, integrate the worker once, write the
+    // tests, and write their mocked world — all use one ACP session.
     expect(driven.promptSessionIds).toEqual([
+      driven.sessionIds[0],
       driven.sessionIds[0],
       driven.sessionIds[0],
       driven.sessionIds[0],
@@ -651,7 +756,9 @@ describe("LiveKit in the wizard", () => {
    */
   async function liveKitLane(options: {
     readonly framework: string;
-    readonly mocking: FakeStep[];
+    readonly integration: FakeStep[];
+    readonly mocking?: FakeStep[];
+    readonly entrypoint?: string;
   }) {
     const script = await workspace.script({
       steps: [{ kind: "stop", reason: "end_turn" }],
@@ -662,12 +769,16 @@ describe("LiveKit in the wizard", () => {
             { kind: "say", text: `egma:found framework ${options.framework}\n` },
             { kind: "say", text: "egma:found agent-name front-desk\n" },
             { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
-            { kind: "say", text: "egma:found entrypoint agent.py\n" },
+            {
+              kind: "say",
+              text: `egma:found entrypoint ${options.entrypoint ?? "agent.py"}\n`,
+            },
             { kind: "say", text: "egma:found tools agent.py (1 definition)\n" },
             { kind: "stop", reason: "end_turn" },
           ],
         },
-        { contains: MOCK_AUTHORING_TASK, steps: options.mocking },
+        { contains: WORKER_INTEGRATION_TASK, steps: options.integration },
+        { contains: MOCK_AUTHORING_TASK, steps: options.mocking ?? [] },
         { contains: "Write 1 test", steps: writingSteps() },
       ],
     });
@@ -714,6 +825,7 @@ describe("LiveKit in the wizard", () => {
   it("wires the SDK, writes the mocked world, and shows both at the gate", async () => {
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
+      integration: integrationSteps(),
       mocking: mockingSteps(),
     });
 
@@ -725,7 +837,9 @@ describe("LiveKit in the wizard", () => {
     expect(worker).toContain("from egma import mockable");
     expect(worker).toContain("await mockable(agent, ctx, session)");
     expect(worker.indexOf("await mockable")).toBeLessThan(worker.indexOf("await session.start"));
-    expect(ui.record.statuses).toContain("◆ Egma's testing entry is in agent.py");
+    expect(ui.record.statuses).toContain(
+      "◆ Egma's requested worker integration is in agent.py",
+    );
     expect(ui.record.statuses).toEqual(
       expect.arrayContaining([
         "◆ Planned 1 mock tool",
@@ -754,34 +868,175 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.gate?.mocks).toEqual([
       { tool: "check_availability", says: "answers" },
     ]);
-    // And the one edit the wizard made to the developer's own code is named on
-    // the same screen: pressing enter runs against a worker Egma just changed.
-    expect(ui.record.gate?.changed).toEqual(["agent.py"]);
+    // The worker and its Python dependency manifest are both named on the same
+    // screen: pressing enter runs only after Egma has verified both files.
+    expect(ui.record.gate?.changed).toEqual(["agent.py", "requirements.txt"]);
+  });
+
+  it("preserves existing monitoring in Testing mode and accepts no explicit connect", async () => {
+    await writeFile(
+      path.join(workspace.dir, "agent.py"),
+      WORKER_MONITORED_BEFORE.replace("    await ctx.connect()\n", ""),
+      "utf8",
+    );
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationPreservingMonitoringWithoutConnect(),
+    });
+
+    expect(report.kind).toBe("run-started");
+    const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+    expect(worker).toContain("monitor_livekit(ctx)");
+    expect(worker).toContain("await mockable(agent, ctx, session)");
+    expect(worker).not.toContain("await ctx.connect()");
+    expect(platform.keys.minted).toHaveLength(0);
+
+    const driven = JSON.parse(
+      await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
+    ) as { instructions: string[] };
+    const integration =
+      driven.instructions.find((task) => task.includes(WORKER_INTEGRATION_TASK)) ?? "";
+    expect(integration).toContain("final mode is **testing**");
+    expect(integration).toContain(
+      "egma:found dependency-manifest pyproject.toml",
+    );
+    expect(integration).toContain(
+      "including an\nEgma entry that was already there before this task",
+    );
+    expect(integration).not.toContain(
+      "this repository has not asked for production monitoring",
+    );
+  });
+
+  it("does not run when Testing removes an existing monitoring hook", async () => {
+    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_MONITORED_BEFORE, "utf8");
+
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      // This edit satisfies Testing but wrongly deletes what was already there.
+      integration: integrationSteps(),
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected preservation refusal");
+    expect(report.reason).toContain("existing monitor_livekit()");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("does not run when a later task removes preserved monitoring", async () => {
+    await writeFile(
+      path.join(workspace.dir, "agent.py"),
+      WORKER_MONITORED_BEFORE.replace("    await ctx.connect()\n", ""),
+      "utf8",
+    );
+
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationPreservingMonitoringWithoutConnect(),
+      mocking: laterRemovesMonitoring(),
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected final preservation refusal");
+    expect(report.reason).toContain("worker changed after integration approval");
+    expect(report.reason).toContain("did not open review, push tests");
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("does not run when the reported Python manifest omits egma", async () => {
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationWithoutEgmaDependency(),
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected dependency refusal");
+    expect(report.reason).toContain("does not declare the Python egma distribution");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("does not run when the coding agent reports no dependency manifest", async () => {
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationWithoutDependencyReport(),
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected dependency report refusal");
+    expect(report.reason).toContain("did not report the Python dependency manifest");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("does not run when a later task removes egma from the manifest", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationSteps(),
+      mocking: laterRemovesEgmaDependency(),
+    });
+
+    expect(report).toMatchObject({ kind: "failed" });
+    if (report.kind !== "failed") throw new Error("expected final dependency refusal");
+    expect(report.reason).toContain(
+      "runtime dependency manifest changed after integration approval",
+    );
+    expect(report.reason).toContain("did not open review, push tests");
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("does not dispatch an edit when the pre-edit worker cannot be snapshotted", async () => {
+    const before = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      entrypoint: "missing.py",
+      integration: integrationSteps(),
+    });
+
+    expect(report.kind).toBe("failed");
+    expect(ui.record.statuses.join("\n")).toContain(
+      "could not snapshot missing.py inside this repository before integration",
+    );
+    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(before);
+    const driven = JSON.parse(
+      await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
+    ) as { instructions: string[] };
+    expect(
+      driven.instructions.some((task) => task.includes(WORKER_INTEGRATION_TASK)),
+    ).toBe(false);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
   });
 
   /**
    * The branch that decides whether a LiveKit walk dies or reaches a run.
    *
    * A coding agent that cannot identify one job entrypoint edits nothing and
-   * says so. Egma does not stop: it prints its own lines for the developer to
-   * add by hand, and the walk finishes with the run it came for — which is the
-   * run every LiveKit repository got before this step existed. What it must
-   * never do is claim a seam it did not wire.
+   * says so. Egma prints its own lines for the developer to add by hand, then
+   * stops before any remote setup. It must never claim or run a seam it did not
+   * wire.
    */
-  it("prints the lines itself when the worker cannot be found, and still runs", async () => {
+  it("prints the lines itself and does not run when the worker cannot be found", async () => {
     const before = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
 
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
-      mocking: cannotFindTheWorker(),
+      integration: cannotFindTheWorker(),
     });
 
-    // The walk reached what it came for.
-    expect(report.kind).toBe("run-started");
-    expect(platform.running.runs).toHaveLength(1);
+    expect(report.kind).toBe("failed");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
 
     // Egma's own block, word for word, rather than whatever the agent printed.
-    for (const line of sdkEntryInstructions()) {
+    for (const line of workerEntryInstructions("testing")) {
       if (line === "") continue;
       expect(ui.record.statuses).toContain(line);
     }
@@ -789,10 +1044,13 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.statuses.join("\n")).toContain("Two workers define an entrypoint");
 
     // No seam was claimed and none was made.
-    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(false);
+    expect(
+      ui.record.statuses.some((line) =>
+        line.includes("requested worker integration is in"),
+      ),
+    ).toBe(false);
     expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(before);
-    expect(ui.record.gate?.changed).toEqual([]);
-    expect(ui.record.gate?.mocks).toEqual([]);
+    expect(ui.record.gate).toBeNull();
     expect(platform.mocking.mockTools).toHaveLength(0);
   });
 
@@ -811,22 +1069,26 @@ describe("LiveKit in the wizard", () => {
 
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
-      mocking: claimsWithoutEditing(),
+      integration: claimsWithoutEditing(),
     });
 
-    expect(report.kind).toBe("run-started");
+    expect(report.kind).toBe("failed");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
 
     // Nothing was claimed: not on screen, not at the gate.
-    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
-      false,
-    );
-    expect(ui.record.gate?.changed).toEqual([]);
+    expect(
+      ui.record.statuses.some((line) =>
+        line.includes("requested worker integration is in"),
+      ),
+    ).toBe(false);
+    expect(ui.record.gate).toBeNull();
 
     // The developer is told what Egma looked for and where, and given the lines.
     expect(ui.record.statuses.join("\n")).toContain(
-      "Egma read agent.py and found no awaited mockable() in it.",
+      "Egma read agent.py, but expected exactly one mockable() call after integration and found 0.",
     );
-    for (const line of sdkEntryInstructions()) {
+    for (const line of workerEntryInstructions("testing")) {
       if (line === "") continue;
       expect(ui.record.statuses).toContain(line);
     }
@@ -847,19 +1109,23 @@ describe("LiveKit in the wizard", () => {
     async ({ lines }) => {
       const { report, ui } = await liveKitLane({
         framework: "livekit-agents",
-        mocking: claimsAMentionOnly(lines),
+        integration: claimsAMentionOnly(lines),
       });
 
-      expect(report.kind).toBe("run-started");
+      expect(report.kind).toBe("failed");
+      expect(platform.running.runs).toHaveLength(0);
+      expect(localWorkerRuns).toHaveLength(0);
       // The words really are in the file, which is the whole point of the case.
       expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(CALL);
       expect(ui.record.statuses.join("\n")).toContain(
-        "Egma read agent.py and found no awaited mockable() in it.",
+        "Egma read agent.py, but expected exactly one mockable() call after integration and found 0.",
       );
-      expect(ui.record.gate?.changed).toEqual([]);
-      expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
-        false,
-      );
+      expect(ui.record.gate).toBeNull();
+      expect(
+        ui.record.statuses.some((line) =>
+          line.includes("requested worker integration is in"),
+        ),
+      ).toBe(false);
     },
   );
 
@@ -869,16 +1135,27 @@ describe("LiveKit in the wizard", () => {
    *
    * A worker that explains itself in a docstring and runs the call underneath
    * is an ordinary worker, and Egma believes it.
-   */
+  */
   it("believes a real call that sits under a docstring mentioning it", async () => {
+    await writeFile(
+      path.join(workspace.dir, "agent.py"),
+      workerWith(
+        '    """Egma answers this agent\'s tools from here:',
+        `    ${CALL}`,
+        '    """',
+      ),
+      "utf8",
+    );
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
-      mocking: claimsARealCallBesideAMention(),
+      integration: claimsARealCallBesideAMention(),
     });
 
     expect(report.kind).toBe("run-started");
-    expect(ui.record.statuses).toContain("◆ Egma's testing entry is in agent.py");
-    expect(ui.record.gate?.changed).toEqual(["agent.py"]);
+    expect(ui.record.statuses).toContain(
+      "◆ Egma's requested worker integration is in agent.py",
+    );
+    expect(ui.record.gate?.changed).toEqual(["agent.py", "requirements.txt"]);
   });
 
   /**
@@ -892,18 +1169,22 @@ describe("LiveKit in the wizard", () => {
   it("refuses a reported edit outside the repository without reading it", async () => {
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
-      mocking: claimsAPathOutsideTheRepository(),
+      integration: claimsAPathOutsideTheRepository(),
     });
 
-    expect(report.kind).toBe("run-started");
+    expect(report.kind).toBe("failed");
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
     expect(ui.record.statuses.join("\n")).toContain(
       "../../etc/passwd is outside this repository, so Egma did not read it.",
     );
-    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
-      false,
-    );
-    expect(ui.record.gate?.changed).toEqual([]);
-    for (const line of sdkEntryInstructions()) {
+    expect(
+      ui.record.statuses.some((line) =>
+        line.includes("requested worker integration is in"),
+      ),
+    ).toBe(false);
+    expect(ui.record.gate).toBeNull();
+    for (const line of workerEntryInstructions("testing")) {
       if (line === "") continue;
       expect(ui.record.statuses).toContain(line);
     }
@@ -913,25 +1194,35 @@ describe("LiveKit in the wizard", () => {
    * A Node LiveKit worker has no Egma SDK to put inside it.
    *
    * The SDK ships for Python today. Wiring a Python import into a TypeScript
-   * worker would be worse than doing nothing, and writing a mocked world for a
-   * worker that can never serve it would be writing answers nobody reads. So
-   * the step says which of those it is and the walk carries on.
+   * worker would be worse than doing nothing, and running tests without
+   * isolation could call real tools. The wizard says which of those it found
+   * and stops before it creates testing resources.
    */
-  it("says the SDK is Python only for a Node worker, and dispatches nothing", async () => {
+  it("refuses an unisolated testing run for a Node worker", async () => {
     const { report, ui } = await liveKitLane({
       framework: "@livekit/agents",
-      mocking: mockingSteps(),
+      integration: integrationSteps(),
     });
 
-    expect(report.kind).toBe("run-started");
+    expect(report.kind).toBe("failed");
+    if (report.kind !== "failed") throw new Error("expected Node refusal");
+    expect(report.reason).toContain("Node LiveKit worker cannot be integrated");
+    expect(report.reason).toContain("did not create remote resources");
     expect(ui.record.statuses.join(" ")).toContain("Egma SDK is Python only today");
-    expect(ui.record.gate?.changed).toEqual([]);
-    expect(ui.record.gate?.mocks).toEqual([]);
+    expect(ui.record.gate).toBeNull();
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.suites.suites).toHaveLength(0);
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
 
-    // The mock-authoring task was never sent: there was nothing to ask for.
+    // Neither integration nor mock authoring was sent: the SDK is unavailable.
     const driven = JSON.parse(
       await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
     ) as { instructions: string[] };
+    expect(
+      driven.instructions.some((task) => task.includes(WORKER_INTEGRATION_TASK)),
+    ).toBe(false);
     expect(driven.instructions.some((task) => task.includes(MOCK_AUTHORING_TASK))).toBe(
       false,
     );
