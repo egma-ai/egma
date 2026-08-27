@@ -170,7 +170,9 @@ export default function SignUpPage() {
   }
 
   if (availability === null) {
-    return <SessionLoading label="Opening Egma" />;
+    // Its own sentence, because this is its own question: not who is here, but
+    // whether this instance still takes a first account at all.
+    return <SessionLoading label="Checking whether this instance is ready for setup" />;
   }
 
   if (!availability.open) {

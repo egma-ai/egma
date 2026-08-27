@@ -62,10 +62,20 @@ export default function RootPage() {
   }, [attempt, router]);
 
   /*
-   * Nothing is guessed while the session read is in flight, and nothing is
-   * guessed once it comes back signed out either — that branch is already on
-   * its way to `/sign-in`, and the product shell it used to draw in the
-   * meantime was a dashboard shown to somebody who has no account open.
+   * Nothing is guessed while the read is in flight. The product shell this
+   * used to draw in the meantime was a dashboard shown to somebody who may
+   * have no account open at all.
+   *
+   * **The entrance covers itself rather than leaving it to the shell**, and
+   * the reason is what happens after the answer arrives: `/` is the one
+   * address that never stops here, and the shell's own cover comes down the
+   * moment the session settles — which is the moment *before* the redirect
+   * lands, not after it.
+   *
+   * `signed-out` is written beside `null` for that same reason, and it is a
+   * lock rather than a live branch: the redirect above returns before
+   * `setAnswer`, so no render reaches this holding that status today. It costs
+   * one word, and it is the one state that must never uncover.
    */
   if (answer === null || answer.status === "signed-out") {
     return <SessionLoading label="Opening Egma" />;
