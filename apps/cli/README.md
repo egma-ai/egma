@@ -715,7 +715,7 @@ egma monitoring enable [options]
 egma monitoring disable  Turn the switch off. Everything stored stays stored.
 egma monitoring status   Print the switch, the binding, the key hint, and when
                          a production conversation last arrived.
-egma monitoring record --agent <id>
+egma monitoring record --agent <id> [--monitoring-key-id <id>]
                          Recover only the repository record after a completed
                          remote setup could not write it.
 
@@ -763,6 +763,9 @@ egma monitoring record --agent <id>
   --platform-agent <id>
                        With monitoring enable on Retell: which agent on the
                        account to watch, when it holds more than one.
+  --monitoring-key-id <id>
+                       With LiveKit monitoring record: the non-secret key id
+                       printed in the failed setup receipt.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.

@@ -433,6 +433,8 @@ const VALUES = [
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
   "MockToolTakenError",
+  "MonitoringAgentUnavailableError",
+  "MonitoringExportKeyAlreadyBoundError",
   "NotPermittedError",
   // A record naming a field longer than the column it would be filed in. Its
   // own class because it is about the evidence rather than about the store:

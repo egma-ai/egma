@@ -1,12 +1,12 @@
 /**
- * Minting the key a monitored worker exports with.
+ * Project keys used by monitored workers.
  *
- * One operation, and one rule around it: the secret exists once, in the answer
- * to the mint, and the only place it is written down is the file the developer
- * agreed to. It is never the terminal's own login credential — that one is this
- * machine's identity, and a worker in a deployment holding it would be that
- * machine everywhere, with nothing to revoke that does not also sign this
- * laptop out.
+ * Minting returns the secret once, and the only place it is written down is
+ * the file the developer agreed to. The mint also binds the key's non-secret
+ * id to the stable agent id, which is what makes a failed local write
+ * recoverable without trusting a display name. The worker never receives the
+ * terminal's own login credential — that one is this machine's identity, and
+ * revoking it would also sign this laptop out.
  *
  * The key is scoped by naming a project. There is no scope field to send: the
  * request names the project and the scope is derived, which is what makes a
@@ -72,6 +72,7 @@ export type MintedKey = {
 
 export type Minted =
   | { readonly kind: "minted"; readonly key: MintedKey }
+  | { readonly kind: "already-bound" }
   | CommonFailure;
 
 /**
@@ -82,13 +83,34 @@ export type Minted =
  * rather than when it was made.
  */
 export async function mintProjectKey(
-  input: { readonly name: string; readonly projectId: string },
+  input: {
+    readonly name: string;
+    readonly projectId: string;
+    readonly monitoringAgentId: string;
+  },
   options: RegisterOptions,
 ): Promise<Minted> {
   const answer = await createApiKeyRequest(
-    { name: input.name, projectId: input.projectId },
+    {
+      name: input.name,
+      projectId: input.projectId,
+      monitoringAgentId: input.monitoringAgentId,
+    },
     requestOptions(options),
   );
+
+  const errorCode =
+    typeof answer.error === "object" &&
+    answer.error !== null &&
+    "error" in answer.error
+      ? platformText(answer.error.error)
+      : "";
+  if (
+    answer.response?.status === 409 &&
+    errorCode === "monitoring_key_already_bound"
+  ) {
+    return { kind: "already-bound" };
+  }
 
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;

@@ -107,6 +107,11 @@ const EVERY_ENDING: readonly ExitReport[] = [
     platformUrl: null,
   },
   {
+    kind: "monitoring-already-configured",
+    agentName: "front-desk",
+    platformUrl: "https://egma.example",
+  },
+  {
     kind: "monitoring-record-failed",
     receipt: [
       "agent_id: agt_01K",
@@ -306,6 +311,16 @@ describe("the exit line", () => {
     });
     expect(refused).toContain(lines[1]);
     expect(refused).toContain("Git does not ignore .env here.");
+  });
+
+  it("says an existing LiveKit setup was kept unchanged", () => {
+    const line = buildExitLine({
+      kind: "monitoring-already-configured",
+      agentName: "front-desk",
+      platformUrl: "https://egma.example",
+    });
+    expect(line).toContain("already pushes its production evidence");
+    expect(line).toContain("No key or environment file changed");
   });
 
   it("prints a partial-success receipt before its failure and safe recovery", () => {

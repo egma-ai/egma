@@ -151,6 +151,12 @@ export type ExitReport =
       readonly wired: boolean;
       readonly platformUrl: string | null;
     }
+  /** A repeated LiveKit setup kept the existing working key and environment. */
+  | {
+      readonly kind: "monitoring-already-configured";
+      readonly agentName: string;
+      readonly platformUrl: string | null;
+    }
   /**
    * Remote monitoring setup finished, but its committed repository record did
    * not. The receipt comes first so no later failure can hide the stable agent
@@ -337,6 +343,11 @@ export function buildExitLine(report: ExitReport): string {
           : `Egma put the two lines in ${report.envFile}, and they are below for wherever this worker really runs.`;
       return `${wired} ${where} ${monitoringPointer(report.platformUrl)}`;
     }
+    case "monitoring-already-configured":
+      return (
+        `✓ ${report.agentName} already pushes its production evidence to Egma. ` +
+        `No key or environment file changed. ${monitoringPointer(report.platformUrl)}`
+      );
     case "monitoring-record-failed":
       return `Egma could not record the completed monitoring setup: ${oneLine(report.reason)}`;
     case "monitoring-refused":

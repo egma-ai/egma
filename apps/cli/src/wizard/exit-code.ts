@@ -40,6 +40,8 @@ export function walkExitCode(report: ExitReport): number {
     // The worker is wired and the two lines are on the screen. Nothing waits,
     // because push is observed rather than declared.
     case "monitoring-wired":
+    // A repeated setup kept the working monitoring identity unchanged.
+    case "monitoring-already-configured":
       return 0;
     case "interrupted":
       return 130;

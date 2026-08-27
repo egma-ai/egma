@@ -22,6 +22,7 @@ const agent = {
     platformAgentId: nullable({ type: "string" }),
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
+    monitoringExportApiKeyId: nullable(stringIdSchema),
     pullProductionCalls: { type: "boolean" },
     /**
      * When a production call last arrived for this agent, or null while none
@@ -43,6 +44,7 @@ const agent = {
     "platformAgentId",
     "monitoringKeyPresent",
     "monitoringApiKeyHint",
+    "monitoringExportApiKeyId",
     "pullProductionCalls",
     "lastReceivedAt",
     "archived",

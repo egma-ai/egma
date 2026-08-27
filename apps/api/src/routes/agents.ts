@@ -885,6 +885,7 @@ function describedAgent(one: Agent): Record<string, unknown> {
     platformAgentId: one.platformAgentId,
     monitoringKeyPresent: one.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: one.monitoringApiKeyHint,
+    monitoringExportApiKeyId: one.monitoringExportApiKeyId,
     pullProductionCalls: one.pullProductionCalls,
     // Whether it pulls and when it last received: the two monitoring facts an
     // agent states about itself, and never a condition word beside them.

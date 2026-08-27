@@ -680,6 +680,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -725,6 +736,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -937,6 +949,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -982,6 +1005,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -1340,6 +1364,17 @@
                               }
                             ]
                           },
+                          "monitoringExportApiKeyId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "pullProductionCalls": {
                             "type": "boolean"
                           },
@@ -1522,6 +1557,7 @@
                           "platformAgentId",
                           "monitoringKeyPresent",
                           "monitoringApiKeyHint",
+                          "monitoringExportApiKeyId",
                           "pullProductionCalls",
                           "lastReceivedAt",
                           "archived",
@@ -1711,6 +1747,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -1756,6 +1803,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -2075,6 +2123,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -2120,6 +2179,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -2712,6 +2772,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -2757,6 +2828,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -2983,6 +3055,17 @@
                             }
                           ]
                         },
+                        "monitoringExportApiKeyId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
@@ -3028,6 +3111,7 @@
                         "platformAgentId",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
+                        "monitoringExportApiKeyId",
                         "pullProductionCalls",
                         "lastReceivedAt",
                         "archived",
@@ -4545,6 +4629,17 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "monitoringAgentId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -4681,6 +4776,16 @@
             }
           },
           "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {

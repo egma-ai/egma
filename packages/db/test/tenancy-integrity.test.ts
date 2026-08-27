@@ -77,6 +77,37 @@ async function insertApiKey(
   );
 }
 
+async function rawProjectKey(
+  organizationId: string,
+  projectId: string,
+  createdBy: string,
+): Promise<string> {
+  const id = newId("key");
+  await database.sql(
+    `insert into api_key
+       (id, organization_id, project_id, scope, hash, prefix, display_suffix, created_by_user_id)
+     values ($1, $2, $3, 'project', $4, 'egma_sk_', 'wxyz', $5)`,
+    [id, organizationId, projectId, newId("key"), createdBy],
+  );
+  return id;
+}
+
+async function rawAgent(
+  organizationId: string,
+  projectId: string,
+  createdBy: string,
+  platform: "livekit" | "retell",
+): Promise<string> {
+  const id = newId("agt");
+  await database.sql(
+    `insert into agent
+       (id, organization_id, project_id, name, agent_platform, created_by)
+     values ($1, $2, $3, $4, $5, $6)`,
+    [id, organizationId, projectId, id, platform, createdBy],
+  );
+  return id;
+}
+
 describe("pairing one customer with another customer's project", () => {
   it("is refused by Postgres, not by the application", async () => {
     await expect(
@@ -239,6 +270,101 @@ describe("belonging to an organization", () => {
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+});
+
+describe("binding a LiveKit monitoring export key", () => {
+  it("refuses a key from another project and customer", async () => {
+    const acmeAgent = await rawAgent(
+      acme.id,
+      acmeProject.id,
+      ada.id,
+      "livekit",
+    );
+    const globexKey = await rawProjectKey(
+      globex.id,
+      globexProject.id,
+      grace.id,
+    );
+
+    await expect(
+      database.sql(
+        "update agent set monitoring_export_api_key_id = $1 where id = $2",
+        [globexKey, acmeAgent],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("allows LiveKit and refuses the same pointer on Retell", async () => {
+    const acmeKey = await rawProjectKey(acme.id, acmeProject.id, ada.id);
+    const retellAgent = await rawAgent(
+      acme.id,
+      acmeProject.id,
+      ada.id,
+      "retell",
+    );
+    const globexKey = await rawProjectKey(
+      globex.id,
+      globexProject.id,
+      grace.id,
+    );
+    const globexAgent = await rawAgent(
+      globex.id,
+      globexProject.id,
+      grace.id,
+      "livekit",
+    );
+
+    await expect(
+      database.sql(
+        "update agent set monitoring_export_api_key_id = $1 where id = $2",
+        [globexKey, globexAgent],
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      database.sql(
+        "update agent set monitoring_export_api_key_id = $1 where id = $2",
+        [acmeKey, retellAgent],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("allows one key on one agent and refuses it on a second", async () => {
+    const acmeKey = await rawProjectKey(acme.id, acmeProject.id, ada.id);
+    const first = await rawAgent(acme.id, acmeProject.id, ada.id, "livekit");
+    const second = await rawAgent(acme.id, acmeProject.id, ada.id, "livekit");
+    const globexKey = await rawProjectKey(
+      globex.id,
+      globexProject.id,
+      grace.id,
+    );
+    const globexAgent = await rawAgent(
+      globex.id,
+      globexProject.id,
+      grace.id,
+      "livekit",
+    );
+
+    await database.sql(
+      "update agent set monitoring_export_api_key_id = $1 where id = $2",
+      [acmeKey, first],
+    );
+    await database.sql(
+      "update agent set monitoring_export_api_key_id = $1 where id = $2",
+      [globexKey, globexAgent],
+    );
+    await expect(
+      database.sql(
+        "update agent set monitoring_export_api_key_id = $1 where id = $2",
+        [acmeKey, second],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
     );
   });
 });

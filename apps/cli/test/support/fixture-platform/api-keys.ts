@@ -22,17 +22,30 @@ export type MintedKey = {
   readonly projectId: string | null;
   /** The secret, kept so a check can prove where it did and did not land. */
   readonly secret: string;
+  revokedAt: string | null;
 };
 
 export type ApiKeyControls = {
   /** Every key minted through the API, oldest first. */
   readonly minted: readonly MintedKey[];
+  revoke(apiKeyId: string): void;
 };
 
 export function apiKeyRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
   /** Adds a minted secret to the keys this instance will authorize. */
   readonly accept: (key: string) => void;
+  /** Removes a revoked secret from the keys this instance will authorize. */
+  readonly reject: (key: string) => void;
+  readonly bindMonitoringExportKey: (
+    agentId: string,
+    projectId: string,
+    apiKeyId: string,
+  ) =>
+    | { readonly kind: "bound"; readonly previous: string | null }
+    | { readonly kind: "already-bound"; readonly apiKeyId: string }
+    | undefined;
+  readonly unbindMonitoringExportKey: (apiKeyId: string) => void;
   readonly organizationId: string;
   readonly projectId: string;
 }): { readonly group: RouteGroup; readonly controls: ApiKeyControls } {
@@ -80,7 +93,46 @@ export function apiKeyRoutes(options: {
             scope: named === null ? "organization" : "project",
             projectId: named,
             secret,
+            revokedAt: null,
           };
+          const monitoringAgentId = given(text(body["monitoringAgentId"])) ?? null;
+          if (monitoringAgentId !== null) {
+            if (named === null) {
+              return {
+                status: 422,
+                body: {
+                  error: "invalid_monitoring_agent",
+                  message:
+                    "monitoringAgentId must name a living LiveKit agent in the key's project",
+                },
+              };
+            }
+            const binding = options.bindMonitoringExportKey(
+              monitoringAgentId,
+              named,
+              key.id,
+            );
+            if (binding === undefined) {
+              return {
+                status: 422,
+                body: {
+                  error: "invalid_monitoring_agent",
+                  message:
+                    "monitoringAgentId must name a living LiveKit agent in the key's project",
+                },
+              };
+            }
+            if (binding.kind === "already-bound") {
+              return {
+                status: 409,
+                body: {
+                  error: "monitoring_key_already_bound",
+                  message:
+                    "this LiveKit agent already has an active monitoring key; no key was rotated",
+                },
+              };
+            }
+          }
           minted.push(key);
           options.accept(secret);
 
@@ -105,5 +157,17 @@ export function apiKeyRoutes(options: {
     ],
   };
 
-  return { group, controls: { minted } };
+  return {
+    group,
+    controls: {
+      minted,
+      revoke(apiKeyId) {
+        const held = minted.find((key) => key.id === apiKeyId);
+        if (held === undefined || held.revokedAt !== null) return;
+        held.revokedAt = new Date().toISOString();
+        options.reject(held.secret);
+        options.unbindMonitoringExportKey(apiKeyId);
+      },
+    },
+  };
 }

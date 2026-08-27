@@ -85,6 +85,7 @@ export const apiKeyOperations = {
         properties: {
           name: { type: "string" },
           projectId: nullable(stringIdSchema),
+          monitoringAgentId: nullable(stringIdSchema),
         },
         additionalProperties: false,
       },
@@ -110,6 +111,7 @@ export const apiKeyOperations = {
       400: refusalResponse,
       401: refusalResponse,
       403: refusalResponse,
+      409: refusalResponse,
       422: refusalResponse,
       429: rateLimitResponse,
     },

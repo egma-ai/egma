@@ -24,6 +24,36 @@ export class ProjectOutsideOrganizationError extends Error {
     this.projectId = projectId;
   }
 }
+
+/** A project key tried to bind monitoring to no living LiveKit agent there. */
+export class MonitoringAgentUnavailableError extends Error {
+  readonly agentId: string;
+  readonly projectId: string | null;
+
+  constructor(agentId: string, projectId: string | null) {
+    super(
+      projectId === null
+        ? "a monitoring export key must name the LiveKit agent's project"
+        : `agent ${agentId} is not a living LiveKit agent in project ${projectId}`,
+    );
+    this.name = "MonitoringAgentUnavailableError";
+    this.agentId = agentId;
+    this.projectId = projectId;
+  }
+}
+
+/** Ordinary enable found a working exporter and must not rotate it silently. */
+export class MonitoringExportKeyAlreadyBoundError extends Error {
+  readonly agentId: string;
+  readonly apiKeyId: string;
+
+  constructor(agentId: string, apiKeyId: string) {
+    super(`agent ${agentId} already has active monitoring key ${apiKeyId}`);
+    this.name = "MonitoringExportKeyAlreadyBoundError";
+    this.agentId = agentId;
+    this.apiKeyId = apiKeyId;
+  }
+}
 /**
  * The agent factory turned a write away, and which rule turned it away is
  * carried beside the sentence rather than hidden inside it.

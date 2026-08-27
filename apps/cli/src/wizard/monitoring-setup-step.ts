@@ -68,6 +68,8 @@ export type MonitoringSetupOptions = {
   readonly facts: Facts;
   /** The name settled by the one worker-integration owner, when it found one. */
   readonly integratedAgentName: string | null;
+  /** The stable agent already committed for this worker, when there is one. */
+  readonly configuredAgentId: string | null;
   /** Whether the requested worker integration was verified before setup. */
   readonly workerWired: boolean;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
@@ -102,6 +104,8 @@ export type MonitoringSetup = {
     readonly retellKey: RetellKey | null;
     /** The platform agent already chosen, so no second picker is drawn. */
     readonly platformAgentId: string | null;
+    /** LiveKit's non-secret project-key id, for record-only recovery. */
+    readonly monitoringKeyId: string | null;
   } | null;
 };
 
@@ -258,6 +262,7 @@ async function watchOnRetell(
       projectId: outcome.projectId,
       retellKey: pasted,
       platformAgentId: outcome.platformAgentId,
+      monitoringKeyId: null,
     },
   };
 }
@@ -278,6 +283,7 @@ async function pushFromLiveKit(
     platform: access,
     cwd: options.cwd,
     signal,
+    agentId: options.configuredAgentId,
     agentName:
       options.integratedAgentName ??
       options.facts.get("agent-name") ??
@@ -288,6 +294,24 @@ async function pushFromLiveKit(
 
   if (wired.kind === "interrupted") {
     return { report: stopReport(signal, null), monitored: null };
+  }
+  if (wired.kind === "already-configured") {
+    ui.pushStatus(`${DETAIL_MARK} ${wired.reason}`);
+    return {
+      report: {
+        kind: "monitoring-already-configured",
+        agentName: wired.agent.name,
+        platformUrl: options.platform.url,
+      },
+      monitored: {
+        agentId: wired.agent.id,
+        agentName: wired.agent.name,
+        projectId: wired.agent.projectId,
+        retellKey: null,
+        platformAgentId: null,
+        monitoringKeyId: wired.keyId,
+      },
+    };
   }
   if (wired.kind === "failed") {
     return ending(wired.reason);
@@ -312,6 +336,7 @@ async function pushFromLiveKit(
       projectId: wired.agent.projectId,
       retellKey: null,
       platformAgentId: null,
+      monitoringKeyId: wired.keyId,
     },
   };
 }

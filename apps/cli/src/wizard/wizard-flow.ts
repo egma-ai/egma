@@ -34,7 +34,7 @@ import {
   type InstalledCodingAgent,
 } from "../acp/coding-agents.ts";
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
-import { folderPathsIn } from "../folder/egma-folder.ts";
+import { folderPathsIn, readConfig } from "../folder/egma-folder.ts";
 import {
   startLocalLiveKitWorker,
   type LocalLiveKitWorker,
@@ -440,16 +440,73 @@ function monitoringRecordFailure(
           "pull_production_calls: on",
         ]),
     ...(setUp.report.kind === "monitoring-wired" ? setUp.report.lines : []),
+    ...(monitored.monitoringKeyId === null
+      ? []
+      : [`monitoring_key_id: ${monitored.monitoringKeyId}`]),
     "status: repository-record-failed",
   ];
+  const recoveryProof =
+    monitored.monitoringKeyId === null
+      ? ""
+      : ` --monitoring-key-id ${monitored.monitoringKeyId}`;
   return {
     kind: "monitoring-record-failed",
     receipt,
     reason:
       `remote monitoring is ready for agent ${monitored.agentId}, but ${failure.detail} The remote setup remains active. ` +
-      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId} --url ${platformUrl}. ` +
+      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId}${recoveryProof} --url ${platformUrl}. ` +
       "That recovery command does not create an agent or mint a key.",
   };
+}
+
+type ConfiguredMonitoringAgent =
+  | { readonly kind: "found"; readonly id: string }
+  | { readonly kind: "none" }
+  | { readonly kind: "failed"; readonly reason: string };
+
+/**
+ * Resolve monitoring identity without treating a model-written display name
+ * as a stable key. One committed agent is unambiguous; several require an
+ * explicit stable id outside this promptless wizard.
+ */
+async function configuredMonitoringAgent(
+  cwd: string,
+  platformUrl: string,
+): Promise<ConfiguredMonitoringAgent> {
+  let config: Awaited<ReturnType<typeof readConfig>>;
+  try {
+    config = await readConfig(folderPathsIn(cwd).config);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return { kind: "none" };
+    return {
+      kind: "failed",
+      reason:
+        `Egma could not read egma/config.yaml before monitoring setup: ${cause instanceof Error ? cause.message : String(cause)} ` +
+        "Egma did not create an agent or mint a key.",
+    };
+  }
+
+  if (config.platform !== null && config.platform.origin !== platformUrl) {
+    return {
+      kind: "failed",
+      reason:
+        `This repository records the Egma platform at ${config.platform.origin}, but this run selected ${platformUrl}. ` +
+        "Egma did not create an agent or mint a key.",
+    };
+  }
+
+  if (config.agents.length === 1) {
+    return { kind: "found", id: config.agents[0]!.id };
+  }
+  if (config.agents.length > 1) {
+    return {
+      kind: "failed",
+      reason:
+        `egma/config.yaml names ${String(config.agents.length)} agents, so the wizard cannot safely choose one from a coding agent's display name. ` +
+        "Use a stable agent id with egma monitoring enable --agent <id>. Egma did not create an agent or mint a key.",
+    };
+  }
+  return { kind: "none" };
 }
 
 /** The wizard work that shares one coding-agent process and ACP session. */
@@ -563,6 +620,15 @@ async function runWizardWithAgent(
    */
   let monitored: MonitoringSetup["monitored"] = null;
   if (goal !== "testing") {
+    const configured =
+      agentPlatform === "livekit"
+        ? await configuredMonitoringAgent(cwd, platform.url)
+        : ({ kind: "none" } as const);
+    if (configured.kind === "failed") {
+      const report: ExitReport = { kind: "failed", reason: configured.reason };
+      ui.setExit(report);
+      return report;
+    }
     const setUp = await monitoringSetupStep({
       ui,
       platform,
@@ -572,6 +638,7 @@ async function runWizardWithAgent(
       goal,
       facts: found.facts,
       integratedAgentName: workerIntegration?.agentName ?? null,
+      configuredAgentId: configured.kind === "found" ? configured.id : null,
       workerWired: workerIntegration?.entry !== null,
       ...(options.connectionFetchImpl === undefined
         ? {}

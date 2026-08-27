@@ -28,6 +28,8 @@ export {
   IdentityConflictError,
   LastAdminError,
   MockToolTakenError,
+  MonitoringAgentUnavailableError,
+  MonitoringExportKeyAlreadyBoundError,
   NotPermittedError,
   OversizeRecordError,
   PersonaNameAmbiguousError,

@@ -122,6 +122,10 @@ export type AgentMonitoring = {
   /** Which platform runs this agent, or `null` while nobody has bound it. */
   readonly agentPlatform: string | null;
   readonly platformAgentId: string | null;
+  /** Whether the platform holds the sealed monitoring key, never the key itself. */
+  readonly monitoringKeyPresent: boolean;
+  /** The active Egma project key bound to LiveKit monitoring, or `null`. */
+  readonly monitoringExportApiKeyId: string | null;
   /** The last characters of the sealed monitoring key, or `null`. */
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
@@ -338,6 +342,11 @@ export async function readAgentMonitoring(
         agent.agentPlatform === null ? null : platformText(agent.agentPlatform),
       platformAgentId:
         agent.platformAgentId === null ? null : platformText(agent.platformAgentId),
+      monitoringKeyPresent: agent.monitoringKeyPresent,
+      monitoringExportApiKeyId:
+        agent.monitoringExportApiKeyId === null
+          ? null
+          : platformText(agent.monitoringExportApiKeyId) || null,
       monitoringApiKeyHint:
         agent.monitoringApiKeyHint === null
           ? null

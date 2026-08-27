@@ -69,6 +69,8 @@ export type DeviceControls = {
    * from a machine that is already signed in rather than from a login.
    */
   accept(key: string): void;
+  /** Stop accepting a key immediately, as production revocation does. */
+  reject(key: string): void;
   deny(code: string): boolean;
   /** What time passing does. */
   expire(code: string): boolean;
@@ -274,6 +276,10 @@ export function deviceRoutes(origin: () => string): {
       },
       accept(key) {
         if (!keys.includes(key)) keys.push(key);
+      },
+      reject(key) {
+        const at = keys.indexOf(key);
+        if (at >= 0) keys.splice(at, 1);
       },
       deny(code) {
         const authorization = find(code);

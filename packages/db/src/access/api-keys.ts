@@ -2,15 +2,20 @@ import { newId } from "@egma/ids";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { agent } from "../schema/agents.ts";
 import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
-import { ProjectOutsideOrganizationError } from "./errors.ts";
-import { membershipsOf } from "./memberships.ts";
+import {
+  MonitoringAgentUnavailableError,
+  MonitoringExportKeyAlreadyBoundError,
+  ProjectOutsideOrganizationError,
+} from "./errors.ts";
+import { ingestCapableApiKeyId, membershipsOf } from "./memberships.ts";
 import { authorize, here, permitsApiKeyMintedBy } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { within } from "./within.ts";
+import { inActingProject, within } from "./within.ts";
 
 /**
  * An API key as anyone is ever allowed to see it again. The hash never leaves
@@ -93,6 +98,8 @@ export type NewApiKey = {
   readonly name?: string | null;
   /** Absent means an organization-scoped key. */
   readonly projectId?: string | null;
+  /** Bind this project key as the current LiveKit monitoring exporter. */
+  readonly monitoringAgentId?: string | null;
 };
 
 /**
@@ -103,6 +110,13 @@ export type NewApiKey = {
  * A project id may be named — the device-approval page is where a person picks
  * which project their terminal is authorized for — and a project belonging to
  * another customer is refused here, before the insert is attempted.
+ *
+ * A monitoring key is different from an ordinary key only at creation time.
+ * Its non-secret id is bound to one immutable LiveKit agent id. Ordinary
+ * enable is create-only: if that agent already has a credential that can
+ * ingest, this write refuses before minting or revoking anything. A stale
+ * pointer to a revoked or no-longer-authorized key is retired before its safe
+ * replacement is bound.
  */
 export async function createApiKey(
   auth: AuthContext,
@@ -114,23 +128,95 @@ export async function createApiKey(
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  const [row] = await db()
-    .insert(apiKey)
-    .values({
-      id: newId("key"),
-      organizationId: auth.organizationId,
-      projectId,
-      scope: projectId === null ? "organization" : "project",
-      hash: input.hash,
-      prefix: input.prefix,
-      displaySuffix: input.displaySuffix,
-      name: input.name ?? null,
-      createdByUserId: auth.userId,
-    })
-    .returning(COLUMNS);
+  const writeKey = async (queryable: Queryable): Promise<ApiKey> => {
+    const [row] = await queryable
+      .insert(apiKey)
+      .values({
+        id: newId("key"),
+        organizationId: auth.organizationId,
+        projectId,
+        scope: projectId === null ? "organization" : "project",
+        hash: input.hash,
+        prefix: input.prefix,
+        displaySuffix: input.displaySuffix,
+        name: input.name ?? null,
+        createdByUserId: auth.userId,
+      })
+      .returning(COLUMNS);
 
-  if (row === undefined) throw new Error("the api key was not written");
-  return row;
+    if (row === undefined) throw new Error("the api key was not written");
+    return row;
+  };
+
+  const monitoringAgentId = input.monitoringAgentId?.trim() || null;
+  if (monitoringAgentId === null) return writeKey(db());
+  authorize(auth, "configure_monitoring", here(auth));
+  if (projectId === null) {
+    throw new MonitoringAgentUnavailableError(monitoringAgentId, null);
+  }
+
+  return db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({
+        id: agent.id,
+        monitoringExportApiKeyId: agent.monitoringExportApiKeyId,
+        activeMonitoringExportApiKeyId: ingestCapableApiKeyId(
+          agent,
+          agent.monitoringExportApiKeyId,
+        ),
+      })
+      .from(agent)
+      .where(
+        within(
+          auth,
+          agent,
+          and(
+            inActingProject(auth, agent),
+            eq(agent.id, monitoringAgentId),
+            eq(agent.projectId, projectId),
+            eq(agent.agentPlatform, "livekit"),
+            isNull(agent.archivedAt),
+          ),
+        ),
+      )
+      .for("update");
+
+    if (held === undefined) {
+      throw new MonitoringAgentUnavailableError(monitoringAgentId, projectId);
+    }
+
+    if (held.activeMonitoringExportApiKeyId !== null) {
+      throw new MonitoringExportKeyAlreadyBoundError(
+        held.id,
+        held.activeMonitoringExportApiKeyId,
+      );
+    }
+
+    const now = new Date();
+    if (held.monitoringExportApiKeyId !== null) {
+      await tx
+        .update(apiKey)
+        .set({ revokedAt: now, updatedAt: now })
+        .where(
+          within(
+            auth,
+            apiKey,
+            and(
+              eq(apiKey.id, held.monitoringExportApiKeyId),
+              isNull(apiKey.revokedAt),
+            ),
+          ),
+        );
+    }
+
+    const row = await writeKey(tx);
+    await tx
+      .update(agent)
+      .set({ monitoringExportApiKeyId: row.id, updatedAt: now })
+      .where(within(auth, agent, eq(agent.id, held.id)));
+
+    return row;
+  });
 }
 
 /**

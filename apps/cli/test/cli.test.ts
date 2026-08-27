@@ -107,6 +107,8 @@ describe("the egma command", () => {
     expect(help.stdout).not.toContain("--suite");
     expect(help.stdout).toContain("--no-follow");
     expect(help.stdout).toContain("What egma run answers with:");
+    expect(help.stdout).toContain("monitoring_key_id");
+    expect(help.stdout).toContain("9 remote monitoring is ready");
     expect(help.stdout).toContain("egma self-host up");
     expect(help.stdout).not.toContain("--replace-carrier");
     expect(help.stdout).not.toContain("Twilio Auth Token");

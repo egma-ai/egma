@@ -2,6 +2,8 @@ import {
   authorize,
   createApiKey,
   listApiKeys,
+  MonitoringAgentUnavailableError,
+  MonitoringExportKeyAlreadyBoundError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   revokeApiKey,
@@ -121,6 +123,7 @@ export async function apiKeyRoutes(
           displaySuffix: minted.displaySuffix,
           name: text(body.name) || null,
           projectId,
+          monitoringAgentId: text(body.monitoringAgentId) || null,
         });
       } catch (cause) {
         if (cause instanceof ProjectOutsideOrganizationError) {
@@ -130,6 +133,20 @@ export async function apiKeyRoutes(
               "that project belongs to a different organization, and the " +
               "organization on a key comes from the credential rather than " +
               "from the request",
+          });
+        }
+        if (cause instanceof MonitoringAgentUnavailableError) {
+          return reply.code(422).send({
+            error: "invalid_monitoring_agent",
+            message:
+              "monitoringAgentId must name a living LiveKit agent in the key's project",
+          });
+        }
+        if (cause instanceof MonitoringExportKeyAlreadyBoundError) {
+          return reply.code(409).send({
+            error: "monitoring_key_already_bound",
+            message:
+              "this LiveKit agent already has an active monitoring key; no key was rotated",
           });
         }
         throw cause;

@@ -157,6 +157,8 @@ export type Invocation = {
   readonly platformWord: string | null;
   /** `--platform-agent`: which agent on the account to watch. */
   readonly platformAgentId: string | null;
+  /** The non-secret LiveKit project-key id from a failed monitoring receipt. */
+  readonly monitoringKeyId: string | null;
   /** A direct child under `egma/tests`, for suite create or run. */
   readonly suiteDirectory: string | null;
   /** Mutable suite display name on create, or optional run name. */
@@ -195,6 +197,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let monitoringAction: string | null = null;
   let platformWord: string | null = null;
   let platformAgentId: string | null = null;
+  let monitoringKeyId: string | null = null;
   let suiteDirectory: string | null = null;
   let name: string | null = null;
   let drivenAgentCommand: string[] = [];
@@ -230,6 +233,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--name") name = argv[(index += 1)] ?? null;
     else if (argument === "--platform") platformWord = argv[(index += 1)] ?? null;
     else if (argument === "--platform-agent") platformAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--monitoring-key-id") {
+      monitoringKeyId = argv[(index += 1)] ?? null;
+    }
     else if (verb === null && isVerb(argument)) verb = argument;
     else if (verb === "suite" && suiteAction === null) suiteAction = argument;
     else if (verb === "monitoring" && monitoringAction === null) {
@@ -266,6 +272,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
     monitoringAction,
     platformWord,
     platformAgentId,
+    monitoringKeyId,
     suiteDirectory,
     name,
     drivenAgentCommand,
@@ -309,7 +316,7 @@ export function helpText(): string {
     "                           when a production conversation last arrived. It",
     "                           is where arrivals are read: enable asks once and",
     "                           does not wait.",
-    "  egma monitoring record --agent <id>",
+    "  egma monitoring record --agent <id> [--monitoring-key-id <id>]",
     "                           Recover only the repository record after a",
     "                           completed remote setup could not write it.",
     "",
@@ -371,6 +378,9 @@ export function helpText(): string {
     "  --platform-agent <id>",
     "                       With monitoring enable on Retell: which agent on the",
     "                       account to watch, when it holds more than one.",
+    "  --monitoring-key-id <id>",
+    "                       With LiveKit monitoring record: the non-secret key",
+    "                       id printed in the failed setup receipt.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -446,7 +456,8 @@ export function helpText(): string {
     "What egma monitoring prints, one fact per line:",
     "  url, agent_name, platform, then either the agent it is now watching",
     "  (agent_id, platform_agent_id, agent_registration, pull_production_calls,",
-    "  first_conversation) or, on LiveKit, what it wired (api_key, env_file, one",
+    "  first_conversation) or, on LiveKit, what it wired (monitoring_key_id,",
+    "  api_key, env_file, one",
     "  env: line per environment line). status and disable print pull_production_calls,",
     "  agent_platform, platform_agent_id, monitoring_key and last_received_at.",
     "  A refusal adds refusal: with the reason and one reason: line per sentence.",
@@ -458,6 +469,7 @@ export function helpText(): string {
     "  5 a choice only you can make was not made: which platform, or which agent",
     "  6 no key given   7 not signed in to Egma",
     "  8 Egma would not start watching, and said which rule refused it",
+    "  9 remote monitoring is ready, but its repository record did not finish",
     "  130 stopped part way",
     "",
     "What egma run answers with:",
@@ -786,6 +798,7 @@ async function runMonitoring(
       agent: invocation.agentName,
       platform: invocation.platformWord,
       platformAgentId: invocation.platformAgentId,
+      monitoringKeyId: invocation.monitoringKeyId,
       name: invocation.name,
       signal: controller.signal,
       stdin: process.stdin,

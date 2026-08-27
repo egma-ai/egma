@@ -24,6 +24,7 @@ import {
   EMPTY_CONFIG,
   folderPathsIn,
   readConfig,
+  writeConfig,
 } from "../src/folder/egma-folder.ts";
 import { walkExitCode } from "../src/wizard/exit-code.ts";
 import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
@@ -278,6 +279,19 @@ function appliesLateMonitorEntry(): FakeStep[] {
     { kind: "write-file", path: "agent.py", content: WORKER_MONITORING_LATE },
     { kind: "say", text: "egma:found worker-entry agent.py\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** Report a worker that was already integrated, without editing it again. */
+function reportsIntegratedWorker(agentName = "front-desk"): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    {
+      kind: "say",
+      text: "egma:found dependency-manifest requirements.txt\n",
+    },
+    { kind: "say", text: `egma:found agent-name ${agentName}\n` },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -714,6 +728,145 @@ describe("choosing monitoring on LiveKit", () => {
     expect(buildExitLine(report)).toContain("Monitoring page");
   });
 
+  it("keeps monitoring unchanged and continues into testing on a second Both walk", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const firstAgent = platform.registered.agents[0];
+    const firstKey = platform.keys.minted[0];
+    const firstEnvironment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+
+    const second = await walk({
+      goal: "both",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: appliesBothEntries(),
+        },
+        { contains: MOCK_AUTHORING_TASK, steps: writesNoMockedWorld() },
+        {
+          contains: GENERATE_TASK,
+          steps: writesOneTest("second-walk", "front-desk-tests"),
+        },
+      ],
+      answers: {
+        "connection:variant": "livekit_room.project_credentials",
+        "connection:config:url": "wss://acme.livekit.cloud",
+        "connection:credentials:apiKey": LIVEKIT_API_KEY,
+        "connection:credentials:apiSecret": LIVEKIT_API_SECRET,
+      },
+    });
+
+    expect(second.report.kind, JSON.stringify(second.report)).toBe("run-started");
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toEqual([firstKey]);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      firstEnvironment,
+    );
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toEqual([
+      expect.objectContaining({ id: firstAgent?.id, name: "front-desk" }),
+    ]);
+    expect(platform.registered.agents.some((agent) => agent.name === "front-desk-2")).toBe(
+      false,
+    );
+    expect(platform.tests.tests).toHaveLength(1);
+    expect(platform.running.runs).toHaveLength(1);
+  });
+
+  it("uses the one committed stable id when the coding agent changes the display name", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const firstAgent = platform.registered.agents[0];
+    const firstKey = platform.keys.minted[0];
+    const firstEnvironment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+    const second = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker("Front Desk"),
+        },
+      ],
+    });
+
+    expect(second.report.kind).toBe("monitoring-already-configured");
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toEqual([firstKey]);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      firstEnvironment,
+    );
+  });
+
+  it("refuses to choose among committed agents from a coding-agent display name", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const first = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [{ contains: WORKER_INTEGRATION_TASK, steps: appliesMonitorEntry() }],
+    });
+    expect(first.report.kind).toBe("monitoring-wired");
+
+    const configFile = folderPathsIn(workspace.dir).config;
+    const config = await readConfig(configFile);
+    await writeConfig(configFile, {
+      ...config,
+      agents: [
+        ...config.agents,
+        { id: "agt_other", name: "other-agent", connections: [] },
+      ],
+    });
+    const firstAgent = platform.registered.agents[0];
+    const firstKey = platform.keys.minted[0];
+    const firstEnvironment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+
+    const second = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker("other-agent"),
+        },
+      ],
+    });
+
+    expect(second.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("names 2 agents"),
+    });
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toEqual([firstKey]);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      firstEnvironment,
+    );
+  });
+
   it("keeps the worker environment lines when the repository catalog cannot be written", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
     const unlock = await lockEgmaFolder();
@@ -735,6 +888,9 @@ describe("choosing monitoring on LiveKit", () => {
     expect(printed).toContain(`agent_id: ${platform.registered.agents[0]?.id ?? ""}`);
     expect(printed).toContain(`export EGMA_URL=${platform.url}`);
     expect(printed).toContain(`export EGMA_API_KEY=${platform.keys.minted[0]?.secret ?? ""}`);
+    expect(printed).toContain(
+      `monitoring_key_id: ${platform.keys.minted[0]?.id ?? ""}`,
+    );
     expect(printed).toContain("status: repository-record-failed");
     expect(printed).toContain(`url: ${platform.url}`);
     expect(lines.findIndex((line) => line.startsWith("export EGMA_API_KEY="))).toBeLessThan(
@@ -743,8 +899,37 @@ describe("choosing monitoring on LiveKit", () => {
     expect(printed).toContain(
       `egma monitoring record --agent ${platform.registered.agents[0]?.id ?? ""}`,
     );
+    expect(printed).toContain(
+      `--monitoring-key-id ${platform.keys.minted[0]?.id ?? ""}`,
+    );
     expect(printed).toContain(`--url ${platform.url}`);
     expect(platform.registered.agents).toHaveLength(1);
+
+    const firstAgent = platform.registered.agents[0];
+    const firstKey = platform.keys.minted[0];
+    const firstEnvironment = await readFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "utf8",
+    );
+    const retried = await walk({
+      goal: "monitoring",
+      steps: liveKitDiscovery(),
+      stepsByTask: [
+        {
+          contains: WORKER_INTEGRATION_TASK,
+          steps: reportsIntegratedWorker(),
+        },
+      ],
+    });
+    expect(retried.report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining("already uses the name"),
+    });
+    expect(platform.registered.agents).toEqual([firstAgent]);
+    expect(platform.keys.minted).toEqual([firstKey]);
+    await expect(readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).resolves.toBe(
+      firstEnvironment,
+    );
   });
 
   /**

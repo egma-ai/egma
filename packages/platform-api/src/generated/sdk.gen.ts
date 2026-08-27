@@ -493,8 +493,13 @@ export const listApiKeys = <ThrowOnError extends boolean = false>(options?: Opti
 export const createApiKey = <ThrowOnError extends boolean = false>(parameters?: {
     name?: string;
     projectId?: string | null;
+    monitoringAgentId?: string | null;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateApiKeyResponses, CreateApiKeyErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'body', key: 'name' }, { in: 'body', key: 'projectId' }] }]);
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'projectId' },
+                { in: 'body', key: 'monitoringAgentId' }
+            ] }]);
     return (options?.client ?? client).post<CreateApiKeyResponses, CreateApiKeyErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',

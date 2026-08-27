@@ -11,9 +11,10 @@
  * Nothing here flips a switch on the platform. Push is observed, never declared
  * (ADR-0015): the worker exports and the evidence is the whole record. What
  * this does write is the agent's identity in the roster, bound to LiveKit, so
- * the agent exists in Egma even though no switch says so — and nothing about
- * the key is kept on that row. The key lives in the customer's `.env` and in
- * Egma's own key records, which is where it is revoked from.
+ * the agent exists in Egma even though no switch says so. The agent row keeps
+ * only the non-secret id of its current monitoring key. The secret lives in
+ * the customer's `.env`; the full key record lives in Egma, where it can be
+ * rotated or revoked.
  */
 
 import {
@@ -27,9 +28,6 @@ import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.t
 
 /** The platform binding a LiveKit worker's agent row carries. */
 const LIVEKIT = "livekit";
-
-/** How many names are tried when a living agent already holds the first one. */
-const NAME_ATTEMPTS = 20;
 
 /**
  * What Egma calls the key it mints, so a person reading the key list a year
@@ -58,12 +56,20 @@ export type LiveKitWired = {
    * put in front of the developer and nowhere else.
    */
   readonly lines: readonly string[];
+  /** The non-secret stable id used to prove this exact key during recovery. */
+  readonly keyId: string;
   /** Enough to tell the minted key from another, and not enough to be one. */
   readonly keyLooksLike: string;
 };
 
 export type LiveKitOutcome =
   | LiveKitWired
+  | {
+      readonly kind: "already-configured";
+      readonly agent: RegisteredAgent;
+      readonly keyId: string;
+      readonly reason: string;
+    }
   | { readonly kind: "interrupted" }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -94,14 +100,19 @@ const NOT_SIGNED_IN =
  * The agent this repository's monitoring is about: the one it already has, or
  * a new platform-bound row.
  *
- * A name a living agent already holds is answered by trying the next one, the
- * same way connection setup does — the alternative is refusing a developer
- * whose repository is named after something ordinary.
+ * A taken name is refused. Inventing a suffixed name here would turn a retry
+ * after a partial local write into another agent, another key, and a rewritten
+ * environment for the same worker.
  */
 async function theAgent(
   options: LiveKitOptions,
 ): Promise<
-  | { readonly kind: "agent"; readonly agent: RegisteredAgent; readonly created: boolean }
+  | {
+      readonly kind: "agent";
+      readonly agent: RegisteredAgent;
+      readonly created: boolean;
+      readonly monitoringKeyId: string | null;
+    }
   | { readonly kind: "failed"; readonly reason: string }
 > {
   const held = options.agentId?.trim() ?? "";
@@ -117,6 +128,7 @@ async function theAgent(
             projectId: read.monitoring.projectId,
           },
           created: false,
+          monitoringKeyId: read.monitoring.monitoringExportApiKeyId,
         };
       case "not-found":
         return {
@@ -133,33 +145,34 @@ async function theAgent(
     }
   }
 
+  if (options.signal.aborted) return { kind: "failed", reason: "stopped" };
   const wanted = options.agentName.trim() || "voice-agent";
-  for (let attempt = 1; attempt <= NAME_ATTEMPTS; attempt += 1) {
-    if (options.signal.aborted) return { kind: "failed", reason: "stopped" };
-    const name = attempt === 1 ? wanted : `${wanted}-${attempt}`;
-    const written = await registerBoundAgent(
-      { name, agentPlatform: LIVEKIT },
-      options.platform,
-    );
-    switch (written.kind) {
-      case "registered":
-        return { kind: "agent", agent: written.agent, created: written.result === "created" };
-      case "name-taken":
-        continue;
-      case "not-authenticated":
-        return { kind: "failed", reason: NOT_SIGNED_IN };
-      case "refused":
-      case "unreachable":
-        return { kind: "failed", reason: written.reason };
-    }
+  const written = await registerBoundAgent(
+    { name: wanted, agentPlatform: LIVEKIT },
+    options.platform,
+  );
+  switch (written.kind) {
+    case "registered":
+      return {
+        kind: "agent",
+        agent: written.agent,
+        created: written.result === "created",
+        monitoringKeyId: null,
+      };
+    case "name-taken":
+      return {
+        kind: "failed",
+        reason:
+          `An Egma agent already uses the name ${JSON.stringify(wanted)}. ` +
+          "Egma did not create a second agent, mint a key, or change the environment. " +
+          "If this follows a repository-record failure, use the printed egma monitoring record command.",
+      };
+    case "not-authenticated":
+      return { kind: "failed", reason: NOT_SIGNED_IN };
+    case "refused":
+    case "unreachable":
+      return { kind: "failed", reason: written.reason };
   }
-
-  return {
-    kind: "failed",
-    reason:
-      `every name from "${wanted}" onwards is already taken in this project. ` +
-      "Rename one of them, then run this again.",
-  };
 }
 
 /**
@@ -181,9 +194,20 @@ export async function wireLiveKitMonitoring(
       ? { kind: "interrupted" }
       : { kind: "failed", reason: resolved.reason };
   }
-  const { agent, created } = resolved;
+  const { agent, created, monitoringKeyId } = resolved;
   if (created) {
     options.say(`${agent.name} is on Egma, bound to LiveKit Agents.`, "action");
+  }
+  if (monitoringKeyId !== null) {
+    return {
+      kind: "already-configured",
+      agent,
+      keyId: monitoringKeyId,
+      reason:
+        `LiveKit monitoring is already configured for ${agent.name}. ` +
+        "No key was rotated and no file was changed. Revoke the current " +
+        "monitoring key in Egma before running enable to replace it.",
+    };
   }
 
   /*
@@ -195,21 +219,46 @@ export async function wireLiveKitMonitoring(
    * this project, named for the job, and revocable on its own.
    */
   const minted = await mintProjectKey(
-    { name: monitoringKeyName(agent.name), projectId: agent.projectId },
+    {
+      name: monitoringKeyName(agent.name),
+      projectId: agent.projectId,
+      monitoringAgentId: agent.id,
+    },
     options.platform,
   );
-  if (options.signal.aborted) return { kind: "interrupted" };
 
   let key: MintedKey;
   switch (minted.kind) {
     case "minted":
       key = minted.key;
       break;
+    case "already-bound": {
+      const current = await readAgentMonitoring(agent.id, {
+        ...options.platform,
+        signal: undefined,
+      });
+      const keyId =
+        current.kind === "monitoring"
+          ? current.monitoring.monitoringExportApiKeyId
+          : null;
+      return {
+        kind: "already-configured",
+        agent,
+        keyId: keyId ?? "unknown",
+        reason:
+          `LiveKit monitoring became configured for ${agent.name} while this command was running. ` +
+          "No key was rotated and no file was changed.",
+      };
+    }
     case "not-authenticated":
-      return { kind: "failed", reason: NOT_SIGNED_IN };
+      return options.signal.aborted
+        ? { kind: "interrupted" }
+        : { kind: "failed", reason: NOT_SIGNED_IN };
     case "refused":
     case "unreachable":
-      return { kind: "failed", reason: minted.reason };
+      return options.signal.aborted
+        ? { kind: "interrupted" }
+        : { kind: "failed", reason: minted.reason };
   }
 
   const values = { url: options.platform.url, key: key.secret };
@@ -229,6 +278,7 @@ export async function wireLiveKitMonitoring(
     created,
     env,
     lines: exportLines(values),
+    keyId: key.id,
     keyLooksLike: key.looksLike,
   };
 }

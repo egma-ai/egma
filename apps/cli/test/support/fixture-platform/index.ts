@@ -133,6 +133,11 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     const apiKeyGroup = apiKeyRoutes({
       holdsKey,
       accept: (key) => device.accept(key),
+      reject: (key) => device.reject(key),
+      bindMonitoringExportKey: (agentId, keyProjectId, apiKeyId) =>
+        registered.bindMonitoringExportKey(agentId, keyProjectId, apiKeyId),
+      unbindMonitoringExportKey: (apiKeyId) =>
+        registered.unbindMonitoringExportKey(apiKeyId),
       organizationId,
       projectId,
     });

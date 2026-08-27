@@ -1,13 +1,23 @@
 import { newId } from "@egma/ids";
-import { and, count, eq, isNull, ne } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  getTableName,
+  isNull,
+  ne,
+  sql,
+  type SQL,
+} from "drizzle-orm";
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 
 import { db, type Queryable } from "../client.ts";
 import { user } from "../schema/identity.ts";
-import { membership } from "../schema/tenancy.ts";
+import { apiKey, membership } from "../schema/tenancy.ts";
 import { revokeApiKeysMintedBy } from "./api-keys.ts";
 import type { AuthContext, Role } from "./context.ts";
 import { LastAdminError } from "./errors.ts";
-import { authorize, here } from "./permissions.ts";
+import { authorize, here, rolesPermittedFor } from "./permissions.ts";
 import { within } from "./within.ts";
 
 /**
@@ -52,6 +62,40 @@ export type ResolvedMembership = Membership & {
    */
   readonly deactivatedAt: Date | null;
 };
+
+const INGEST_ROLES_SQL = sql.join(
+  rolesPermittedFor("ingest_traces").map((role) => sql`${role}`),
+  sql`, `,
+);
+
+/**
+ * A bound API key only while the credential can actually ingest now.
+ *
+ * Membership is read only in this module. This correlated subquery gives
+ * agent reads the same answer as API-key resolution plus the trace door: the
+ * key is unrevoked, its creator is still active and present, and their current
+ * role may write traces.
+ */
+export function ingestCapableApiKeyId(
+  outerTable: PgTable,
+  keyId: AnyPgColumn,
+): SQL<string> {
+  const qualified = (table: PgTable, column: AnyPgColumn): SQL =>
+    sql`${sql.identifier(getTableName(table))}.${sql.identifier(column.name)}`;
+  return sql`(
+    select ${qualified(apiKey, apiKey.id)}
+      from ${apiKey}
+      inner join ${membership}
+        on ${qualified(membership, membership.userId)} = ${qualified(apiKey, apiKey.createdByUserId)}
+       and ${qualified(membership, membership.organizationId)} = ${qualified(apiKey, apiKey.organizationId)}
+      inner join ${user}
+        on ${qualified(user, user.id)} = ${qualified(apiKey, apiKey.createdByUserId)}
+     where ${qualified(apiKey, apiKey.id)} = ${qualified(outerTable, keyId)}
+       and ${qualified(apiKey, apiKey.revokedAt)} is null
+       and ${qualified(user, user.deactivatedAt)} is null
+       and ${qualified(membership, membership.role)} in (${INGEST_ROLES_SQL})
+  )`.mapWith(apiKey.id);
+}
 
 /**
  * The same place, as a list of people rather than a list of rows: enough to
