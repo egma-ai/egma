@@ -387,6 +387,10 @@ export function buildApi(options: ServerOptions): Api {
     authBasePath: AUTH_BASE_PATH,
     baseUrl: config.baseUrl,
     singleOrganization: config.singleOrganization,
+    // The same value the provider reads for `requireEmailVerification`, from
+    // the same place, so signup cannot say one thing and the provider do
+    // another.
+    emailVerificationRequired: emailSender.delivers,
   });
 
   void app.register(meRoutes, { provider: identity.provider });

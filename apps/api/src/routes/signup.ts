@@ -38,6 +38,17 @@ export type SignupRoutesOptions = {
   /** The origin the provider is configured for, and the one it trusts. */
   readonly baseUrl: string;
   readonly singleOrganization: boolean;
+  /**
+   * Whether a new identity has to confirm its address before it can sign in.
+   *
+   * It is the mail transport's `delivers` and nothing else, exactly as the
+   * provider's own `requireEmailVerification` is, so there is one setting and
+   * not two. Signup is where it changes what a person must do next: with mail
+   * configured the provider deliberately issues no session, and a page that did
+   * not know would send somebody into a product they cannot open yet and leave
+   * them back at the sign-in door with no reason given.
+   */
+  readonly emailVerificationRequired: boolean;
 };
 
 type SignupBody = {
@@ -180,6 +191,7 @@ export async function signupRoutes(
       organization: { id: landing.organizationId, name: landing.organizationName },
       project: { id: landing.projectId, name: landing.projectName },
       role: landing.role,
+      emailVerificationRequired: options.emailVerificationRequired,
     });
   });
 }
