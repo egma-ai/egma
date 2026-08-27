@@ -267,6 +267,57 @@ describe("the shared controls on access pages", () => {
     expect(screen.getByRole("button", { name: "Join Acme" })).toBeTruthy();
   });
 
+  /**
+   * An invitation can only be delivered by an instance that posts mail, and
+   * that is precisely the instance where the provider requires the address to
+   * be confirmed and issues no session for a new identity. So the invited
+   * colleague is the likeliest person in the product to meet this, and the one
+   * this page used to walk into a product they could not open.
+   */
+  it("sends an invited colleague to their inbox when the address has to be confirmed first", async () => {
+    window.history.replaceState({}, "", "/invite?token=inv_1");
+    const assign = vi.fn();
+    vi.stubGlobal("location", {
+      assign,
+      search: "?token=inv_1",
+      href: "http://egma.test/invite?token=inv_1",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input), "http://egma.test").pathname;
+        if (path === "/api/invitations/lookup") {
+          return json(200, {
+            state: "pending",
+            email: "ada@example.com",
+            role: "member",
+            organization: { name: "Acme" },
+          });
+        }
+        if (path === "/api/me") return json(401, {});
+        if (path === "/api/signup") {
+          return json(201, { emailVerificationRequired: true });
+        }
+        throw new Error(`nothing stubbed for ${path}`);
+      }),
+    );
+
+    render(<InvitePage />);
+
+    fireEvent.change(await screen.findByLabelText("Choose a password"), {
+      target: { value: "correct horse" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Join Acme" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Check your inbox" }),
+    ).toBeTruthy();
+    // The invitation's own address, which is the one the link went to.
+    expect(screen.getByText("ada@example.com").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeTruthy();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it("keeps password recovery and completion native to the browser", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(200, {})));
     const forgot = render(<ForgotPasswordPage />);
