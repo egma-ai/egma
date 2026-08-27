@@ -129,7 +129,18 @@ const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
  */
 const ACTION =
   "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-top";
-const PAD = "px-2.5 py-2";
+/**
+ * The lane's padding, and it is the house table's rather than this grid's own.
+ *
+ * This is the one table in the product that is not drawn from
+ * `components/ui/table.tsx`, and it had been reading from 10px where every
+ * other list reads from `--row-padding-x`. Six pixels is enough to see: a
+ * person who walks Agents, Runs, Personas and then a suite watches the first
+ * column step left, and 10px is not on `DESIGN.md`'s spacing scale to begin
+ * with. Header and cells both read this, so the column keeps one edge from the
+ * heading to the last row — which is the same promise the shared table makes.
+ */
+const PAD = "px-(--row-padding-x) py-(--row-padding-y)";
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
 /*
  * A woken cell wears its 2px ink edge as an inset shadow rather than a border,
@@ -1385,7 +1396,10 @@ export function TestsGrid(props: GridProps) {
           <tr className="bg-surface-soft">
             {COLUMNS.map((column) => (
               <th
-                className="border-r border-b border-border px-2.5 py-2 text-left text-sm font-normal text-faint last:border-r-0"
+                className={cn(
+                  PAD,
+                  "border-r border-b border-border text-left text-sm font-normal text-faint last:border-r-0",
+                )}
                 key={column.field}
                 scope="col"
               >
@@ -1399,7 +1413,10 @@ export function TestsGrid(props: GridProps) {
               is what it holds, and every reader gets the same word now.
             */}
             <th
-              className="w-(--table-action-labelled-width) border-b border-border px-4 py-2 text-center text-sm font-normal whitespace-nowrap text-faint"
+              className={cn(
+                PAD,
+                "w-(--table-action-labelled-width) border-b border-border text-center text-sm font-normal whitespace-nowrap text-faint",
+              )}
               scope="col"
             >
               Actions
