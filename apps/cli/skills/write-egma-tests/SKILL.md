@@ -101,6 +101,10 @@ smallest edit that completes the developer's request.
 ## Write strong expected behaviors
 
 - Write one observable statement per item.
+- Write every expected behavior as an unconditional claim that can be judged
+  from one simulation.
+- Put the branch condition in `## Scenario`; use a separate test for each
+  other branch.
 - Ground each statement in the voice agent's prompt, tools, or stated product
   requirement.
 - Cover the ordinary path, important refusals, weak tool answers, and difficult
