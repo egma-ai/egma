@@ -157,6 +157,8 @@ export type Invocation = {
   readonly platformWord: string | null;
   /** `--platform-agent`: which agent on the account to watch. */
   readonly platformAgentId: string | null;
+  /** `--monitoring-key-id`: non-secret proof for LiveKit record recovery. */
+  readonly monitoringKeyId: string | null;
   /** A direct child under `egma/tests`, for suite create or run. */
   readonly suiteDirectory: string | null;
   /** Mutable suite display name on create, or optional run name. */
@@ -195,6 +197,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let monitoringAction: string | null = null;
   let platformWord: string | null = null;
   let platformAgentId: string | null = null;
+  let monitoringKeyId: string | null = null;
   let suiteDirectory: string | null = null;
   let name: string | null = null;
   let drivenAgentCommand: string[] = [];
@@ -230,6 +233,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--name") name = argv[(index += 1)] ?? null;
     else if (argument === "--platform") platformWord = argv[(index += 1)] ?? null;
     else if (argument === "--platform-agent") platformAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--monitoring-key-id") {
+      monitoringKeyId = argv[(index += 1)] ?? null;
+    }
     else if (verb === null && isVerb(argument)) verb = argument;
     else if (verb === "suite" && suiteAction === null) suiteAction = argument;
     else if (verb === "monitoring" && monitoringAction === null) {
@@ -266,6 +272,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
     monitoringAction,
     platformWord,
     platformAgentId,
+    monitoringKeyId,
     suiteDirectory,
     name,
     drivenAgentCommand,
@@ -309,9 +316,10 @@ export function helpText(): string {
     "                           when a production conversation last arrived. It",
     "                           is where arrivals are read: enable asks once and",
     "                           does not wait.",
-    "  egma monitoring record --agent <id>",
-    "                           Record a stable existing agent in this repository.",
-    "                           It never creates an agent or mints a key.",
+    "  egma monitoring record --agent <id> [--monitoring-key-id <id>]",
+    "                           Recover the repository record after remote",
+    "                           monitoring succeeded. LiveKit needs the",
+    "                           non-secret worker-key id from the receipt.",
     "",
     "In a platform workspace — the directory your Egma deployment lives in,",
     "which is never your agent repository:",
@@ -371,6 +379,9 @@ export function helpText(): string {
     "  --platform-agent <id>",
     "                       With monitoring enable on Retell: which agent on the",
     "                       account to watch, when it holds more than one.",
+    "  --monitoring-key-id <id>",
+    "                       With monitoring record on LiveKit: the non-secret",
+    "                       worker-key id from the failed setup receipt.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -788,6 +799,7 @@ async function runMonitoring(
       agent: invocation.agentName,
       platform: invocation.platformWord,
       platformAgentId: invocation.platformAgentId,
+      monitoringKeyId: invocation.monitoringKeyId,
       name: invocation.name,
       signal: controller.signal,
       stdin: process.stdin,

@@ -937,7 +937,7 @@ describe("choosing monitoring on LiveKit", () => {
     );
   });
 
-  it("does not mint a worker key when the repository catalog cannot be written", async () => {
+  it("keeps the LiveKit key receipt when the repository catalog cannot be written", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
     const unlock = await lockEgmaFolder();
     let walked: Awaited<ReturnType<typeof walk>>;
@@ -951,17 +951,20 @@ describe("choosing monitoring on LiveKit", () => {
       await unlock();
     }
 
-    expect(walked.report).toMatchObject({
-      kind: "failed",
-      reason: expect.stringContaining("No worker key was created"),
-    });
+    expect(walked.report).toMatchObject({ kind: "monitoring-record-failed" });
     expect(walkExitCode(walked.report)).toBe(1);
-    expect(exitLines(walked.report).join("\n")).not.toContain("EGMA_API_KEY=");
+    const printed = exitLines(walked.report).join("\n");
+    const minted = platform.keys.minted[0];
+    expect(printed).toContain(`monitoring_key_id: ${minted?.id ?? ""}`);
+    expect(printed).toContain(
+      `--monitoring-key-id ${minted?.id ?? ""}`,
+    );
+    expect(printed).toContain("EGMA_API_KEY=");
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.keys.minted).toHaveLength(0);
+    expect(platform.keys.minted).toHaveLength(1);
     await expect(
       readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    ).resolves.toContain(`EGMA_API_KEY=${minted?.secret ?? ""}`);
   });
 
   /**

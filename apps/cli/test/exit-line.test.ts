@@ -145,7 +145,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "interrupted",
     drivenAgentName: null,
-    monitoringAgentKept: "agt_01K",
+    monitoringAgentCreated: "agt_01K",
   },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 },
   { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 1 },
@@ -197,10 +197,10 @@ describe("the exit line", () => {
       buildExitLine({
         kind: "interrupted",
         drivenAgentName: null,
-        monitoringAgentKept: "agt_01K",
+        monitoringAgentCreated: "agt_01K",
       }),
     ).toBe(
-      "Egma stopped before the task finished. Agent agt_01K is saved in egma/config.yaml, so the next run will reuse it.",
+      "Egma stopped before the task finished. Agent agt_01K exists on Egma, but no worker key was created. Run Egma again to resume setup.",
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");

@@ -301,7 +301,7 @@ async function pushFromLiveKit(
           : {
               kind: "interrupted",
               drivenAgentName: null,
-              monitoringAgentKept: wired.retryTarget.agentId,
+              monitoringAgentCreated: wired.retryTarget.agentId,
             },
       monitored: null,
     };

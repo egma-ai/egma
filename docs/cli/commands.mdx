@@ -427,8 +427,11 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     egma monitoring status
     egma monitoring disable
 
-    # Recovery only: record an already-created remote target in this repository
+    # Retell recovery: record an already-monitored target in this repository
     egma monitoring record --agent agt_01K…
+
+    # LiveKit recovery: also prove the active worker key from the receipt
+    egma monitoring record --agent agt_01K… --monitoring-key-id key_01K…
     ```
 
     **Key flags**
@@ -438,6 +441,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `--agent <name-or-id>` | A configured agent for ordinary actions; the stable Egma agent id from the receipt for `record` recovery |
     | `--platform <retell\|livekit>` | Which platform runs this agent. Left out, Egma reads it from the repository's own binding |
     | `--platform-agent <id>` | Which agent on the Retell account to watch, when it holds more than one |
+    | `--monitoring-key-id <id>` | With LiveKit `record`: the non-secret worker-key id from the failed setup receipt |
     | `--name <name>` | What to call the agent Egma writes, when it writes one |
 
     On **Retell**, one commit registers the agent if Egma does not have it yet,

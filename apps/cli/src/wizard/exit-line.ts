@@ -224,8 +224,8 @@ export type ExitReport =
       readonly kind: "interrupted";
       readonly drivenAgentName: string | null;
       readonly testsKept?: number;
-      /** A fresh LiveKit agent saved after the stop, for a duplicate-free retry. */
-      readonly monitoringAgentKept?: string;
+      /** A fresh remote LiveKit agent left without a worker key after the stop. */
+      readonly monitoringAgentCreated?: string;
     }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -366,9 +366,9 @@ export function buildExitLine(report: ExitReport): string {
           ? "Egma stopped before the task finished."
           : `Egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
       const monitoring =
-        report.monitoringAgentKept === undefined
+        report.monitoringAgentCreated === undefined
           ? ""
-          : ` Agent ${report.monitoringAgentKept} is saved in egma/config.yaml, so the next run will reuse it.`;
+          : ` Agent ${report.monitoringAgentCreated} exists on Egma, but no worker key was created. Run Egma again to resume setup.`;
       const kept = report.testsKept ?? 0;
       if (kept === 0) return `${stopped}${monitoring}`;
       // The folder is not empty, so the line says so. A developer who finds

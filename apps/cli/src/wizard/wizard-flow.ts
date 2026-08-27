@@ -428,6 +428,10 @@ function monitoringRecordFailure(
   failure: MonitoringRecordFailure,
   platformUrl: string,
 ): ExitReport {
+  const recoveryProof =
+    monitored.monitoringKeyId === null
+      ? ""
+      : ` --monitoring-key-id ${monitored.monitoringKeyId}`;
   const receipt = [
     `url: ${platformUrl}`,
     `agent_id: ${monitored.agentId}`,
@@ -450,7 +454,7 @@ function monitoringRecordFailure(
     receipt,
     reason:
       `remote monitoring is ready for agent ${monitored.agentId}, but ${failure.detail} The remote setup remains active. ` +
-      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId} --url ${platformUrl}. ` +
+      `Keep the receipt above. After the repository or Egma connection is fixed, run egma monitoring record --agent ${monitored.agentId}${recoveryProof} --url ${platformUrl}. ` +
       "That recovery command does not create an agent or mint a key.",
   };
 }
@@ -651,12 +655,13 @@ async function runWizardWithAgent(
       return setUp.report;
     }
     monitored = setUp.monitored;
-    // LiveKit saved this stable target before it minted the worker key. Retell
-    // finishes remote setup first, so only that lane still needs this write.
-    const localRecordFailure =
-      agentPlatform === "livekit"
-        ? null
-        : await recordMonitoredTarget(options, platform, monitored);
+    // Both lanes record the stable target only after remote monitoring setup
+    // succeeds. A LiveKit recovery receipt also carries the active key id.
+    const localRecordFailure = await recordMonitoredTarget(
+      options,
+      platform,
+      monitored,
+    );
     if (localRecordFailure !== null) {
       const report = monitoringRecordFailure(
         setUp,

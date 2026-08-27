@@ -19,6 +19,7 @@
 import { randomBytes } from "node:crypto";
 
 import {
+  agentNamed,
   registerBoundAgent,
   type RegisteredAgent,
   type RegisterOptions,
@@ -31,9 +32,8 @@ import {
 } from "../platform/api-keys.ts";
 import { readAgentMonitoring } from "../platform/monitoring.ts";
 import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
-import { recordMonitoringTarget } from "./record-target.ts";
 
-/** The LiveKit identity saved in the repository before a worker key is minted. */
+/** The platform binding written on a LiveKit monitoring agent. */
 const LIVEKIT = "livekit";
 
 /** Cleanup must finish even when the developer stops the parent command. */
@@ -47,7 +47,7 @@ const COMMIT_TIMEOUT_MS = 30_000;
  * later can tell what revoking it would break.
  */
 /** Stable across display-name changes, and readable in the project key list. */
-function monitoringKeyPrefix(agentId: string): string {
+export function monitoringKeyPrefix(agentId: string): string {
   return `Egma monitoring ${agentId} — `;
 }
 
@@ -158,7 +158,7 @@ async function interruptedAfterMint(
 ): Promise<LiveKitOutcome> {
   const keyRevoked = await rollbackUncommittedKey(keyId, options.platform);
   return keyRevoked
-    ? interruptedAfterRecord(agent, created)
+    ? interruptedAfterAgent(agent, created)
     : {
         kind: "failed",
         reason:
@@ -167,51 +167,8 @@ async function interruptedAfterMint(
       };
 }
 
-/**
- * Commit the stable agent before any key can exist.
- *
- * This is the retry boundary. If the local write fails, the command stops
- * before minting. A later run can recover the exact remote row by its printed
- * id without any monitoring-only state on that row.
- */
-async function recordTargetBeforeKey(
-  options: LiveKitOptions,
-  agent: RegisteredAgent,
-  created: boolean,
-): Promise<
-  | { readonly kind: "recorded" }
-  | { readonly kind: "failed"; readonly reason: string }
-> {
-  try {
-    await recordMonitoringTarget({
-      cwd: options.cwd,
-      signedIn: { url: options.platform.url, key: options.platform.key },
-      target: agent,
-      ...(options.platform.fetchImpl === undefined
-        ? {}
-        : { fetchImpl: options.platform.fetchImpl }),
-      signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
-    });
-    if (created) {
-      options.say(
-        `Saved agent ${agent.id} in egma/config.yaml before creating its worker key.`,
-        "action",
-      );
-    }
-    return { kind: "recorded" };
-  } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    return {
-      kind: "failed",
-      reason:
-        `Agent ${agent.id} remains in Egma, but Egma could not save it in egma/config.yaml: ${detail} ` +
-        `No worker key was created. After the repository is writable, run egma monitoring record --agent ${agent.id} --url ${options.platform.url}.`,
-    };
-  }
-}
-
-/** Preserve the stable fresh-agent receipt after the alternate screen closes. */
-function interruptedAfterRecord(
+/** Preserve a fresh remote agent's stable id if the setup is interrupted. */
+function interruptedAfterAgent(
   agent: RegisteredAgent,
   created: boolean,
 ): Extract<LiveKitOutcome, { readonly kind: "interrupted" }> {
@@ -287,14 +244,30 @@ async function theAgent(
         agent: written.agent,
         created: written.result === "created",
       };
-    case "name-taken":
+    case "name-taken": {
+      const existing = await agentNamed(wanted, {
+        ...options.platform,
+        signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+      });
+      if (existing.kind === "found") {
+        const read = await readAgentMonitoring(existing.agent.id, {
+          ...options.platform,
+          signal: AbortSignal.timeout(COMMIT_TIMEOUT_MS),
+        });
+        if (
+          read.kind === "monitoring" &&
+          read.monitoring.agentPlatform === LIVEKIT
+        ) {
+          return { kind: "agent", agent: existing.agent, created: false };
+        }
+      }
       return {
         kind: "failed",
         reason:
-          `An Egma agent already uses the name ${JSON.stringify(wanted)}. ` +
-          "Egma did not create a second agent, mint a key, or change the environment. " +
-          "If this follows a repository-record failure, use the printed egma monitoring record command.",
+          `An Egma agent already uses the name ${JSON.stringify(wanted)}, but Egma could not prove that it is this LiveKit worker. ` +
+          "Egma did not create a second agent, mint a key, or change the environment. Select the existing agent in egma/config.yaml before retrying.",
       };
+    }
     case "not-authenticated":
       return { kind: "failed", reason: NOT_SIGNED_IN };
     case "uncertain":
@@ -342,11 +315,7 @@ export async function wireLiveKitMonitoring(
     options.say(`${agent.name} is on Egma, bound to LiveKit Agents.`, "action");
   }
 
-  const recorded = await recordTargetBeforeKey(options, agent, created);
-  if (recorded.kind === "failed") {
-    return { kind: "failed", reason: recorded.reason };
-  }
-  if (options.signal.aborted) return interruptedAfterRecord(agent, created);
+  if (options.signal.aborted) return interruptedAfterAgent(agent, created);
 
   const namePrefix = monitoringKeyPrefix(agent.id);
   const before = await listActiveProjectKeys(
@@ -359,7 +328,7 @@ export async function wireLiveKitMonitoring(
       ]),
     },
   );
-  if (options.signal.aborted) return interruptedAfterRecord(agent, created);
+  if (options.signal.aborted) return interruptedAfterAgent(agent, created);
   if (before.kind !== "listed") {
     return {
       kind: "failed",

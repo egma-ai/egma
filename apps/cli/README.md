@@ -715,9 +715,10 @@ egma monitoring enable [options]
 egma monitoring disable  Turn the switch off. Everything stored stays stored.
 egma monitoring status   Print the switch, the binding, the key hint, and when
                          a production conversation last arrived.
-egma monitoring record --agent <id>
-                         Record a stable existing agent in this repository. It
-                         never creates an agent or mints a key.
+egma monitoring record --agent <id> [--monitoring-key-id <id>]
+                         Recover the repository record after remote monitoring
+                         succeeded. LiveKit also needs the non-secret worker-key
+                         id from the setup receipt.
 
   --coding-agent <id>  Use one installed coding agent without asking.
                        claude, codex, cursor, opencode
@@ -763,6 +764,9 @@ egma monitoring record --agent <id>
   --platform-agent <id>
                        With monitoring enable on Retell: which agent on the
                        account to watch, when it holds more than one.
+  --monitoring-key-id <id>
+                       With monitoring record on LiveKit: the non-secret
+                       worker-key id from the failed setup receipt.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.
