@@ -306,6 +306,12 @@ describe("the suite-first Tests route", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Write a test" }));
     expect(screen.getByLabelText("Name")).toBeTruthy();
 
+    // Run suite stands over the tests it runs, and goes to the run builder
+    // carrying this suite.
+    expect(
+      screen.getByRole("link", { name: "Run suite" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/runs/new?suite=ste_1");
+
     // Rename and Delete suite stay on the suites list, and there is no toolbar
     // ⋮ here to hold them.
     expect(screen.queryByRole("button", { name: "Write a test" })).toBeNull();

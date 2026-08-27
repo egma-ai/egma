@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getTestSuite, listTests } from "@egma/platform-api/client";
@@ -14,6 +15,7 @@ import {
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   matchesSearch,
+  runSuitePath,
   suitePagePath,
   testsPagePath,
   type TestSuite,
@@ -38,9 +40,13 @@ import { TestsGrid } from "./tests-grid.tsx";
  * already open — the old write-a-test address, kept as a deep link now that the
  * side sheet it used to open is retired.
  *
- * **Suite management is not here.** Rename, Run suite and Delete suite live on
- * the suites list's row menu, where one screen owns every verb a suite has
- * (founder's ruling, 2026-08-24).
+ * **Suite management is not here, but running is.** Rename and Delete suite
+ * live on the suites list's row menu, where one screen owns them (founder's
+ * ruling, 2026-08-24). Run suite came back to this screen on 2026-08-26 by
+ * developer decision: running is what a suite is for rather than a way of
+ * managing one, and it stands over the tests it runs. It goes to the run
+ * builder with this suite in the address, which is where the suites list's own
+ * Run suite goes.
  *
  * **Writing a test is the grid's own verb, and the toolbar has none.** The
  * ghost row at the foot of the grid says "+ Write a test" where the row it
@@ -252,6 +258,11 @@ export function SuiteScreen({
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+        }
+        action={
+          <Button asChild>
+            <Link href={runSuitePath(projectId, suiteId)}>Run suite</Link>
+          </Button>
         }
       />
       <PageBody>{body()}</PageBody>
