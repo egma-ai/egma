@@ -213,8 +213,10 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     const written = await platformAnswer(
       createApiKey(
         {
-        name: name.trim(),
-          ...(scope === WHOLE_ORGANIZATION ? {} : { projectId: scope }),
+          body: {
+            name: name.trim(),
+            ...(scope === WHOLE_ORGANIZATION ? {} : { projectId: scope }),
+          },
         },
         { client: platformClient },
       ),
