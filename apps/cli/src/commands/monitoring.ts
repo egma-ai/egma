@@ -340,6 +340,13 @@ async function proveMonitoringSetup(
   monitoring: AgentMonitoring,
   platform: RegisterOptions,
 ): Promise<number | null> {
+  if (monitoring.archived) {
+    return refuseMissingMonitoring(
+      options,
+      `Agent ${monitoring.agentId} is archived and cannot be recorded for monitoring. Nothing was recorded.`,
+    );
+  }
+
   const agentPlatform = inferredPlatform(monitoring);
   if (agentPlatform === "retell") {
     if (

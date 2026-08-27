@@ -26,6 +26,7 @@ import {
   EMPTY_CONFIG,
   folderPathsIn,
   readConfig,
+  serializeConfig,
 } from "../src/folder/egma-folder.ts";
 import { ENV_FILE_NAME } from "../src/monitoring/env-file.ts";
 import { wireLiveKitMonitoring } from "../src/monitoring/livekit-lane.ts";
@@ -1200,6 +1201,51 @@ describe("egma monitoring status and disable", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.keys.minted).toHaveLength(0);
+  });
+
+  it("refuses to recover an archived LiveKit target", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+    const setup = await egma([
+      "monitoring",
+      "enable",
+      "--platform",
+      "livekit",
+      "--name",
+      "archived-livekit-agent",
+    ]);
+    expect(setup.code, `${setup.stdout}\n${setup.stderr}`).toBe(
+      MONITORING_EXIT.done,
+    );
+
+    const agent = platform.registered.agents[0];
+    if (agent === undefined) throw new Error("expected the registered agent");
+    agent.archivedAt = new Date("2026-08-27T12:00:00.000Z").toISOString();
+    await writeFile(
+      folderPathsIn(workspace.dir).config,
+      serializeConfig({
+        ...EMPTY_CONFIG,
+        platform: { origin: platform.url },
+        project: { name: "Fixture project", id: platform.projectId },
+      }),
+      "utf8",
+    );
+
+    const result = await egma([
+      "monitoring",
+      "record",
+      "--agent",
+      agent.id,
+      "--monitoring-key-id",
+      facts(setup.stdout).monitoring_key_id ?? "",
+    ]);
+
+    expect(result.code).toBe(MONITORING_EXIT.refused);
+    expect(facts(result.stdout).status).toBe("no-monitoring-setup");
+    expect(result.stderr).toContain("is archived");
+    expect((await readConfig(folderPathsIn(workspace.dir).config)).agents).toEqual(
+      [],
+    );
+    expect(platform.keys.minted).toHaveLength(1);
   });
 
   /**

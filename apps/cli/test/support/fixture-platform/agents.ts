@@ -771,6 +771,8 @@ export type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
+  /** Null while active; set when a test needs the archived lifecycle state. */
+  archivedAt: string | null;
   // Written at registration, and by start-monitoring exactly as the real
   // access layer writes it: binding an agent Egma is told to watch.
   agentPlatform: BoundPlatform;
@@ -814,6 +816,7 @@ export function blankAgent(
     id: newId("agt"),
     projectId,
     name,
+    archivedAt: null,
     agentPlatform,
     platformAgentId: null,
     monitoringApiKey: null,
@@ -837,8 +840,8 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     monitoringApiKeyHint: agent.monitoringApiKeyHint,
     pullProductionCalls: agent.pullProductionCalls,
     lastReceivedAt: agent.lastReceivedAt,
-    archived: false,
-    archivedAt: null,
+    archived: agent.archivedAt !== null,
+    archivedAt: agent.archivedAt,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
