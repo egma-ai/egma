@@ -16,7 +16,10 @@ import type { Me } from "../lib/me.ts";
 import {
   ChatTranscript,
   RecordingEvidence,
+  simulationToolCalls,
+  transcriptToolCalls,
   type SimulationEvidenceRecording,
+  useDirectEvidenceRecording,
   useSimulationEvidenceRecording,
 } from "../ui/simulation-evidence.tsx";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
@@ -620,6 +623,67 @@ describe("the transcript time rail", () => {
     );
     expect(seek).toHaveBeenCalledWith(5.5);
   });
+
+  it("can name monitoring speakers and keeps one shared tool-call walk", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const tool = {
+      spanId: "span_tool_shared",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const firstTurn = transcript.turns[0];
+    if (firstTurn === undefined) throw new Error("fixture needs one turn");
+    const withTool = {
+      ...transcript,
+      turns: [
+        { ...firstTurn, spans: [tool] },
+        ...transcript.turns.slice(1),
+      ],
+      spans: [tool],
+    };
+
+    expect(transcriptToolCalls(withTool as never)).toEqual([tool]);
+    expect(
+      simulationToolCalls({ ...read, transcript: withTool } as never),
+    ).toEqual([tool]);
+
+    const rendered = render(
+      <ChatTranscript
+        transcript={transcript as never}
+        speakerLabels={{ human: "Caller", agent: "Voice agent" }}
+      />,
+    );
+    expect(screen.getByText("Caller")).toBeTruthy();
+    expect(screen.getByText("Voice agent")).toBeTruthy();
+    expect(screen.getByLabelText("Turn 1, Caller")).toBeTruthy();
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={{ ...transcript, turns: [], spans: [] } as never}
+        emptyState={{
+          title: "No transcript",
+          description: "No spoken turns were recorded for this trace.",
+        }}
+      />,
+    );
+    expect(screen.getByText("No transcript")).toBeTruthy();
+    expect(
+      screen.getByText("No spoken turns were recorded for this trace."),
+    ).toBeTruthy();
+  });
 });
 
 describe("recording evidence", () => {
@@ -666,7 +730,9 @@ describe("recording evidence", () => {
       onPlay: vi.fn(),
       onPause: vi.fn(),
     };
-    render(<RecordingEvidence recording={recording} active={false} />);
+    const rendered = render(
+      <RecordingEvidence recording={recording} active={false} />,
+    );
 
     const audio = screen.getByLabelText("Simulation recording") as HTMLAudioElement;
     const play = vi.fn(async () => undefined);
@@ -693,6 +759,21 @@ describe("recording evidence", () => {
       target: { value: "12" },
     });
     expect(seek).toHaveBeenCalledWith(12);
+
+    rendered.rerender(
+      <RecordingEvidence
+        recording={recording}
+        active={false}
+        labels={{
+          title: "Call recording",
+          human: "Caller",
+          agent: "Voice agent",
+        }}
+      />,
+    );
+    expect(screen.getByLabelText("Call recording")).toBeTruthy();
+    expect(screen.getByText("Caller")).toBeTruthy();
+    expect(screen.getByText("Voice agent")).toBeTruthy();
   });
 
   it("keeps the fallback seek control at the 44px coarse-pointer target", () => {
@@ -718,5 +799,47 @@ describe("recording evidence", () => {
     expect(
       screen.getByRole("slider", { name: "Seek the recording" }).className,
     ).toContain("h-(--tap-target)");
+  });
+
+  it("keeps a direct recording playable when waveform decoding is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Blocked by CORS");
+      }),
+    );
+    const { result } = renderHook(() =>
+      useDirectEvidenceRecording("https://recordings.example/trace.wav"),
+    );
+
+    expect(result.current.status).toBe("ready");
+    expect(result.current.url).toBe(
+      "https://recordings.example/trace.wav",
+    );
+    await waitFor(() => expect(result.current.waveformLoading).toBe(false));
+    expect(result.current.waveform).toBeNull();
+    expect(result.current.status).toBe("ready");
+
+    act(() => result.current.onError());
+    expect(result.current.status).toBe("failed");
+    expect(result.current.message).toBe("The recording could not be played.");
+  });
+
+  it("uses the supplied copy when a direct recording is absent", () => {
+    const { result } = renderHook(() => useDirectEvidenceRecording(null));
+    expect(result.current.status).toBe("absent");
+
+    render(
+      <RecordingEvidence
+        recording={result.current}
+        active={false}
+        labels={{
+          absent: "No audio recording is available for this trace.",
+        }}
+      />,
+    );
+    expect(
+      screen.getByText("No audio recording is available for this trace."),
+    ).toBeTruthy();
   });
 });

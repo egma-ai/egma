@@ -725,32 +725,25 @@ async function send(secret: string, resourceSpans: unknown[]): Promise<void> {
 /**
  * The banned list, as a person reading the screen would meet it.
  *
- * Held against **what is actually legible** — the rendered text of the page,
- * with nothing expanded — rather than against the markup. Two words behave
- * differently and it is worth saying which: `trace` and `span` are storage
- * words and must never appear at all, and `session` is the one carve-out,
- * correct for a signed-in browser session and wrong for an exchange, which
- * these pages have no reason to mention either way.
+ * Held against **what is actually legible** rather than against the markup.
+ * `span` remains a storage word. Trace, Trace ID, Call overview, and Caller are
+ * now deliberate Monitoring vocabulary on the approved list and evidence
+ * sheet.
  *
  * The pages' own copy is held against the same list from the other side, in
  * `apps/web/test/transcripts.test.ts`, where every string they can render lives
  * in one file. Both are worth having: that one catches a word before it can
  * reach a screen, and this one catches a word that reached one anyway.
  *
- * **The screen's own name is the second carve-out**, and it is one word wide —
- * the same one `transcripts.test.ts` makes, for the same reason. The developer
- * renamed the surface to Traces on 2026-08-25, so the sidebar row and the list
- * heading both say it on every page this helper reads. `trace` stays banned in
- * every sentence around them: the artifact a person opens is a **transcript**,
- * and this rule is what keeps it one.
+ * The developer renamed the surface to Traces on 2026-08-25, and the approved
+ * compact index now also names Trace ID and the Trace reading sheet. The full
+ * evidence route remains a transcript.
  */
 const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SHOWN = [
-  "trace",
   "span",
   "session",
   "conversation",
-  "caller",
   "persona",
   "eval",
   "scenario",
@@ -1172,7 +1165,26 @@ describe("what a project recorded in production", () => {
       // capture was recorded. Nothing was widened to find this row.
       expect(await page.inputValue("#window")).toBe("24h");
 
-      // The facts the list endpoint returns, as columns.
+      // The approved compact index: five visible facts and the fixed action
+      // lane. Details such as turns, spans, platform, errors and a transcript
+      // preview belong after the row is opened, not in this scan surface.
+      const headings = await page
+        .locator("thead th")
+        .evaluateAll((cells) =>
+          cells.map((cell) => cell.textContent?.trim() ?? ""),
+        );
+      expect(headings).toEqual([
+        "Time",
+        "Duration",
+        "P90 turn latency",
+        "Trace ID",
+        "Agent",
+        "Actions",
+      ]);
+      expect(
+        await page.locator("thead th").last().getAttribute("data-action"),
+      ).toBe("true");
+
       const started = page.locator("tbody time").first();
       /*
        * **A list's date column is an absolute short date, never a changing
@@ -1191,12 +1203,17 @@ describe("what a project recorded in production", () => {
       expect(await started.getAttribute("datetime")).toBe(
         FIXTURE_TRACE.started_at,
       );
+      expect(await started.innerText()).toContain(" · ");
+      expect(
+        await started.evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+            target: unknown,
+          ) => { readonly whiteSpace: string };
+          return styleOf(element.parentElement ?? element).whiteSpace;
+        }),
+      ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      expect(shown).toContain(
-        `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
-      );
-      expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("LiveKit");
+      expect(shown).toContain("1.99s");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1214,10 +1231,11 @@ describe("what a project recorded in production", () => {
       );
       expect(await page.innerText("table")).not.toContain("production");
 
-      // The first thing the *human* said, which is what somebody scanning a
-      // list is looking for — not the greeting the agent opens every one with.
-      expect(shown).toContain("Hi Kelly, my name is Sam.");
+      // Transcript content is evidence inside the opened trace, not a preview
+      // column that makes this index wider and harder to scan.
+      expect(shown).not.toContain("Hi Kelly, my name is Sam.");
       expect(shown).not.toContain("Hello! How can I assist you today?");
+      expect(shown).not.toContain("No project grader");
 
       // And exactly one row: one exchange was recorded, on page one, with no
       // next page to visit.
@@ -1233,21 +1251,186 @@ describe("what a project recorded in production", () => {
   );
 
   it(
-    "marks what failed without anybody having to open anything",
+    "opens one continuous trace sheet from the trace ID",
     async () => {
       await page.goto(monitoringAt(acme));
       await page.waitForSelector("table");
+      const traceId = page
+        .locator('tbody td[data-primary="true"] button')
+        .first();
+      await reactHasTakenOver(page, 'tbody td[data-primary="true"] button');
+      await traceId.click();
 
-      // Three spans of this capture carry an error status — a model timing out,
-      // the fallback giving up, and then a successful retry. The count is on the
-      // row, so a list of a hundred exchanges says which one to open.
-      const headings = await page.locator("thead th").allInnerTexts();
-      const errors = headings.indexOf("Errors");
-      expect(errors, headings.join(", ")).toBeGreaterThan(-1);
+      const sheet = page.locator('[data-kind="sheet"]');
+      await sheet.waitFor();
+      await sheet.getByRole("heading", { name: "Call overview" }).waitFor();
 
-      expect(await page.locator("tbody tr td").nth(errors).innerText()).toBe(
-        String(FIXTURE_TRACE.erroredSpans),
+      // The reading surface is the approved 640px wide sheet. It stays beside
+      // the table, so there is no scrim over the page.
+      expect(
+        await sheet.evaluate((element) =>
+          Math.round(element.getBoundingClientRect().width),
+        ),
+      ).toBe(640);
+      expect(await page.locator('[data-slot="dialog-overlay"]').count()).toBe(0);
+
+      const overview = sheet.getByRole("region", { name: "Call overview" });
+      expect(await overview.locator("dt").allTextContents()).toEqual([
+        "Started",
+        "Duration",
+        "Turns",
+        "P90 turn latency",
+      ]);
+      expect(await overview.innerText()).toContain("1.99s");
+      expect(
+        await sheet
+          .getByRole("heading", { name: "Latency", exact: true })
+          .count(),
+      ).toBe(0);
+      expect(await sheet.innerText()).toContain("No grades for this trace");
+      expect(await sheet.innerText()).toContain(
+        "No project grader was active when this trace was recorded.",
       );
+      expect(await sheet.innerText()).toContain(
+        "No audio recording is available for this trace.",
+      );
+
+      // Summary and Transcript are location anchors over one continuous body,
+      // not tabs that replace one section with the other.
+      const summaryAnchor = sheet.getByRole("button", {
+        name: "Summary",
+        exact: true,
+      });
+      const transcriptAnchor = sheet.getByRole("button", {
+        name: "Transcript",
+        exact: true,
+      });
+      expect(await summaryAnchor.getAttribute("aria-current")).toBe("location");
+      expect(await sheet.getByRole("tab").count()).toBe(0);
+      expect(
+        await sheet.locator("#trace-summary, #trace-transcript").count(),
+      ).toBe(2);
+      expect(
+        await sheet
+          .locator("#trace-summary, #trace-transcript")
+          .evaluateAll(
+            (sections) =>
+              new Set(sections.map((one) => one.parentElement)).size,
+          ),
+      ).toBe(1);
+
+      await transcriptAnchor.click();
+      await expect
+        .poll(() => transcriptAnchor.getAttribute("aria-current"))
+        .toBe("location");
+      expect(await sheet.locator("#trace-summary").count()).toBe(1);
+      expect(
+        await sheet.locator("#trace-transcript").evaluate((section) => {
+          const scroller = section.parentElement;
+          return (
+            scroller !== null &&
+            scroller.scrollTop > 0 &&
+            Math.abs(
+              section.getBoundingClientRect().top -
+                scroller.getBoundingClientRect().top,
+            ) <= 1
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await sheet.getByRole("region", { name: "Transcript" }).count(),
+      ).toBe(1);
+
+      // Dead space on the row opens the same sheet. Closing it returns focus
+      // to that row's one Trace ID control, so keyboard use resumes where the
+      // person was reading.
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      await page.locator("tbody tr").first().locator("td").nth(1).click();
+      await sheet.waitFor();
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      await expect
+        .poll(() =>
+          traceId.evaluate(
+            (element) => {
+              const pageDocument = Reflect.get(globalThis, "document") as {
+                readonly activeElement: unknown;
+              };
+              return element === pageDocument.activeElement;
+            },
+          ),
+        )
+        .toBe(true);
+
+      // The sheet is nonmodal, so its filter remains usable. If that filter
+      // changes, Close keeps the new window instead of going back to the one
+      // that was active when the trace first opened.
+      await traceId.click();
+      await sheet.waitFor();
+      await page.selectOption("#window", "7d");
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("window"))
+        .toBe("7d");
+      await sheet.getByRole("button", { name: "Close" }).click();
+      await sheet.waitFor({ state: "detached" });
+      expect(new URL(page.url()).searchParams.get("trace")).toBeNull();
+      expect(new URL(page.url()).searchParams.get("window")).toBe("7d");
+      expect(await page.inputValue("#window")).toBe("7d");
+    },
+    SETTLE,
+  );
+
+  it(
+    "keeps the trace table semantic and scrollable on a narrow screen",
+    async () => {
+      const previous = page.viewportSize() ?? { width: 1280, height: 720 };
+      try {
+        await page.setViewportSize({ width: 700, height: 800 });
+        await page.goto(monitoringAt(acme));
+        await page.waitForSelector("table");
+
+        const panel = page.locator('[data-slot="table-panel"]');
+        expect(
+          await page
+            .locator("table")
+            .evaluate((table) => {
+              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+                target: unknown,
+              ) => { readonly display: string };
+              return styleOf(table).display;
+            }),
+        ).toBe("table");
+        expect(
+          await panel.evaluate(
+            (element) => element.scrollWidth > element.clientWidth,
+          ),
+        ).toBe(true);
+        const documentWidth = await page.evaluate(() => {
+          const root = Reflect.get(
+            Reflect.get(globalThis, "document"),
+            "documentElement",
+          ) as { readonly scrollWidth: number; readonly clientWidth: number };
+          return {
+            scrollWidth: root.scrollWidth,
+            clientWidth: root.clientWidth,
+          };
+        });
+        expect(
+          documentWidth.scrollWidth,
+          JSON.stringify(documentWidth),
+        ).toBeLessThanOrEqual(documentWidth.clientWidth);
+        expect(
+          await page.locator("tbody time").first().evaluate((element) => {
+            const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+              target: unknown,
+            ) => { readonly whiteSpace: string };
+            return styleOf(element.parentElement ?? element).whiteSpace;
+          }),
+        ).toBe("nowrap");
+      } finally {
+        await page.setViewportSize(previous);
+      }
     },
     SETTLE,
   );
@@ -1365,7 +1548,7 @@ describe("what a project recorded in production", () => {
 });
 
 describe("one exchange, read as a transcript", () => {
-  /** Following the link out of the list, which is how anybody arrives. */
+  /** Following the explicit full-transcript action out of the list. */
   async function openIt(): Promise<void> {
     await page.goto(monitoringAt(acme));
     await page.waitForSelector("table");
@@ -1377,7 +1560,17 @@ describe("one exchange, read as a transcript", () => {
         (x: number, y: number) => void;
       Reflect.apply(scrollTo, globalThis, [0, pageDocument.body.scrollHeight]);
     });
-    await page.locator("tbody tr td a").first().click();
+    await reactHasTakenOver(
+      page,
+      'tbody button[aria-label^="Actions for trace"]',
+    );
+    await page
+      .getByRole("button", { name: /^Actions for trace /u })
+      .first()
+      .click();
+    await page
+      .getByRole("menuitem", { name: "Open full transcript", exact: true })
+      .click();
     await page.waitForSelector("text=The exchange");
     await expect.poll(() => page.evaluate(() => Number(Reflect.get(globalThis, "scrollY")))).toBe(0);
   }
@@ -1578,9 +1771,10 @@ describe("an exchange with nothing timed inside its turns", () => {
     "still renders as a transcript, and says what is missing rather than hiding it",
     async () => {
       const theirs = await anotherCustomer("bare@sparse.example", "Sparse");
+      const sparseTraceId = "4d1c0b9a8e7f6a5b4c3d2e1f00998877";
       await send(theirs, [
         exchange(
-          "4d1c0b9a8e7f6a5b4c3d2e1f00998877",
+          sparseTraceId,
           new Date(AT.getTime() - 60 * 60 * 1000),
           "Is anybody there?",
           "I am here.",
@@ -1596,10 +1790,24 @@ describe("an exchange with nothing timed inside its turns", () => {
       await them.waitForSelector("table");
 
       const listed = await them.innerText("main");
-      expect(listed).toContain("Is anybody there?");
+      expect(
+        await them
+          .getByRole("button", { name: sparseTraceId, exact: true })
+          .count(),
+      ).toBe(1);
+      expect(listed).not.toContain("Is anybody there?");
       expect(listed).not.toContain("Hi Kelly, my name is Sam.");
 
-      await them.locator("tbody tr td a").first().click();
+      await reactHasTakenOver(
+        them,
+        'tbody button[aria-label^="Actions for trace"]',
+      );
+      await them
+        .getByRole("button", { name: `Actions for trace ${sparseTraceId}` })
+        .click();
+      await them
+        .getByRole("menuitem", { name: "Open full transcript", exact: true })
+        .click();
       await them.waitForSelector("text=The exchange");
 
       const shown = await them.innerText("main");
@@ -1640,6 +1848,8 @@ describe("more exchanges than one page holds", () => {
     "moves between cursor pages, skipping none and repeating none",
     async () => {
       const theirs = await anotherCustomer("many@globex.example", "Globex");
+      const traceIdFor = (index: number) =>
+        `9a0b0c0d0e0f${String(index).padStart(20, "0")}`;
 
       // A minute apart, so newest-first is unambiguous, and inside the day the
       // page asks about.
@@ -1647,7 +1857,7 @@ describe("more exchanges than one page holds", () => {
         theirs,
         Array.from({ length: HOW_MANY }, (_, index) =>
           exchange(
-            `9a0b0c0d0e0f${String(index).padStart(20, "0")}`,
+            traceIdFor(index),
             new Date(AT.getTime() - (index + 1) * 60 * 1000),
             `This is exchange number ${index}.`,
             "Understood.",
@@ -1663,7 +1873,9 @@ describe("more exchanges than one page holds", () => {
       // the paging control says so rather than ending silently at the boundary.
       const rows = them.locator("tbody tr");
       expect(await rows.count()).toBe(50);
-      expect(await them.innerText("main")).toContain("50 transcripts");
+      expect(await them.innerText("main")).toContain(
+        "50 transcripts on this page",
+      );
       expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await reactHasTakenOver(them, "main button");
@@ -1674,7 +1886,11 @@ describe("more exchanges than one page holds", () => {
 
       // Page two contains only the one older exchange. Page one is cached and
       // returns without mixing both pages into one table.
-      expect(await them.innerText("main")).toContain("This is exchange number 50.");
+      expect(
+        await them
+          .getByRole("button", { name: traceIdFor(50), exact: true })
+          .count(),
+      ).toBe(1);
       expect(await them.getByText("Page 2", { exact: true }).count()).toBe(1);
       expect(
         await them
@@ -1684,11 +1900,12 @@ describe("more exchanges than one page holds", () => {
 
       await them.getByRole("button", { name: "Previous" }).click();
       await expect.poll(async () => rows.count()).toBe(50);
-      const shown = await them.innerText("main");
-      const numbered = [...shown.matchAll(/This is exchange number (\d+)\./gu)].map(
-        (found) => Number(found[1]),
+      const listedTraceIds = await them
+        .locator('tbody td[data-primary="true"] button')
+        .allInnerTexts();
+      expect(listedTraceIds).toEqual(
+        Array.from({ length: 50 }, (_, index) => traceIdFor(index)),
       );
-      expect(numbered).toEqual(Array.from({ length: 50 }, (_, index) => index));
       expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await them.context().close();

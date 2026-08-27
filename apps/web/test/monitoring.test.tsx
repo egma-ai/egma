@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
 import { asListInstant } from "../lib/instants.ts";
 import type { Me } from "../lib/me.ts";
-import { COLUMNS, LIST, QUIET } from "../lib/transcript-copy.ts";
+import { LIST, QUIET, TRACE_COLUMNS } from "../lib/transcript-copy.ts";
 import type { Facts, Listed } from "../lib/transcripts.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
@@ -107,7 +107,37 @@ const FACTS: Facts = {
   agentId: "",
 };
 
-const ONE_ROW: Listed = { ...FACTS, preview: "I need to move my appointment" };
+const ONE_ROW: Listed = {
+  ...FACTS,
+  preview: "I need to move my appointment",
+  turnResponseLatencyP90Milliseconds: 4780,
+  turnResponseLatencyP90Partial: false,
+};
+
+const TRACE_DETAIL = {
+  trace: FACTS,
+  turns: [],
+  spans: [],
+  spansTruncated: false,
+  metrics: [
+    {
+      measure: "turn_response_latency",
+      unit: "milliseconds",
+      derived: true,
+      samples: [4200, 4780],
+      spanIds: ["spn_1", "spn_2"],
+      mean: 4490,
+      p50: 4200,
+      p90: 4780,
+      partial: false,
+    },
+  ],
+  simulationId: null,
+  gradingState: "not_requested",
+  grades: [],
+  gradeHistory: [],
+  combinedScore: null,
+} as const;
 
 /** A project grader, with or without production in its scope. */
 function grader(scope: "simulations" | "both") {
@@ -212,6 +242,7 @@ function stub(options: {
   readonly everRecorded?: readonly Listed[] | "refused";
   readonly graders?: readonly ReturnType<typeof grader>[] | "refused";
   readonly keys?: readonly ReturnType<typeof key>[] | "refused";
+  readonly detail?: unknown;
 }) {
   const rows = options.rows ?? [];
   const ever = options.everRecorded ?? rows;
@@ -225,6 +256,10 @@ function stub(options: {
           ? REFUSED
           : page(ever)
         : page(rows),
+    [`/v1/traces/${FACTS.traceId}`]: {
+      status: 200,
+      body: options.detail ?? TRACE_DETAIL,
+    },
     "/v1/graders":
       options.graders === "refused"
         ? REFUSED
@@ -277,11 +312,17 @@ beforeEach(() => {
   seenRole = "admin";
   routed.pathname = "/projects/prj_2/monitoring/transcripts";
   atNoWindow();
+  vi.stubGlobal("scrollTo", vi.fn());
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    value: vi.fn(),
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
 });
 
 /**
@@ -335,11 +376,7 @@ describe("what the Monitoring list asks egma for", () => {
 });
 
 describe("what the Monitoring list shows", () => {
-  /**
-   * Every row here is production by definition, so a column saying so on every
-   * line would be furniture around a constant.
-   */
-  it("carries no source column", async () => {
+  it("shows the compact call index in the approved order", async () => {
     stub({ rows: [ONE_ROW] });
     render(<MonitoringTranscriptsPage />);
 
@@ -348,12 +385,68 @@ describe("what the Monitoring list shows", () => {
       .getAllByRole("columnheader")
       .map((cell) => cell.textContent);
 
-    expect(headings).toContain(COLUMNS.started);
-    expect(headings).toContain(COLUMNS.environment);
-    expect(headings).toContain(COLUMNS.platform);
-    expect(headings).not.toContain("Connection");
-    expect(headings).not.toContain("Source");
-    expect(Object.values(COLUMNS)).not.toContain("Source");
+    expect(headings).toEqual([
+      TRACE_COLUMNS.time,
+      TRACE_COLUMNS.duration,
+      TRACE_COLUMNS.p90TurnLatency,
+      TRACE_COLUMNS.traceId,
+      TRACE_COLUMNS.agent,
+      TRACE_COLUMNS.actions,
+    ]);
+    expect(within(table).getByText("4.78s")).toBeDefined();
+    expect(within(table).getByText("kelly")).toBeDefined();
+    expect(table.style.minWidth).toBe("62rem");
+  });
+
+  it("marks a P90 taken from a truncated trace as partial", async () => {
+    stub({
+      rows: [{ ...ONE_ROW, turnResponseLatencyP90Partial: true }],
+      detail: {
+        ...TRACE_DETAIL,
+        spansTruncated: true,
+        metrics: TRACE_DETAIL.metrics.map((metric) => ({
+          ...metric,
+          partial: true,
+        })),
+      },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    expect(within(table).getByText("4.78s · partial")).toBeDefined();
+
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(within(sheet).getByText("4.78s · partial")).toBeDefined();
+  });
+
+  it("keeps a platform-reported P90 complete on a truncated trace", async () => {
+    stub({
+      rows: [{ ...ONE_ROW, turnResponseLatencyP90Partial: false }],
+      detail: {
+        ...TRACE_DETAIL,
+        spansTruncated: true,
+        metrics: TRACE_DETAIL.metrics.map((metric) => ({
+          ...metric,
+          partial: false,
+          reportedBy: "retell",
+        })),
+      },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    expect(within(table).getByText("4.78s")).toBeDefined();
+    expect(within(table).queryByText("4.78s · partial")).toBeNull();
+
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(within(sheet).getByText("4.78s")).toBeDefined();
+    expect(within(sheet).queryByText("4.78s · partial")).toBeNull();
   });
 
   /**
@@ -361,9 +454,9 @@ describe("what the Monitoring list shows", () => {
    * exchange happened in — which is what makes one transcript a link somebody
   * can send.
   */
-  it("links each row into this project's transcript, window and all", async () => {
+  it("opens one continuous trace sheet from the row", async () => {
     const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    stub({
+    const { asked } = stub({
       rows: [
         {
           ...ONE_ROW,
@@ -375,15 +468,13 @@ describe("what the Monitoring list shows", () => {
     render(<MonitoringTranscriptsPage />);
 
     const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    const link = within(table).getAllByRole("link")[0];
-    const href = link?.getAttribute("href") ?? "";
     /*
      * The exchange's own moment, absolute and to the second. A list column is
      * an absolute short date (ticket 09, item a): a column of ages cannot be
      * scanned, and two exchanges a minute apart read the same for the whole of
      * the first hour. The precision this column has always had is kept.
      */
-    const started = within(link as HTMLAnchorElement).getByText(
+    const started = within(table).getByText(
       asListInstant(startedAt, "second"),
     );
 
@@ -392,15 +483,148 @@ describe("what the Monitoring list shows", () => {
       /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /u,
     );
 
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(within(sheet).getByRole("heading", { name: "Call overview" })).toBeDefined();
+    expect(within(sheet).getByText("4.78s")).toBeDefined();
+    expect(within(sheet).getAllByRole("term").map((one) => one.textContent)).toEqual([
+      "Started",
+      "Duration",
+      "Turns",
+      "P90 turn latency",
+    ]);
+    expect(within(sheet).queryByRole("heading", { name: "Latency" })).toBeNull();
+    expect(within(sheet).getByText("No grades for this trace")).toBeDefined();
     expect(
-      href.startsWith(
-        `/projects/prj_2/monitoring/transcripts/${FACTS.traceId}?`,
+      within(sheet).getByText(
+        "No project grader was active when this trace was recorded.",
       ),
-    ).toBe(true);
-    const carried = new URLSearchParams(href.slice(href.indexOf("?")));
-    expect(carried.get("from")).not.toBeNull();
-    expect(carried.get("to")).not.toBeNull();
+    ).toBeDefined();
+    expect(
+      within(sheet).getByText(
+        "No audio recording is available for this trace.",
+      ),
+    ).toBeDefined();
+    const transcriptAnchor = within(sheet).getByRole("button", {
+      name: "Transcript",
+    });
+    expect(transcriptAnchor.getAttribute("aria-current")).toBeNull();
+    fireEvent.click(transcriptAnchor);
+    expect(transcriptAnchor.getAttribute("aria-current")).toBe("location");
+    expect(
+      within(sheet).getByRole("heading", { name: "Call overview" }),
+    ).toBeDefined();
+
+    // A short last section reaches the bottom before its own top can reach
+    // the nav rail. The bottom still means Transcript, so the scroll-spy must
+    // not undo the anchor the person just chose.
+    const transcriptSection = sheet.querySelector("#trace-transcript");
+    expect(transcriptSection).toBeInstanceOf(HTMLElement);
+    if (!(transcriptSection instanceof HTMLElement)) {
+      throw new Error("The transcript section was not rendered.");
+    }
+    const scroller = transcriptSection.parentElement;
+    expect(scroller).not.toBeNull();
+    if (scroller === null) {
+      throw new Error("The trace sheet scroller was not rendered.");
+    }
+    Object.defineProperties(scroller, {
+      scrollTop: { configurable: true, value: 200 },
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 700 },
+      getBoundingClientRect: {
+        configurable: true,
+        value: () => ({ top: 0 }) as DOMRect,
+      },
+    });
+    Object.defineProperty(transcriptSection, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ top: 650 }) as DOMRect,
+    });
+    fireEvent.scroll(scroller);
+    expect(transcriptAnchor.getAttribute("aria-current")).toBe("location");
+
+    const detailRead = asked.find((one) =>
+      one.startsWith(`/v1/traces/${FACTS.traceId}?`),
+    );
+    expect(detailRead).toBeDefined();
+    const sent = new URLSearchParams(detailRead?.slice(detailRead.indexOf("?")));
+    expect(sent.get("projectId")).toBe("prj_2");
+    expect(sent.get("from")).not.toBeNull();
+    expect(sent.get("to")).not.toBeNull();
   });
+
+  it("keeps a changed window when the open trace sheet is closed", async () => {
+    atWindow("24h");
+    stub({ rows: [ONE_ROW] });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    expect(new URL(globalThis.location.href).searchParams.get("trace")).toBe(
+      FACTS.traceId,
+    );
+
+    fireEvent.change(screen.getByLabelText(LIST.window), {
+      target: { value: "7d" },
+    });
+    expect(new URL(globalThis.location.href).searchParams.get("window")).toBe(
+      "7d",
+    );
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    const closed = new URL(globalThis.location.href);
+    expect(closed.searchParams.get("window")).toBe("7d");
+    expect(closed.searchParams.get("trace")).toBeNull();
+    expect((screen.getByLabelText(LIST.window) as HTMLSelectElement).value).toBe(
+      "7d",
+    );
+  });
+
+  it.each([
+    {
+      state: "pending",
+      title: "Grading is still running",
+      lead: "Project grades appear here as they finish.",
+      role: "status",
+    },
+    {
+      state: "error",
+      title: "Grading could not be completed",
+      lead: "Egma could not complete the requested grades for this trace.",
+      role: "alert",
+    },
+  ] as const)(
+    "does not describe $state grading as an inactive grader",
+    async ({ state, title, lead, role }) => {
+      stub({
+        rows: [ONE_ROW],
+        detail: { ...TRACE_DETAIL, gradingState: state },
+      });
+      render(<MonitoringTranscriptsPage />);
+
+      const table = await screen.findByRole("table", { name: LIST.tableLabel });
+      fireEvent.click(
+        within(table).getByRole("button", { name: FACTS.traceId }),
+      );
+
+      const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+      const stateMessage = within(sheet).getByRole(role);
+      expect(within(stateMessage).getByText(title)).toBeDefined();
+      expect(within(stateMessage).getByText(lead)).toBeDefined();
+      expect(
+        within(sheet).queryByText(
+          "No project grader was active when this trace was recorded.",
+        ),
+      ).toBeNull();
+    },
+  );
 
   it("shows one cached page at a time inside one fixed time window", async () => {
     const second = {
@@ -434,18 +658,18 @@ describe("what the Monitoring list shows", () => {
     });
     render(<MonitoringTranscriptsPage />);
 
-    await screen.findByText(ONE_ROW.preview);
+    await screen.findByRole("button", { name: ONE_ROW.traceId });
     expect(screen.getByText("Page 1")).toBeDefined();
-    expect(screen.queryByText(second.preview)).toBeNull();
+    expect(screen.queryByRole("button", { name: second.traceId })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText(second.preview);
-    expect(screen.queryByText(ONE_ROW.preview)).toBeNull();
+    await screen.findByRole("button", { name: second.traceId });
+    expect(screen.queryByRole("button", { name: ONE_ROW.traceId })).toBeNull();
     expect(screen.getByText("Page 2")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
-    await screen.findByText(ONE_ROW.preview);
-    expect(screen.queryByText(second.preview)).toBeNull();
+    await screen.findByRole("button", { name: ONE_ROW.traceId });
+    expect(screen.queryByRole("button", { name: second.traceId })).toBeNull();
 
     const listReads = asked
       .filter((one) => one.startsWith("/v1/traces?"))
@@ -458,7 +682,7 @@ describe("what the Monitoring list shows", () => {
 });
 
 /**
- * The four quiet states, each asserted present **and** the other three absent.
+ * The three list-level quiet states, each asserted present and the others absent.
  *
  * Showing two at once is the failure this guards: somebody reading the last
  * hour of a busy project told to go and set up the export they already have,
@@ -468,8 +692,7 @@ describe("what the Monitoring list shows", () => {
  */
 describe("what a quiet Monitoring page says", () => {
   /**
-   * Which of the four is on screen, read by the one thing each puts there and
-   * nothing else does: three headings and a link.
+   * Which list-level state is on screen, read by its heading.
    */
   function guidance(): readonly string[] {
     return [
@@ -486,9 +709,6 @@ describe("what a quiet Monitoring page says", () => {
       }) === null
         ? []
         : ["key-names-the-organization"]),
-      ...(screen.queryByRole("link", { name: QUIET.unwatched.graders }) === null
-        ? []
-        : ["nothing-watches-production"]),
     ];
   }
 
@@ -638,12 +858,7 @@ describe("what a quiet Monitoring page says", () => {
     ).toBe("/projects/prj_2/settings/keys");
   });
 
-  /**
-   * Every new grader starts scoped to simulations and the seeded one is
-   * structurally simulations-only, so this is the ordinary first state of a
-   * project whose traffic has just started flowing — not a fault.
-   */
-  it("says no grader watches production once traffic is arriving", async () => {
+  it("keeps grader setup guidance out of the trace list", async () => {
     stub({
       rows: [ONE_ROW],
       keys: [key(null)],
@@ -651,15 +866,12 @@ describe("what a quiet Monitoring page says", () => {
     });
     render(<MonitoringTranscriptsPage />);
 
-    const graders = await screen.findByRole("link", {
-      name: QUIET.unwatched.graders,
-    });
-    expect(guidance()).toEqual(["nothing-watches-production"]);
-    expect(graders.getAttribute("href")).toBe("/projects/prj_2/graders");
-    expect(screen.getByText(QUIET.unwatched.lead)).toBeDefined();
-    // The rows are still the page. Guidance sits above them rather than
-    // replacing them.
-    expect(screen.getByRole("table", { name: LIST.tableLabel })).toBeDefined();
+    await screen.findByRole("table", { name: LIST.tableLabel });
+    expect(guidance()).toEqual([]);
+    expect(screen.queryByText(QUIET.unwatched.lead)).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: QUIET.unwatched.graders }),
+    ).toBeNull();
   });
 
   /** A healthy project is told nothing, which is the fourth answer. */

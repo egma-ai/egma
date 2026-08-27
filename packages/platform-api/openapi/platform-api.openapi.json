@@ -20517,6 +20517,19 @@
                           },
                           "preview": {
                             "type": "string"
+                          },
+                          "turnResponseLatencyP90Milliseconds": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "turnResponseLatencyP90Partial": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -20539,7 +20552,9 @@
                           "platformAgentVersion",
                           "runId",
                           "agentId",
-                          "preview"
+                          "preview",
+                          "turnResponseLatencyP90Milliseconds",
+                          "turnResponseLatencyP90Partial"
                         ],
                         "additionalProperties": false
                       }

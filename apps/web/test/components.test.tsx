@@ -877,6 +877,7 @@ describe("a dialog", () => {
     );
 
     const panel = screen.getByRole("dialog", { name: "Navigation" });
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeTruthy();
 
     // Inert is not a class on the page behind: the kit hides it from the
     // accessibility tree, so a control out there is no longer reachable at all.
@@ -916,7 +917,7 @@ describe("a dialog", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("uses the same modal layer for a right-side sheet", () => {
+  it("uses a right-side sheet without drawing a scrim", () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -946,6 +947,7 @@ describe("a dialog", () => {
       name: "Transcript and audio",
     });
     expect(sheet.getAttribute("data-kind")).toBe("sheet");
+    expect(document.querySelector("[data-slot='dialog-overlay']")).toBeNull();
     expect(sheet.contains(document.activeElement)).toBe(true);
     expect(within(sheet).getByRole("button", { name: "Close" })).toBeTruthy();
 

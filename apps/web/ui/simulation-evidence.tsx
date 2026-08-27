@@ -563,6 +563,214 @@ export function useSimulationEvidenceRecording(
   };
 }
 
+type DirectRecordingClock = {
+  readonly url: string;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly playing: boolean;
+};
+
+type DirectRecordingWaveform = {
+  readonly url: string;
+  readonly value: SimulationEvidenceRecording["waveform"];
+  readonly loading: boolean;
+};
+
+/**
+ * A recording controller for an audio URL that is already usable by the media
+ * element. Unlike a simulation recording, this source has no signed-link
+ * refresh step. A waveform decode is only an enhancement: CORS and decode
+ * failures keep the native player usable through its seek control.
+ */
+export function useDirectEvidenceRecording(
+  url: string | null,
+): SimulationEvidenceRecording {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingSeekAt = useRef<number | null>(null);
+  const lastClock = useRef(0);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const [clock, setClock] = useState<DirectRecordingClock | null>(null);
+  const [waveform, setWaveform] = useState<DirectRecordingWaveform | null>(
+    null,
+  );
+
+  useEffect(() => {
+    pendingSeekAt.current = null;
+    lastClock.current = 0;
+    setFailedUrl(null);
+    if (url === null) {
+      setClock(null);
+      setWaveform(null);
+      return undefined;
+    }
+
+    setClock({ url, currentTime: 0, duration: 0, playing: false });
+    setWaveform({ url, value: null, loading: true });
+    let current = true;
+    let context: AudioContext | null = null;
+    const closeContext = (): void => {
+      const ownedContext = context;
+      context = null;
+      if (ownedContext === null) return;
+      try {
+        void ownedContext.close().catch(() => undefined);
+      } catch {
+        // Cleanup stays safe if the browser already closed the context.
+      }
+    };
+
+    void fetch(url)
+      .then((answer) => {
+        if (!answer.ok) throw new Error("The audio file could not be decoded.");
+        return answer.arrayBuffer();
+      })
+      .then(async (bytes) => {
+        context = new AudioContext();
+        const decoded = await context.decodeAudioData(bytes);
+        if (!current) return;
+        setClock((present) =>
+          present?.url === url
+            ? { ...present, duration: decoded.duration }
+            : present,
+        );
+        setWaveform({
+          url,
+          value:
+            decoded.numberOfChannels === 2
+              ? {
+                  human: peaksOf(decoded, 0),
+                  agent: peaksOf(decoded, 1),
+                }
+              : null,
+          loading: false,
+        });
+      })
+      .catch(() => {
+        if (!current) return;
+        setWaveform({ url, value: null, loading: false });
+      })
+      .finally(closeContext);
+
+    return () => {
+      current = false;
+      closeContext();
+    };
+  }, [url]);
+
+  const currentClock =
+    clock?.url === url
+      ? clock
+      : { url: url ?? "", currentTime: 0, duration: 0, playing: false };
+  const currentWaveform = waveform?.url === url ? waveform : null;
+
+  useEffect(() => {
+    if (!currentClock.playing || url === null) return undefined;
+    let frame = 0;
+    const follow = (): void => {
+      const next = audioRef.current?.currentTime ?? 0;
+      if (Math.abs(next - lastClock.current) >= 0.1) {
+        lastClock.current = next;
+        setClock((present) =>
+          present?.url === url
+            ? { ...present, currentTime: next }
+            : present,
+        );
+      }
+      frame = requestAnimationFrame(follow);
+    };
+    frame = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(frame);
+  }, [currentClock.playing, url]);
+
+  const seek = useCallback((seconds: number, play = false): void => {
+    const audio = audioRef.current;
+    if (audio === null) return;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      pendingSeekAt.current = Math.max(0, seconds);
+      return;
+    }
+    audio.currentTime = Math.min(
+      Math.max(0, seconds),
+      Math.max(0, audio.duration),
+    );
+    lastClock.current = audio.currentTime;
+    setClock((present) =>
+      present === null
+        ? present
+        : { ...present, currentTime: audio.currentTime },
+    );
+    if (play) void audio.play().catch(() => undefined);
+  }, []);
+
+  function readClock(): void {
+    if (url === null) return;
+    const next = audioRef.current?.currentTime ?? 0;
+    lastClock.current = next;
+    setClock((present) =>
+      present?.url === url ? { ...present, currentTime: next } : present,
+    );
+  }
+
+  function readDuration(): void {
+    if (url === null) return;
+    const audio = audioRef.current;
+    const heard = audio?.duration;
+    const duration =
+      heard !== undefined && Number.isFinite(heard) ? heard : null;
+    if (duration !== null) {
+      setClock((present) =>
+        present?.url === url ? { ...present, duration } : present,
+      );
+    }
+    if (pendingSeekAt.current === null || audio === null) return;
+    const requested = pendingSeekAt.current;
+    audio.currentTime = Math.min(requested, duration ?? requested);
+    lastClock.current = audio.currentTime;
+    setClock((present) =>
+      present?.url === url
+        ? { ...present, currentTime: audio.currentTime }
+        : present,
+    );
+    pendingSeekAt.current = null;
+  }
+
+  const failed = url !== null && failedUrl === url;
+  return {
+    status: url === null ? "absent" : failed ? "failed" : "ready",
+    message: failed ? "The recording could not be played." : null,
+    url,
+    audioRef,
+    currentTime: currentClock.currentTime,
+    duration: currentClock.duration,
+    playing: currentClock.playing,
+    waveform: currentWaveform?.value ?? null,
+    waveformLoading:
+      url !== null && (currentWaveform?.loading ?? true),
+    seek,
+    onTimeUpdate: readClock,
+    onLoadedMetadata: readDuration,
+    onError: () => {
+      if (url === null) return;
+      setFailedUrl(url);
+      setClock((present) =>
+        present?.url === url ? { ...present, playing: false } : present,
+      );
+    },
+    onPlay: () => {
+      if (url === null) return;
+      setClock((present) =>
+        present?.url === url ? { ...present, playing: true } : present,
+      );
+    },
+    onPause: () => {
+      if (url === null) return;
+      setClock((present) =>
+        present?.url === url ? { ...present, playing: false } : present,
+      );
+    },
+  };
+}
+
 type EvidenceGrader = {
   readonly key: string;
   readonly name: string;
@@ -707,19 +915,41 @@ const RECORDING_STATE =
 const RECORDING_STATE_UNDER_PLAYER =
   "m-0 border-t border-border bg-surface px-3 py-3 text-sm text-muted-foreground";
 
+export type RecordingEvidenceLabels = {
+  readonly title: string;
+  readonly human: string;
+  readonly agent: string;
+  readonly absent: string;
+};
+
+const DEFAULT_RECORDING_LABELS: RecordingEvidenceLabels = {
+  title: "Simulation recording",
+  human: "User",
+  agent: "Agent",
+  absent: "No audio was recorded.",
+};
+
 export function RecordingEvidence({
   recording,
   active,
+  labels,
 }: {
   readonly recording: SimulationEvidenceRecording;
   readonly active: boolean;
+  readonly labels?: Partial<RecordingEvidenceLabels>;
 }) {
+  const title = labels?.title ?? DEFAULT_RECORDING_LABELS.title;
+  const human = labels?.human ?? DEFAULT_RECORDING_LABELS.human;
+  const agent = labels?.agent ?? DEFAULT_RECORDING_LABELS.agent;
+  const absent =
+    labels?.absent ??
+    (active
+      ? "Recording will be available after the call ends."
+      : DEFAULT_RECORDING_LABELS.absent);
   if (recording.status === "absent") {
     return (
       <p className={RECORDING_STATE} role={active ? "status" : undefined}>
-        {active
-          ? "Recording will be available after the call ends."
-          : "No audio was recorded."}
+        {absent}
       </p>
     );
   }
@@ -763,7 +993,7 @@ export function RecordingEvidence({
     <div className="min-w-0 overflow-hidden border border-border bg-surface">
       <audio
         ref={recording.audioRef}
-        aria-label="Simulation recording"
+        aria-label={title}
         className="sr-only"
         preload="metadata"
         src={recording.url}
@@ -792,7 +1022,7 @@ export function RecordingEvidence({
         </Button>
         <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
           <span className="truncate text-sm font-medium text-foreground">
-            Simulation recording
+            {title}
           </span>
           <output className="flex-none font-mono text-sm tabular-nums text-muted-foreground">
             {elapsed} / {total}
@@ -865,11 +1095,11 @@ export function RecordingEvidence({
           >
             <span className="inline-flex items-center gap-2">
               <span className="size-2.5 flex-none bg-foreground" aria-hidden="true" />
-              User
+              {human}
             </span>
             <span className="inline-flex items-center gap-2">
               <span className="size-2.5 flex-none bg-brand" aria-hidden="true" />
-              Agent
+              {agent}
             </span>
           </div>
         </div>
@@ -878,23 +1108,31 @@ export function RecordingEvidence({
   );
 }
 
-type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
+export type EvidenceTranscript = NonNullable<SimulationEvidence["transcript"]>;
 
 /** Every recorded tool call, once, in the order it happened. */
-export function simulationToolCalls(
-  evidence: SimulationEvidence,
+export function transcriptToolCalls(
+  transcript: EvidenceTranscript,
 ): readonly EvidenceStep[] {
-  if (evidence.transcript === null) return [];
   const found = new Map<string, EvidenceStep>();
   const visit = (step: EvidenceStep): void => {
     if (step.kind === "tool") found.set(step.spanId, step);
     for (const nested of step.spans) visit(nested);
   };
-  for (const turn of evidence.transcript.turns) visit(turn);
-  for (const step of evidence.transcript.spans) visit(step);
+  for (const turn of transcript.turns) visit(turn);
+  for (const step of transcript.spans) visit(step);
   return [...found.values()].sort(
     (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
+}
+
+/** Every recorded tool call in one simulation, using the shared transcript walk. */
+export function simulationToolCalls(
+  evidence: SimulationEvidence,
+): readonly EvidenceStep[] {
+  return evidence.transcript === null
+    ? []
+    : transcriptToolCalls(evidence.transcript);
 }
 
 type ConversationEvent =
@@ -1098,6 +1336,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
   timelineStartedAt,
   active,
   selected,
+  speakerLabels,
   onSeek,
 }: {
   readonly turn: EvidenceStep;
@@ -1105,10 +1344,11 @@ const TranscriptTurn = memo(function TranscriptTurn({
   readonly timelineStartedAt: string;
   readonly active: boolean;
   readonly selected: boolean;
+  readonly speakerLabels: TranscriptSpeakerLabels;
   readonly onSeek?: TranscriptSeek;
 }) {
   const human = turn.kind === "turn:human";
-  const speaker = human ? "User" : "Agent";
+  const speaker = human ? speakerLabels.human : speakerLabels.agent;
   const seconds = secondsInto(turn.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
   const content = (
@@ -1180,6 +1420,26 @@ const TranscriptTurn = memo(function TranscriptTurn({
   );
 });
 
+export type TranscriptSpeakerLabels = {
+  readonly human: string;
+  readonly agent: string;
+};
+
+export type TranscriptEmptyState = {
+  readonly title: string;
+  readonly description: string;
+};
+
+const DEFAULT_TRANSCRIPT_SPEAKERS: TranscriptSpeakerLabels = {
+  human: "User",
+  agent: "Agent",
+};
+
+const DEFAULT_TRANSCRIPT_EMPTY_STATE: TranscriptEmptyState = {
+  title: "Nothing was said",
+  description: "Egma filed no spoken turns for this simulation.",
+};
+
 /**
  * Readable speech and tool calls on one time rail. A recording-backed row is a
  * real button: selecting it seeks the shared player without autoplay. Selection
@@ -1191,12 +1451,16 @@ export function ChatTranscript({
   recordingStartedAt,
   currentTime,
   onSeek,
+  speakerLabels = DEFAULT_TRANSCRIPT_SPEAKERS,
+  emptyState = DEFAULT_TRANSCRIPT_EMPTY_STATE,
 }: {
   readonly transcript: EvidenceTranscript;
   readonly toolCalls?: readonly EvidenceStep[];
   readonly recordingStartedAt?: string | null;
   readonly currentTime?: number;
   readonly onSeek?: (seconds: number) => void;
+  readonly speakerLabels?: TranscriptSpeakerLabels;
+  readonly emptyState?: TranscriptEmptyState;
 }) {
   const timelineStartedAt = recordingStartedAt ?? transcript.startedAt;
   const events = useMemo(
@@ -1214,10 +1478,8 @@ export function ChatTranscript({
   if (events.length === 0) {
     return (
       <div className={EMPTY_STATE}>
-        <strong className={EMPTY_STATE_TITLE}>Nothing was said</strong>
-        <p className={EMPTY_STATE_LEAD}>
-          Egma filed no spoken turns for this simulation.
-        </p>
+        <strong className={EMPTY_STATE_TITLE}>{emptyState.title}</strong>
+        <p className={EMPTY_STATE_LEAD}>{emptyState.description}</p>
       </div>
     );
   }
@@ -1252,6 +1514,7 @@ export function ChatTranscript({
             active={active}
             key={event.step.spanId}
             selected={selectedSpanId === event.step.spanId}
+            speakerLabels={speakerLabels}
             timelineStartedAt={timelineStartedAt}
             turn={event.step}
             turnNumber={event.turnNumber}

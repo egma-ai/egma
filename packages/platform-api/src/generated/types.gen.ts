@@ -5666,6 +5666,8 @@ export type ListTracesResponses = {
             runId: string;
             agentId: string;
             preview: string;
+            turnResponseLatencyP90Milliseconds: number | null;
+            turnResponseLatencyP90Partial: boolean;
         }>;
         nextPageToken: string | null;
         window: {

@@ -357,6 +357,10 @@ export type ListedTrace = {
   readonly runId: string;
   readonly agentId: string;
   readonly preview: string;
+  /** Null when this trace carried no usable turn-response latency samples. */
+  readonly turnResponseLatencyP90Milliseconds: number | null;
+  /** Whether that P90 came from the bounded prefix of a larger trace. */
+  readonly turnResponseLatencyP90Partial: boolean;
 };
 
 export type ListedPage = {

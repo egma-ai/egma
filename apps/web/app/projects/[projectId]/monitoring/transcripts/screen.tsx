@@ -3,19 +3,13 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import {
-  listApiKeys,
-  listGraders,
-  listTraces,
-} from "@egma/platform-api/client";
+import { listApiKeys, listTraces } from "@egma/platform-api/client";
 
 import type { Answer } from "../../../../../lib/api.ts";
-import type { ProjectGradersPage } from "../../../../../lib/graders.ts";
 import {
   platformAnswer,
   platformClient,
 } from "../../../../../lib/platform-client.ts";
-import { projectPath } from "../../../../../lib/project-context.ts";
 import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
 import {
   AGENT_PARAMETER,
@@ -24,25 +18,26 @@ import {
   SHEET_PARAMETER,
 } from "../../../../../lib/monitoring.ts";
 import {
-  COLUMNS,
   DEFAULT_WINDOW,
   LIST,
   QUIET,
+  TRACE_COLUMNS,
+  TRACE_SHEET,
   WINDOWS,
   type WindowChoice,
 } from "../../../../../lib/transcript-copy.ts";
 import {
-  agentPlatformLabel,
   howLong,
   isWidestWindow,
   namesWholeOrganization,
   quietState,
   recentWindow,
+  shownTurnLatency,
   transcriptPath,
   transcriptsPath,
-  watchesProduction,
   WIDEST_WINDOW,
   WINDOW_PARAMETER,
+  windowAround,
   windowChoiceOf,
   type Listed,
   type ListPage,
@@ -52,13 +47,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { MenuItem } from "../../../../../ui/menu.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { roleOf } from "../../../../../lib/me.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import { useProjectRead } from "../../../../../ui/resource.ts";
 import { TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
@@ -68,8 +63,9 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import { Notice } from "../../../../ui.tsx";
+import { RowMenu } from "../../../../../ui/row-menu.tsx";
 import { MonitorAgentSheet } from "../monitor-sheet.tsx";
+import { TraceSheet, type OpenTrace } from "./trace-sheet.tsx";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -125,6 +121,29 @@ type State =
       pageFailure: string | null;
     };
 
+const TRACE_PARAMETER = "trace";
+const TRACE_FROM_PARAMETER = "traceFrom";
+const TRACE_TO_PARAMETER = "traceTo";
+
+function traceInAddress(): OpenTrace | null {
+  const asked = new URLSearchParams(globalThis.location.search);
+  const traceId = asked.get(TRACE_PARAMETER);
+  const from = asked.get(TRACE_FROM_PARAMETER);
+  const to = asked.get(TRACE_TO_PARAMETER);
+  return traceId === null || from === null || to === null
+    ? null
+    : { traceId, from, to };
+}
+
+/** This list's current address, with only the opened trace removed. */
+function traceFreeAddress(address: URL): string {
+  const list = new URL(address.href);
+  list.searchParams.delete(TRACE_PARAMETER);
+  list.searchParams.delete(TRACE_FROM_PARAMETER);
+  list.searchParams.delete(TRACE_TO_PARAMETER);
+  return `${list.pathname}${list.search}${list.hash}`;
+}
+
 /**
  * The screen, which is not the route.
  *
@@ -169,39 +188,36 @@ export function TranscriptsScreen({
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [openedTrace, setOpenedTrace] = useState<OpenTrace | null>(null);
+  const [traceOpener, setTraceOpener] = useState<HTMLElement | null>(null);
+  const traceWasPushed = useRef(false);
+  const traceReturnAddress = useRef<string | null>(null);
 
   /** Changes whenever the first page changes, so a late next page is ignored. */
   const requestGeneration = useRef(0);
 
-  /**
-   * The two reads that decide what a quiet page says, beside the list itself.
-   *
-   * The graders answer is this project's. The keys answer names no project,
-   * because a key is minted against the customer even when it is scoped to one
-   * — but it is **what this reader may see rather than what the organization
-   * holds**: the server shows an ordinary member their own keys and an admin
-   * everybody's. So an empty answer is not proof that no organization-wide key
-   * exists, which is why the caution about one rides with the setup teaching as
-   * well as having a state of its own.
-   *
-   * Neither is asked about a window: what each says is true of the project
-   * rather than of the last day.
-   */
-  const { answer: graders } = useProjectRead<ProjectGradersPage>(
-    (projectId) =>
-      platformAnswer(listGraders({ projectId }, { client: platformClient })),
-    projectId,
-  );
+  /** Keys decide which first-day guidance an empty project needs. */
   const { answer: keys } = useOrganizationRead<ApiKeyList>(() =>
     platformAnswer(listApiKeys({ client: platformClient })),
   );
 
   useEffect(() => {
-    setChoice(
-      windowChoiceOf(
-        new URLSearchParams(globalThis.location.search).get(WINDOW_PARAMETER),
-      ),
-    );
+    const followAddress = () => {
+      const nextTrace = traceInAddress();
+      setChoice(
+        windowChoiceOf(
+          new URLSearchParams(globalThis.location.search).get(WINDOW_PARAMETER),
+        ),
+      );
+      setOpenedTrace(nextTrace);
+      if (nextTrace === null) {
+        traceWasPushed.current = false;
+        traceReturnAddress.current = null;
+      }
+    };
+    followAddress();
+    globalThis.addEventListener("popstate", followAddress);
+    return () => globalThis.removeEventListener("popstate", followAddress);
   }, []);
 
   /** Chosen, remembered in the address, and read back on the next visit. */
@@ -373,6 +389,43 @@ export function TranscriptsScreen({
     state.status === "loaded" ? (state.pages[state.page] ?? null) : null;
   const shownRows = shownPage?.rows ?? [];
 
+  function openTrace(row: Listed, opener: HTMLElement | null = null): void {
+    const exact = windowAround(row);
+    const next = { traceId: row.traceId, ...exact };
+    const at = new URL(globalThis.location.href);
+    const returnAddress = traceFreeAddress(at);
+    at.searchParams.set(TRACE_PARAMETER, next.traceId);
+    at.searchParams.set(TRACE_FROM_PARAMETER, next.from);
+    at.searchParams.set(TRACE_TO_PARAMETER, next.to);
+    const address = `${at.pathname}${at.search}${at.hash}`;
+    if (openedTrace === null) {
+      globalThis.history.pushState(null, "", address);
+      traceWasPushed.current = true;
+      traceReturnAddress.current = returnAddress;
+    } else {
+      globalThis.history.replaceState(null, "", address);
+    }
+    setTraceOpener(opener);
+    setOpenedTrace(next);
+  }
+
+  function closeTrace(): void {
+    setOpenedTrace(null);
+    const current = traceFreeAddress(new URL(globalThis.location.href));
+    if (
+      traceWasPushed.current &&
+      traceReturnAddress.current === current
+    ) {
+      traceWasPushed.current = false;
+      traceReturnAddress.current = null;
+      globalThis.history.back();
+      return;
+    }
+    traceWasPushed.current = false;
+    traceReturnAddress.current = null;
+    globalThis.history.replaceState(null, "", current);
+  }
+
   /**
    * Whether this project has **ever** recorded anything, asked only when the
    * window on screen holds nothing.
@@ -461,7 +514,6 @@ export function TranscriptsScreen({
 
   const quiet: Quiet | null =
     state.status !== "loaded" ||
-    graders === null ||
     keys === null ||
     everRecorded === undefined
       ? null
@@ -472,10 +524,8 @@ export function TranscriptsScreen({
             keys,
             (page) => rowsIn(page.keys).filter(namesWholeOrganization).length,
           ),
-          watchingProduction: counted(
-            graders,
-            (page) => page.graders.filter(watchesProduction).length,
-          ),
+          /* Grader setup belongs inside an opened trace, not above this list. */
+          watchingProduction: null,
         });
 
   /*
@@ -585,15 +635,6 @@ export function TranscriptsScreen({
         ) : null}
         {state.status === "loading" ? <Loading what={LIST.loadingWhat} /> : null}
 
-        {quiet === "nothing-watches-production" ? (
-          <Notice>
-            {QUIET.unwatched.lead}{" "}
-            <Link href={projectPath(projectId, "graders")}>
-              {QUIET.unwatched.graders}
-            </Link>
-          </Notice>
-        ) : null}
-
         {/*
           The list is empty because of the window rather than because of the
           project, so the way out is the control above and nothing else is
@@ -632,10 +673,13 @@ export function TranscriptsScreen({
             )}
             <DataTable
               label={LIST.tableLabel}
-              columns={columnsFor(projectId)}
+              columns={columnsFor(projectId, openTrace)}
               rows={shownRows}
               keyOf={(row) => row.traceId}
-              stretchPrimaryLink
+              currentKey={openedTrace?.traceId}
+              narrowLayout="scroll"
+              tableMinWidth="62rem"
+              onRowActivate={(row, opener) => openTrace(row, opener)}
               pagination={{
                 page: state.page + 1,
                 canPrevious: state.page > 0,
@@ -677,6 +721,15 @@ export function TranscriptsScreen({
           onStarted={() => setAttempt((one) => one + 1)}
         />
       ) : null}
+
+      {openedTrace === null ? null : (
+        <TraceSheet
+          projectId={projectId}
+          opened={openedTrace}
+          returnFocusTo={traceOpener}
+          onClose={closeTrace}
+        />
+      )}
     </ProductPage>
   );
 }
@@ -715,90 +768,89 @@ function Nothing() {
  * endpoint under it requires both, and this row already knows the answers, so
  * nobody has to.
  */
-function columnsFor(projectId: string): readonly Column<Listed>[] {
-  const order: readonly (readonly [string, (row: Listed) => ReactNode])[] = [
-    [
-      COLUMNS.started,
-      (row) => (
-        <Link href={transcriptPath(projectId, row)}>
-          <ListInstant instant={row.startedAt} precision="second" />
-        </Link>
+function columnsFor(
+  projectId: string,
+  openTrace: (row: Listed, opener?: HTMLElement | null) => void,
+): readonly Column<Listed>[] {
+  return [
+    {
+      key: "time",
+      header: TRACE_COLUMNS.time,
+      width: "260px",
+      mono: true,
+      cell: (row) => (
+        <ListInstant instant={row.startedAt} precision="second" />
       ),
-    ],
-    [COLUMNS.duration, (row) => howLong(row.durationNs)],
-    [
-      COLUMNS.turns,
-      (row) => (
-        <>
-          {row.turnCounts.human} {LIST.human} · {row.turnCounts.agent}{" "}
-          {LIST.agent}
-        </>
-      ),
-    ],
-    [
-      COLUMNS.preview,
-      (row) => (row.preview === "" ? <Nothing /> : <span>{row.preview}</span>),
-    ],
-    [COLUMNS.steps, (row) => row.spanCount],
-    [
-      COLUMNS.tools,
-      (row) => (row.toolSpanCount === 0 ? <Nothing /> : row.toolSpanCount),
-    ],
-    [
-      COLUMNS.errors,
-      (row) =>
-        row.erroredSpanCount === 0 ? (
+    },
+    {
+      key: "duration",
+      header: TRACE_COLUMNS.duration,
+      width: "95px",
+      mono: true,
+      cell: (row) => howLong(row.durationNs),
+    },
+    {
+      key: "p90-turn-latency",
+      header: TRACE_COLUMNS.p90TurnLatency,
+      width: "150px",
+      mono: true,
+      cell: (row) =>
+        row.turnResponseLatencyP90Milliseconds === null ? (
           <Nothing />
         ) : (
-          <strong className="text-failure">{row.erroredSpanCount}</strong>
+          shownTurnLatency(
+            row.turnResponseLatencyP90Milliseconds,
+            row.turnResponseLatencyP90Partial
+              ? TRACE_SHEET.overview.partial
+              : undefined,
+          )
         ),
-    ],
-    [COLUMNS.environment, (row) => row.environment],
-    [
-      COLUMNS.platform,
-      (row) =>
-        row.agentPlatform === "" ? (
-          <Nothing />
-        ) : (
-          agentPlatformLabel(row.agentPlatform)
-        ),
-    ],
+    },
+    {
+      key: "trace-id",
+      header: TRACE_COLUMNS.traceId,
+      width: "240px",
+      mono: true,
+      primary: true,
+      cell: (row) => (
+        <button
+          className="block max-w-full cursor-pointer truncate border-0 bg-transparent p-0 font-inherit text-left text-foreground underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
+          type="button"
+          title={row.traceId}
+          onClick={(event) => openTrace(row, event.currentTarget)}
+        >
+          {row.traceId}
+        </button>
+      ),
+    },
+    {
+      key: "agent",
+      header: TRACE_COLUMNS.agent,
+      width: "203px",
+      cell: (row) => {
+        const name =
+          row.platformAgentName.trim() ||
+          row.platformAgentId.trim() ||
+          row.agentId.trim();
+        return name === "" ? <Nothing /> : name;
+      },
+    },
+    {
+      key: "actions",
+      header: TRACE_COLUMNS.actions,
+      action: true,
+      cell: (row) => (
+        <RowMenu label={`Actions for trace ${row.traceId}`}>
+          {(close) => (
+            <MenuItem
+              href={transcriptPath(projectId, row)}
+              onClick={close}
+            >
+              {TRACE_SHEET.actions.openFullTranscript}
+            </MenuItem>
+          )}
+        </RowMenu>
+      ),
+    },
   ];
-
-  return order.map(([header, cell], index) => ({
-    key: header,
-    header,
-    cell,
-    hideOnMobile: !MOBILE_COLUMNS.has(header),
-    primary: index === 0,
-    mono: MEASURED_COLUMNS.has(header),
-  }));
 }
-
-/** Keep the exchange, when it happened, and any failure legible on a phone. */
-const MOBILE_COLUMNS = new Set<string>([
-  COLUMNS.started,
-  COLUMNS.duration,
-  COLUMNS.preview,
-  COLUMNS.errors,
-]);
-
-/**
- * The columns somebody scans down rather than reads across.
- *
- * `DESIGN.md` asks for tabular numerals on metrics, dates and durations, and
- * the mono face is where this table gets them. A count and a duration are worth
- * nothing on their own — what they are for is the row that is three times the
- * others — and a proportional face puts every figure at a different width, so
- * the eye has to read each one instead of seeing the shape of the column.
- *
- * Turns is deliberately out: it is a sentence with two numbers in it rather
- * than a figure. So are the two words at the end.
- */
-const MEASURED_COLUMNS = new Set<string>([
-  COLUMNS.started,
-  COLUMNS.duration,
-  COLUMNS.steps,
-  COLUMNS.tools,
-  COLUMNS.errors,
-]);
