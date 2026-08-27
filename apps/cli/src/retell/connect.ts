@@ -809,6 +809,11 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     if (chosen === null) return { kind: "unchosen", agents };
   }
 
+  // Confirm the settled agent before the next provider read. The read gives a
+  // terminal renderer time to paint this line; saying it only after every
+  // registration step can let the next wizard screen replace it first.
+  options.say(`Retell agent ${defaultAgentName(chosen.name)}`, "action");
+
   const pulled = await pullAgent(key, chosen, options.retell ?? {});
   if (options.signal.aborted) return { kind: "interrupted" };
 

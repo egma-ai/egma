@@ -260,10 +260,6 @@ export async function connectionSetupStep(options: ConnectionSetupStepOptions): 
 
   {
     const { registered, config } = outcome;
-    // One agent on the account is confirmed here rather than asked about: the
-    // developer reads which one egma took, inside the flow, with nothing to
-    // answer.
-    ui.pushStatus(`${ACTION_MARK} Retell agent ${config.name}`);
     ui.pushStatus(`${DETAIL_MARK} ${config.agentId}`);
     ui.pushStatus(
       `${ACTION_MARK} ${registered.agent.name} is on Egma, reachable over ${registered.connection.name} (${registered.connection.productLabel}, ${registered.connection.modality}).`,
