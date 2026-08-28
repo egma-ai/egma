@@ -1369,21 +1369,41 @@ export function simulationToolCalls(
     : transcriptToolCalls(evidence.transcript);
 }
 
-type ConversationEvent =
-  | {
-      readonly kind: "turn";
-      readonly step: EvidenceStep;
-      readonly turnNumber: number;
-    }
-  | {
-      readonly kind: "tool";
-      readonly step: EvidenceStep;
-    };
+type TurnConversationEvent = {
+  readonly kind: "turn";
+  readonly step: EvidenceStep;
+  readonly turnNumber: number;
+};
 
-type TimedConversationEvent = ConversationEvent & {
+type ToolConversationEvent = {
+  readonly kind: "tool";
+  readonly step: EvidenceStep;
+};
+
+type ConversationEvent = TurnConversationEvent | ToolConversationEvent;
+
+type ConversationTiming = {
   readonly startedSeconds: number | null;
   readonly endedSeconds: number | null;
 };
+
+type TimedTurnConversationEvent = TurnConversationEvent & ConversationTiming;
+type TimedToolConversationEvent = ToolConversationEvent & ConversationTiming;
+type TimedConversationEvent =
+  | TimedTurnConversationEvent
+  | TimedToolConversationEvent;
+
+type ConversationGroup =
+  | {
+      readonly kind: "turn";
+      readonly turn: TimedTurnConversationEvent;
+      /** The spoken turn and its directly owned tools, in recorded order. */
+      readonly events: readonly TimedConversationEvent[];
+    }
+  | {
+      readonly kind: "tool";
+      readonly tool: TimedToolConversationEvent;
+    };
 
 function conversationEvents(
   transcript: EvidenceTranscript,
@@ -1441,6 +1461,118 @@ function timedConversationEvents(
   return timed;
 }
 
+function toolOwners(
+  transcript: EvidenceTranscript,
+  toolCalls: readonly EvidenceStep[],
+): ReadonlyMap<string, string> {
+  const steps = new Map<string, EvidenceStep>();
+  const index = (step: EvidenceStep): void => {
+    if (!steps.has(step.spanId)) steps.set(step.spanId, step);
+    for (const child of step.spans) index(child);
+  };
+  for (const turn of transcript.turns) index(turn);
+  for (const step of transcript.spans) index(step);
+  for (const tool of toolCalls) index(tool);
+
+  const agentTurnIds = new Set(
+    transcript.turns
+      .filter((turn) => turn.kind === "turn:agent")
+      .map((turn) => turn.spanId),
+  );
+  const owners = new Map<string, string>();
+
+  /* The returned span tree is authoritative even when an intermediate span's
+   * parent field is incomplete. Walk every Agent subtree before the fallback. */
+  for (const turn of transcript.turns) {
+    if (turn.kind !== "turn:agent") continue;
+    const ownDescendants = (step: EvidenceStep): void => {
+      if (step.kind === "tool" && !owners.has(step.spanId)) {
+        owners.set(step.spanId, turn.spanId);
+      }
+      for (const child of step.spans) ownDescendants(child);
+    };
+    for (const child of turn.spans) ownDescendants(child);
+  }
+
+  /* A caller can supply a separately collected tool list. Follow its complete
+   * parent chain when the nested tree did not already establish ownership. */
+  for (const tool of toolCalls) {
+    if (owners.has(tool.spanId)) continue;
+    const visited = new Set<string>([tool.spanId]);
+    let parentSpanId = tool.parentSpanId;
+    while (parentSpanId !== "" && !visited.has(parentSpanId)) {
+      if (agentTurnIds.has(parentSpanId)) {
+        owners.set(tool.spanId, parentSpanId);
+        break;
+      }
+      visited.add(parentSpanId);
+      const parent = steps.get(parentSpanId);
+      if (parent === undefined) break;
+      parentSpanId = parent.parentSpanId;
+    }
+  }
+  return owners;
+}
+
+/**
+ * Keep descendants of an Agent turn inside that turn. A tool whose ownership
+ * cannot be resolved stays on the main rail, so incomplete hierarchy never
+ * hides evidence.
+ */
+function conversationGroups(
+  transcript: EvidenceTranscript,
+  toolCalls: readonly EvidenceStep[],
+  events: readonly TimedConversationEvent[],
+): readonly ConversationGroup[] {
+  const ownerByTool = toolOwners(transcript, toolCalls);
+  const orderedKeys: string[] = [];
+  const eventsByGroup = new Map<string, TimedConversationEvent[]>();
+  for (const event of events) {
+    const ownerId = event.kind === "tool"
+      ? ownerByTool.get(event.step.spanId)
+      : event.step.spanId;
+    const key = ownerId === undefined
+      ? `tool:${event.step.spanId}`
+      : `turn:${ownerId}`;
+    const grouped = eventsByGroup.get(key);
+    if (grouped === undefined) {
+      orderedKeys.push(key);
+      eventsByGroup.set(key, [event]);
+    } else {
+      grouped.push(event);
+    }
+  }
+
+  const groups: ConversationGroup[] = [];
+  for (const key of orderedKeys) {
+    const grouped = eventsByGroup.get(key) ?? [];
+    const turn = grouped.find(
+      (event): event is TimedTurnConversationEvent => event.kind === "turn",
+    );
+    if (turn !== undefined) {
+      groups.push({ kind: "turn", turn, events: grouped });
+      continue;
+    }
+    const tool = grouped[0];
+    if (tool?.kind === "tool") groups.push({ kind: "tool", tool });
+  }
+  return groups;
+}
+
+function conversationEventIsActive(
+  event: TimedConversationEvent,
+  currentTime: number | undefined,
+): boolean {
+  const started = event.startedSeconds;
+  const ended = event.endedSeconds;
+  return (
+    currentTime !== undefined &&
+    started !== null &&
+    currentTime >= started &&
+    currentTime < Math.max(started + 0.05, ended ?? started)
+  );
+}
+
 type TranscriptSeek = (spanId: string, seconds: number) => void;
 
 const TranscriptToolCall = memo(function TranscriptToolCall({
@@ -1448,12 +1580,16 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   timelineStartedAt,
   active,
   selected,
+  nested = false,
+  separated = false,
   onSeek,
 }: {
   readonly step: EvidenceStep;
   readonly timelineStartedAt: string;
   readonly active: boolean;
   readonly selected: boolean;
+  readonly nested?: boolean;
+  readonly separated?: boolean;
   readonly onSeek?: TranscriptSeek;
 }) {
   const failed = step.status === "error";
@@ -1466,15 +1602,19 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   const name = step.toolName === "" ? humanizeIdentifier(step.name) : step.toolName;
   const seconds = secondsInto(step.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
+  const Container = nested ? "div" : "li";
 
   return (
-    <li
+    <Container
       className={cn(
-        "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden border border-border bg-surface-soft",
+        "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface-soft",
         "max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
+        nested ? "border-0" : "border border-border",
+        separated && "border-border border-t",
         selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
         active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
       )}
+      role={nested ? "group" : undefined}
       data-active={active ? "true" : "false"}
       data-selected={selected ? "true" : "false"}
       aria-label={`Tool call, ${name}`}
@@ -1560,32 +1700,34 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
           </section>
         </div>
       </details>
-    </li>
+    </Container>
   );
 });
 
 const TranscriptTurn = memo(function TranscriptTurn({
-  turn,
-  turnNumber,
+  turnEvent,
+  events,
   timelineStartedAt,
-  active,
-  selected,
+  currentTime,
+  selectedSpanId,
   speakerLabels,
   onSeek,
 }: {
-  readonly turn: EvidenceStep;
-  readonly turnNumber: number;
+  readonly turnEvent: TimedTurnConversationEvent;
+  readonly events: readonly TimedConversationEvent[];
   readonly timelineStartedAt: string;
-  readonly active: boolean;
-  readonly selected: boolean;
+  readonly currentTime?: number;
+  readonly selectedSpanId: string | null;
   readonly speakerLabels: TranscriptSpeakerLabels;
   readonly onSeek?: TranscriptSeek;
 }) {
+  const turn = turnEvent.step;
+  const turnNumber = turnEvent.turnNumber;
   const human = turn.kind === "turn:human";
   const speaker = human ? speakerLabels.human : speakerLabels.agent;
   const seconds = secondsInto(turn.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
-  const content = (
+  const speechContent = (
     <>
       <div className="flex min-h-(--tap-target) flex-col items-start justify-center border-r border-border px-3 py-2">
         <time
@@ -1618,38 +1760,60 @@ const TranscriptTurn = memo(function TranscriptTurn({
 
   return (
     <li
-      className="group w-full min-w-0 scroll-my-8"
+      className="group w-full min-w-0 scroll-my-8 overflow-hidden border border-border target:border-brand"
       id={`transcript-turn-${String(turnNumber)}`}
       aria-label={`Turn ${String(turnNumber)}, ${speaker}`}
     >
-      {onSeek === undefined || seconds === null ? (
-        <div
-          className={cn(
-            "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden border border-border bg-surface max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
-            "group-target:border-brand group-target:bg-selected",
-            active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
-          )}
-          aria-current={active ? "true" : undefined}
-        >
-          {content}
-        </div>
-      ) : (
-        <button
-          className={cn(
-            "relative grid min-w-0 w-full cursor-pointer grid-cols-[64px_minmax(0,1fr)] overflow-hidden border border-border bg-surface p-0 text-left max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
-            "pointer-hover:bg-surface-soft group-target:border-brand group-target:bg-selected",
-            selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
-            active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
-          )}
-          type="button"
-          aria-current={active ? "true" : undefined}
-          aria-pressed={selected}
-          title={`Seek recording to ${shownTime}`}
-          onClick={() => onSeek(turn.spanId, seconds)}
-        >
-          {content}
-        </button>
-      )}
+      {events.map((event, at) => {
+        const active = conversationEventIsActive(event, currentTime);
+        const selected = selectedSpanId === event.step.spanId;
+        if (event.kind === "tool") {
+          return (
+            <TranscriptToolCall
+              active={active}
+              key={event.step.spanId}
+              nested
+              selected={selected}
+              separated={at > 0}
+              step={event.step}
+              timelineStartedAt={timelineStartedAt}
+              {...(onSeek === undefined ? {} : { onSeek })}
+            />
+          );
+        }
+        return onSeek === undefined || seconds === null ? (
+          <div
+            className={cn(
+              "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
+              "group-target:bg-selected",
+              at > 0 && "border-border border-t",
+              active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
+            )}
+            key={event.step.spanId}
+            aria-current={active ? "true" : undefined}
+          >
+            {speechContent}
+          </div>
+        ) : (
+          <button
+            className={cn(
+              "relative grid min-w-0 w-full cursor-pointer grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface p-0 text-left max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
+              "pointer-hover:bg-surface-soft group-target:bg-selected",
+              at > 0 && "border-border border-t",
+              selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
+              active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
+            )}
+            key={event.step.spanId}
+            type="button"
+            aria-current={active ? "true" : undefined}
+            aria-pressed={selected}
+            title={`Seek recording to ${shownTime}`}
+            onClick={() => onSeek(turn.spanId, seconds)}
+          >
+            {speechContent}
+          </button>
+        );
+      })}
     </li>
   );
 });
@@ -1689,9 +1853,11 @@ export function TranscriptEmpty({
 }
 
 /**
- * Readable speech and tool calls on one time rail. A recording-backed row is a
- * real button: selecting it seeks the shared player without autoplay. Selection
- * stays put while the playhead independently marks the event currently playing.
+ * Readable speech and tool calls on one time rail. A tool with an Agent parent
+ * stays inside that turn; incomplete hierarchy never hides an orphan tool. A
+ * recording-backed row is a real button: selecting it seeks the shared player
+ * without autoplay. Selection stays put while the playhead independently marks
+ * the event currently playing.
  */
 export function ChatTranscript({
   transcript,
@@ -1715,6 +1881,10 @@ export function ChatTranscript({
     () => timedConversationEvents(transcript, toolCalls, timelineStartedAt),
     [timelineStartedAt, toolCalls, transcript],
   );
+  const groups = useMemo(
+    () => conversationGroups(transcript, toolCalls, events),
+    [events, toolCalls, transcript],
+  );
   const [selectedSpanId, setSelectedSpanId] = useState<string | null>(null);
   const selectAndSeek = useCallback<TranscriptSeek>(
     (spanId, seconds) => {
@@ -1723,7 +1893,7 @@ export function ChatTranscript({
     },
     [onSeek],
   );
-  if (events.length === 0) {
+  if (groups.length === 0) {
     return <TranscriptEmpty emptyState={emptyState} />;
   }
 
@@ -1732,21 +1902,15 @@ export function ChatTranscript({
       className="m-0 flex min-w-0 list-none flex-col gap-3 p-0"
       aria-label="Transcript messages"
     >
-      {events.map((event) => {
-        const started = event.startedSeconds;
-        const ended = event.endedSeconds;
-        const active =
-          currentTime !== undefined &&
-          started !== null &&
-          currentTime >= started &&
-          currentTime < Math.max(started + 0.05, ended ?? started);
-        if (event.kind === "tool") {
+      {groups.map((group) => {
+        if (group.kind === "tool") {
+          const event = group.tool;
           return (
             <TranscriptToolCall
               key={event.step.spanId}
               step={event.step}
               timelineStartedAt={timelineStartedAt}
-              active={active}
+              active={conversationEventIsActive(event, currentTime)}
               selected={selectedSpanId === event.step.spanId}
               {...(onSeek === undefined ? {} : { onSeek: selectAndSeek })}
             />
@@ -1754,13 +1918,13 @@ export function ChatTranscript({
         }
         return (
           <TranscriptTurn
-            active={active}
-            key={event.step.spanId}
-            selected={selectedSpanId === event.step.spanId}
+            currentTime={currentTime}
+            events={group.events}
+            key={group.turn.step.spanId}
+            selectedSpanId={selectedSpanId}
             speakerLabels={speakerLabels}
             timelineStartedAt={timelineStartedAt}
-            turn={event.step}
-            turnNumber={event.turnNumber}
+            turnEvent={group.turn}
             {...(onSeek === undefined
               ? {}
               : { onSeek: selectAndSeek })}

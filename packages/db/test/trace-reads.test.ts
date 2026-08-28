@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   appendSpans,
   connectClickHouse,
@@ -41,9 +43,11 @@ let store: MigratedTraceStore;
 const acme = { organizationId: newId("org"), userId: newId("usr") };
 const globex = { organizationId: newId("org"), userId: newId("usr") };
 const identityProof = { organizationId: newId("org"), userId: newId("usr") };
+const toolTimelineProof = { organizationId: newId("org"), userId: newId("usr") };
 
 const OUTBOUND = newId("prj");
 const SUPPORT = newId("prj");
+const TOOL_TIMELINE_PROJECT = newId("prj");
 
 /** An instant as the microseconds since the epoch a window is counted in. */
 function microseconds(instant: string): bigint {
@@ -288,6 +292,292 @@ describe("platform agent reference carried only by a late root", () => {
 
     expect(listed).toMatchObject(expected);
     expect(detail).toMatchObject(expected);
+  });
+});
+
+/**
+ * Provider normalization has one output contract at the store boundary: the
+ * tool names the agent turn that invoked it and carries its real timeline
+ * instant. Retell has to derive that instant from its woven transcript; OTLP
+ * supplies it directly. The reader must preserve both without flattening the
+ * tool beside the conversation or moving it back to trace zero.
+ */
+describe("provider tool-call timeline rows", () => {
+  const RETELL_TOOL_TRACE = "eded2222222222222222222222222222";
+  const RETAINED_RETELL_TOOL_TRACE = "eded3333333333333333333333333333";
+  const RETAINED_ORPHAN_TOOL_TRACE = "eded4444444444444444444444444444";
+  const OTLP_TOOL_TRACE = "fefe2222222222222222222222222222";
+
+  function retainedRetellSpanId(traceId: string, within: string): string {
+    return createHash("sha256")
+      .update(`egma:retell:span\n${traceId}\n${within}`)
+      .digest("hex")
+      .slice(0, 16);
+  }
+
+  async function appendToolTrace(
+    traceId: string,
+    agentPlatform: "retell" | "livekit",
+    agentOffsetMilliseconds: number,
+    toolOffsetMilliseconds: number,
+  ): Promise<void> {
+    const root = spanId();
+    const human = spanId();
+    const agent = spanId();
+    await appendSpans(at(toolTimelineProof, TOOL_TIMELINE_PROJECT), [
+      span({
+        traceId,
+        spanId: root,
+        agentPlatform,
+        durationNanoseconds: 60_000_000_000n,
+      }),
+      span({
+        traceId,
+        spanId: human,
+        parentSpanId: root,
+        agentPlatform,
+        name: "human_turn",
+        kind: "turn:human",
+        text: "Find an appointment.",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+      span({
+        traceId,
+        spanId: agent,
+        parentSpanId: root,
+        agentPlatform,
+        name: "agent_turn",
+        kind: "turn:agent",
+        text: "I found an opening.",
+        startedAtMicroseconds:
+          BigInt(WHEN.getTime() + agentOffsetMilliseconds) * 1000n,
+      }),
+      span({
+        traceId,
+        spanId: spanId(),
+        parentSpanId: agent,
+        agentPlatform,
+        name: "get_availability",
+        kind: "tool",
+        toolName: "get_availability",
+        startedAtMicroseconds:
+          BigInt(WHEN.getTime() + toolOffsetMilliseconds) * 1000n,
+      }),
+    ]);
+  }
+
+  beforeAll(async () => {
+    await appendToolTrace(RETELL_TOOL_TRACE, "retell", 39_606, 37_362);
+    await appendToolTrace(OTLP_TOOL_TRACE, "livekit", 4_000, 6_000);
+
+    const root = retainedRetellSpanId(RETAINED_RETELL_TOOL_TRACE, "root");
+    const human = retainedRetellSpanId(
+      RETAINED_RETELL_TOOL_TRACE,
+      "turn/0",
+    );
+    const agent = retainedRetellSpanId(
+      RETAINED_RETELL_TOOL_TRACE,
+      "turn/1",
+    );
+    await appendSpans(at(toolTimelineProof, TOOL_TIMELINE_PROJECT), [
+      span({
+        traceId: RETAINED_RETELL_TOOL_TRACE,
+        spanId: root,
+        agentPlatform: "retell",
+        name: "retell_call",
+        kind: "conversation",
+        durationNanoseconds: 60_000_000_000n,
+        payload: JSON.stringify({
+          transcript_with_tool_calls: [
+            { role: "user" },
+            {
+              role: "tool_call_invocation",
+              tool_call_id: "call_tool_retained",
+              time_sec: 37.362,
+            },
+            {
+              role: "tool_call_result",
+              tool_call_id: "call_tool_retained",
+              time_sec: 37.893,
+            },
+            { role: "agent" },
+          ],
+          tool_calls: [
+            {
+              tool_call_id: "call_tool_retained",
+              start_time_sec: 37.362,
+              latency_ms: 531,
+            },
+          ],
+        }),
+      }),
+      span({
+        traceId: RETAINED_RETELL_TOOL_TRACE,
+        spanId: human,
+        parentSpanId: root,
+        agentPlatform: "retell",
+        name: "human_turn",
+        kind: "turn:human",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 33_649) * 1000n,
+      }),
+      span({
+        traceId: RETAINED_RETELL_TOOL_TRACE,
+        spanId: agent,
+        parentSpanId: root,
+        agentPlatform: "retell",
+        name: "agent_turn",
+        kind: "turn:agent",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 39_606) * 1000n,
+      }),
+      // This is the immutable row already held by the local trace: the old
+      // normalizer put it at call start, under the preceding human turn.
+      span({
+        traceId: RETAINED_RETELL_TOOL_TRACE,
+        spanId: retainedRetellSpanId(RETAINED_RETELL_TOOL_TRACE, "tool/0"),
+        parentSpanId: human,
+        agentPlatform: "retell",
+        name: "get_availability",
+        kind: "tool",
+        toolName: "get_availability",
+        durationNanoseconds: 0n,
+        payload: JSON.stringify({ id: "call_tool_retained" }),
+      }),
+    ]);
+
+    const orphanRoot = retainedRetellSpanId(
+      RETAINED_ORPHAN_TOOL_TRACE,
+      "root",
+    );
+    const orphanHuman = retainedRetellSpanId(
+      RETAINED_ORPHAN_TOOL_TRACE,
+      "turn/0",
+    );
+    await appendSpans(at(toolTimelineProof, TOOL_TIMELINE_PROJECT), [
+      span({
+        traceId: RETAINED_ORPHAN_TOOL_TRACE,
+        spanId: orphanRoot,
+        agentPlatform: "retell",
+        name: "retell_call",
+        kind: "conversation",
+        durationNanoseconds: 10_000_000_000n,
+        payload: JSON.stringify({
+          transcript_with_tool_calls: [
+            { role: "user" },
+            {
+              role: "tool_call_invocation",
+              tool_call_id: "call_tool_orphan",
+              time_sec: 5,
+            },
+            {
+              role: "tool_call_result",
+              tool_call_id: "call_tool_orphan",
+              time_sec: 5.1,
+            },
+          ],
+          tool_calls: [
+            {
+              tool_call_id: "call_tool_orphan",
+              start_time_sec: 5,
+              latency_ms: 100,
+            },
+          ],
+        }),
+      }),
+      span({
+        traceId: RETAINED_ORPHAN_TOOL_TRACE,
+        spanId: orphanHuman,
+        parentSpanId: orphanRoot,
+        agentPlatform: "retell",
+        name: "human_turn",
+        kind: "turn:human",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+      span({
+        traceId: RETAINED_ORPHAN_TOOL_TRACE,
+        spanId: retainedRetellSpanId(RETAINED_ORPHAN_TOOL_TRACE, "tool/0"),
+        parentSpanId: orphanHuman,
+        agentPlatform: "retell",
+        name: "get_availability",
+        kind: "tool",
+        toolName: "get_availability",
+        durationNanoseconds: 0n,
+        payload: JSON.stringify({ id: "call_tool_orphan" }),
+      }),
+    ]);
+  });
+
+  it.each([
+    ["Retell", RETELL_TOOL_TRACE, 37_362],
+    ["OTLP", OTLP_TOOL_TRACE, 6_000],
+  ] as const)(
+    "preserves the %s tool under its agent turn at the provider offset",
+    async (_source, traceId, expectedOffsetMilliseconds) => {
+      const detail = await readTrace(
+        at(toolTimelineProof, TOOL_TIMELINE_PROJECT),
+        traceId,
+        { window: WINDOW },
+      );
+      const agent = detail?.turns.find((turn) => turn.kind === "turn:agent");
+      const tool = agent?.spans.find((step) => step.kind === "tool");
+
+      expect(agent).toBeDefined();
+      expect(tool).toMatchObject({
+        parentSpanId: agent?.spanId,
+        toolName: "get_availability",
+      });
+      expect(
+        Date.parse(tool?.startedAt ?? "") -
+          Date.parse(detail?.startedAt ?? ""),
+      ).toBe(expectedOffsetMilliseconds);
+      expect(everySpanOf(detail).filter((step) => step.kind === "tool"))
+        .toHaveLength(1);
+      expect(detail?.spans.filter((step) => step.kind === "tool")).toEqual([]);
+    },
+  );
+
+  it("projects a retained Retell tool row from safe structural provider fields", async () => {
+    const detail = await readTrace(
+      at(toolTimelineProof, TOOL_TIMELINE_PROJECT),
+      RETAINED_RETELL_TOOL_TRACE,
+      { window: WINDOW },
+    );
+    const human = detail?.turns.find((turn) => turn.kind === "turn:human");
+    const agent = detail?.turns.find((turn) => turn.kind === "turn:agent");
+    const tool = agent?.spans.find((step) => step.kind === "tool");
+
+    expect(tool).toMatchObject({
+      parentSpanId: agent?.spanId,
+      durationNanoseconds: "531000000",
+      toolName: "get_availability",
+    });
+    expect(
+      Date.parse(tool?.startedAt ?? "") - Date.parse(detail?.startedAt ?? ""),
+    ).toBe(37_362);
+    expect(human?.spans.filter((step) => step.kind === "tool")).toEqual([]);
+    expect(detail?.spans.filter((step) => step.kind === "tool")).toEqual([]);
+  });
+
+  it("keeps a retained Retell tool visible as an orphan when its Agent is absent", async () => {
+    const detail = await readTrace(
+      at(toolTimelineProof, TOOL_TIMELINE_PROJECT),
+      RETAINED_ORPHAN_TOOL_TRACE,
+      { window: WINDOW },
+    );
+    const human = detail?.turns.find((turn) => turn.kind === "turn:human");
+    const root = detail?.spans.find((step) => step.parentSpanId === "");
+    const tool = root?.spans.find((step) => step.kind === "tool");
+
+    expect(tool).toMatchObject({
+      parentSpanId: root?.spanId,
+      durationNanoseconds: "100000000",
+      toolName: "get_availability",
+    });
+    expect(
+      Date.parse(tool?.startedAt ?? "") - Date.parse(detail?.startedAt ?? ""),
+    ).toBe(5_000);
+    expect(human?.spans.filter((step) => step.kind === "tool")).toEqual([]);
+    expect(everySpanOf(detail).filter((step) => step.kind === "tool"))
+      .toHaveLength(1);
   });
 });
 

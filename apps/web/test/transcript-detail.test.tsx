@@ -455,7 +455,14 @@ describe("the transcript that was read", () => {
       screen.getByText(`${TRACE.source} / ${TRACE.environment}`),
     ).toBeTruthy();
     // Nothing errored, so the chip says so rather than counting nothing.
-    expect(screen.getByText(DETAIL.recorded)).toBeTruthy();
+    const recorded = screen.getByText(DETAIL.recorded);
+    expect(recorded).toBeTruthy();
+    const mark = recorded
+      .closest('[data-slot="badge"]')
+      ?.querySelector('[data-slot="state-mark"]');
+    expect(mark?.getAttribute("data-state-mark")).toBe("complete");
+    expect(mark?.classList.contains("bg-transparent")).toBe(true);
+    expect(mark?.classList.contains("bg-failure")).toBe(false);
   });
 
   it("counts the errors in the chip when something went wrong", async () => {
@@ -466,7 +473,14 @@ describe("the transcript that was read", () => {
     await open();
     await settled();
 
-    expect(screen.getByText(DETAIL.errors(2))).toBeTruthy();
+    const errors = screen.getByText(DETAIL.errors(2));
+    expect(errors).toBeTruthy();
+    const mark = errors
+      .closest('[data-slot="badge"]')
+      ?.querySelector('[data-slot="state-mark"]');
+    expect(mark?.getAttribute("data-state-mark")).toBe("error");
+    expect(mark?.classList.contains("bg-failure")).toBe(true);
+    expect(mark?.classList.contains("bg-transparent")).toBe(false);
     expect(screen.queryByText(DETAIL.recorded)).toBeNull();
   });
 
