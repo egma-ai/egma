@@ -15,10 +15,11 @@ so the count is asserted here rather than trusted to survive a tidy-up.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 
-from conftest import tools_on
-from egma import monitoring
+from conftest import inside_egma, tools_on
+from egma import mockable, monitoring
 
 from agent import FrontDesk
 
@@ -31,6 +32,30 @@ UNMOCKED_TOOL = "opening_hours"
 
 def test_the_agent_carries_both_tools_before_anything_is_wrapped():
     assert set(tools_on(FrontDesk())) == {MOCKABLE_TOOL, UNMOCKED_TOOL}
+
+
+async def test_this_agent_reports_its_tools_when_egma_walks_in_second(session):
+    """The dispatch path this fixture is silent on unless the SDK waits.
+
+    This worker registers unnamed by default, so nothing dispatches it on
+    egma's behalf: LiveKit walks it into the room as soon as the room
+    exists, which is before egma's own participant is in it. The room's
+    name is what says this is a simulation, and it says so from the first
+    line of the entrypoint — so the census still goes, and it goes to the
+    participant that arrives afterwards.
+    """
+    agent = FrontDesk()
+    context = inside_egma()
+
+    async def egma_walks_in() -> None:
+        await asyncio.sleep(0.05)
+        context.room.arrive("egma-persona")
+
+    joining = asyncio.create_task(egma_walks_in())
+    await mockable(agent, context, session)
+    await joining
+
+    assert context.room.asked == ["egma.hello"]
 
 
 def test_the_booking_shaped_tool_takes_the_day_it_is_asked_about():

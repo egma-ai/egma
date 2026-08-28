@@ -1,10 +1,10 @@
 """The exchange, from the customer's seat: census, couriers, and answers.
 
 Every test here runs against a room-shaped stand-in for egma's
-participant, so the whole of the SDK's own code is exercised — the
-metadata read, the census built off a real agent, the couriers stood in
-LiveKit's own side table, the reply read, the fail-open — with no LiveKit
-server and no network anywhere.
+participant, so the whole of the SDK's own code is exercised — the room's
+name read, egma found among the people in the room, the census built off
+a real agent, the couriers stood in LiveKit's own side table, the reply
+read, the fail-open — with no LiveKit server and no network anywhere.
 
 Where a courier is called, it is called the way the framework delivers a
 call to one: through LiveKit's own argument trimming. That is the only
@@ -31,9 +31,21 @@ from livekit.agents import (
 )
 from livekit.agents.llm import AgentHandoff
 from livekit.rtc import RpcError
-from room_stub import EGMA_IDENTITY, StubRoom, not_reached
+from room_stub import (
+    EGMA_IDENTITY,
+    SIMULATION_ROOM,
+    StubContext,
+    StubRoom,
+    egma_metadata,
+    not_reached,
+    persona_in,
+)
 
 from egma import mockable, seam
+
+# The module rather than the verb: ``egma.mockable`` is both, and the
+# tests that shorten this SDK's own waits have to reach the module.
+implementation = importlib.import_module("egma.mockable")
 
 
 def answer(value: object) -> dict:
@@ -68,6 +80,34 @@ async def test_an_already_connected_simulation_does_not_connect_again(session):
     await mockable(agent, ctx, session)
 
     assert ctx.connect_calls == 0
+
+
+async def test_a_room_that_will_not_open_leaves_the_agent_alone(session, caplog):
+    """The one connect this SDK forces is not a way for it to raise.
+
+    Connecting is the only thing ``mockable`` makes an agent do that the
+    agent had not asked for yet, so it is the one place a fault of egma's
+    could reach a customer's entrypoint. It does not: a room that will not
+    open is a room egma cannot be found in, which lands where every other
+    unreachable egma lands — nothing wrapped, every tool its own, and the
+    reason said out loud. The agent's own startup is left to connect, or
+    to fail on its own terms.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(connected=False, mocked_tools=("check_calendar",))
+    ctx = in_a_simulation(room)
+
+    async def will_not_open() -> None:
+        raise RuntimeError("the LiveKit server refused this token")
+
+    ctx.connect = will_not_open
+
+    with caplog.at_level("ERROR", logger="egma"):
+        await mockable(agent, ctx, session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.asked == []
+    assert "the LiveKit server refused this token" in caplog.text
 
 
 async def test_the_census_goes_first_and_names_every_tool(session):
@@ -108,14 +148,334 @@ async def test_the_census_carries_each_tool_s_schema(session):
 
 async def test_the_census_sets_both_knobs_explicitly(session):
     """Never a default, on any call. The transport's own timeout is
-    shorter than a delay a mock tool may legally declare."""
+    shorter than a delay a mock tool may legally declare.
+
+    A census gets the shorter of this SDK's two waits, because a hello has
+    no authored delay to wait out and every second spent on one is a
+    second the agent has not greeted anybody in.
+    """
     agent = ReceptionAgent()
     room = StubRoom()
 
     await mockable(agent, in_a_simulation(room), session)
 
-    assert room.asked[0].response_timeout == seam.RESPONSE_TIMEOUT_SECONDS
+    assert room.asked[0].response_timeout == seam.HELLO_TIMEOUT_SECONDS
     assert room.asked[0].max_round_trip_latency == seam.MAX_ROUND_TRIP_SECONDS
+
+
+async def test_the_hello_wait_stays_clear_of_the_time_egma_gives_an_agent(session):
+    """The relation the number is chosen for, asserted rather than trusted.
+
+    egma allows an agent 30 seconds to join and publish audio. A hello is
+    sent before the session starts, so a hello this side would wait longer
+    than that for is a simulation egma ends by blaming the customer's
+    worker for a stall on this side of the room.
+    """
+    assert seam.HELLO_TIMEOUT_SECONDS < seam.RESPONSE_TIMEOUT_SECONDS
+    assert seam.HELLO_TIMEOUT_SECONDS < 30.0
+
+
+# -- Finding egma in the room -------------------------------------------------
+
+
+async def test_egma_arriving_after_the_agent_is_waited_for(session):
+    """The ordinary order, on three of the four dispatch paths into an egma room.
+
+    Nothing dispatches the worker on egma's behalf on those three, so the
+    agent is in the room first and egma walks in afterwards. The room's
+    name already said this is a simulation, so this side may wait — and it
+    connects before it waits, because a room nobody is connected to has
+    nobody in it.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(
+        connected=False, present=(), mocked_tools=("check_calendar",)
+    )
+    ctx = in_a_simulation(room)
+
+    async def egma_walks_in() -> None:
+        await asyncio.sleep(0.05)
+        room.arrive(EGMA_IDENTITY)
+
+    joining = asyncio.create_task(egma_walks_in())
+    await mockable(agent, ctx, session)
+    await joining
+
+    assert ctx.connect_calls == 1
+    assert room.methods_asked == [seam.HELLO_METHOD]
+    assert room.asked[0].identity == EGMA_IDENTITY
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+    # Nothing is left subscribed to the room once egma has been found.
+    assert room.listeners == {}
+
+
+async def test_egma_already_in_the_room_is_found_without_waiting(session):
+    """The other order, which is the one an explicit dispatch produces."""
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("check_calendar",))
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+    assert room.listeners == {}
+
+
+async def test_the_persona_a_token_endpoint_mints_for_is_found_too(session):
+    """egma joins under two names, and the second is the customer's variant.
+
+    Where a customer's own token endpoint mints egma's token, egma asks it
+    for ``egma-persona-<simulation>`` rather than the bare name. Both are
+    egma, and the address every message goes to is whichever one is really
+    in the room.
+    """
+    agent = ReceptionAgent()
+    persona = persona_in()
+    room = StubRoom(present=(persona,), mocked_tools=("check_calendar",))
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    assert room.asked[0].identity == persona
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+
+
+async def test_two_participants_answering_to_egmas_name_are_refused(session, caplog):
+    """A room with two claimants is a room where the answer is not knowable.
+
+    LiveKit makes one identity unique per room, so an impersonator taking
+    egma's exact name is evicted by the server. One taking a variant of it
+    sits quietly beside the real thing — and whichever this side picked
+    would be handed every tool name and schema this agent has. So neither
+    is picked.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(
+        present=(EGMA_IDENTITY, persona_in()), mocked_tools=("check_calendar",)
+    )
+
+    with caplog.at_level("ERROR", logger="egma"):
+        await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    # Not one word on the wire: the census is this agent's whole tool
+    # inventory, and it is never sent to somebody who might not be egma.
+    assert room.asked == []
+    assert EGMA_IDENTITY in caplog.text
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        pytest.param("egma-personality-quiz", id="a name that merely starts alike"),
+        pytest.param("caller-8871", id="an ordinary caller"),
+        pytest.param("EGMA-PERSONA", id="the name in another case"),
+    ],
+)
+async def test_a_participant_who_is_not_egma_is_never_asked(
+    session, monkeypatch, identity
+):
+    """The room's name says simulation; who to talk to is a separate question.
+
+    The name gets this side as far as looking, and no further: what the
+    census carries is every tool this agent has, by name and schema, so
+    the only participant it may be sent to is one that answers to egma's
+    name exactly — the bare name, or the name with a ``-`` and a
+    simulation after it. A prefix test would hand that inventory to
+    ``egma-personality-quiz``. Nobody here matches, so the search waits
+    the bound out and ends in the ordinary fail-open instead.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(present=(identity,), mocked_tools=("check_calendar",))
+    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.asked == []
+
+
+async def test_a_room_that_will_not_say_who_is_in_it_wraps_nothing(
+    session, monkeypatch, caplog
+):
+    """A room this side cannot see into is read as a room egma is not in.
+
+    Who is in the room is read through the mapping LiveKit declares, so
+    anything that answers ``items()`` is walked and anything that does not
+    is treated as an empty room rather than raised from. The end is the
+    ordinary fail-open, and nothing is sent anywhere on the way there.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("check_calendar",))
+    room.remote_participants = None
+    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+
+    with caplog.at_level("ERROR", logger="egma"):
+        await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.asked == []
+    assert "Monitoring" in caplog.text
+
+
+async def test_a_simulation_room_egma_never_joined_says_what_to_do(
+    session, monkeypatch, caplog
+):
+    """The branch that is unreachable in production, by construction.
+
+    The room's name said simulation and nobody by egma's name ever
+    arrived, which is a simulation that will run its real tools unless
+    somebody acts. So this is the one line in the SDK that asks for
+    action: it names who to look for in the room and this package's own
+    version, and it says that this job's spans stay out of Monitoring
+    regardless, because the room's name settled that on its own.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(present=(), mocked_tools=("check_calendar",))
+    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+
+    with caplog.at_level("ERROR", logger="egma"):
+        await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.asked == []
+    assert "egma" in caplog.text
+    assert "Monitoring" in caplog.text
+    assert room.listeners == {}
+
+
+async def test_a_census_sent_before_egma_registered_the_exchange_is_asked_again(
+    session,
+):
+    """egma is in the room a while before it answers to anything.
+
+    Its participant enters when its transport connects; the two methods of
+    this exchange are registered later. An SDK that read the transport's
+    "no such method" as "there is no egma here" would fall open for the
+    whole simulation — every mocked tool running its real implementation,
+    which is a real appointment booked.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("check_calendar",), refuses_hello_until=2)
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    assert room.methods_asked == [seam.HELLO_METHOD] * 3
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+
+
+async def test_a_census_asked_again_until_the_deadline_wraps_nothing(
+    session, monkeypatch, caplog
+):
+    """The retry is bounded, and what it ends in is the ordinary fail-open."""
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("check_calendar",), refuses_hello_until=10_000)
+    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.3)
+
+    with caplog.at_level("WARNING", logger="egma"):
+        await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.methods_asked
+    assert EGMA_IDENTITY in caplog.text
+
+
+async def test_a_room_that_lost_egma_is_not_waited_out(session):
+    """``RECIPIENT_NOT_FOUND`` is answered at once, not asked again.
+
+    It is the same kind of race as an unregistered method in principle,
+    and it is treated differently on purpose: nothing gets as far as
+    asking without having seen egma in this room's own participant table,
+    so a destination that cannot be found now is one that left. A
+    participant that left gets the fail-open every lost participant gets.
+    Asking it again for the rest of the bound would hold this agent silent
+    through the simulation it was waiting to serve, and end in the same
+    place.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(refuses_with=not_reached())
+
+    await mockable(agent, in_a_simulation(room), session)
+
+    assert room.methods_asked == [seam.HELLO_METHOD]
+    assert couriers_on(session, agent) == {}
+
+
+# -- What dispatch metadata is worth in a simulation room ---------------------
+
+
+async def test_the_legacy_context_block_changes_nothing_in_a_simulation_room(session):
+    """egma's own four keys arrive on one dispatch path, and are not read.
+
+    Where egma dispatches the worker by name it merges a context block
+    into the job's metadata, underneath the customer's keys, for SDK
+    releases below the room-name floor. This side reads none of
+    it. The room is what said simulation, and egma is found by looking for
+    it — so this room behaves exactly like the same room with empty
+    metadata, which is the property that keeps that block deletable.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(mocked_tools=("check_calendar",))
+
+    await mockable(
+        agent,
+        StubContext(room, SIMULATION_ROOM, egma_metadata()),
+        session,
+    )
+
+    assert room.asked[0].identity == EGMA_IDENTITY
+    assert set(couriers_on(session, agent)) == {"check_calendar"}
+
+
+async def test_an_identity_named_in_metadata_is_never_the_address(
+    session, monkeypatch
+):
+    """The address comes from the room, never from a string handed to it.
+
+    The census is this agent's whole tool inventory, so who receives it is
+    the one decision in this file that a name in the customer's own
+    dispatch metadata may not make. Here that metadata names somebody who
+    is not in the room and is not egma; the room holds nobody by egma's
+    name; and the answer is the ordinary fail-open, with nothing sent to
+    anyone.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(present=("caller-8871",), mocked_tools=("check_calendar",))
+    monkeypatch.setattr(implementation, "STARTUP_SECONDS", 0.2)
+
+    await mockable(
+        agent,
+        StubContext(room, SIMULATION_ROOM, egma_metadata(identity="caller-8871")),
+        session,
+    )
+
+    assert room.asked == []
+    assert couriers_on(session, agent) == {}
+
+
+async def test_a_version_neither_side_speaks_is_learned_from_the_reply(
+    session, caplog
+):
+    """The version rides the hello, and that is where it is read.
+
+    It rides the hello in both directions. An egma that will not speak
+    this side's version refuses the census with its own code, and the one
+    thing this SDK adds to that sentence is the package the two numbers
+    belong to — because "Egma speaks 1 and this one declared 2" reads as
+    an SDK that is too new when the fix is usually the other half.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(
+        refuses_with=RpcError(
+            seam.UNSUPPORTED_PROTOCOL_VERSION,
+            "egma.hello declares which version of this exchange it speaks",
+        )
+    )
+
+    with caplog.at_level("ERROR", logger="egma"):
+        await mockable(agent, in_a_simulation(room), session)
+
+    assert couriers_on(session, agent) == {}
+    assert "egma" in caplog.text
+    assert "Upgrade" in caplog.text
 
 
 # -- Which tools get a courier ------------------------------------------------
@@ -943,6 +1303,17 @@ async def test_a_census_egma_refuses_wraps_nothing_and_says_so(session, caplog):
         pytest.param('{"protocol_version":1}', id="no names at all"),
         pytest.param('{"protocol_version":2,"mocked_tools":[]}', id="another version"),
         pytest.param(
+            '{"protocol_version":true,"mocked_tools":["check_calendar"]}',
+            id="a boolean, which python counts as one",
+        ),
+        pytest.param(
+            '{"protocol_version":"1","mocked_tools":["check_calendar"]}',
+            id="a version written as text",
+        ),
+        pytest.param(
+            '{"mocked_tools":["check_calendar"]}', id="no version at all"
+        ),
+        pytest.param(
             '{"protocol_version":1,"mocked_tools":[7]}', id="a name that is a number"
         ),
     ],
@@ -950,6 +1321,15 @@ async def test_a_census_egma_refuses_wraps_nothing_and_says_so(session, caplog):
 async def test_a_census_reply_this_side_cannot_read_wraps_nothing(
     session, reply, caplog
 ):
+    """Only the number itself will do, in the one place the number is read.
+
+    The boolean is the parameter worth naming: Python counts ``True`` as
+    equal to ``1``, so a reply carrying ``true`` would otherwise pass for
+    version 1 and this side would stand couriers on the word of a far side
+    that never said which exchange it was answering in. Each of these
+    carries a real tool name, so the only thing that can refuse them is
+    the version reading itself.
+    """
     agent = ReceptionAgent()
     room = StubRoom(hello_reply=reply)
 
@@ -1055,10 +1435,14 @@ async def test_every_message_is_one_compact_json_object(session):
     await mockable(agent, in_a_simulation(room), session)
     await called(couriers_on(session, agent)["check_calendar"], day="Tuesday")
 
+    waits = {
+        seam.HELLO_METHOD: seam.HELLO_TIMEOUT_SECONDS,
+        seam.TOOL_METHOD: seam.RESPONSE_TIMEOUT_SECONDS,
+    }
     for asked in room.asked:
         assert isinstance(json.loads(asked.payload), dict)
         assert ", " not in asked.payload
         assert len(asked.payload.encode()) <= seam.LARGEST_PAYLOAD_BYTES
         assert asked.identity == EGMA_IDENTITY
-        assert asked.response_timeout == seam.RESPONSE_TIMEOUT_SECONDS
+        assert asked.response_timeout == waits[asked.method]
         assert asked.max_round_trip_latency == seam.MAX_ROUND_TRIP_SECONDS

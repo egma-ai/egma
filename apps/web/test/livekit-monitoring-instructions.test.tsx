@@ -25,7 +25,7 @@ describe("LiveKit monitoring instructions", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(3);
 
     const copy = container.textContent ?? "";
-    expect(copy).toContain("pip install egma");
+    expect(copy).toContain("pip install 'egma>=0.2.0'");
     expect(copy).toContain("from egma import monitor_livekit");
     expect(copy.indexOf("monitor_livekit(ctx)")).toBeLessThan(
       copy.indexOf("await session.start(...)"),

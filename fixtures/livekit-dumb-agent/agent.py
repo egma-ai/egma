@@ -33,12 +33,16 @@ a clock, a network or a disk.
 ## The one line that lets egma answer
 
 ``await mockable(agent, ctx, session)`` goes after the agent and the
-session exist and before the session starts. In a room egma dispatched, it
-reports these two tools by name and stands egma in front of whichever ones
-this simulation has answers for. **In every other room it does nothing at
-all** — no wrapper, no message, the same two callables — so this file
-behaves identically whether or not egma is anywhere near it, which is the
-property `tests/test_outside_egma.py` holds it to.
+session exist and before the session starts. In a room egma named for a
+simulation, it reports these two tools by name and stands egma in front of
+whichever ones this simulation has answers for. It does that on both
+dispatch styles below, including the unnamed one where this worker is in
+the room before egma is: the SDK reads the room's name, which arrives with
+the job either way, and waits for egma's own participant. **In every other
+room it does nothing at all** — no wrapper, no message, no connect, the
+same two callables — so this file behaves identically whether or not egma
+is anywhere near it, which is the property `tests/test_outside_egma.py`
+holds it to.
 
 ## The export that makes this agent visible in Egma
 

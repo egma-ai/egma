@@ -35,7 +35,10 @@ export type LiveKitKeyPairRegistration = CommonRegistration & {
   readonly variant: typeof LIVEKIT_KEY_PAIR_VARIANT;
   /** Omit for automatic dispatch. */
   readonly agentName?: string | undefined;
-  /** JSON object text handed to the worker as room metadata. */
+  /**
+   * JSON object text handed to the worker on the room's metadata, and on the
+   * dispatch's too wherever `agentName` above names one to dispatch.
+   */
   readonly metadata?: string | undefined;
   readonly credentials: ConnectionCredentials;
 };

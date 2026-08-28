@@ -106,10 +106,17 @@ describe("what a browser is told about a simulation connection", () => {
       label: "LiveKit agent name",
       required: false,
     });
+    // The label and the help both name two channels, because the value rides
+    // on two: the room always, the dispatch wherever an agent name is given.
+    // A string promising only the room would send a customer looking for
+    // their JSON in one of the two places it can be.
     expect(fields.get("metadata")).toMatchObject({
+      label: "Agent metadata",
       required: false,
       afterCredentials: true,
     });
+    expect(fields.get("metadata")?.help).toContain("ctx.room.metadata");
+    expect(fields.get("metadata")?.help).toContain("ctx.job.metadata");
 
     const endpoint = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.customer_token_endpoint",

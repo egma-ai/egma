@@ -77,7 +77,8 @@ export type ConfigFieldMetadata = {
   /**
    * Keep a supporting config field after the credential fields when that is
    * the order a person needs to fill the form in. Most config comes first;
-   * this is only for a field such as room metadata that completes the setup.
+   * this is only for a field such as the agent metadata that completes the
+   * setup.
    */
   readonly afterCredentials?: true;
 };
@@ -672,14 +673,48 @@ function livekitServerUrl(key: string, value: unknown): string {
 }
 
 /**
+ * What LiveKit accepts in any one metadata field.
+ *
+ * The same 512 KiB ceiling covers room metadata, participant metadata and the
+ * metadata a job is dispatched with, so a value written once and carried on
+ * two of those channels is measured against one number.
+ */
+const LIVEKIT_METADATA_BYTES = 512 * 1024;
+
+/**
+ * What egma accepts, which is the ceiling less room to add to the value.
+ *
+ * The stored string is not the whole of what a dispatch carries: a small block
+ * of egma's own context is merged in beside the customer's keys for as long as
+ * SDKs that read it are still running. A value sized to the ceiling exactly
+ * would therefore pass here and be refused by LiveKit mid-simulation, which is
+ * the one outcome this gate exists to prevent. Eight kibibytes is far more
+ * than that block will ever be and costs nothing real: a metadata value is a
+ * tenant and a locale, and anything approaching either number is a payload
+ * that LiveKit's own guidance says to pass by id instead.
+ */
+const METADATA_BYTES = LIVEKIT_METADATA_BYTES - 8 * 1024;
+
+/**
  * A JSON object, carried as the text it was written as.
  *
- * Text rather than a parsed object because it travels verbatim — it is handed
- * to the agent as the room's metadata exactly as it arrives, and re-serialising
- * it here would hand over something the customer never wrote. Checked all the
- * same, and checked at create: a stray comma refused here is a person looking
- * at their own mistake, while the same comma refused at dispatch is a run that
- * has already started and an agent left to make sense of it.
+ * Text rather than a parsed object because one of the two channels it rides
+ * carries it verbatim: the room's metadata is this string exactly as it
+ * arrives, and re-serialising it here would hand the agent something the
+ * customer never wrote. The dispatch's copy is the customer's keys written out
+ * again beside a small block of egma's own, so the room's byte-for-byte
+ * promise is only keepable while the text itself is what gets stored. Checked
+ * all the same, and checked at create: a stray comma refused here is a person
+ * looking at their own mistake, while the same comma refused at dispatch is a
+ * run that has already started and an agent left to make sense of it.
+ *
+ * Size is checked here for that same reason, and it is measured against the
+ * copy that runs out of room first — the dispatch's, which is this string plus
+ * that block. A string LiveKit will not carry
+ * is a connection that opens a room, bills for it, and then fails every
+ * simulation on it at the dispatch — a refusal nobody can act on from the
+ * record it leaves. Measured in UTF-8 bytes, because that is what goes on the
+ * wire and not what a character count would suggest.
  */
 function jsonObjectText(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -695,6 +730,18 @@ function jsonObjectText(key: string, value: unknown): string {
       "not_admitted",
       `the config's ${key} must be a JSON object written in a string, which ` +
         `looks like {"tenant":"acme"}`,
+    );
+  }
+
+  const bytes = Buffer.byteLength(candidate, "utf8");
+  if (bytes > METADATA_BYTES) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} is ${bytes} bytes and egma admits at most ` +
+        `${METADATA_BYTES} on the room and the dispatch — livekit's own ` +
+        `ceiling is ${LIVEKIT_METADATA_BYTES} bytes, and egma holds the ` +
+        `difference back as room for the block it merges into the dispatch; ` +
+        `hold a large value in your own store and put its id here instead`,
     );
   }
   return candidate;
@@ -926,7 +973,14 @@ export const CONNECTION_REGISTRY: Readonly<
      * holds no key pair, so it cannot create a room, cannot dispatch a worker
      * and cannot delete anything — which is why `agentName` and `metadata` are
      * not among its keys. Both are powers a key pair buys, and a config key
-     * egma would silently ignore is worse than one it refuses by name.
+     * egma would silently ignore is worse than one it refuses by name. That
+     * holds for `metadata` on both of the channels it rides: creating the
+     * room that carries it and dispatching the worker that is handed it are
+     * the same one power, and the token-endpoint access variant has
+     * neither. Where a customer on that variant wants their agent to read
+     * something, their own
+     * endpoint is what puts it there — it is the side minting the token and
+     * dispatching the worker.
      */
     accessVariants: [
       {
@@ -942,7 +996,16 @@ export const CONNECTION_REGISTRY: Readonly<
           // listening takes the room, and that is the state every quickstart
           // agent runs in.
           agentName: optional(nonEmptyString),
-          // Handed to the agent as the room's metadata, exactly as written.
+          // Handed to the agent on both of the channels LiveKit gives it to
+          // read its per-session context from, and each channel carries the
+          // value to a different precision. The room's metadata is this
+          // string byte for byte, always. The dispatch's metadata is these
+          // keys and values written out again, beside a small block of egma's
+          // own, wherever `agentName` above names a worker to dispatch:
+          // whitespace the customer wrote is not preserved there, and no key
+          // of theirs is touched. Automatic dispatch creates no dispatch for
+          // it to ride on, so there the room is the only channel and this key
+          // reaches the agent at `ctx.room.metadata` alone.
           metadata: optional(jsonObjectText),
         },
         fields: [
@@ -960,9 +1023,9 @@ export const CONNECTION_REGISTRY: Readonly<
           },
           {
             key: "metadata",
-            label: "Room metadata",
+            label: "Agent metadata",
             kind: "json",
-            help: 'A JSON object handed to the agent as the room metadata, exactly as written, like {"tenant":"acme"}.',
+            help: 'A JSON object handed to your agent, like {"tenant":"acme"}. The room metadata at ctx.room.metadata carries your string byte for byte. When this connection names an agent above, the dispatch metadata at ctx.job.metadata carries your keys unchanged as well. Egma writes nothing of its own over your keys.',
             afterCredentials: true,
           },
         ],

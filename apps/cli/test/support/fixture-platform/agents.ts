@@ -263,6 +263,15 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
   return candidate;
 }
 
+/**
+ * What LiveKit accepts in one metadata field, less the room egma keeps back
+ * for the context block it merges into the dispatch beside the customer's
+ * keys. Mirrored from the access layer so the fixture refuses the oversize
+ * value the real platform refuses: a fixture that admits what production
+ * rejects lets a CLI test register a connection nobody could really have.
+ */
+const METADATA_BYTES = 512 * 1024 - 8 * 1024;
+
 /** A JSON object carried as the text it was written as, checked at create. */
 function jsonObjectText(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -275,6 +284,12 @@ function jsonObjectText(key: string, value: unknown): string {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Refusal(
       `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
+    );
+  }
+  const bytes = Buffer.byteLength(candidate, "utf8");
+  if (bytes > METADATA_BYTES) {
+    throw new Refusal(
+      `the config's ${key} is ${bytes} bytes and egma admits at most ${METADATA_BYTES} on the room and the dispatch`,
     );
   }
   return candidate;
@@ -348,9 +363,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     /**
      * Two access variants answer one question: who mints the
      * token that opens the room. Nothing carries over between them — a
-     * connection that names an endpoint holds no key pair, so it cannot
-     * dispatch a worker or carry room metadata, and both keys are refused on
-     * it by name rather than silently ignored.
+     * connection that names an endpoint holds no key pair, so it can neither
+     * create the room that carries metadata nor dispatch the worker that is
+     * handed it, which is one power covering both of the channels a metadata
+     * value rides. `agentName` and `metadata` are therefore not among that
+     * variant's keys, and both are refused on it by name rather than silently
+     * ignored.
      */
     accessVariants: [
       {
@@ -360,7 +378,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           url: livekitServerUrl,
           // Left out means automatic dispatch: whichever worker is listening.
           agentName: optional(nonEmptyString),
-          // Handed to the agent as the room's metadata, exactly as written.
+          // Handed to the agent exactly as written, on both of the channels
+          // LiveKit gives an agent to read its per-session context from: the
+          // room's metadata always, and the dispatch's metadata as well
+          // wherever `agentName` above names a worker to dispatch.
           metadata: optional(jsonObjectText),
         },
         credentials: {

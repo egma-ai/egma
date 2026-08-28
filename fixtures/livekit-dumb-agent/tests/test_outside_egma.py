@@ -7,8 +7,8 @@ that is a different claim: a wiring mistake here would leave the SDK's own
 suite green and this fixture changed.
 
 Nothing here needs a room, a model or a key. A production room is a room
-with no egma named in its dispatch metadata, and that is a string, so the
-whole property is testable on a laptop with the network unplugged.
+egma did not name, and a room's name is a string, so the whole property is
+testable on a laptop with the network unplugged.
 """
 
 from __future__ import annotations
@@ -19,21 +19,35 @@ from egma import mockable
 
 from agent import AFTERNOON_SLOT, MORNING_SLOT, FrontDesk
 
-NO_EGMA = [
+NOT_AN_EGMA_ROOM = [
+    pytest.param("maple-street-front-desk", id="the practice's own room"),
+    pytest.param("", id="no room name at all"),
+    pytest.param("egma-simulator-demo", id="a name that merely starts alike"),
+    pytest.param("call-egma-sim-0001", id="the prefix in the middle"),
+]
+
+THE_PRACTICE_S_OWN_METADATA = [
     pytest.param("", id="no metadata at all"),
     pytest.param("   ", id="metadata of blanks"),
     pytest.param(
         '{"tenant":"maple-street","shift":"mornings"}', id="the practice's own"
     ),
     pytest.param("not json at all", id="metadata that is not json"),
+    pytest.param(
+        '{"egmaIdentity":"egma-persona"}',
+        id="the practice's own use of egma's key name",
+    ),
 ]
 
 
-@pytest.mark.parametrize("metadata", NO_EGMA)
-async def test_a_room_with_no_egma_in_it_leaves_this_agent_alone(metadata, session):
+@pytest.mark.parametrize("metadata", THE_PRACTICE_S_OWN_METADATA)
+@pytest.mark.parametrize("room_name", NOT_AN_EGMA_ROOM)
+async def test_a_room_egma_did_not_name_leaves_this_agent_alone(
+    room_name, metadata, session
+):
     agent = FrontDesk()
     before = agent.tools
-    context = outside_egma(metadata)
+    context = outside_egma(room_name, metadata)
 
     await mockable(agent, context, session)
 
@@ -49,9 +63,13 @@ async def test_a_room_with_no_egma_in_it_leaves_this_agent_alone(metadata, sessi
     # every production session a round trip before it could greet
     # anybody — and the substitution it installs afterwards is written
     # into a side table rather than onto the agent, so the objects above
-    # would still be the same ones. The room in this test would answer
-    # such a call happily. This empty list is what says none was made.
+    # would still be the same ones. The room in this test has egma in it
+    # and would answer such a call happily. This empty list is what says
+    # none was made.
     assert context.room.asked == []
+    # Nor was the room connected on egma's account. Where this agent
+    # connects, it connects for its own reasons.
+    assert context.room.connect_calls == 0
 
 
 async def test_the_tools_still_answer_out_of_this_file(session):

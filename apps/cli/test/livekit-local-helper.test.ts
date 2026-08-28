@@ -55,7 +55,7 @@ if (process.env.OBSERVED_PYTHON_FILE) {
 }
 if (args[0] === "-c") process.exit(existsSync(process.env.FIXTURE_INSTALLED_MARKER) ? 0 : 1);
 if (args[0] === "-m" && args[1] === "pip" && args[2] === "install" && args[3] === "-r") {
-  writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.1\\n");
+  writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.2.0\\n");
   process.exit(0);
 }
 process.exit(2);
@@ -143,7 +143,7 @@ writeFileSync(process.env.OBSERVED_UV_FILE, JSON.stringify({
   key: process.env.LIVEKIT_API_KEY ?? null,
   secret: process.env.LIVEKIT_API_SECRET ?? null,
 }));
-writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.1.1\\n");
+writeFileSync(process.env.FIXTURE_INSTALLED_MARKER, "0.2.0\\n");
 `;
 
 afterEach(async () => {
@@ -263,7 +263,7 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
     ]);
     await Promise.all([
       writeFile(path.join(repository, "src", "agent.py"), "# fixture\n", "utf8"),
-      writeFile(requirements, "livekit-agents>=1.6.7\negma>=0.1.1\n", "utf8"),
+      writeFile(requirements, "livekit-agents>=1.6.7\negma>=0.2.0\n", "utf8"),
       writeExecutable(fakePython, FAKE_PYTHON),
       writeExecutable(path.join(bin, "lk"), FAKE_LIVEKIT),
     ]);
@@ -353,10 +353,14 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
     };
     expect(await probeVersion("0.1.0.dev1")).toBe(1);
     expect(await probeVersion("0.1.0")).toBe(1);
-    expect(await probeVersion("0.1.1.dev1")).toBe(1);
-    expect(await probeVersion("0.1.1")).toBe(0);
-    expect(await probeVersion("0.1.1.post1")).toBe(0);
-    expect(await probeVersion("0.1.1+local.1")).toBe(0);
+    expect(await probeVersion("0.1.1")).toBe(1);
+    expect(await probeVersion("0.1.9")).toBe(1);
+    expect(await probeVersion("0.2.0.dev1")).toBe(1);
+    expect(await probeVersion("0.2.0")).toBe(0);
+    expect(await probeVersion("0.2.0.post1")).toBe(0);
+    expect(await probeVersion("0.2.0+local.1")).toBe(0);
+    expect(await probeVersion("0.2.1")).toBe(0);
+    expect(await probeVersion("1.0.0")).toBe(0);
 
     const mismatch = await runHelper({
       bin,
@@ -404,7 +408,7 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
       writeFile(path.join(project, "src", "agent.py"), "# fixture\n", "utf8"),
       writeFile(
         path.join(project, "pyproject.toml"),
-        '[project]\nname = "fixture-agent"\nversion = "0.0.0"\ndependencies = ["livekit-agents>=1.6.7", "egma>=0.1.1"]\n' +
+        '[project]\nname = "fixture-agent"\nversion = "0.0.0"\ndependencies = ["livekit-agents>=1.6.7", "egma>=0.2.0"]\n' +
           (hasLock ? "" : "\n[tool.uv]\n"),
         "utf8",
       ),
