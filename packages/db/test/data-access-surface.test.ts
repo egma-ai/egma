@@ -96,6 +96,12 @@ const WORK_DISPATCHING = [
   "claimSimulations",
   "recordSimulationHeartbeat",
   "resolveSimulationStanding",
+  // The mock endpoint's own context, derived the same way and for the same
+  // reason: the caller is the customer's agent platform, holding no credential
+  // of egma's, so the run and simulation the URL names are the whole authority.
+  // It answers the three gates and the answers this simulation is served, and
+  // nothing else about the customer.
+  "resolveMockToolCall",
   "sweepOrphanedSimulations",
   "watchGradingWork",
   // The poller names no customer. It claims the next due pulled agent and
@@ -318,6 +324,11 @@ const CONTEXT_REQUIRING = [
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
   "seedPersonaLibrary",
+  // What a run built on the agent's platform, written for the teardown that has
+  // to put it back and readable by the landing that stamps a simulation's
+  // coverage from it.
+  "recordMockedWorld",
+  "simulationMockedWorld",
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
@@ -551,6 +562,22 @@ const THE_MOCKED_WORLD = [
   "NO_MOCK_TOOLS",
   "isErrorAnswer",
   "resolveMockTools",
+  // The coverage stamp's vocabulary and its serialization, and the record of
+  // the temporary world a run built. Pure both ways: a stored value or a set of
+  // classes goes in, a checked shape comes out, and no store is touched. They
+  // cross the boundary because both halves of each are in two packages — a
+  // platform read produces the classes and this module stores them — and a
+  // second implementation of either would be a second answer about how isolated
+  // a simulation was.
+  "NO_MOCK_TOOL_COVERAGE",
+  "NO_TOOL_COVERAGE_CLASSES",
+  "TOOL_COVERAGE_CLASSES",
+  "coverageFromClasses",
+  "mockToolCoverageFrom",
+  "mockToolCoverageRow",
+  "mockedWorldFrom",
+  "mockedWorldRow",
+  "toolCoverageClassesFrom",
 ];
 
 /**

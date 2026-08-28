@@ -36,7 +36,7 @@ type Seen = {
 
 type Route = (seen: Seen) => Response | undefined;
 
-/** A fake Retell: the requests it saw, and the answers it gave. */
+/** A stand-in Retell: the requests it saw, and the answers it gave. */
 function retell(routes: readonly Route[]): {
   readonly fetchImpl: typeof fetch;
   readonly seen: Seen[];
@@ -292,7 +292,8 @@ describe("branching, writing and deleting a version", () => {
   it("never relies on Retell's default-to-latest", async () => {
     const { fetchImpl, seen } = retell([
       (request) =>
-        // The fake refuses any write that leaves the version to Retell, which
+        // The stand-in refuses any write that leaves the version to Retell,
+        // which
         // is the behaviour a real account would give a concurrent branch: the
         // latest version is whichever one was minted last, anywhere.
         request.method === "PATCH" && !request.url.includes("version=")
