@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
 import { asListInstant } from "../lib/instants.ts";
 import type { Me } from "../lib/me.ts";
 import { LIST, QUIET, TRACE_COLUMNS } from "../lib/transcript-copy.ts";
-import type { Facts, Listed } from "../lib/transcripts.ts";
+import type { Facts, Grade, Listed } from "../lib/transcripts.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
@@ -139,6 +147,40 @@ const TRACE_DETAIL = {
   combinedScore: null,
 } as const;
 
+const FAILED_GRADE: Grade = {
+  projectGraderId: "grd_latency",
+  graderDefinitionId: "grl_latency",
+  graderDefinitionVersion: 1,
+  graderName: "response_latency",
+  score: 0,
+  details: {
+    rationale: "Average response time exceeded the configured maximum.",
+  },
+  passThreshold: 1,
+  result: "failed",
+  gradedAt: "2026-08-27T19:03:16.000000Z",
+};
+
+const ERRORED_GRADE: Grade = {
+  ...FAILED_GRADE,
+  projectGraderId: "grd_broken",
+  graderDefinitionId: "grl_broken",
+  graderName: "broken_grader",
+  score: null,
+  details: { error: "The grader could not read its input." },
+  result: "errored",
+};
+
+const PASSED_GRADE: Grade = {
+  ...FAILED_GRADE,
+  projectGraderId: "grd_policy",
+  graderDefinitionId: "grl_policy",
+  graderName: "policy_grader",
+  score: 1,
+  details: { rationale: "The policy requirement was satisfied." },
+  result: "passed",
+};
+
 /** A project grader, with or without production in its scope. */
 function grader(scope: "simulations" | "both") {
   return {
@@ -243,9 +285,24 @@ function stub(options: {
   readonly graders?: readonly ReturnType<typeof grader>[] | "refused";
   readonly keys?: readonly ReturnType<typeof key>[] | "refused";
   readonly detail?: unknown;
+  readonly details?: Readonly<Record<string, unknown>>;
 }) {
   const rows = options.rows ?? [];
   const ever = options.everRecorded ?? rows;
+  const details =
+    options.details === undefined
+      ? {
+          [`/v1/traces/${FACTS.traceId}`]: {
+            status: 200,
+            body: options.detail ?? TRACE_DETAIL,
+          },
+        }
+      : Object.fromEntries(
+          Object.entries(options.details).map(([traceId, detail]) => [
+            `/v1/traces/${traceId}`,
+            { status: 200, body: detail },
+          ]),
+        );
 
   return apiAnswers({
     "/api/me": { status: 200, body: meIs() },
@@ -256,10 +313,7 @@ function stub(options: {
           ? REFUSED
           : page(ever)
         : page(rows),
-    [`/v1/traces/${FACTS.traceId}`]: {
-      status: 200,
-      body: options.detail ?? TRACE_DETAIL,
-    },
+    ...details,
     "/v1/graders":
       options.graders === "refused"
         ? REFUSED
@@ -396,6 +450,52 @@ describe("what the Monitoring list shows", () => {
     expect(within(table).getByText("4.78s")).toBeDefined();
     expect(within(table).getByText("kelly")).toBeDefined();
     expect(table.style.minWidth).toBe("62rem");
+  });
+
+  it("keeps the Agent cell and trace table layout stable while its reading sheet is open", async () => {
+    stub({ rows: [ONE_ROW] });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = (await screen.findByRole("table", {
+      name: LIST.tableLabel,
+    })) as HTMLTableElement;
+    const agent = within(table).getByText("kelly");
+    const row = agent.closest("tr");
+    expect(row).not.toBeNull();
+    if (row === null) throw new Error("The trace row was not rendered.");
+    const agentColumn = Array.from(table.rows[0]?.cells ?? []).findIndex(
+      (cell) => cell.textContent === TRACE_COLUMNS.agent,
+    );
+    const agentCell = row.cells[agentColumn];
+    const beforeRowClasses = new Set(row.className.split(/\s+/u));
+
+    /* Reproduce the reported path: press the row, not its Trace ID control. */
+    fireEvent.click(agent);
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+
+    expect(sheet.className).toContain("--sheet-width-extra-wide");
+    expect(sheet.className).not.toContain("--sheet-width-wide");
+
+    expect(row.cells[agentColumn]).toBe(agentCell);
+    expect(row.cells[agentColumn]?.textContent).toContain("kelly");
+    const activeMark = agentCell?.querySelector(
+      '[data-slot="current-row-mark"]',
+    );
+    expect(activeMark).not.toBeNull();
+    expect(activeMark?.parentElement).toBe(agentCell);
+    /*
+     * An active mark may not be generated from `<tr>`. Browser table fix-up
+     * treats that pseudo-element as another table box, expands the table, and
+     * moves the Agent cell under the reading sheet.
+     */
+    const addedTableBoxes = row.className
+      .split(/\s+/u)
+      .filter(
+        (name) =>
+          !beforeRowClasses.has(name) &&
+          (name === "relative" || name.startsWith("before:")),
+      );
+    expect(addedTableBoxes).toEqual([]);
   });
 
   it("marks a P90 taken from a truncated trace as partial", async () => {
@@ -563,6 +663,49 @@ describe("what the Monitoring list shows", () => {
     expect(sent.get("to")).not.toBeNull();
   });
 
+  it("fills failure-state squares without filling the passed square", async () => {
+    stub({
+      rows: [ONE_ROW],
+      detail: {
+        ...TRACE_DETAIL,
+        gradingState: "complete",
+        grades: [FAILED_GRADE, ERRORED_GRADE, PASSED_GRADE],
+        gradeHistory: [FAILED_GRADE, ERRORED_GRADE, PASSED_GRADE],
+        combinedScore: 0,
+      },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+    const badgeFor = (word: string) =>
+      within(sheet).getByText(word).closest('[data-slot="badge"]');
+    const markFor = (word: string) =>
+      badgeFor(word)?.querySelector('[data-slot="state-mark"]');
+
+    for (const word of ["failed", "errored"]) {
+      const badge = badgeFor(word);
+      const mark = markFor(word);
+      expect(badge?.classList.contains("text-failure")).toBe(true);
+      expect(mark).not.toBeNull();
+      expect(mark?.classList.contains("bg-failure")).toBe(true);
+      expect(mark?.classList.contains("bg-transparent")).toBe(false);
+    }
+
+    const erroredCard = badgeFor("errored")?.closest("article");
+    expect(erroredCard?.classList.contains("border-s-failure")).toBe(true);
+    expect(erroredCard?.classList.contains("border-s-warning")).toBe(false);
+
+    const passed = markFor("passed");
+    expect(passed).not.toBeNull();
+    expect(passed?.classList.contains("bg-failure")).toBe(false);
+    expect(passed?.classList.contains("bg-transparent")).toBe(true);
+  });
+
   it("keeps a changed window when the open trace sheet is closed", async () => {
     atWindow("24h");
     stub({ rows: [ONE_ROW] });
@@ -591,6 +734,103 @@ describe("what the Monitoring list shows", () => {
     expect((screen.getByLabelText(LIST.window) as HTMLSelectElement).value).toBe(
       "7d",
     );
+  });
+
+  it("closes an open production transcript when the page beside it is pressed", async () => {
+    atWindow("24h");
+    stub({ rows: [ONE_ROW] });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    expect(await screen.findByRole("dialog", { name: /Trace/u })).toBeTruthy();
+
+    /* Radix starts its document listener after the press that opened it. */
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const pageTitle = screen.getByRole("heading", { name: LIST.title });
+    fireEvent.pointerDown(pageTitle);
+    fireEvent.click(pageTitle);
+
+    expect(screen.queryByRole("dialog", { name: /Trace/u })).toBeNull();
+    await waitFor(() => {
+      const address = new URL(globalThis.location.href);
+      expect(address.searchParams.get("trace")).toBeNull();
+      expect(address.searchParams.get("traceFrom")).toBeNull();
+      expect(address.searchParams.get("traceTo")).toBeNull();
+      expect(address.searchParams.get("window")).toBe("24h");
+    });
+  });
+
+  it("closes when the currently selected transcript row is pressed", async () => {
+    stub({ rows: [ONE_ROW] });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    expect(await screen.findByRole("dialog", { name: /Trace/u })).toBeTruthy();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const currentAgent = within(table).getByText(FACTS.platformAgentName);
+    fireEvent.pointerDown(currentAgent);
+    fireEvent.click(currentAgent);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Trace/u })).toBeNull();
+      expect(
+        new URL(globalThis.location.href).searchParams.get("trace"),
+      ).toBeNull();
+    });
+  });
+
+  it("switches to a different production transcript when that row is pressed", async () => {
+    const nextFacts: Facts = {
+      ...FACTS,
+      traceId: "6d2f5c1a9e3b4f7081a2b3c4d5e6f708",
+      startedAt: "2026-08-02T19:04:40.281989Z",
+      endedAt: "2026-08-02T19:05:53.776865Z",
+      platformAgentName: "morgan",
+    };
+    const nextRow: Listed = { ...ONE_ROW, ...nextFacts };
+    stub({
+      rows: [ONE_ROW, nextRow],
+      details: {
+        [FACTS.traceId]: TRACE_DETAIL,
+        [nextFacts.traceId]: { ...TRACE_DETAIL, trace: nextFacts },
+      },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    const table = await screen.findByRole("table", { name: LIST.tableLabel });
+    fireEvent.click(
+      within(table).getByRole("button", { name: FACTS.traceId }),
+    );
+    expect(await screen.findByRole("dialog", { name: /Trace/u })).toBeTruthy();
+
+    /* Let Radix install the document listener used by outside presses. */
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const next = within(table).getByRole("button", {
+      name: nextFacts.traceId,
+    });
+    fireEvent.pointerDown(next);
+    fireEvent.click(next);
+
+    await waitFor(() => {
+      const sheet = screen.getByRole("dialog", { name: /Trace/u });
+      expect(within(sheet).getByText(nextFacts.traceId)).toBeTruthy();
+      expect(new URL(globalThis.location.href).searchParams.get("trace")).toBe(
+        nextFacts.traceId,
+      );
+    });
   });
 
   it.each([

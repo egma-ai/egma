@@ -301,7 +301,7 @@ export function DataTable<Row>({
                    * Hover stays off that row because it is already current.
                   */
                   current
-                    ? "relative bg-selected before:absolute before:inset-y-0 before:left-0 before:w-(--active-edge-width) before:bg-brand"
+                    ? ["bg-selected", stacks && "stacked:relative"]
                     : onRowActivate !== undefined && ROW_HOVER,
                 )}
                 data-current={current ? "true" : undefined}
@@ -340,10 +340,14 @@ export function DataTable<Row>({
                       }
                 }
               >
-                {columns.map((column) => (
+                {columns.map((column, columnIndex) => (
                   <TableCell
                     className={cn(
                       "h-(--row-min-height) text-muted-foreground",
+                      current && columnIndex === 0 && [
+                        "relative",
+                        stacks && "stacked:static",
+                      ],
                       "data-[action=true]:px-0 data-[action=true]:text-center",
                       /*
                        * **A column the narrow layout omits takes the stacked
@@ -409,6 +413,13 @@ export function DataTable<Row>({
                     data-primary={column === primary ? "true" : undefined}
                     key={column.key}
                   >
+                    {current && columnIndex === 0 ? (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-y-0 left-0 w-(--active-edge-width) bg-brand"
+                        data-slot="current-row-mark"
+                      />
+                    ) : null}
                     <span
                       className={cn(
                         column === primary && onRowActivate !== undefined

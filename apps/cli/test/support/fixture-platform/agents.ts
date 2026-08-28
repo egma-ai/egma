@@ -316,13 +316,13 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
 }
 
 /**
- * What LiveKit accepts in one metadata field, less the room egma keeps back
- * for the context block it merges into the dispatch beside the customer's
- * keys. Mirrored from the access layer so the fixture refuses the oversize
- * value the real platform refuses: a fixture that admits what production
- * rejects lets a CLI test register a connection nobody could really have.
+ * What LiveKit accepts in one metadata field, which is the whole of what egma
+ * accepts because egma adds nothing to it. Mirrored from the access layer so
+ * the fixture refuses the oversize value the real platform refuses: a fixture
+ * that admits what production rejects lets a CLI test register a connection
+ * nobody could really have.
  */
-const METADATA_BYTES = 512 * 1024 - 8 * 1024;
+const METADATA_BYTES = 512 * 1024;
 
 /** A JSON object carried as the text it was written as, checked at create. */
 function jsonObjectText(key: string, value: unknown): string {

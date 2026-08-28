@@ -6,7 +6,7 @@ import {
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
-import type { Browser, Page, Request, Route } from "playwright-core";
+import type { Browser, Locator, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { asListInstant, asSecond } from "../../web/lib/instants.ts";
@@ -614,6 +614,29 @@ async function reactHasTakenOver(page: Page, selector: string): Promise<void> {
     `Object.keys(document.querySelector(${JSON.stringify(selector)}) ?? {})` +
       `.some((key) => key.startsWith("__react"))`,
   );
+}
+
+/** The table grid around one row control, measured by a real layout engine. */
+async function tableShapeAround(element: Locator): Promise<{
+  readonly firstCellOffset: number;
+  readonly firstCellWidth: number;
+  readonly tableWidth: number;
+}> {
+  return element.evaluate((target) => {
+    const row = target.matches("tr") ? target : target.closest("tr");
+    const table = target.closest("table");
+    const firstCell = row?.querySelector("td");
+    if (row === null || table === null || firstCell === null) {
+      throw new Error("the measured element was not inside a table row");
+    }
+    const tableBox = table.getBoundingClientRect();
+    const cellBox = firstCell.getBoundingClientRect();
+    return {
+      firstCellOffset: Math.round(cellBox.left - tableBox.left),
+      firstCellWidth: Math.round(cellBox.width),
+      tableWidth: Math.round(tableBox.width),
+    };
+  });
 }
 
 /** A browser of their own, signed in, with the same pinned clock. */
@@ -1260,19 +1283,25 @@ describe("what a project recorded in production", () => {
         .locator('tbody td[data-primary="true"] button')
         .first();
       await reactHasTakenOver(page, 'tbody td[data-primary="true"] button');
+      const tableShapeBefore = await tableShapeAround(traceId);
       await traceId.click();
 
       const sheet = page.locator('[data-kind="sheet"]');
       await sheet.waitFor();
       await sheet.getByRole("heading", { name: "Call overview" }).waitFor();
+      const tableShapeAfter = await tableShapeAround(traceId);
+      expect(
+        tableShapeAfter,
+        "opening the transcript sheet keeps the trace table grid fixed",
+      ).toEqual(tableShapeBefore);
 
-      // The reading surface is the approved 640px wide sheet. It stays beside
-      // the table, so there is no scrim over the page.
+      // Production gets the expanded reading width on a desktop. It stays
+      // beside the table, so there is no scrim over the page.
       expect(
         await sheet.evaluate((element) =>
           Math.round(element.getBoundingClientRect().width),
         ),
-      ).toBe(640);
+      ).toBe(760);
       expect(await page.locator('[data-slot="dialog-overlay"]').count()).toBe(0);
 
       const overview = sheet.getByRole("region", { name: "Call overview" });
@@ -1429,6 +1458,36 @@ describe("what a project recorded in production", () => {
             return styleOf(element.parentElement ?? element).whiteSpace;
           }),
         ).toBe("nowrap");
+
+        /*
+         * The wider production variant does not force the desktop maximum
+         * onto a narrow screen. The continuous rail still fits the 640px
+         * reading sheet without its own horizontal scroll.
+         */
+        await page.locator("tbody tr").first().locator("td").first().click();
+        const sheet = page.locator('[data-kind="sheet"]');
+        await sheet.waitFor();
+        expect(
+          await sheet.evaluate((element) =>
+            Math.round(element.getBoundingClientRect().width),
+          ),
+        ).toBe(640);
+        const transcript = sheet.locator(
+          'ol[aria-label="Transcript messages"]',
+        );
+        await transcript.waitFor({ state: "attached" });
+        expect(
+          await transcript.evaluate((rail) => {
+            const firstEvent = rail.querySelector("li > :first-child");
+            return {
+              noHorizontalOverflow: rail.scrollWidth === rail.clientWidth,
+              metadataWidth: Math.round(
+                firstEvent?.firstElementChild?.getBoundingClientRect().width ??
+                  0,
+              ),
+            };
+          }),
+        ).toEqual({ noHorizontalOverflow: true, metadataWidth: 104 });
       } finally {
         await page.setViewportSize(previous);
       }
@@ -1923,19 +1982,36 @@ describe("the saved theme", () => {
       await page.evaluate(() => localStorage.removeItem("egma-theme"));
       await page.reload();
 
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
+      // Every read below follows a reload or a click, so every one of them
+      // is polled. A bare read asks once, at whatever moment the previous
+      // line happened to return, and the theme is written by script after
+      // the document is: on a loaded machine the answer is simply not there
+      // yet, and the read fails for a reason that has nothing to do with
+      // the theme. Polling waits for the state the click or the reload was
+      // always going to reach.
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("light");
       const account = page.locator('aside button[aria-label^="Account"]');
       await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
       await controls.first().click();
 
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
-      expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
-      expect(await controls.first().getAttribute("aria-checked")).toBe("true");
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("dark");
+      await expect
+        .poll(() => page.evaluate(() => localStorage.getItem("egma-theme")))
+        .toBe("dark");
+      await expect
+        .poll(() => controls.first().getAttribute("aria-checked"))
+        .toBe("true");
 
       await page.reload();
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("dark");
       await page.locator('aside button[aria-label^="Account"]').click();
       await expect
         .poll(() => page.getByRole("switch", { name: "Dark theme" }).first().getAttribute("aria-checked"))
@@ -3004,6 +3080,7 @@ describe("the complete product, walked in order in a second project", () => {
         .filter({ hasText: "The Support line" })
         .first();
       await named.waitFor();
+      const tableShapeBefore = await tableShapeAround(named);
       expect(
         await named
           .getByRole("link", { name: "The Support line", exact: true })
@@ -3019,6 +3096,11 @@ describe("the complete product, walked in order in a second project", () => {
       await named.getByRole("cell", { name: "Retell", exact: true }).click();
       const details = walk.getByRole("dialog", { name: "The Support line" });
       await details.waitFor();
+      const tableShapeAfter = await tableShapeAround(named);
+      expect(
+        tableShapeAfter,
+        "opening agent details keeps the agents table grid fixed",
+      ).toEqual(tableShapeBefore);
 
       // Rename and delete remain available, but inside the details sheet.
       await details
@@ -4763,23 +4845,44 @@ describe("the complete product, walked in order in a second project", () => {
         // The DOM keeps one table. CSS turns its rows into the narrow stacked
         // shape, instead of rendering a second list with duplicate controls.
         const table = walk.locator('table[aria-label="Agents in this project"]');
+        const firstRow = table.locator("tbody tr").first();
         expect(await table.count()).toBe(1);
         expect(await table.isVisible()).toBe(true);
         expect(
-          await table
-            .locator("tbody tr")
-            .first()
-            .evaluate((row) => {
-              const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
-                target: unknown,
-              ) => { readonly display: string; readonly flexDirection: string };
-              const style = styleOf(row);
-              return `${style.display}/${style.flexDirection}`;
-            }),
+          await firstRow.evaluate((row) => {
+            const styleOf = Reflect.get(globalThis, "getComputedStyle") as (
+              target: unknown,
+            ) => { readonly display: string; readonly flexDirection: string };
+            const style = styleOf(row);
+            return `${style.display}/${style.flexDirection}`;
+          }),
         ).toBe("flex/column");
         expect(
           await walk.locator('ul[aria-label="Agents in this project"]').count(),
         ).toBe(0);
+
+        const agentControl = firstRow.locator('td[data-primary="true"] button');
+        const agentName = await agentControl.innerText();
+        await agentControl.click();
+        const details = walk.getByRole("dialog", {
+          name: agentName,
+          exact: true,
+        });
+        await details.waitFor();
+        const selectedEdge = await firstRow.evaluate((row) => {
+          const mark = row.querySelector('[data-slot="current-row-mark"]');
+          if (mark === null) throw new Error("the current row had no edge mark");
+          return {
+            row: Math.round(row.getBoundingClientRect().height),
+            mark: Math.round(mark.getBoundingClientRect().height),
+          };
+        });
+        expect(
+          Math.abs(selectedEdge.row - selectedEdge.mark),
+          JSON.stringify(selectedEdge),
+        ).toBeLessThanOrEqual(1);
+        await details.getByRole("button", { name: "Done" }).click();
+        await details.waitFor({ state: "detached" });
 
         await walk.setViewportSize({ width: 1280, height: 900 });
         await expect.poll(() => table.isVisible()).toBe(true);

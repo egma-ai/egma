@@ -644,6 +644,21 @@ describe("measures derived from a recognised framework's own spans", () => {
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400, 600]);
   });
 
+  it("does not count the caller's delay before speaking as agent response latency", async () => {
+    const trace = await aLiveKitCall([
+      { who: "agent", from: 0, to: 1_000 },
+      // The caller waits a full minute before replying. That silence belongs to
+      // the caller, not to the agent's response latency.
+      { who: "human", from: 61_000, to: 62_000 },
+      // A tool-only answer has no speaking child, so its turn start is the
+      // response boundary: 62_125 - 62_000 = 125 ms.
+      { who: "agent", from: 62_125, to: 63_000 },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([125]);
+  });
+
   /**
    * A turn that answered with a tool call and no speech still answered. The
    * turn's own start stands in for the first word it never said, which is the

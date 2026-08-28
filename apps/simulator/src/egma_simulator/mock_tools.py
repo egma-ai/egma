@@ -103,18 +103,11 @@ PROTOCOL_VERSION = 1
 """Which version of this exchange egma's participant speaks.
 
 It rides every hello in both directions, so a mismatch is refused at the
-first message rather than discovered halfway through a simulation. It
-also rides the retiring context block on a named dispatch — see
-:func:`egma_simulator.media.livekit_room.dispatch_metadata` — which is
-the one channel an SDK older than room-name detection reads.
-
-**Which channel announces this number is not part of it.** The version
-names the shape of a hello and of its reply, and nothing about where the
-other side first read it. An SDK speaking 1 and a simulator speaking 1
-therefore understand each other whichever way round they were upgraded,
-and a bump made over a channel would refuse both of those pairings with
-904 and buy nothing — the SDK that would need warning off is the one that
-sends no hello at all, so it would never see the number.
+first message rather than discovered halfway through a simulation. That
+is the whole of where it travels: this number is a property of the
+exchange, and nothing about how either side found the other. An SDK
+speaking 1 and a simulator speaking 1 therefore understand each other
+whichever way round they were upgraded.
 
 Two facts constrain a future bump, and both are load-bearing. This file
 and the SDK's own copy are deliberately duplicated and must stay equal,

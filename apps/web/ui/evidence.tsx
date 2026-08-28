@@ -13,6 +13,7 @@ import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong } from "../lib/transcripts.ts";
 import { Help } from "./form.tsx";
 import { Empty } from "./page-state.tsx";
+import { StateMark } from "./run-status.tsx";
 
 /**
  * The parts one conversation's evidence page is built from.
@@ -362,15 +363,14 @@ export function ExecutionTimeline({
               <span className="font-mono text-muted-foreground tabular-nums">
                 {howFarIn(step.startedAt, transcript.startedAt)}
               </span>
-              <span
+              <StateMark
                 /*
                  * A square, not a dot. Every status marker in the product is
                  * a square (`DESIGN.md`, developer decision 2026-08-24): one
                  * round shape is left in the system and it is the radio
                  * button, whose circle is what tells it apart from a checkbox.
                  */
-                className="size-2 border-2 border-foreground bg-surface"
-                aria-hidden="true"
+                kind={failed ? "error" : "complete"}
               />
               <span className="flex min-w-0 items-baseline gap-2">
                 <strong className="font-medium text-foreground">

@@ -15,11 +15,12 @@ function summaryScore(score: number | null): string {
   return score === null ? "Not available" : score.toFixed(2);
 }
 
-const RESULT_VARIANT = {
-  passed: "success",
-  failed: "failure",
-  errored: "warning",
-} as const;
+/** The semantic tone shared by a grade badge and its evidence card. */
+export function gradeResultTone(
+  result: DisplayGrade["result"],
+): "success" | "failure" {
+  return result === "passed" ? "success" : "failure";
+}
 
 const RESULT_MARK = {
   passed: "complete",
@@ -34,7 +35,7 @@ export function GradeResultBadge({
   readonly result: DisplayGrade["result"];
 }) {
   return (
-    <Badge variant={RESULT_VARIANT[result]}>
+    <Badge variant={gradeResultTone(result)}>
       <StateMark kind={RESULT_MARK[result]} />
       {result}
     </Badge>

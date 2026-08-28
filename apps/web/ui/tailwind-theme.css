@@ -314,6 +314,17 @@
   --row-padding-x: var(--space-4);
 
   /*
+   * The compact transcript is one continuous rail with a fixed metadata lane.
+   *
+   * Time and speaker share the lane, so every spoken turn and nested tool keeps
+   * the same vertical reading line. The visual rows may be denser than a table;
+   * interactive rows still expand to `--tap-target` on coarse pointers.
+   */
+  --transcript-meta-width: 104px;
+  --transcript-turn-min-height: var(--row-height);
+  --transcript-tool-min-height: var(--control-md);
+
+  /*
    * The trailing slot every row ends with, whether or not it holds a ⋮ menu.
    *
    * It is a fixed width rather than a cell that shrinks to its content,
@@ -360,17 +371,20 @@
    * bare number until 2026-08-23; a size is a design value like a colour is,
    * and `DESIGN.md` says a component holds neither.
    *
-   * **Two side sheets, two widths, and they are two things.** `--sheet-width`
-   * is the modal panel the boards draw one record in (`77F-0`): create, read
-   * and edit, over a scrim, with the page behind it inert.
+   * **Two side-sheet behaviours, with one production reading variant.**
+   * `--sheet-width` is the modal panel the boards draw one record in (`77F-0`):
+   * create, read and edit, over a scrim, with the page behind it inert.
    * `--sheet-width-wide` is the *reading* surface `ui/dialog.tsx` opens beside
    * a page that stays usable — a transcript against its grader results, a
-   * persona's version history. Collapsing the second into the first took 200px
-   * off a transcript to make a number match, which is a worse product for a
-   * tidier theme.
+   * persona's version history. A production trace uses the same behaviour but
+   * gets more reading room on a large viewport; the clamp keeps its existing
+   * width until the viewport can give it that room. Collapsing the reading
+   * surface into the form width took 200px off a transcript to make a number
+   * match, which is a worse product for a tidier theme.
    */
   --sheet-width: 440px;
   --sheet-width-wide: 640px;
+  --sheet-width-extra-wide: clamp(var(--sheet-width-wide), 60vw, 760px);
   /* The signed-in sidebar's Egma mark, larger now that it is not a trigger. */
   --sidebar-mark-size: 32px;
   /*

@@ -69,9 +69,12 @@ export type StateMarkKind =
 /**
  * A second, non-colour signal for simulation, grading, and result states.
  *
- * The word remains the source of meaning. The same outline square anchors
- * those states and keeps their marks distinct from radio controls and progress
- * dots. A run uses plain text instead, with a loader only while it is running.
+ * The word remains the source of meaning. A square anchors those states and
+ * keeps their marks distinct from radio controls and progress dots. Failed and
+ * errored states use the shared failure fill so they do not read as empty
+ * checkboxes; progress, success, stopped, and not-requested states keep the
+ * quiet outline. A run uses plain text instead, with a loader only while it is
+ * running.
  */
 export function StateMark({
   kind,
@@ -82,7 +85,12 @@ export function StateMark({
 }) {
   return (
     <span
-      className="block size-2.5 flex-none border border-current bg-transparent"
+      className={cn(
+        "block size-2.5 flex-none border border-current",
+        kind === "failed" || kind === "error"
+          ? "border-failure bg-failure"
+          : "bg-transparent",
+      )}
       data-slot="state-mark"
       data-state-mark={kind}
       data-motion={moving ? "active" : undefined}
@@ -206,8 +214,9 @@ export function SimulationStatus({
 }
 
 /**
- * Where the grading work stands. **Never good and never bad**: how far along the
- * grading is says nothing about the scores it will produce.
+ * Where the grading work stands. Progress says nothing about the scores it
+ * will produce. An error is still a system failure, so its word and mark use
+ * the Failure treatment without turning it into a failed grade.
  */
 const GRADING_WORD: Readonly<Record<GradingWord, string>> = {
   not_requested: "No grading",
@@ -240,16 +249,17 @@ export function GradingState({
   readonly grading: GradingWord;
   readonly compact?: boolean;
 }) {
+  const tone = grading === "error" ? "failure" : "neutral";
   if (compact) {
     return (
-      <InlineState title={GRADING_MEANING[grading]}>
+      <InlineState tone={tone} title={GRADING_MEANING[grading]}>
         <StateMark kind={GRADING_MARK[grading]} />
         {GRADING_WORD[grading]}
       </InlineState>
     );
   }
   return (
-    <Badge title={GRADING_MEANING[grading]}>
+    <Badge variant={tone} title={GRADING_MEANING[grading]}>
       <StateMark kind={GRADING_MARK[grading]} />
       {GRADING_WORD[grading]}
     </Badge>

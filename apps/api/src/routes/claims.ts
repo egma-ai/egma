@@ -122,14 +122,29 @@ const LARGEST_CLAIM_CAPACITY = 50;
  * the contract's golden fixtures, so what the platform hands out and what
  * the fixtures teach cannot drift apart. A limit tripping ends a simulation
  * deliberately (`limit_reached`), which is never the agent failing; the
- * numbers bound egma's spend on a conversation going nowhere. Voice is
- * shorter than chat because every voice minute costs real speech synthesis
- * and transcription. Per-test limits are a future column on the test; these
- * are the platform's own.
+ * numbers bound egma's spend on a conversation going nowhere. Per-test
+ * limits are a future column on the test; these are the platform's own.
+ *
+ * **Ten minutes on both, as of 2026-08-28.** Voice used to stop at five,
+ * on the reasoning that a voice minute costs real speech synthesis and
+ * transcription while a chat minute does not. The reasoning is sound and
+ * the number was wrong for what people actually test: a screening
+ * interview, a support call that escalates, an onboarding walk-through —
+ * conversations that are fifteen minutes in production and had every
+ * simulation of them cut at five, which grades an agent on an exchange
+ * that never finished. Ten is the developer's call and is a ceiling
+ * rather than a target; almost every simulation ends on the persona
+ * concluding, long before it.
+ *
+ * **The turn count is where voice still costs more, and it binds first.**
+ * Forty turns at a typical voice pace is roughly six to eight minutes, so
+ * a talkative agent meets `max_turns` before it meets the ten minutes.
+ * Raising that number is a separate decision with a separate bill, and it
+ * was not taken here.
  */
 const SIMULATION_LIMITS = {
   chat: { max_duration_seconds: 600, max_turns: 60 },
-  voice: { max_duration_seconds: 300, max_turns: 40 },
+  voice: { max_duration_seconds: 600, max_turns: 40 },
 } as const;
 
 /** The one clean-cut contract this control plane and simulator speak. */

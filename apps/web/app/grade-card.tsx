@@ -7,6 +7,7 @@ import { graderDisplayName } from "../lib/presentation.ts";
 import {
   GradeDetails,
   GradeResultBadge,
+  gradeResultTone,
 } from "../ui/grade.tsx";
 import { shownScore } from "../ui/run-status.tsx";
 
@@ -20,15 +21,12 @@ export function GradeCard({
   readonly grade: Grade;
   readonly historical?: boolean;
 }) {
+  const resultTone = gradeResultTone(grade.result);
   return (
     <article
       className={cn(
         "min-w-0 rounded-input border border-border border-s-[3px] bg-surface-soft p-4",
-        grade.result === "passed"
-          ? "border-s-success"
-          : grade.result === "failed"
-            ? "border-s-failure"
-            : "border-s-warning",
+        resultTone === "success" ? "border-s-success" : "border-s-failure",
       )}
       data-result={grade.result}
     >

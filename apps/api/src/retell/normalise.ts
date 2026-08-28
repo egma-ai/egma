@@ -213,6 +213,8 @@ type ToolCall = {
   readonly result: string;
   readonly successful: boolean | undefined;
   readonly parentTurn: number | null;
+  readonly startedAfterNanoseconds: bigint | undefined;
+  readonly durationNanoseconds: bigint | undefined;
 };
 
 type Transcript = {
@@ -222,6 +224,27 @@ type Transcript = {
 };
 
 const NANOSECONDS_PER_SECOND = 10 ** 9;
+const NANOSECONDS_PER_MILLISECOND = 10 ** 6;
+
+/** A provider offset or duration that can be placed on a forward timeline. */
+function nonNegativeNumber(value: unknown): number | undefined {
+  const held = number(value);
+  return held === undefined || held < 0 ? undefined : held;
+}
+
+function secondsAsNanoseconds(value: unknown): bigint | undefined {
+  const seconds = nonNegativeNumber(value);
+  return seconds === undefined
+    ? undefined
+    : BigInt(Math.round(seconds * NANOSECONDS_PER_SECOND));
+}
+
+function millisecondsAsNanoseconds(value: unknown): bigint | undefined {
+  const milliseconds = nonNegativeNumber(value);
+  return milliseconds === undefined
+    ? undefined
+    : BigInt(Math.round(milliseconds * NANOSECONDS_PER_MILLISECOND));
+}
 
 /** Retell word bounds, measured from the start of the call. */
 function reportedTimingIn(row: Readonly<Record<string, unknown>>): {
@@ -298,22 +321,33 @@ function spokenTurnsIn(value: unknown): {
   return { turns, whole };
 }
 
-function toolSuccessIn(call: RetellCall): ReadonlyMap<string, boolean> {
+type ToolSummary = {
+  readonly successful: boolean | undefined;
+  readonly startedAfterNanoseconds: bigint | undefined;
+  readonly durationNanoseconds: bigint | undefined;
+};
+
+/** The exact per-tool facts Retell repeats beside its woven event stream. */
+function toolSummariesIn(call: RetellCall): ReadonlyMap<string, ToolSummary> {
   const summaries = call["tool_calls"];
   if (!Array.isArray(summaries)) return new Map();
 
-  const successes = new Map<string, boolean>();
+  const byId = new Map<string, ToolSummary>();
   for (const summary of summaries) {
     if (typeof summary !== "object" || summary === null || Array.isArray(summary)) {
       continue;
     }
     const row = summary as Record<string, unknown>;
     const id = text(row["tool_call_id"]);
-    if (id !== "" && typeof row["success"] === "boolean") {
-      successes.set(id, row["success"]);
-    }
+    if (id === "") continue;
+    byId.set(id, {
+      successful:
+        typeof row["success"] === "boolean" ? row["success"] : undefined,
+      startedAfterNanoseconds: secondsAsNanoseconds(row["start_time_sec"]),
+      durationNanoseconds: millisecondsAsNanoseconds(row["latency_ms"]),
+    });
   }
-  return successes;
+  return byId;
 }
 
 /**
@@ -321,8 +355,10 @@ function toolSuccessIn(call: RetellCall): ReadonlyMap<string, boolean> {
  *
  * Tool invocation and result entries are separate and can have other provider
  * events between them. Their `tool_call_id` is the relationship Retell states,
- * so it is the only relationship used here. Position gives the preceding
- * spoken turn, when one exists; a tool before all speech stays under the root.
+ * so it is the only relationship used here. A tool after an agent stays inside
+ * that agent turn. A tool after a human belongs to the following agent reply,
+ * because that is the reply whose work the call represents. With no such agent
+ * it stays under the root rather than being assigned to the caller.
  *
  * A provider that does not supply the woven form can still supply spoken turns
  * through `transcript_object`. Egma does not read the retired nested tool-call
@@ -347,9 +383,16 @@ function turnsIn(call: RetellCall): Transcript {
     firstAt: number;
     invocationAt: number | undefined;
     parentTurn: number | null;
+    invocationStartedAfterNanoseconds: bigint | undefined;
+    resultStartedAfterNanoseconds: bigint | undefined;
   };
 
   const turns: Turn[] = [];
+  const turnEvents: {
+    readonly at: number;
+    readonly index: number;
+    readonly kind: Turn["kind"];
+  }[] = [];
   const pairs = new Map<string, Pair>();
   let whole = true;
 
@@ -361,7 +404,9 @@ function turnsIn(call: RetellCall): Transcript {
     const row = entry as Record<string, unknown>;
     const role = text(row["role"]);
     if (role === "user" || role === "agent") {
-      turns.push(spokenTurnIn(row, role));
+      const turn = spokenTurnIn(row, role);
+      turnEvents.push({ at, index: turns.length, kind: turn.kind });
+      turns.push(turn);
       continue;
     }
 
@@ -379,16 +424,26 @@ function turnsIn(call: RetellCall): Transcript {
         successful: undefined,
         firstAt: at,
         invocationAt: undefined,
-        parentTurn: turns.length === 0 ? null : turns.length - 1,
+        parentTurn: null,
+        invocationStartedAfterNanoseconds: undefined,
+        resultStartedAfterNanoseconds: undefined,
       };
       if (role === "tool_call_invocation") {
         if (pair.invocationAt !== undefined) whole = false;
         pair.invocationAt = at;
         pair.name = text(row["name"]);
         pair.arguments = text(row["arguments"]);
-        pair.parentTurn = turns.length === 0 ? null : turns.length - 1;
+        pair.invocationStartedAfterNanoseconds = secondsAsNanoseconds(
+          row["time_sec"],
+        );
+        const previous = turnEvents.at(-1);
+        pair.parentTurn =
+          previous?.kind === "turn:agent" ? previous.index : null;
       } else {
         pair.result = text(row["content"]);
+        pair.resultStartedAfterNanoseconds = secondsAsNanoseconds(
+          row["time_sec"],
+        );
         const success = row["successful"] ?? row["success"];
         if (typeof success === "boolean") {
           pair.successful = success;
@@ -402,23 +457,45 @@ function turnsIn(call: RetellCall): Transcript {
     // payload. It is not malformed merely because Egma has no typed span for it.
   }
 
-  const reportedSuccess = toolSuccessIn(call);
+  const summaries = toolSummariesIn(call);
   const toolCalls = [...pairs.values()]
     .sort(
       (left, right) =>
         (left.invocationAt ?? left.firstAt) -
         (right.invocationAt ?? right.firstAt),
     )
-    .map(
-      (pair): ToolCall => ({
+    .map((pair): ToolCall => {
+      const summary = summaries.get(pair.id);
+      const startedAfterNanoseconds =
+        pair.invocationStartedAfterNanoseconds ??
+        summary?.startedAfterNanoseconds;
+      const measuredInterval =
+        pair.invocationStartedAfterNanoseconds !== undefined &&
+        pair.resultStartedAfterNanoseconds !== undefined &&
+        pair.resultStartedAfterNanoseconds >=
+          pair.invocationStartedAfterNanoseconds
+          ? pair.resultStartedAfterNanoseconds -
+            pair.invocationStartedAfterNanoseconds
+          : undefined;
+      const invocationAt = pair.invocationAt;
+      const followingAgent =
+        invocationAt === undefined
+          ? undefined
+          : turnEvents.find(
+              (turn) =>
+                turn.at > invocationAt && turn.kind === "turn:agent",
+            );
+      return {
         id: pair.id,
         name: pair.name,
         arguments: pair.arguments,
         result: pair.result,
-        successful: pair.successful ?? reportedSuccess.get(pair.id),
-        parentTurn: pair.parentTurn,
-      }),
-    );
+        successful: pair.successful ?? summary?.successful,
+        parentTurn: pair.parentTurn ?? followingAgent?.index ?? null,
+        startedAfterNanoseconds,
+        durationNanoseconds: summary?.durationNanoseconds ?? measuredInterval,
+      };
+    });
 
   return { turns, toolCalls, whole };
 }
@@ -765,12 +842,21 @@ export function normaliseRetellCall(
             : (turnIds[invocation.parentTurn] ?? rootId),
         name: invocation.name === "" ? "tool" : invocation.name,
         kind: "tool",
-        startedAtMicroseconds: startedAt,
+        startedAtMicroseconds:
+          startedAt + (invocation.startedAfterNanoseconds ?? 0n) / 1000n,
+        durationNanoseconds: invocation.durationNanoseconds ?? 0n,
         status: invocation.successful === false ? "error" : "ok",
         toolName: invocation.name,
         toolArguments: invocation.arguments,
         toolResult: invocation.result,
-        payload: JSON.stringify(invocation),
+        payload: JSON.stringify({
+          id: invocation.id,
+          name: invocation.name,
+          arguments: invocation.arguments,
+          result: invocation.result,
+          successful: invocation.successful,
+          parentTurn: invocation.parentTurn,
+        }),
       }),
     );
   }

@@ -111,13 +111,11 @@ agent learns it is in a simulation from the room's name, which begins
 persona's participant identity — see :mod:`egma_simulator.media.room`,
 where both are declared as the published contracts they are. Dispatch
 metadata cannot carry that signal: it reaches the agent only where egma
-dispatches by name, which is one of the four ways in. On the other three
-there is no dispatch at all, and an agent reading that channel for egma's
-context would find nothing and conclude it was in production while a
-simulation ran around it.
-
-One transitional exception is described at :func:`dispatch_metadata`, and
-it names the condition on which it goes.
+dispatches by name, which is one of the three ways in. On the other two
+the customer's own endpoint dispatches and egma writes no metadata at
+all, so an agent reading that channel for egma's context would find
+nothing and conclude it was in production while a simulation ran around
+it.
 
 ## Answering for the agent's tools
 
@@ -169,7 +167,6 @@ from urllib.parse import urlsplit
 from ..contract import AGENT_NEVER_JOINED, ERROR
 from ..mock_tools import (
     HELLO_METHOD,
-    PROTOCOL_VERSION,
     TOOL_METHOD,
     MockToolSeam,
 )
@@ -363,103 +360,6 @@ async def _token_body(answer: Any) -> bytes:
     return bytes(held)
 
 
-def dispatch_metadata(
-    configured: str | None,
-    simulation_id: str,
-    *,
-    modality: str,
-    egma_identity: str,
-) -> str:
-    """What a dispatched worker is handed: the customer's own JSON.
-
-    The connection's configured metadata is the whole of this message's
-    purpose. It rides here for the same reason it rides on the room:
-    dispatch metadata is where LiveKit teaches an agent to read its
-    per-session context, so an agent that reads it must find its own
-    object and not egma's. **Nothing of the test's content is ever added**
-    — no scenario, no persona, no expected behavior, and no mock answer —
-    because an agent that could read its script would stop being under
-    test.
-
-    ## The retiring context block
-
-    Underneath the customer's keys, and only where none of them collide,
-    four facts about *where egma is* are added: ``simulationId``,
-    ``modality``, ``egmaIdentity`` and ``protocolVersion``. They are not
-    how an agent finds egma — the room name and the persona identity are,
-    on all four ways into a room — and they are here for one reason only:
-    an SDK older than room-name detection reads this block and nothing
-    else. Take it away today and every worker running such an SDK stops
-    serving mock tools inside a live simulation without saying so, runs
-    the customer's real tools instead, and exports the simulation's own
-    spans through its production door as a conversation that never
-    happened.
-
-    So it stays until it is provably unread, and the condition is
-    recorded rather than remembered: delete this block, its keys, and its
-    collision check once egma's own telemetry reports no hello from an SDK
-    below the room-name minimum for a full release cycle.
-
-    While it lives it tells the truth: the ``modality`` here is the
-    conducting driver's own, never an assumed ``voice``. Nothing current
-    depends on it — the chat setup in the integration instructions reads
-    the room's name, not this block — so the deletion condition above
-    stays exactly as written.
-
-    A customer's own key always wins. Where their configured JSON already
-    uses one of these four names, or is not a JSON object at all, their
-    string rides alone byte for byte and the block is dropped. Corrupting
-    a value an agent reads is a worse failure than an old SDK losing its
-    one way into a simulation: the agent's own deployment breaks on a key
-    it was promised, in production shape, inside a run that was meant to
-    test it — while the old SDK's loss is a mock-tool exchange nobody
-    offered, which is where every simulation stood before mock tools.
-    """
-    written = configured or ""
-    context = {
-        "simulationId": simulation_id,
-        "modality": modality,
-        "egmaIdentity": egma_identity,
-        "protocolVersion": PROTOCOL_VERSION,
-    }
-    # ``ensure_ascii=True`` on both writes below, and it is a correctness
-    # rule rather than a style one. A configured value may hold a lone
-    # surrogate: ``{"label":"\ud800"}`` is legal JSON, the control plane
-    # admits it, and the room's copy carries it as the six ASCII characters
-    # the customer wrote. Parsed, it is a character with no UTF-8 form at
-    # all, so writing it out raw would put a string on this request that
-    # cannot be encoded onto the wire, and the simulation would die at
-    # dispatch over a value the room carried without complaint.
-    #
-    # What escaping costs is bytes, and only on egma's copy: an agent
-    # reading its own key parses it back to the same value either way.
-    # That is why the room is what promises the string byte for byte, and
-    # the dispatch promises the keys.
-    if not written:
-        return json.dumps(context, separators=(",", ":"), ensure_ascii=True)
-
-    try:
-        held = json.loads(written)
-    except ValueError:
-        held = None
-    if not isinstance(held, dict):
-        return written
-
-    # Read off the block itself rather than from a second list of its
-    # names, so what is checked for and what would be written cannot
-    # drift apart.
-    collided = sorted(set(held) & set(context))
-    if collided:
-        logger.warning(
-            "the configured metadata for this connection already uses %s, so "
-            "the dispatch carries the configured JSON alone; an Egma SDK "
-            "older than room-name detection will not find a simulation here",
-            collided,
-        )
-        return written
-    return json.dumps({**held, **context}, separators=(",", ":"), ensure_ascii=True)
-
-
 def platform_refusal(what_failed: str, code: str, told: str) -> MediaBackendError:
     """The platform said no, in the platform's own words.
 
@@ -516,10 +416,11 @@ class RoomSettings:
     it.
 
     One field for two channels, because the customer configured one
-    value: :meth:`_create_room` sets it as the room's metadata byte for
-    byte, and :meth:`_dispatch` passes this same string through
-    :func:`dispatch_metadata` for the dispatch's. ``None`` where the
-    connection configured none.
+    value and both carry it byte for byte: :meth:`_create_room` sets it as
+    the room's metadata and :meth:`_dispatch` sends the same string as the
+    dispatch's. Neither writes it out again, so what an agent reads on
+    either channel is what was configured. ``None`` where the connection
+    configured none.
     """
 
     token_endpoint: str = ""
@@ -825,10 +726,11 @@ class RoomLifecycle:
     MODALITY: str
     """Which kind of simulation this driver conducts.
 
-    It is not decoration: it rides the dispatch metadata, and it is the
+    It is not decoration: it names the room. A chat driver's rooms carry
+    the modality mark the customer's worker reads, and that mark is the
     only thing that tells an agent whether to answer in speech or in
     text. A subclass that conducts something else says so here, and the
-    dispatch tells the truth by construction rather than by a caller
+    name tells the truth by construction rather than by a caller
     remembering to pass the right word.
     """
 
@@ -841,7 +743,6 @@ class RoomLifecycle:
         endpoint_resolver: Any = None,
     ) -> None:
         self._settings = settings
-        self._simulation_id = simulation_id
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
         # One registry per driver, so what this driver quotes from the
@@ -891,7 +792,7 @@ class RoomLifecycle:
 
         Done at the join itself, which is the earliest moment it can be
         done and the only one that is early enough. The agent's side says
-        hello as its session starts, and on three of the four ways into a
+        hello as its session starts, and on two of the three ways into a
         room nothing egma does decides when that session starts: the
         worker can already be in the room, mid-hello, while egma is still
         connecting. A method registered a step later than the connect is a
@@ -988,7 +889,7 @@ class RoomLifecycle:
         the token endpoint's, or the platform's that opened the room — and
         egma's part is to be in the room when it arrives.
 
-        On three of the four ways in the agent may have arrived already,
+        On two of the three ways in the agent may have arrived already,
         so the room is asked who is in it before anybody starts waiting
         for somebody to come.
         """
@@ -1066,19 +967,13 @@ class RoomLifecycle:
         request = api.CreateAgentDispatchRequest(
             room=self._room_name,
             agent_name=self._settings.agent_name,
-            # The identity the token grants, not a name invented here: an
-            # SDK old enough to still read the retiring block addresses
-            # its mock-tool calls to exactly this participant, so a name
-            # invented for the message would send them to nobody.
-            # Dispatching happens only on the access variant that mints its
-            # own token, which is the one that signs this identity — see
-            # `room_token`.
-            metadata=dispatch_metadata(
-                self._settings.metadata,
-                self._simulation_id,
-                modality=self.MODALITY,
-                egma_identity=PERSONA_IDENTITY,
-            ),
+            # The connection's own JSON, exactly as it was configured and
+            # exactly as the room carries it. Nothing of egma's is added:
+            # an agent reading its per-session context out of the channel
+            # LiveKit teaches it to read finds its own object there and
+            # nothing else, and the two channels carry the same bytes
+            # because neither is written out again.
+            metadata=self._settings.metadata or "",
         )
         await self._asked(
             request,
