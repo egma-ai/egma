@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import { createPersona, sealAgentMonitoringKey } from "@egma/db";
+import { mockToolUrl, SIMULATION_VARIABLE } from "@egma/retell";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -274,6 +275,68 @@ describe("the address the transform writes", () => {
     expect(mockToolBase("https://egma.example.com/")).toBe(
       "https://egma.example.com/mock-tools",
     );
+  });
+
+  /**
+   * The loop closed: the URL written onto the temporary version is the URL this
+   * endpoint answers. Two halves of one seam, in two packages, and the only
+   * thing that keeps them honest is a proof that walks from one to the other.
+   */
+  it("is answered by this endpoint, tool name and all", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_round_trip", {
+      answer: { ok: true },
+      delayMs: 0,
+    });
+
+    // Exactly what the transform writes onto the draft, from the package that
+    // writes it — and then what Retell would post to, with the simulation
+    // dynamic variable rendered per call.
+    const written = mockToolUrl(
+      { base: mockToolBase("https://egma.example.com"), runId: ready.runId },
+      "get_availability",
+    );
+    expect(written).toContain(`/{{${SIMULATION_VARIABLE}}}/`);
+    const rendered = written.replace(
+      `{{${SIMULATION_VARIABLE}}}`,
+      ready.simulationId,
+    );
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: new URL(rendered).pathname,
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({ service: "facial" }),
+    });
+    expect(answered.statusCode, answered.body).toBe(200);
+    expect(JSON.parse(answered.body)).toEqual({ ok: true });
+  });
+
+  it("routes a tool name carrying characters a path has to encode", async () => {
+    const fresh = await aRunningSimulation("mock_endpoint_encoded_name");
+    // The tool this run's world answers for, named the way a real one can be.
+    await api.database.sql(
+      `update run
+          set mock_tool_snapshot = jsonb_set(
+            mock_tool_snapshot,
+            '{defaults,0,toolName}',
+            '"price list/lookup?v=2"'::jsonb)
+        where id = $1`,
+      [fresh.runId],
+    );
+
+    const rendered = mockToolUrl(
+      { base: mockToolBase("https://egma.example.com"), runId: fresh.runId },
+      "price list/lookup?v=2",
+    ).replace(`{{${SIMULATION_VARIABLE}}}`, fresh.simulationId);
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: new URL(rendered).pathname,
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(answered.statusCode, answered.body).toBe(200);
+    expect(JSON.parse(answered.body)).toEqual({ slots: ["Tuesday 14:00"] });
   });
 });
 

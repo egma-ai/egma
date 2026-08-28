@@ -9,6 +9,7 @@ import {
   SIMULATION_VARIABLE,
   toolCoverageOf,
   toolsOf,
+  writeEngineTools,
   type EngineConfiguration,
   type EngineReference,
 } from "../src/index.ts";
@@ -251,6 +252,46 @@ describe("the mocked draft's transform", () => {
     const first = (tools["tools"] as Record<string, unknown>[])[0];
     expect(Object.hasOwn(first as object, "headers")).toBe(true);
     expect(first?.["headers"]).toEqual({});
+  });
+
+  it("sends none of them to Retell either, on the wire or in a refusal", async () => {
+    const sent: string[] = [];
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      sent.push(typeof init?.body === "string" ? init.body : "");
+      return new Response(JSON.stringify({ error: "nope" }), { status: 500 });
+    }) as typeof fetch;
+
+    const { tools } = mockedToolsFor(flow, TARGET);
+    const written = await writeEngineTools(
+      { reveal: () => "retell-key-abc123" },
+      { reference: FLOW_REFERENCE, version: 106, tools },
+      { url: "https://retell.invalid", fetchImpl },
+    );
+
+    // What went out carries no credential of the customer's…
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).not.toContain("FIXTURESECRET");
+    // …and the refusal that came back carries neither theirs nor egma's.
+    expect(JSON.stringify(written)).not.toContain("FIXTURESECRET");
+    expect(JSON.stringify(written)).not.toContain("retell-key-abc123");
+  });
+
+  it("keeps a thrown transport failure clear of them too", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("socket hang up");
+    }) as typeof fetch;
+
+    const { tools } = mockedToolsFor(llm, TARGET);
+    const written = await writeEngineTools(
+      { reveal: () => "retell-key-abc123" },
+      { reference: LLM_REFERENCE, version: 13, tools },
+      { url: "https://retell.invalid", fetchImpl },
+    );
+
+    expect(written.kind).toBe("unreachable");
+    const said = JSON.stringify(written);
+    expect(said).not.toContain("FIXTURESECRET");
+    expect(said).not.toContain("retell-key-abc123");
   });
 
   it("writes nothing for an engine that declares no tools", () => {
