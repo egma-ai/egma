@@ -17,6 +17,7 @@ import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organ
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
 import ProjectSettingsPage from "../app/projects/[projectId]/settings/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
@@ -1621,6 +1622,18 @@ describe("API keys", () => {
 
     expect(await screen.findByText("egma_sk_the_only_time")).toBeTruthy();
     expect(screen.getByText(/only its hash was kept/)).toBeTruthy();
+
+    /*
+     * And session replay does not read it. This is the one surface in the
+     * product with a live credential drawn as text, for as long as somebody
+     * takes to copy it — `lib/replay-privacy.ts` holds the policy and this is
+     * the mark it defines.
+     */
+    expect(
+      screen
+        .getByText("egma_sk_the_only_time")
+        .hasAttribute(REPLAY_PRIVATE_ATTRIBUTE),
+    ).toBe(true);
 
     // What survives on the row is what a person can tell two keys apart by,
     // and it is not the key.

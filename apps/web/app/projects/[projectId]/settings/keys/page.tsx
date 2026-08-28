@@ -8,6 +8,7 @@ import { createApiKey, listApiKeys, revokeApiKey } from "@egma/platform-api/clie
 import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf, type Project } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
+import { REPLAY_PRIVATE } from "../../../../../lib/replay-privacy.ts";
 import {
   keysOwnedBy,
   rowsIn,
@@ -159,8 +160,16 @@ function ApiKeyReceipt({
            * The secret on its own contained surface, in the mono face, wrapped
            * rather than clipped (`7D6-0`). A key that ran off the edge of its
            * line would be a key somebody copied half of.
+           *
+           * **And the one place in the product where session replay would
+           * otherwise record a live credential.** The key is on screen as text,
+           * once, for as long as somebody takes to copy it, so the element that
+           * holds it carries the mark `lib/replay-privacy.ts` defines.
            */}
-          <code className="block rounded-input border border-border bg-surface-soft p-3 font-mono text-sm break-all text-foreground">
+          <code
+            {...REPLAY_PRIVATE}
+            className="block rounded-input border border-border bg-surface-soft p-3 font-mono text-sm break-all text-foreground"
+          >
             {keyValue.secret}
           </code>
         </div>
