@@ -161,6 +161,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   >(null);
   const [retellAgentId, setRetellAgentId] = useState("");
   const [retellRoute, setRetellRoute] = useState("");
+  // How the developer wants to test a voice agent: chat over the playground, or
+  // voice down a call. The modality question the flow leads with for a voice
+  // agent whose goal is a simulation.
+  const [testModality, setTestModality] = useState<"" | "chat" | "voice">("");
   const [discovering, setDiscovering] = useState(false);
 
   const [livekitAccess, setLivekitAccess] = useState(PROJECT_CREDENTIALS);
@@ -185,6 +189,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
+    setTestModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
     setLivekitConfig({});
@@ -339,6 +344,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
+    setTestModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
     setLivekitConfig({});
@@ -402,6 +408,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(answer.value.agents);
     setRetellAgentId("");
     setRetellRoute("");
+    setTestModality("");
     transition("retell-agent");
   }
 
@@ -618,13 +625,30 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-key":
         await findRetellAgents();
         return;
-      case "retell-agent":
-        if (selectedModality === null) return;
-        if (selectedModality === "voice") {
+      case "retell-agent": {
+        if (selectedModality === null || goal === "") return;
+        const next = stepAfterRetellAgent(selectedModality, goal);
+        // A voice agent going straight to the phone step (Monitoring or Both)
+        // needs its first voice route chosen for it; a voice agent going to the
+        // modality question waits for chat-or-voice first.
+        if (next === "retell-phone") {
           const first = voiceRoutes[0];
           setRetellRoute(first === undefined ? "" : retellCandidateValue(first));
         }
-        transition(stepAfterRetellAgent(selectedModality));
+        transition(next);
+        return;
+      }
+      case "retell-modality":
+        if (testModality === "") return;
+        if (testModality === "chat") {
+          // Chat over the playground: minted from the one chat route a voice
+          // agent carries, the same finish the chat-agent path uses.
+          await finishRetellChat();
+        } else {
+          const first = voiceRoutes[0];
+          setRetellRoute(first === undefined ? "" : retellCandidateValue(first));
+          transition("retell-phone");
+        }
         return;
       case "retell-phone":
         await finishRetellVoice();
@@ -680,6 +704,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     const needsCatalog =
       step === "livekit-simulation" ||
       step === "retell-phone" ||
+      // The modality step can mint the playground connection on Continue, and
+      // that needs the option catalog to name the row it writes.
+      step === "retell-modality" ||
       (step === "retell-chat" && goal !== "monitoring");
     if (needsCatalog && catalogRefused !== null) {
       return (
@@ -807,6 +834,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 onValueChange={(value) => {
                   setRetellAgentId(value);
                   setRetellRoute("");
+                  setTestModality("");
                 }}
               >
                 {visibleRetellAgents.map((one) => {
@@ -841,6 +869,42 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             <InfoBox>
               Voice agents use a phone number. Chat agents connect through the
               Retell Chat API.
+            </InfoBox>
+          </div>
+        );
+      case "retell-modality":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="How do you want to test this agent?"
+              description={
+                "Egma can test " +
+                String(selectedRetellAgent?.name ?? "this voice agent") +
+                " two ways. Choose the one you want to start with."
+              }
+            />
+            <RadioGroup
+              className="gap-4"
+              aria-label="How to test"
+              value={testModality}
+              onValueChange={(value) =>
+                setTestModality(value as "chat" | "voice")
+              }
+            >
+              <ChoiceCard
+                value="chat"
+                title="Chat"
+                description="Egma tests the agent in text over Retell's playground. No call is placed and nothing is dialled, so a whole suite runs in seconds."
+              />
+              <ChoiceCard
+                value="voice"
+                title="Voice"
+                description="Egma places a call and talks to the agent over the wire, the way its callers do."
+              />
+            </RadioGroup>
+            <InfoBox>
+              Chat and voice land as two connections on one agent, so you can
+              add the other later and compare the same tests across both.
             </InfoBox>
           </div>
         );
@@ -980,11 +1044,18 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const primaryLabel =
     step === "goal" || step === "platform" || step === "retell-agent"
       ? "Continue"
-      : step === "retell-key"
-        ? discovering
-          ? "Finding agents…"
-          : "Find agents"
-        : step === "retell-phone"
+      : step === "retell-modality"
+        ? // Chat mints here; voice carries on to choose a number.
+          testModality === "chat"
+          ? saving
+            ? "Setting up…"
+            : "Set up simulation"
+          : "Continue"
+        : step === "retell-key"
+          ? discovering
+            ? "Finding agents…"
+            : "Find agents"
+          : step === "retell-phone"
           ? saving
             ? "Finishing…"
             : goal === "simulation"
@@ -1013,6 +1084,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     (step === "platform" && platform === "") ||
     (step === "retell-key" && !keyReady) ||
     (step === "retell-agent" && selectedModality === null) ||
+    // Nothing chosen yet, or chat chosen before the catalog it mints from
+    // arrived.
+    (step === "retell-modality" &&
+      (testModality === "" ||
+        (testModality === "chat" && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
     (step === "retell-chat" && goal !== "monitoring" && catalog === null) ||

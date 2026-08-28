@@ -1292,6 +1292,31 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 }
 
 /**
+ * Every connection type that reuses on the same key as this one — the family
+ * that means one underlying platform agent.
+ *
+ * A reuse key is a config field that names the vendor's own agent, and two
+ * connection types that carry the same-named field for the same value reach the
+ * **same** platform agent: Retell's chat API, its playground, and its web call
+ * all key on `retellAgentId`, so a text lane and a voice lane on one Retell
+ * agent are two ways to reach one thing rather than two agents. Registering a
+ * second one therefore lands on the first's Egma agent, whichever door it came
+ * through. A type with no reuse key — a phone number, a LiveKit room — is in no
+ * family and answers an empty list: a number is where Egma dials, not who
+ * answers, and two agents may share one.
+ *
+ * The set always includes the type asked about when it has a reuse key, so a
+ * caller may treat it as "this connection's whole reuse family".
+ */
+export function connectionTypesSharingReuseKey(
+  reuseKey: string,
+): readonly ConnectionType[] {
+  return CONNECTION_TYPES.filter(
+    (connectionType) => CONNECTION_REGISTRY[connectionType].reuseKey === reuseKey,
+  );
+}
+
+/**
  * Whether this exact stored connection can be handed to a simulator.
  *
  * The modality is checked here as well as at write time. Dispatch trusts only

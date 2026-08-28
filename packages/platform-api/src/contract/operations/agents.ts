@@ -334,6 +334,7 @@ export const agentOperations = {
                       type: "string",
                       enum: [
                         "retell_chat_api",
+                        "retell_playground",
                         "retell_web_call",
                         "phone_number",
                       ],
@@ -342,6 +343,7 @@ export const agentOperations = {
                       type: "string",
                       enum: [
                         "retell_chat_api.api_key",
+                        "retell_playground.api_key",
                         "retell_web_call.api_key",
                         "phone_number.public_e164",
                       ],

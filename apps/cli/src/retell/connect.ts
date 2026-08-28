@@ -39,6 +39,7 @@ import {
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
 import {
   confirmNumber,
+  CUSTOM_LLM_HAS_NO_CONFIGURATION,
   listAgents,
   listNumbers,
   numbersAnswering,
@@ -81,10 +82,12 @@ export const DEFAULT_AGENT_NAME = "voice-agent";
 /**
  * How egma reaches the agent, chosen by the developer and never by egma.
  *
- * A Retell voice agent is reached by phone. A genuine Retell chat agent is
- * reached by text. Voice-over-text stays unavailable until Egma implements
- * Retell Agent Playground Completion; the shipped chat adapter cannot safely
- * conduct that path.
+ * A Retell voice agent is reached either way: by phone, dialling one of its
+ * numbers, or by text, conducting a chat simulation over the Retell playground.
+ * A genuine Retell chat agent is reached by text alone, over the chat API. So
+ * text means two different connections depending on the agent it is chosen for
+ * — the playground for a voice agent, the chat API for a chat one — which is
+ * `selectionFor`'s whole job below.
  */
 export type Reach = "text" | "phone";
 
@@ -99,15 +102,25 @@ export const REACH_LINES: Readonly<Record<Reach, string>> = {
     "telephone network, the way the people who call it do.",
 };
 
-/** What a developer can do after asking Retell for the wrong connection type. */
-export const VOICE_REQUIRES_PHONE_LINE =
-  "Retell says this is a voice agent. Voice agents require a Phone connection. " +
-  "Choose --reach phone and try again. Nothing was written.";
-
 /** What a developer can do after asking Retell for a phone connection to chat. */
 export const CHAT_REQUIRES_TEXT_LINE =
   "Retell says this is a chat agent. Chat agents require a Chat connection. " +
   "Choose --reach text and try again. Nothing was written.";
+
+/**
+ * Why text cannot reach a voice agent whose engine is a custom LLM.
+ *
+ * The playground is the door text would open for a voice agent, and it reaches
+ * an agent's words and tools through Retell — which holds neither for a custom
+ * LLM. So the refusal is Retell's own absence, said in the package's one place
+ * for it, and then the one door that does reach such an agent: its phone line,
+ * where the agent answers the way its callers reach it. It is the same reason
+ * the run-start read and the web flow give, at the moment the engine is read.
+ */
+export const PLAYGROUND_REFUSES_CUSTOM_LLM =
+  `${CUSTOM_LLM_HAS_NO_CONFIGURATION} Choose --reach phone and test this agent ` +
+  "over its phone line instead, which reaches it the way its callers do. " +
+  "Nothing was written.";
 
 /** What the developer is asked when the phone was chosen. */
 export const NUMBER_ASK_LINE =
@@ -216,7 +229,15 @@ export type ConnectOutcome =
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
   /** Nobody chose one of the provider-safe ways offered for this agent. */
   | { readonly kind: "unchosen-reach"; readonly offered: readonly Reach[] }
-  /** The requested reach does not match the selected Retell agent's channel. */
+  /**
+   * The requested reach cannot reach this agent, and the reason says why.
+   *
+   * Two shapes, one outcome: a chat agent asked for by phone, which has no
+   * number to dial, and a voice agent asked for by text whose engine is a
+   * custom LLM, which the playground cannot reach. Each names the reach that
+   * does work — text for the first, phone for the second — and the reason a
+   * developer reads.
+   */
   | {
       readonly kind: "incompatible-reach";
       readonly requested: Reach;
@@ -379,13 +400,16 @@ type Selected = {
 /**
  * The one connection the chosen reach means.
  *
- * **Text is only a direct connection to a genuine Retell chat agent.** A voice
- * agent cannot take this branch until the Agent Playground Completion adapter
- * exists. **Phone carries the destination number and no durable connection
- * credential.** Its request-only platform selection carries the Retell key so
- * the API can confirm the routing during the write, then discard the key. The
- * separate agent-platform field records that this onboarding flow found the
- * agent in Retell.
+ * **Text means two different connections, and the agent decides which.** A
+ * genuine Retell chat agent is reached over the chat API; a Retell voice agent
+ * is reached over the playground, which conducts a chat simulation of it in
+ * text. Both carry the vendor's own agent id and the Retell key, because both
+ * conduct every simulation through Retell — and they differ only in the two
+ * technical axes that name which door egma knocks on. **Phone carries the
+ * destination number and no durable connection credential.** Its request-only
+ * platform selection carries the Retell key so the API can confirm the routing
+ * during the write, then discard the key. The separate agent-platform field
+ * records that this onboarding flow found the agent in Retell.
  */
 function selectionFor(
   reach: Reach,
@@ -412,14 +436,21 @@ function selectionFor(
       number,
     };
   }
+  // A voice agent tested in text is conducted over the playground; a chat agent
+  // over the chat API. The engine that cannot take the playground — a custom
+  // LLM — has already been refused before this is reached, so a voice agent
+  // here is one the playground can conduct.
+  const playground = config.modality === "voice";
   return {
     reach,
     connection: {
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
-      // Only Retell chat agents reach this branch. Their vendor identity is the
-      // connection target, and no phone number is read or stored.
+      connectionType: playground ? "retell_playground" : "retell_chat_api",
+      accessVariant: playground
+        ? "retell_playground.api_key"
+        : "retell_chat_api.api_key",
+      // The one modality both text doors speak: a chat simulation, whether of a
+      // voice agent over the playground or a chat agent over the chat API.
       modality: "chat",
       config: { retellAgentId: config.agentId },
       credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
@@ -441,11 +472,27 @@ function isTheSameReach(held: RegisteredConnection, wanted: NewConnection): bool
   return Object.entries(wanted.config).every(([key, value]) => held.config[key] === value);
 }
 
-/** The Retell agent a connection already on the platform reaches, if it names one. */
+/**
+ * The Retell agent a connection already on the platform reaches, if it names
+ * one.
+ *
+ * Every Retell connection that carries the vendor's own agent id answers here —
+ * the chat API, the playground, and the web call alike — because the whole
+ * point is telling a name clash apart: a living connection naming this vendor
+ * agent means the row that holds it is this agent, whichever modality it was
+ * reached by. Only a phone connection names no vendor id, and that is the one
+ * case the numbers below have to settle instead.
+ */
+const RETELL_AGENT_ID_KINDS: readonly string[] = [
+  "retell_chat_api",
+  "retell_playground",
+  "retell_web_call",
+];
+
 function retellAgentOf(held: RegisteredConnection): string | null {
   if (
     held.agentPlatform !== "retell" ||
-    held.connectionType !== "retell_chat_api"
+    !RETELL_AGENT_ID_KINDS.includes(held.connectionType)
   ) {
     return null;
   }
@@ -834,28 +881,40 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
 
   const config = pulled.config;
 
-  // The agent is settled, so what egma may offer is settled with it. Asking
-  // before this point would be offering a phone the agent may have no number
-  // for.
-  const compatibleReach: Reach = config.modality === "voice" ? "phone" : "text";
-  const offered: readonly Reach[] = [compatibleReach];
+  // The agent is settled, so what egma may offer is settled with it. This is
+  // the modality question, and it leads: for a voice agent the developer says
+  // chat or voice — text over the playground, or phone down a line — before
+  // any number is read. A chat agent has one door, text over the chat API, so
+  // there is nothing to ask it and text is all that is offered.
+  const offered: readonly Reach[] =
+    config.modality === "voice" ? ["text", "phone"] : ["text"];
   const reach = await options.chooseReach(offered);
   if (options.signal.aborted) return { kind: "interrupted" };
   if (reach === null) return { kind: "unchosen-reach", offered };
-  if (config.modality === "voice" && reach !== "phone") {
-    return {
-      kind: "incompatible-reach",
-      requested: reach,
-      compatible: compatibleReach,
-      reason: VOICE_REQUIRES_PHONE_LINE,
-    };
-  }
+  // A chat agent has no number to dial, so phone is the wrong door for it.
   if (config.modality === "chat" && reach !== "text") {
     return {
       kind: "incompatible-reach",
       requested: reach,
-      compatible: compatibleReach,
+      compatible: "text",
       reason: CHAT_REQUIRES_TEXT_LINE,
+    };
+  }
+  // A voice agent tested in text is conducted over the playground, which
+  // reaches an agent's words and tools through Retell — and a custom LLM keeps
+  // both on its own socket server, out of that reach. So the engine, already
+  // read when the agent was pulled, is refused here, at the door, with its
+  // reason and the phone line as the way that does reach it.
+  if (
+    config.modality === "voice" &&
+    reach === "text" &&
+    config.engine === "custom-llm"
+  ) {
+    return {
+      kind: "incompatible-reach",
+      requested: reach,
+      compatible: "phone",
+      reason: PLAYGROUND_REFUSES_CUSTOM_LLM,
     };
   }
 

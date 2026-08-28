@@ -21,7 +21,7 @@ import {
   KEY_ASK_LINE,
   CUSTODY_LINE,
   NO_AGENTS_LINE,
-  VOICE_REQUIRES_PHONE_LINE,
+  PLAYGROUND_REFUSES_CUSTOM_LLM,
 } from "../src/retell/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
@@ -77,6 +77,24 @@ const ONE_VOICE_AGENT: FakeRetellScript = {
     },
   ],
   ...(ONE_CHAT_AGENT.llms === undefined ? {} : { llms: ONE_CHAT_AGENT.llms }),
+  numbers: NUMBERS,
+};
+
+/** A voice agent whose brain is a custom LLM, so Retell holds no words for it. */
+const ONE_VOICE_CUSTOM_LLM_AGENT: FakeRetellScript = {
+  keys: [KEY],
+  agents: [
+    {
+      agent_id: "agent_0001",
+      agent_name: "order-line",
+      channel: "voice",
+      voice_id: "11labs-Adrian",
+      response_engine: {
+        type: "custom-llm",
+        llm_websocket_url: "wss://example.invalid/llm",
+      },
+    },
+  ],
   numbers: NUMBERS,
 };
 
@@ -328,14 +346,59 @@ describe("one agent, and several", () => {
     expect(connected?.config.prompt).toBeNull();
   });
 
-  it("refuses text for a Retell voice agent before it writes anything", async () => {
+  it("makes a text connection a playground one for a Retell voice agent", async () => {
+    // agent_0002 is a voice agent on a Retell LLM, so text is a chat simulation
+    // over the playground rather than the phone. The refusal that used to stand
+    // here retired with this lane.
     retell = await startFakeRetell(THREE_AGENTS);
 
-    const voice = await run({ keys: [KEY], agent: "agent_0002" });
-    expect(voice.connected).toBeNull();
-    expect(voice.report).toEqual({ kind: "failed", reason: VOICE_REQUIRES_PHONE_LINE });
+    const { connected } = await run({ keys: [KEY], agent: "agent_0002" });
+
+    expect(connected?.reach).toBe("text");
+    expect(connected?.config.modality).toBe("voice");
+    const [connection] = platform.registered.connections;
+    expect(connection?.connectionType).toBe("retell_playground");
+    expect(connection?.accessVariant).toBe("retell_playground.api_key");
+    // A chat simulation of a voice agent: the connection speaks chat, and it
+    // names the voice agent it conducts against.
+    expect(connection?.modality).toBe("chat");
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
+    expect(connection?.productLabel).toBe("Retell playground");
+    // The key conducts every playground exchange, so it is sealed on the
+    // connection exactly as the chat API's is.
+    expect(connection?.credentialsHint).toBe(KEY.slice(-4));
+  });
+
+  it("refuses text for a voice agent whose engine is a custom LLM, at the door", async () => {
+    // The playground reaches an agent's words and tools through Retell, and a
+    // custom LLM keeps both on the customer's own socket. So the choice is
+    // refused with its reason, before anything is written, and phone is named
+    // as the door that does reach it.
+    retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
+
+    const refused = await run({ keys: [KEY], reach: "text" });
+
+    expect(refused.connected).toBeNull();
+    expect(refused.report).toEqual({
+      kind: "failed",
+      reason: PLAYGROUND_REFUSES_CUSTOM_LLM,
+    });
+    expect(PLAYGROUND_REFUSES_CUSTOM_LLM).toContain("custom LLM");
+    expect(PLAYGROUND_REFUSES_CUSTOM_LLM).toContain("--reach phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
+  });
+
+  it("still conducts a custom-LLM voice agent over the phone, which reaches it", async () => {
+    // The refusal is the playground's alone: a phone connection dials the
+    // agent the way its callers do, whatever engine answers behind the line.
+    retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
+
+    const { connected, report } = await run({ keys: [KEY], reach: "phone" });
+
+    expect(report.kind).toBe("connected");
+    expect(connected?.reach).toBe("phone");
+    expect(platform.registered.connections[0]?.connectionType).toBe("phone_number");
   });
 
   it("reads a chat agent at the address Retell keeps chat agents at", async () => {
@@ -539,6 +602,74 @@ describe("what lands on the platform", () => {
       agent: "created",
       connection: "created",
     });
+  });
+});
+
+describe("one agent, two connections", () => {
+  /**
+   * The chat-versus-voice diagnostic the model promises needs both histories
+   * under one identity. So registering the same Retell agent again with the
+   * other modality attaches to the agent the first walk wrote, never a twin —
+   * in either order, because a developer sets one up today and the other
+   * tomorrow and cannot be made to remember which came first.
+   */
+  it("attaches text after phone to the one agent, never a twin", async () => {
+    retell = await startFakeRetell(ONE_VOICE_AGENT);
+
+    const phone = await run({ keys: [KEY], reach: "phone" });
+    const text = await run({ keys: [KEY], reach: "text" });
+
+    expect(phone.connected?.reach).toBe("phone");
+    expect(text.connected?.reach).toBe("text");
+
+    // One egma agent holds both ways of reaching the one Retell agent.
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
+    expect(text.connected?.registered.agent.id).toBe(phone.connected?.registered.agent.id);
+
+    // The phone was written first; the playground was added to the same agent.
+    expect(phone.connected?.registration).toEqual({ agent: "created", connection: "created" });
+    expect(text.connected?.registration).toEqual({ agent: "reused", connection: "created" });
+    expect(text.connected?.registered.result).toBe("connection_added");
+
+    const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
+    expect(kinds).toEqual(["phone_number", "retell_playground"]);
+  });
+
+  it("attaches phone after text to the one agent, never a twin", async () => {
+    retell = await startFakeRetell(ONE_VOICE_AGENT);
+
+    const text = await run({ keys: [KEY], reach: "text" });
+    const phone = await run({ keys: [KEY], reach: "phone" });
+
+    expect(text.connected?.reach).toBe("text");
+    expect(phone.connected?.reach).toBe("phone");
+
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
+    expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
+
+    // The playground was written first; the phone was added to the same agent.
+    expect(text.connected?.registration).toEqual({ agent: "created", connection: "created" });
+    expect(phone.connected?.registration).toEqual({ agent: "reused", connection: "created" });
+    expect(phone.connected?.registered.result).toBe("connection_added");
+
+    const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
+    expect(kinds).toEqual(["phone_number", "retell_playground"]);
+  });
+
+  it("reuses the playground connection when the same modality is registered twice", async () => {
+    // Registering text twice is one connection, rotated: the within-type reuse
+    // rule the platform already keeps, now for the playground too.
+    retell = await startFakeRetell({ ...ONE_VOICE_AGENT, keys: [KEY, OTHER_KEY] });
+
+    const first = await run({ keys: [KEY], reach: "text" });
+    const second = await run({ keys: [OTHER_KEY], reach: "text" });
+
+    expect(first.connected?.registered.result).toBe("created");
+    expect(second.connected?.registered.result).toBe("reused");
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.connectionType).toBe("retell_playground");
+    // The key it was just given replaces the old one whole.
+    expect(platform.registered.connections[0]?.credentialsHint).toBe(OTHER_KEY.slice(-4));
   });
 });
 

@@ -94,7 +94,16 @@ export type WroteEngineTools = { readonly kind: "written" } | RetellFailure;
 /** What a version reference may be: a number, `latest`, or a tag's name. */
 export type VersionReference = number | string;
 
-const CUSTOM_LLM_HAS_NO_CONFIGURATION =
+/**
+ * Why the playground cannot reach a custom-LLM agent, in Retell's own absence.
+ *
+ * Exported to the package because two flows now say it — the run-start read
+ * that refuses a run over a playground connection whose engine turned out to
+ * be a custom LLM, and the connect flows that refuse the same engine at the
+ * door, at the moment they read it. One sentence in one place, so the two
+ * cannot drift into two ideas of why the same agent is out of reach.
+ */
+export const CUSTOM_LLM_HAS_NO_CONFIGURATION =
   "this agent's response engine is a custom LLM, so Retell holds none of its " +
   "words or tools: they run in your own service, behind the websocket URL " +
   "the agent points at.";

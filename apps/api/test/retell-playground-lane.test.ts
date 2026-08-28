@@ -61,6 +61,16 @@ const RETELL_CHAT = {
   credentials: { apiKey: SENTINEL_KEY },
 } as const;
 
+/** The voice door beside the playground: a web call against the same agent. */
+const WEB_CALL = {
+  agentPlatform: "retell",
+  connectionType: "retell_web_call",
+  accessVariant: "retell_web_call.api_key",
+  modality: "voice",
+  config: { retellAgentId: PLATFORM_AGENT },
+  credentials: { apiKey: SENTINEL_KEY },
+} as const;
+
 /**
  * A conversation flow with one tool of each class: one Egma stands in front
  * of, one that executes inside Retell, and one Egma does not intercept yet.
@@ -343,6 +353,60 @@ describe("registering a playground connection against a named Retell agent", () 
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
     expect(String(refused.body.message)).toContain("Chat API");
+  });
+});
+
+describe("one Retell agent through both a text and a voice door, on the web's fresh flow", () => {
+  /**
+   * The web connect flow registers a fresh agent by POSTing a plain
+   * registration — it has no name-clash fallback of its own, unlike the CLI. So
+   * the server is what has to land the other modality on the first door's agent.
+   * Both the playground (chat) and the web call (voice) key on the vendor agent
+   * id, so it does: a connection added, never a twin, in either order.
+   */
+  async function bothDoors(
+    label: string,
+    firstDoor: typeof PLAYGROUND | typeof WEB_CALL,
+    secondDoor: typeof PLAYGROUND | typeof WEB_CALL,
+  ): Promise<void> {
+    const { fetchImpl } = retell({ channel: "voice" });
+    api = await createApi(label, { retellFetch: fetchImpl });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const post = (door: typeof PLAYGROUND | typeof WEB_CALL) =>
+      ask(api.app, "POST", "/v1/agents", key, {
+        agentPlatform: "retell",
+        name: "Front desk",
+        connection: { ...door, platformAgentId: PLATFORM_AGENT },
+      });
+
+    const first = await post(firstDoor);
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.result).toBe("created");
+
+    const second = await post(secondDoor);
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
+    // Attached to the first door's agent, not a second identity.
+    expect(second.body.result).toBe("connection_added");
+    expect((second.body.agent as { id: string }).id).toBe(
+      (first.body.agent as { id: string }).id,
+    );
+
+    // One Egma agent, two connections; the sentinel key never surfaced.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from agent",
+    );
+    expect(rows[0]?.count).toBe("1");
+    expect(JSON.stringify(second.body)).not.toContain(SENTINEL_KEY);
+  }
+
+  it("attaches the web call after the playground, on one egma agent", async () => {
+    await bothDoors("web_playground_then_webcall", PLAYGROUND, WEB_CALL);
+  });
+
+  it("attaches the playground after the web call, on one egma agent", async () => {
+    await bothDoors("web_webcall_then_playground", WEB_CALL, PLAYGROUND);
   });
 });
 

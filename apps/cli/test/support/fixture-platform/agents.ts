@@ -308,6 +308,34 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
   },
+  retell_playground: {
+    // Chat, and a chat with a voice agent: the playground door a Retell voice
+    // agent otherwise has none of. Voice is never admitted here — a playground
+    // exchange synthesizes nothing — so a voice simulation of the same agent is
+    // a phone or web-call connection beside this one, on one Egma agent.
+    modalities: ["chat"],
+    // Retell brokers the exchange exactly as it brokers a chat session.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_playground.api_key",
+        named: "a Retell playground connection",
+        // Only the vendor agent id here: the CLI never sends the optional
+        // baseUrl the real registry admits for a proxied deployment, so the
+        // fixture does not need to model a URL gate it would never exercise.
+        config: { retellAgentId: nonEmptyString },
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+      },
+    ],
+    // The same vendor agent as the voice connection beside it: chat and voice
+    // land as two connections on one Egma agent, never a twin.
+    reuseKey: "retellAgentId",
+    simulatorAdapter: true,
+  },
   phone_number: {
     modalities: ["voice"],
     topology: "egma-dials-in",
@@ -408,6 +436,13 @@ const CONNECTION_OPTIONS = [
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     productLabel: "Retell chat",
+  },
+  {
+    agentPlatform: "retell",
+    connectionType: "retell_playground",
+    accessVariant: "retell_playground.api_key",
+    modality: "chat",
+    productLabel: "Retell playground",
   },
   {
     agentPlatform: "retell",

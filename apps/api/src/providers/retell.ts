@@ -225,9 +225,15 @@ export async function discoverRetellAgents(
         agent.modality === "chat"
           ? [chatCandidate(agent.id)]
           : [
-              // The web call first: it needs nothing of the customer's to be
-              // routed, it is what a mocked run is conducted over, and it is
-              // the one voice lane every voice agent has.
+              // The chat door a voice agent otherwise has none of: the
+              // playground conducts a chat simulation of it in text. Offered
+              // for every voice agent, because whether its engine is one the
+              // playground can reach is a question answered when the connection
+              // is confirmed, not one discovery can answer from a listing.
+              playgroundCandidate(agent.id),
+              // The web call: it needs nothing of the customer's to be routed,
+              // it is what a mocked run is conducted over, and it is the one
+              // voice lane every voice agent has.
               webCallCandidate(agent.id),
               ...numbersAnswering(numbers, agent.id).map(({ number }) =>
                 phoneCandidate(number),
