@@ -7,10 +7,11 @@ platform's telemetry — with no LiveKit server, no project, no worker and
 no network anywhere. What stands in for the LiveKit is
 :mod:`room_stub`'s chat half, which is the real chat driver and the real
 text room with only the three requests and the one join answered locally.
-Everything else — reading each utterance to its close, dropping egma's own
-words, waiting out the quiet period, deciding where a turn ends, offering
-the mock-tool methods on egma's participant — is the code a customer's
-server will run.
+Everything else — stamping each stream at its header, reading it to its
+close, dropping egma's own words, reading the agent's own state off the
+wire, deciding where a turn ends and waiting out whatever it has to wait
+out, offering the mock-tool methods on egma's participant — is the code a
+customer's server will run.
 
 The specs go in at the top, through the plug registry and the pipeline the
 service assembles, for the same reason the voice suite's do: a test that
@@ -41,7 +42,7 @@ from conftest import (
     a_spec,
     load_fixture_spec,
 )
-from room_stub import AGENT_IDENTITY, ChatStub
+from room_stub import AGENT_IDENTITY, ChatStub, ClosesLate
 
 from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
@@ -90,6 +91,88 @@ the arithmetic is the production arithmetic.
 A_PAUSE = QUIET_SECONDS / 2
 """A gap inside one turn — shorter than the quiet period, which is what
 makes it a pause rather than the end of a turn."""
+
+DRAIN_SECONDS = QUIET_SECONDS * 5
+"""What the wait for a still-open stream is shortened to for the suite.
+
+Larger than the quiet period, exactly as the production pair is and for
+the same reason: it is the wait a turn pays *after* the quiet period has
+expired with a stream still open, so a suite where the two were equal
+would be testing arithmetic this plug does not do.
+"""
+
+A_LATE_CLOSE = QUIET_SECONDS * 2
+"""How long a scripted stream stays open after its turn's other words.
+
+Past the quiet period, so a turn that ended on what had already arrived is
+already over when this stream closes — and comfortably inside the drain,
+so a turn that waits for what it opened still has it. The gap between the
+two is what the tests below read.
+"""
+
+A_NEVER_CLOSES = DRAIN_SECONDS * 5
+"""How long a stream that is never going to close stays open.
+
+Past every bound the plug has, which is what a stream whose trailer the
+wire lost looks like from egma's seat: indistinguishable from one that is
+still being written, until the bound decides.
+"""
+
+A_LONG_QUIET = QUIET_SECONDS * 10
+"""A quiet period big enough to be caught being skipped.
+
+Where a test claims the agent's own state ended a turn, the claim is only
+worth anything if waiting out the quiet period instead would have shown.
+Ten times the suite's number, and the assertions leave half of it as
+margin, so a slow machine cannot pass the test by accident either way.
+"""
+
+A_JUST_AFTER = QUIET_SECONDS / 4
+"""The gap between one utterance closing and the next one opening.
+
+Short enough that the second stream is plainly the same turn still being
+written, rather than the agent starting again.
+"""
+
+A_SLOW_TURN_PAUSE = A_LATE_CLOSE + A_JUST_AFTER
+"""The gap inside a turn whose every utterance closes late.
+
+Each stream opens just after the one before it closed, so a turn scripted
+with this pause is several honest slow utterances in a row and not one
+stalled stream anywhere.
+"""
+
+A_DECLARED_TOOL_DELAY = 3.0
+"""The mock-tool delay this plug's budgets are written to clear.
+
+The customer declares it on the test and
+:data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` names it in so
+many words. It is the slow half of the gap an agent that publishes no
+state leaves in the middle of one turn.
+"""
+
+A_TOOL_TURN_GAP = A_DECLARED_TOOL_DELAY + 0.5
+"""That delay with a model round trip on either side of it.
+
+Half a second for the pair, which is generous to the quiet period rather
+than to the agent: two real round trips cost more than that, so a quiet
+period that cannot carry this gap cannot carry the real one either.
+"""
+
+A_MEASURED_QUIET = QUIET_SECONDS * 5
+"""A quiet period long enough to carry that gap at its production ratio."""
+
+A_TOOL_PAUSE = (
+    A_MEASURED_QUIET * A_TOOL_TURN_GAP / chat_plug.TURN_QUIET_SECONDS
+)
+"""The gap above, on the suite's clock, at the production ratio.
+
+Divided by the real
+:data:`~egma_simulator.plugs.livekit_chat.TURN_QUIET_SECONDS` rather than
+by a copy of it, so the test holds the *number* and not only the rule:
+shrink the quiet period and this pause grows past it, which is the same
+turn being cut short that a real stateless agent would have.
+"""
 
 
 def chat_spec(
@@ -155,6 +238,7 @@ def hurry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "GREETING_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "REPLY_SECONDS", QUIET_SECONDS)
+    monkeypatch.setattr(chat_plug, "TURN_DRAIN_SECONDS", DRAIN_SECONDS)
     monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 1.0)
 
 
@@ -580,10 +664,13 @@ class _FilingControlPlane:
 
 # -- Where a turn ends -------------------------------------------------------
 #
-# The one real design question chat has. The wire gives one stream per
-# utterance and closes it when that utterance is done, and that close is
-# an end-of-*utterance* marker rather than an end-of-turn one. Everything
-# below is about the difference.
+# The one real design question chat has, and two facts settle it together.
+# The agent has to be finished, which it says itself on `lk.agent.state`
+# and which the quiet period stands in for where it does not. And every
+# stream the turn opened has to have closed, because a stream closing is
+# an end-of-*utterance* marker and never an end-of-turn one — an utterance
+# still being written belongs to the turn it began in however late it
+# lands. Everything below is one of those two, or the bound on the second.
 
 
 async def test_one_agent_turn_may_arrive_in_several_utterances(
@@ -649,9 +736,11 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
 
     So whatever is still queued when the next turn goes out is taken off
     first. That is the half of the problem a rule can settle; the other
-    half — an utterance still in flight at that moment — is why
+    half — a stream that has not opened at all by then — is why
     :data:`REPLY_SECONDS` is sized to make running out of budget
-    exceptional rather than routine.
+    exceptional rather than routine. An utterance still in flight at that
+    moment is neither half: its stream opened while its own turn was
+    outstanding, so the turn waits for it rather than losing it.
     """
     hurry(monkeypatch)
     stub = ChatStub(greeting=None, replies=["The second answer."])
@@ -661,15 +750,668 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
     room = plug.backend._room
     assert room is not None
     # Stamped with the turn before this one: a stream that opened while the
-    # first question was outstanding and only finished now.
+    # first question was outstanding and only finished now. Put straight on
+    # the queue rather than opened as a stream, because that is the state
+    # this test is about — the words are here, nothing is still open, and
+    # the room has nothing left to wait for. Its place in the open order is
+    # first because it is the first stream this room ever saw.
     room.utterances.put_nowait(
-        Utterance(text="The first answer, late.", spoken=False, turn=0)
+        Utterance(text="The first answer, late.", spoken=False, turn=0, opened=1)
     )
 
     answered = await plug.deliver("The second question.")
 
     assert answered.text == "The second answer."
     await plug.close()
+
+
+async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_record(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A stream that opens promptly and closes late is still its turn's.
+
+    That is this plug's own rule, written down in its module docstring: an
+    utterance belongs to the turn that was outstanding when its stream
+    **opened**, "so one that opens promptly and finishes late still
+    belongs to the question it began answering". The stamp was taken for
+    exactly that reason and then used only to *refuse* a late utterance,
+    never to wait for one, so the rule it was taken for was not kept.
+
+    The agent here opens its greeting in two streams and the first one
+    closes last, after the quiet period has run out. Both opened while the
+    greeting was outstanding, so both are the greeting, and the turn is
+    not over while either is open: it waits, takes the late words, and
+    joins the two in the order they opened rather than the order they
+    arrived.
+
+    What the red looks like is what the founder read: an agent turn that
+    begins part-way through the sentence the agent started with — the
+    greeting ends without the open stream, the turn after refuses it for
+    being older, and nothing on the record says a word of it went missing.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+
+    opening = asyncio.ensure_future(plug.open())
+    await asyncio.sleep(0)
+    room = stub.room
+
+    # Both streams open while the greeting is outstanding, which is where
+    # an agent's opening opens. The first is still being written when the
+    # second has closed; the quiet period is measured from that close.
+    still_open = asyncio.Event()
+    room._agent_said(_Echo("Hi! I", closes_when=still_open), AGENT_IDENTITY)
+    room._agent_said(
+        _Echo("can help you book an appointment."), AGENT_IDENTITY
+    )
+
+    async def closes_after_the_quiet_period() -> None:
+        """The held stream closes late — but still inside its own turn.
+
+        Past the quiet period on purpose, because that is the moment the
+        defect ends the greeting: a turn that stops at what has already
+        arrived is over before this line runs, and these words then land
+        in the turn after, which refuses them.
+        """
+        await asyncio.sleep(A_LATE_CLOSE)
+        still_open.set()
+
+    closing = asyncio.ensure_future(closes_after_the_quiet_period())
+
+    # The record, written exactly as `walk.conduct` writes it: the opening
+    # if there was one, the persona's turn, then the answer's words.
+    record: list[tuple[str, str]] = []
+    greeting = await opening
+    await closing
+    if greeting is not None:
+        record.append(("agent", greeting))
+    record.append(("human", "Hi, my name is Starter."))
+
+    delivering = asyncio.ensure_future(plug.deliver("Hi, my name is Starter."))
+    await asyncio.sleep(0)
+    room._agent_said(_Echo("That sounds good, Starter."), AGENT_IDENTITY)
+    answered = await delivering
+    if answered.text is not None:
+        record.append(("agent", answered.text))
+    await plug.close()
+
+    said = [text for speaker, text in record if speaker == "agent"]
+    assert said[0].startswith("Hi! I"), (
+        "the record's first agent turn begins part-way through what the "
+        f"agent said: {said[0]!r}. The stream carrying its opening words was "
+        "stamped with the greeting, the greeting ended without waiting for "
+        "it, and the turn after refused it for being older"
+    )
+
+
+async def test_a_turn_arrives_in_the_order_it_was_said_not_the_order_it_landed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """One turn, two utterances, and the first one closes last.
+
+    An agent writes a long opening and a short line after it, and the
+    short one finishes first. Both streams opened in the same turn, so
+    both are the same turn's — and the record has to read the way the
+    agent said them. Joining on arrival reversed them, which is the
+    sentence the founder read: an agent turn beginning half-way through
+    itself.
+    """
+    stub = ChatStub(
+        greeting="Front desk.",
+        replies=[
+            [
+                ClosesLate("Let me look at Thursday.", A_LATE_CLOSE),
+                "Thursday at 2:15 is free.",
+            ]
+        ],
+    )
+    _conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch, scenario="One point."
+    )
+
+    assert turns[2] == (
+        "agent",
+        "Let me look at Thursday.\nThursday at 2:15 is free.",
+    )
+
+
+async def test_a_stream_that_never_closes_bounds_the_turn_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """The bound is real, and what it costs the record is said out loud.
+
+    A turn waits for a stream it opened, and it cannot wait for ever: an
+    agent whose process died mid-sentence would otherwise hold the turn,
+    and the simulation behind it, until the run's own duration limit — and
+    the record would then say ``limit_reached`` about something else
+    entirely.
+
+    So the wait is bounded, and where the bound is what ended it the log
+    names the room, the turn, how many streams were still open and what
+    the agent last said about itself. That line is the only place this
+    fact exists: the report schema and the span vocabulary are the
+    simulation contract's, and this lane does not settle those alone.
+    """
+    caplog.set_level(logging.WARNING)
+    stub = ChatStub(
+        greeting="Front desk.",
+        replies=[
+            [
+                "Let me look at Thursday.",
+                ClosesLate("Thursday at 2:15 is free.", A_NEVER_CLOSES),
+            ],
+            "Booked.",
+        ],
+    )
+    _conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch, scenario="One point. Another point."
+    )
+
+    # The words that did arrive are on the record, and the ones still
+    # being written are not — which is the honest half of a bad outcome.
+    assert turns[2] == ("agent", "Let me look at Thursday.")
+
+    bounded = [
+        record.getMessage()
+        for record in caplog.records
+        if "open-stream path" in record.getMessage()
+    ]
+    assert len(bounded) == 1, caplog.text
+    told = bounded[0]
+    assert stub.rooms[0].name in told, "the log has to name the room"
+    assert "turn 1" in told, "the log has to name the turn that lost the words"
+    assert "nothing at all" in told, "this agent published no state, and so it says"
+
+
+async def test_a_turn_of_slow_utterances_gives_every_stream_the_whole_bound(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """The bound is on one stream, not on a turn's worth of them.
+
+    Five utterances of one turn, each opening just after the one before it
+    closed, every one of them slower than the quiet period and not one of
+    them stalled. Each is the agent still writing, so each is waited for,
+    and what each gets is the whole bound — because
+    :data:`~egma_simulator.plugs.livekit_chat.TURN_DRAIN_SECONDS` measures
+    "the writing of one utterance the agent has already begun" and nothing
+    larger.
+
+    Spent as one budget for the whole turn it runs out part-way down an
+    honest one: the streams that closed perfectly normally have already
+    eaten it, the next stream is dropped for stalling when it did not, and
+    the log names a stalled stream where there is none. That is the very
+    defect this rule was written to end, arriving by the rule's own doing,
+    and the honest half of a bad outcome — the log — would be pointing at
+    the agent.
+    """
+    caplog.set_level(logging.WARNING)
+    hurry(monkeypatch)
+    stub = ChatStub(
+        greeting=None,
+        replies=[
+            [
+                ClosesLate("Let me look at Thursday.", A_LATE_CLOSE),
+                ClosesLate("Checking the morning first.", A_LATE_CLOSE),
+                ClosesLate("Nothing before eleven.", A_LATE_CLOSE),
+                ClosesLate("The afternoon is better.", A_LATE_CLOSE),
+                ClosesLate("Thursday at 2:15 is free.", A_LATE_CLOSE),
+            ]
+        ],
+        pause_seconds=A_SLOW_TURN_PAUSE,
+    )
+    plug = chat_room(stub)
+    assert await plug.open() is None
+
+    answered = await plug.deliver("Anything on Thursday?")
+
+    assert answered.text == (
+        "Let me look at Thursday.\n"
+        "Checking the morning first.\n"
+        "Nothing before eleven.\n"
+        "The afternoon is better.\n"
+        "Thursday at 2:15 is free."
+    ), (
+        "words were dropped from a turn whose every stream closed on its "
+        "own, so the bound was spent on the streams that had already "
+        "finished rather than on the one still being written"
+    )
+    assert not [
+        record
+        for record in caplog.records
+        if "open-stream path" in record.getMessage()
+    ], "an agent writing steadily was filed as a stalled stream"
+    await plug.close()
+
+
+async def test_the_agents_own_state_ends_the_turn_without_the_quiet_period(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """The whole point of reading ``lk.agent.state``: not waiting.
+
+    The quiet period is a guess about time, and a guess has to be
+    generous — which is why the founder's run spent two thirds of its
+    wall clock in one. The agent publishes the answer instead, and a turn
+    that has it does not pay the guess at all.
+
+    Held to a quiet period ten times the suite's so the difference cannot
+    be a scheduling accident: the turn has to come back in a fraction of
+    a wait it never took.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
+    stub = ChatStub(
+        greeting="Front desk.",
+        replies=["Thursday at 2:15 is free."],
+        agent_states=[["listening"], ["thinking", "speaking", "listening"]],
+    )
+    plug = chat_room(stub)
+    await plug.open()
+
+    began = asyncio.get_running_loop().time()
+    answered = await plug.deliver("Anything on Thursday?")
+    took = asyncio.get_running_loop().time() - began
+
+    assert answered.text == "Thursday at 2:15 is free."
+    assert took < A_LONG_QUIET / 2, (
+        f"the turn took {took:.2f}s against a {A_LONG_QUIET:.1f}s quiet "
+        "period, so it waited out a silence the agent had already broken"
+    )
+    await plug.close()
+
+
+async def test_a_state_change_egma_never_saw_go_by_still_ends_the_turn(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """The coalesced transition, which is the common one on a quick turn.
+
+    LiveKit's room plumbing cancels an attribute write that a faster
+    transition overtakes, so a turn can publish ``listening`` and nothing
+    else — ``thinking`` and ``speaking`` never reach egma at all. A rule
+    that waited to see the agent leave ``listening`` before believing it
+    had come back would wait for ever here.
+
+    So nothing waits for them. What ends the turn is the arrival of a
+    finished state after the turn began, whatever came before it.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
+    stub = ChatStub(
+        greeting="Front desk.",
+        replies=["Thursday at 2:15 is free."],
+        # One state for the whole turn, and it is the last one. This is
+        # the wire egma really gets from a fast agent.
+        agent_states=[[], ["listening"]],
+    )
+    plug = chat_room(stub)
+    await plug.open()
+
+    began = asyncio.get_running_loop().time()
+    answered = await plug.deliver("Anything on Thursday?")
+    took = asyncio.get_running_loop().time() - began
+
+    assert answered.text == "Thursday at 2:15 is free."
+    assert took < A_LONG_QUIET / 2, f"the turn waited {took:.2f}s to be told twice"
+    await plug.close()
+
+
+async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The fallback, which is the whole of the rule for some agents.
+
+    An agent that is not a LiveKit session publishes nothing on
+    ``lk.agent.state``, and the quiet period is then the only thing that
+    can end its turns. It still does, and it still waits through the pause
+    a tool call leaves in the middle of one: the filler and the answer are
+    one turn on the record, exactly as before any of this was read off the
+    wire.
+    """
+    stub = ChatStub(
+        greeting="Front desk.",
+        replies=[["One moment while I check.", "Thursday at 2:15 is free."]],
+        pause_seconds=A_PAUSE,
+    )
+    assert stub.agent_states is None, "this agent says nothing about itself"
+    _conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch, scenario="One point."
+    )
+
+    assert turns[2] == (
+        "agent",
+        "One moment while I check.\nThursday at 2:15 is free.",
+    )
+
+
+async def test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """The gap the quiet period is sized for, held to the number itself.
+
+    An agent that publishes no state has nothing but the quiet period to
+    end its turns, and the slowest honest thing it does inside one is call
+    a tool and answer out of what came back. How slow that tool is, is the
+    customer's to declare: a test that makes a backend take three seconds
+    is exactly the kind this lane exists to run, which is why
+    :data:`~egma_simulator.plugs.livekit_chat.REPLY_SECONDS` says so. The
+    gap between the filler and the answer is then that delay with a model
+    round trip on either side of it, and the quiet period has to outlast
+    the whole gap or the answer belongs to no turn at all — the record
+    keeps "one moment", the words that answered the question are dropped,
+    and only a line in the log says so.
+
+    The pause below is that gap carried onto this suite's clock at the
+    production ratio, divided by the production number rather than by a
+    copy of it. So this test holds the *number*: cut the quiet period and
+    the pause grows past it, and the turn ends on the filler.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
+    stub = ChatStub(
+        greeting=None,
+        replies=[
+            [
+                "One moment while I check the calendar.",
+                "Nothing is free on Tuesday.",
+            ]
+        ],
+        pause_seconds=A_TOOL_PAUSE,
+    )
+    assert stub.agent_states is None, "this agent says nothing about itself"
+    plug = chat_room(stub)
+    assert await plug.open() is None
+
+    answered = await plug.deliver("Anything on Tuesday?")
+
+    assert answered.text == (
+        "One moment while I check the calendar.\nNothing is free on Tuesday."
+    ), (
+        f"the answer was lost across a {A_TOOL_PAUSE:.2f}s gap inside one "
+        f"turn — a {A_DECLARED_TOOL_DELAY:.0f}-second declared mock-tool "
+        "delay with a model round trip either side, on this suite's clock "
+        "at the production ratio. The quiet period is the whole of the rule "
+        "for an agent that publishes no state, so it has to outlast that gap"
+    )
+    await plug.close()
+
+
+async def test_the_state_a_session_starts_in_never_ends_the_greeting(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """``listening`` means ready before it means finished.
+
+    A LiveKit session publishes ``listening`` the moment it starts, which
+    is before it has greeted anybody. A turn-end rule that took that as
+    the agent finishing would end the greeting turn on it — and the
+    greeting, arriving a moment later, would land in the persona's first
+    question and be refused for being older.
+
+    So the state signal is off until the turn has heard something. Before
+    that the greeting's own budget owns the wait, which is the exemption
+    the greeting has always had: nothing has been asked yet, so silence
+    here is an agent waiting to be spoken to rather than an agent that
+    has finished.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(
+        agent_state_at_start="listening",
+        greeting=["Hello there.", "How can I help?"],
+        replies=["Thursday at 2:15 is free."],
+        answer_delay_seconds=A_PAUSE,
+        pause_seconds=A_PAUSE,
+    )
+    plug = chat_room(stub)
+
+    assert await plug.open() == "Hello there.\nHow can I help?"
+    await plug.close()
+
+
+async def test_a_greeting_that_never_comes_is_still_not_a_failure(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """The other half of the greeting's exemption, with a state on the wire.
+
+    This agent announces itself listening and then waits to be spoken to,
+    which is most agents. The greeting budget expires, ``open`` answers
+    with nothing, and the walk has the persona go first. Nothing about
+    reading the agent's state may turn that ordinary answer into a fault.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(agent_state_at_start="listening", replies=["Certainly."])
+    plug = chat_room(stub)
+
+    assert await plug.open() is None
+    assert (await plug.deliver("One point.")).text == "Certainly."
+    await plug.close()
+
+
+async def test_a_finished_state_never_ends_a_turn_that_owes_itself_a_stream(
+    monkeypatch: pytest.MonkeyPatch
+):
+    """The two halves in the one order that matters.
+
+    An agent can say it has finished while a stream it opened is still
+    being written — the state travels on one channel and the words on
+    another, and nothing sequences the two. The finished state is not a
+    licence to stop reading: a turn still owes itself every stream it
+    opened, and the words that arrive late are still the answer to the
+    question that prompted them.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+    assert await plug.open() is None
+    room = stub.room
+
+    delivering = asyncio.ensure_future(plug.deliver("Anything on Thursday?"))
+    await asyncio.sleep(0)
+
+    still_open = asyncio.Event()
+    room._agent_said(_Echo("Let me check that."), AGENT_IDENTITY)
+    room._agent_said(
+        _Echo("Thursday at 2:15 is free.", closes_when=still_open), AGENT_IDENTITY
+    )
+    await asyncio.sleep(0)
+    # The agent says it has finished while the second stream is still open.
+    room.agent_publishes_state("listening")
+
+    async def closes_after_the_quiet_period() -> None:
+        await asyncio.sleep(A_LATE_CLOSE)
+        still_open.set()
+
+    closing = asyncio.ensure_future(closes_after_the_quiet_period())
+    answered = await delivering
+    await closing
+
+    assert answered.text == "Let me check that.\nThursday at 2:15 is free."
+    await plug.close()
+
+
+@pytest.mark.parametrize(
+    "state_first",
+    [False, True],
+    ids=["the trailer lands first", "the finished state lands first"],
+)
+async def test_a_finished_state_ends_the_turn_in_either_channel_order(
+    monkeypatch: pytest.MonkeyPatch, state_first: bool
+):
+    """The state and the last trailer race, and either one may win.
+
+    An agent's state travels the signalling channel and its words travel
+    the data channel, so ``listening`` and the close of the last stream of
+    the same turn arrive in whichever order the wire happens to hand them
+    over. Both orderings are one turn ending, and the turn has to end at
+    once either way.
+
+    A landing utterance does outrank the latch — a stream that closes
+    after the agent called itself finished is the agent still writing —
+    but only where that stream *opened* after the state arrived. Clearing
+    the latch on every landing utterance threw the signal away whenever it
+    merely beat its own trailer, and the turn then waited out the whole
+    quiet period it had just been told it need not pay. On an agent whose
+    wire happens to deliver that ordering, that is one quiet period per
+    turn: the exact cost reading the state was for.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_LONG_QUIET)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+    assert await plug.open() is None
+    room = stub.room
+
+    delivering = asyncio.ensure_future(plug.deliver("Anything on Thursday?"))
+    await asyncio.sleep(0)
+    closing = asyncio.Event()
+    room._agent_said(
+        _Echo("Thursday at 2:15 is free.", closes_when=closing), AGENT_IDENTITY
+    )
+    await asyncio.sleep(0)
+
+    began = asyncio.get_running_loop().time()
+    if state_first:
+        # The state overtakes the trailer of the very utterance it is
+        # about, which is an ordinary race and not a stale signal.
+        room.agent_publishes_state("listening")
+        closing.set()
+    else:
+        # The words really are on the record before the state goes out,
+        # which is what makes this the other ordering and not the same
+        # one. Waited on by the driver's own reader task rather than by a
+        # sleep, so the ordering is a fact rather than a hope.
+        reading = [
+            task
+            for task in asyncio.all_tasks()
+            if task.get_name() == "livekit-agent-utterance"
+        ]
+        assert reading, "the driver opened no reader for this stream"
+        closing.set()
+        await asyncio.wait(reading)
+        room.agent_publishes_state("listening")
+
+    answered = await delivering
+    took = asyncio.get_running_loop().time() - began
+
+    assert answered.text == "Thursday at 2:15 is free."
+    assert took < A_LONG_QUIET / 2, (
+        f"the turn took {took:.2f}s against a {A_LONG_QUIET:.1f}s quiet "
+        "period, so the agent said it had finished and egma waited the "
+        "silence out anyway"
+    )
+    await plug.close()
+
+
+async def test_the_server_dropping_egma_is_answered_at_once_not_after_the_drain(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """A room that is gone is not a turn that is slow.
+
+    The bound on a still-open stream is spent so that words already on
+    their way reach the record. Egma losing the room means nothing is on
+    its way and there is no record to reach: the answer is the fault
+    raised out of the turn, and paying the bound first would delay it by
+    the whole drain and then file a line saying these words will be
+    refused by the turn after — when the exchange has no turn after.
+    """
+    caplog.set_level(logging.WARNING)
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+    assert await plug.open() is None
+    room = stub.room
+
+    delivering = asyncio.ensure_future(plug.deliver("Anything on Thursday?"))
+    await asyncio.sleep(0)
+    # A stream opens and never closes, so the turn is owed an utterance —
+    # and then the server drops egma out of the room.
+    room._agent_said(_Echo("Thursday at", closes_when=asyncio.Event()), AGENT_IDENTITY)
+    await asyncio.sleep(0)
+    began = asyncio.get_running_loop().time()
+    room.failed.set()
+
+    with pytest.raises(PlugError) as dropped:
+        await delivering
+    took = asyncio.get_running_loop().time() - began
+
+    assert failed_ending(dropped.value) == ERROR
+    assert "while the exchange was under way" in str(dropped.value)
+    assert took < DRAIN_SECONDS / 2, (
+        f"the fault took {took:.2f}s to surface against a {DRAIN_SECONDS:.1f}s "
+        "drain, so it waited out a bound meant for a stream still arriving"
+    )
+    assert not [
+        record
+        for record in caplog.records
+        if "open-stream path" in record.getMessage()
+    ], "a room that is gone owes no turn after, and nothing may say it does"
+    await plug.close()
+
+
+async def test_a_stream_that_cannot_be_read_says_which_path_lost_the_words(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """The other way an utterance leaves the record, told apart from the first.
+
+    Two paths drop an agent's words. One is a stream that closed after the
+    turn it belonged to had ended; the other is a stream that could not be
+    read at all. On a production record they leave the same fingerprint —
+    an agent turn that begins part-way through a sentence — so the log has
+    to say which of the two happened, or the next run teaches nobody
+    anything.
+
+    Both lines name the room and the turn. Only the stale-turn one can
+    name a length, because only it has the words; this one says the
+    length is not known rather than pretending to a number. That is the
+    difference a reader keys on.
+    """
+    caplog.set_level(logging.WARNING)
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+
+    opening = asyncio.ensure_future(plug.open())
+    await asyncio.sleep(0)
+    stub.room._agent_said(_Unread(RuntimeError("the stream was reset")), AGENT_IDENTITY)
+
+    assert await opening is None, "nothing was read, so nothing is on the record"
+    await plug.close()
+
+    unread = [
+        record.getMessage()
+        for record in caplog.records
+        if "unread-stream path" in record.getMessage()
+    ]
+    assert len(unread) == 1, caplog.text
+    told = unread[0]
+    assert stub.rooms[0].name in told, "the log has to name the room"
+    assert "turn 0" in told, "the log has to name the turn that lost the words"
+    assert "not known" in told, "this path cannot name a length and must not"
+    assert "stale-turn" not in told, "the two paths must not read alike"
+
+
+async def test_a_speaking_agent_is_still_caught_when_it_publishes_its_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Reading the agent's state may not soften the one refusal that matters.
+
+    An agent that never took the chat setup is caught at its first output,
+    and the state channel is beside the point: it is the transcribed-track
+    mark on the words that says the exchange is speech-paced. A turn-end
+    rule that consulted the state first would have to hear the whole turn
+    out before refusing it, and every further persona turn would spend
+    more of the customer's speech budget proving the same thing twice.
+    """
+    stub = ChatStub(
+        greeting="Lakeside Dental, good afternoon.",
+        replies=["Thursday at 2:15 is free."],
+        marks_speech=True,
+        agent_states=[["speaking", "listening"], ["listening"]],
+    )
+
+    with pytest.raises(PlugError) as refused:
+        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
+
+    assert "chat setup" in str(refused.value)
+    assert stub.typed == [], "no persona turn was delivered after the refusal"
 
 
 async def test_a_turn_the_agent_never_answers_stops_the_exchange(
@@ -747,7 +1489,7 @@ async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
 
 
 def test_the_waits_are_bounded_and_shorter_than_a_simulation():
-    """The three budgets, pinned where the tests above shorten them.
+    """The four budgets, pinned where the tests above shorten them.
 
     A wait that outran a simulation's duration limit would put
     ``limit_reached`` on a record whose real story is that the agent was
@@ -756,12 +1498,18 @@ def test_the_waits_are_bounded_and_shorter_than_a_simulation():
     assert 0 < chat_plug.AGENT_JOIN_SECONDS <= 60
     assert 0 < chat_plug.GREETING_SECONDS <= 30
     assert 0 < chat_plug.TURN_QUIET_SECONDS <= 15
-    # The quiet period is the only one of the three paid on every turn, so
-    # it is the one that has to stay smallest: a whole test suite of chat
-    # simulations finishing in seconds is what this number is spent
-    # against, and it buys a turn boundary the wire does not give.
+    assert 0 < chat_plug.TURN_DRAIN_SECONDS <= chat_plug.AGENT_JOIN_SECONDS
+    # The quiet period is the one paid on every turn an agent does not end
+    # itself, so it is the one that has to stay smallest: a whole test
+    # suite of chat simulations finishing in seconds is what this number
+    # is spent against.
     assert chat_plug.TURN_QUIET_SECONDS < chat_plug.GREETING_SECONDS
     assert chat_plug.GREETING_SECONDS < chat_plug.AGENT_JOIN_SECONDS
+    # And the drain has to be the larger of the pair, because it is paid
+    # after the quiet period has already expired with a stream still open.
+    # A drain shorter than the quiet period would mean a turn gave a
+    # stream it could see was open less time than it gave the silence.
+    assert chat_plug.TURN_QUIET_SECONDS < chat_plug.TURN_DRAIN_SECONDS
 
 
 # -- An agent that never took the chat setup ---------------------------------
@@ -1037,16 +1785,46 @@ async def test_egmas_own_words_are_never_read_back_as_the_agents(
 
 
 class _Echo:
-    """One transcription stream, read to its close without a LiveKit."""
+    """One transcription stream, read to its close without a LiveKit.
 
-    def __init__(self, said: str, *, spoken: bool = False) -> None:
+    ``closes_when`` holds the stream open until the test says otherwise,
+    which is the one thing a stream really does that a queued utterance
+    cannot show: the header is here and stamped, and the words are not.
+    """
+
+    def __init__(
+        self,
+        said: str,
+        *,
+        spoken: bool = False,
+        closes_when: asyncio.Event | None = None,
+    ) -> None:
         self.info = _StreamInfo(
             {SPOKEN_TRACK_ATTRIBUTE: "TR_0001"} if spoken else {}
         )
         self._said = said
+        self._closes_when = closes_when
 
     async def read_all(self) -> str:
+        if self._closes_when is not None:
+            await self._closes_when.wait()
         return self._said
+
+
+class _Unread:
+    """One transcription stream that never reaches its close.
+
+    The header arrived and was stamped, so the turn knows it is owed an
+    utterance; the words never come. What a reset connection or a worker
+    that died mid-sentence looks like from egma's seat.
+    """
+
+    def __init__(self, unread: Exception) -> None:
+        self.info = _StreamInfo({})
+        self._unread = unread
+
+    async def read_all(self) -> str:
+        raise self._unread
 
 
 class _StreamInfo:

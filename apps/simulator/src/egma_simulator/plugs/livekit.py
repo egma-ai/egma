@@ -80,8 +80,12 @@ into the room can ask.
 
 ## Where a turn begins and ends
 
-Nowhere in here. A live room carries no end-of-turn signal. The one
-running Pipecat pipeline reads those turns from the transport's frames.
+Nowhere in here. A live room does carry an end-of-turn signal — a LiveKit
+session publishes ``lk.agent.state`` and the chat driver next door reads
+it — but a spoken exchange does not need one: the running Pipecat
+pipeline reads turns from the transport's own frames, at the pace speech
+arrives, and a room attribute would be a second, slower answer to a
+question already settled.
 """
 
 from __future__ import annotations
