@@ -90,26 +90,13 @@ function reachOf(reach: MockedWorldReach) {
 }
 
 /**
- * Whether this run is one that builds a mocked world.
- *
- * The same two facts the queue's own gate reads, asked here in TypeScript so
- * the answer cannot differ: the agent's tick, and the run's recorded connection
- * type. A run started before the tick was turned on keeps the answer its own
- * snapshot gives, which is the point of a snapshot.
- */
-export async function runBuildsAMockedWorld(
-  auth: AuthContext,
-  run: Run,
-): Promise<boolean> {
-  if (!connectionTypeTakesMockedWorld(run.connectionSnapshot.connectionType)) {
-    return false;
-  }
-  const agent = await getAgent(auth, run.agentId);
-  return agent?.mockToolsDuringSimulations === true;
-}
-
-/**
  * Build the temporary world this run will be conducted in, or refuse.
+ *
+ * **Whether this run is one at all is decided from the same two facts the
+ * queue's own gate reads** — the agent's tick and the run's own recorded
+ * connection type — so the two can never disagree about which runs wait for a
+ * world. The connection type is checked first because it costs nothing: every
+ * run over a lane that is never mocked leaves here without a read.
  *
  * On a refusal the run is canceled here rather than left for somebody to
  * notice: its simulations are unclaimable, so a run left alone would sit
@@ -121,10 +108,13 @@ export async function buildRunMockedWorld(
   reach: MockedWorldReach,
   log: { error: (payload: unknown, message?: string) => void },
 ): Promise<MockedWorldOutcome> {
-  if (!(await runBuildsAMockedWorld(auth, run))) return { kind: "not-mocked" };
-
+  if (!connectionTypeTakesMockedWorld(run.connectionSnapshot.connectionType)) {
+    return { kind: "not-mocked" };
+  }
   const agent = await getAgent(auth, run.agentId);
-  const platformAgentId = agent?.platformAgentId ?? "";
+  if (agent?.mockToolsDuringSimulations !== true) return { kind: "not-mocked" };
+
+  const platformAgentId = agent.platformAgentId ?? "";
   if (platformAgentId === "") {
     return await refuseRun(
       auth,

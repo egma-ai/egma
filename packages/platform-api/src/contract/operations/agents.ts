@@ -712,8 +712,15 @@ export const agentOperations = {
           type: "object",
           properties: {
             /**
-             * Whether the tick can be turned on right now. False carries a
-             * `refusal` naming which of the four reasons it is.
+             * Whether anything about this agent stops mocking outright. False
+             * carries a `refusal` naming which reason it is.
+             *
+             * True is not by itself permission to turn the tick on: a number
+             * riding the platform's `latest` pointer still has to be consented
+             * to, and `numbers` below is where that question is read from. This
+             * read deliberately does not refuse for it — refusing here would
+             * hide the very numbers the question is about — and the tick itself
+             * refuses without an answer.
              */
             mockable: { type: "boolean" },
             refusal: nullable({
