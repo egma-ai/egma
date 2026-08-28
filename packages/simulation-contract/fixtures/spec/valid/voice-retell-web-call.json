@@ -1,0 +1,63 @@
+{
+  "contract_version": 5,
+  "simulation_id": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
+  "modality": "voice",
+  "connection": {
+    "agent_platform": "retell",
+    "connection_type": "retell_web_call",
+    "access_variant": "retell_web_call.api_key",
+    "config": {
+      "retellAgentId": "agent_b0e2e9cb267c47e7e7026cd8e8"
+    },
+    "credentials": {
+      "apiKey": "fixture-not-a-real-secret-0000000000000000"
+    }
+  },
+  "agent_version": 106,
+  "dynamic_variables": {
+    "egma_simulation": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
+    "is_existing": "false",
+    "lookup_status": "no_match"
+  },
+  "persona": {
+    "name": "Eleanor",
+    "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
+    "language": "en-US"
+  },
+  "scenario": {
+    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the call ends."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "adapter": "cartesia",
+      "voice_id": "measured-alto-3",
+      "speed": 0.95,
+      "key": "fixture-not-a-real-secret-tts"
+    }
+  },
+  "mock_tools": [
+    {
+      "tool_name": "get_availability",
+      "answer": { "answer": { "slots": [] } },
+      "delay_milliseconds": 250
+    }
+  ]
+}
