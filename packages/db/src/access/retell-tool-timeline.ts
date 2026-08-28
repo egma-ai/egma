@@ -42,8 +42,8 @@ type Correction = {
   readonly durationNanoseconds: bigint | undefined;
 };
 
-const NANOSECONDS_PER_SECOND = 1_000_000_000;
-const NANOSECONDS_PER_MILLISECOND = 1_000_000;
+const NANOSECONDS_PER_SECOND = 10 ** 9;
+const NANOSECONDS_PER_MILLISECOND = 10 ** 6;
 
 /** A tuple array from ClickHouse, or an empty one for an old or damaged row. */
 function tuples(value: string): readonly (readonly unknown[])[] {
