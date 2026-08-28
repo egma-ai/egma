@@ -119,8 +119,10 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
-    // The platform writes a mocked run builds its world with. Reached only for
-    // a run whose agent carries the tick.
+    // The one Retell seam the run start needs, for both lanes that reach the
+    // platform at creation: the draft lane's mocked-world build (the tick), and
+    // the playground lane's version-pinning run-start read. Same test seam the
+    // two provider groups above take.
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),

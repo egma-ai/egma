@@ -112,6 +112,12 @@ export {
   MOCKABLE_CONNECTION_TYPES,
   type MockableConnectionType,
 } from "./mock-tools/lanes.ts";
+export {
+  conductedWorldFrom,
+  conductedWorldRow,
+  type ConductedEngine,
+  type ConductedWorld,
+} from "./mock-tools/conducted.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,
@@ -154,6 +160,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
+  connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   credentialRuleOf,

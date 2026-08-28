@@ -198,6 +198,26 @@ export const run = pgTable(
      * told apart by the run's own status, not by a second empty shape here.
      */
     mockedWorld: jsonb("mocked_world"),
+    /**
+     * The world this run **read** at its start and conducts against: the
+     * serving agent version it resolved once, the engine that version runs on,
+     * and the three-class coverage stamp of that version's tools.
+     *
+     * **The opposite record to `mocked_world` beside it.** That one exists so a
+     * teardown can put back what egma changed on somebody's platform. This one
+     * exists because egma changed nothing: on a lane where the mocked answers
+     * ride each request, there is no draft to sweep and no binding to restore,
+     * and the only thing worth remembering is what was read.
+     *
+     * It is therefore inside the header's freeze rather than carved out of it.
+     * The version is settled before the first simulation is claimed, and every
+     * request from then on names it — because the platform's own default is
+     * "the newest version", and the newest version is exactly the one a
+     * concurrent edit has just made.
+     *
+     * Nullable, and null means one thing: this run pinned no platform version.
+     */
+    conductedWorld: jsonb("conducted_world"),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
@@ -406,6 +426,25 @@ export const simulation = pgTable(
      * came back.
      */
     mockToolCoverage: jsonb("mock_tool_coverage"),
+    /**
+     * Which version of the agent this one conversation was conducted against,
+     * as the platform numbers its versions.
+     *
+     * **Evidence pins at the evidence grain.** The run's header already holds
+     * the version it resolved, and that is not enough: a result is read at the
+     * simulation, a grader's reads start there, and a reader asking "what did
+     * this conversation actually test" must not have to fetch a second row to
+     * find out. Copied from the run's own resolved value in the same
+     * transaction that writes the row, so the two cannot disagree.
+     *
+     * Written at creation rather than at landing, unlike the terminal facts
+     * above it: the version is decided before anything is conducted, and a
+     * conversation that failed still says which version it failed against.
+     *
+     * Null means the lane pinned no version — every connection whose platform
+     * has no versions to name, and every row written before this column.
+     */
+    conductedAgentVersion: integer("conducted_agent_version"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -506,6 +545,14 @@ export const simulation = pgTable(
     check(
       "simulation_mock_tool_coverage_only_when_ended",
       sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
+    ),
+    // A version is a whole number of versions. No "only when ended" guard
+    // beside it, deliberately: unlike every terminal fact above, this one is
+    // known before the conversation starts and is written with the row.
+    check(
+      "simulation_conducted_agent_version_is_a_version",
+      sql`${table.conductedAgentVersion} is null
+        or ${table.conductedAgentVersion} >= 0`,
     ),
     // A chat has no audio, so its row refuses a recording.
     check(

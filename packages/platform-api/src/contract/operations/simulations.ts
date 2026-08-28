@@ -159,6 +159,7 @@ const simulationSchema = {
     startedAt: nullable(dateTimeSchema),
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
+    conductedAgentVersion: nullable(integerSchema),
     hasRecording: booleanSchema,
     measures: {
       type: "object",
@@ -290,6 +291,7 @@ const simulationSchema = {
     "startedAt",
     "endedAt",
     "providerReference",
+    "conductedAgentVersion",
     "hasRecording",
     "measures",
     "metrics",

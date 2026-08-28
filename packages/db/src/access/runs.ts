@@ -58,6 +58,7 @@ import {
   mockToolCoverageFrom,
   mockToolCoverageRow,
   type MockToolCoverage,
+  type ToolCoverageClasses,
 } from "../mock-tools/coverage.ts";
 import {
   mockedWorldFrom,
@@ -65,10 +66,16 @@ import {
   type MockedWorld,
 } from "../mock-tools/world.ts";
 import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
+import {
+  conductedWorldFrom,
+  conductedWorldRow,
+  type ConductedWorld,
+} from "../mock-tools/conducted.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
   connectionIsConductable,
+  connectionTypeReadsPlatformAtRunStart,
   noSimulatorAdapterMessage,
   platformOfConnectionType,
 } from "./connection-registry.ts";
@@ -104,6 +111,32 @@ export type NewRun = {
   readonly idempotencyKey: string;
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
+  /**
+   * The world this run will conduct against, already read from the agent's
+   * platform, for the lanes that pin a version.
+   *
+   * **Read outside this call and handed in, deliberately.** Resolving a version
+   * and reading its tools are two requests to somebody else's API, and this
+   * function's whole body is one database transaction holding a lock on a test
+   * suite. A provider that answers slowly would hold that lock for as long as
+   * it took. So the caller reads first and fails the run out loud when the read
+   * fails — never a silent conduct against an unread world — and what arrives
+   * here is a settled fact to write down.
+   *
+   * Absent on every other lane, where nothing pins a version.
+   */
+  readonly conductedWorld?: ConductedWorld | undefined;
+  /**
+   * A fingerprint of the connection the world above was read from.
+   *
+   * Travels with `conductedWorld` and only with it: the world was read from a
+   * target before this transaction opened, and this is how the transaction
+   * proves the target has not moved since. Under the lock `startRun` already
+   * holds on the connection, the fingerprint taken now must equal this one, or
+   * the connection was edited mid-creation and the run is refused rather than
+   * written against a target its record would misname.
+   */
+  readonly conductedConnectionIdentity?: string | undefined;
 };
 
 export type ConnectionSnapshot = {
@@ -131,6 +164,8 @@ export type Run = {
   readonly connectionSnapshot: ConnectionSnapshot;
   /** The temporary platform world this run built, or null when it built none. */
   readonly mockedWorld: MockedWorld | null;
+  /** The version and tools this run read at its start, or null for no pin. */
+  readonly conductedWorld: ConductedWorld | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -142,7 +177,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type { MockToolCoverage, MockedWorld };
+export type { MockToolCoverage, MockedWorld, ConductedWorld };
 
 export type Simulation = {
   readonly id: string;
@@ -168,6 +203,8 @@ export type Simulation = {
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly mockToolCoverage: MockToolCoverage | null;
+  /** The agent version this conversation was conducted against, or null. */
+  readonly conductedAgentVersion: number | null;
   readonly createdAt: Date;
 };
 
@@ -208,6 +245,7 @@ const RUN_COLUMNS = {
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
   mockedWorld: run.mockedWorld,
+  conductedWorld: run.conductedWorld,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -241,6 +279,7 @@ const SIMULATION_COLUMNS = {
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
+  conductedAgentVersion: simulation.conductedAgentVersion,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -256,6 +295,7 @@ type RunRow = {
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
   readonly mockedWorld: unknown;
+  readonly conductedWorld: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -383,7 +423,14 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const { status, triggeredVia, connectionSnapshot, mockedWorld, ...rest } = row;
+  const {
+    status,
+    triggeredVia,
+    connectionSnapshot,
+    mockedWorld,
+    conductedWorld,
+    ...rest
+  } = row;
   return {
     ...rest,
     suiteName,
@@ -394,6 +441,10 @@ function runFromRow(
     mockedWorld: mockedWorldFrom(
       mockedWorld,
       () => new Error(`run ${row.id} holds a malformed mocked world`),
+    ),
+    conductedWorld: conductedWorldFrom(
+      conductedWorld,
+      () => new Error(`run ${row.id} holds a malformed conducted world`),
     ),
   };
 }
@@ -621,6 +672,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
+          credentials: connection.credentials,
         })
         .from(connection)
         .innerJoin(agent, eq(connection.agentId, agent.id))
@@ -636,6 +688,59 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
       if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
+      }
+      // A kind whose run start reads the agent's platform carries two demands
+      // that a kind reading nothing does not, and both live here so they are
+      // properties of the write rather than habits of one caller.
+      if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
+        // **Never a silent conduct against an unread world.** The run cannot
+        // begin without what the read produced: the version every request
+        // will name, and the tool classes its coverage stamp is built from.
+        // The caller does the reading — it is somebody else's API and this is
+        // one transaction holding a lock — but arriving here without it is a
+        // bug in the caller, not a run to write, and a run written without it
+        // would conduct against a world nobody looked at and stamp a claim
+        // nobody checked.
+        if (input.conductedWorld === undefined) {
+          throw new Error(
+            `a run over a ${reached.connectionType} connection is conducted ` +
+              `against a named version, so it cannot be started without the ` +
+              `run-start read of the agent's platform`,
+          );
+        }
+        // **The world was read from this exact connection, and it still is.**
+        // The read happened before this transaction, so the connection could
+        // have been edited in between — its agent moved, its address changed,
+        // its key rotated — and the version and tools frozen from the old
+        // target would then be stamped onto a run whose snapshot names the new
+        // one. The `for("share")` above holds the row still for the rest of
+        // this transaction, so the fingerprint taken now is the connection as
+        // it will be written; if it does not match the fingerprint the world
+        // was read at, the connection moved during creation. The fingerprint
+        // is over the identity the world depends on — the config and the
+        // sealed key — never a clock, so an edit inside the same millisecond
+        // is caught like any other. Refuse loudly and write nothing; the
+        // caller reads the connection again and retries.
+        const identityNow = connectionIdentityToken(
+          stringRecordFromRow(
+            reached.config,
+            () =>
+              new Error(
+                `connection ${input.connectionId} holds config in a shape ` +
+                  `Egma never writes`,
+              ),
+          ),
+          reached.credentials,
+        );
+        if (input.conductedConnectionIdentity !== identityNow) {
+          refuseRun(
+            "not_admitted",
+            `connection ${input.connectionId} was edited while Egma was ` +
+              `reading the agent's platform for this run, so the version it ` +
+              `read may not be the one this connection now reaches. Nothing ` +
+              `was started; read the connection again and retry.`,
+          );
+        }
       }
 
       const graderCandidates = await applicableGraders(auth, tx, projectId);
@@ -690,6 +795,12 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           config: reached.config,
         },
         mockToolSnapshot,
+        // Read before this transaction opened; written down here so that every
+        // request this run makes names the same version, and a concurrent edit
+        // on the account cannot move what the suite is testing halfway through.
+        ...(input.conductedWorld === undefined
+          ? {}
+          : { conductedWorld: conductedWorldRow(input.conductedWorld) }),
         expectedSimulationCount,
         createdAt: at,
       }).returning(RUN_COLUMNS);
@@ -751,6 +862,10 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
               position: simulationCount + index + 1,
               modality: reached.modality,
               status: "queued" as const,
+              // The run's own resolved version, copied onto each conversation
+              // so a simulation read alone answers what it conducted.
+              conductedAgentVersion:
+                input.conductedWorld?.agentVersion ?? null,
               createdAt: at,
             })));
             simulationCount += pins.length;
@@ -794,6 +909,141 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
     return winner;
   }
   return created;
+}
+
+/**
+ * How a run-start read reaches the agent's platform: the connection's own
+ * config, and the key sealed on it.
+ *
+ * **The second door onto a connection's plaintext, and it is deliberately not
+ * the first one widened.** `resolveSimulationConnection` unseals for the
+ * simulator and for nothing else, because conducting is the only thing done
+ * there. This one exists because a run over some kinds cannot honestly begin
+ * until Egma has read the agent's own configuration — which version is serving,
+ * and what tools that version has — and reading it means reaching the platform
+ * with the key that will conduct over it.
+ *
+ * It is held narrow in four ways at once, and each one is load-bearing:
+ *
+ * - **Only for the kinds that declare a run-start read.** Every other kind
+ *   answers `undefined` however well-formed the request is, so this can never
+ *   become "unseal any connection".
+ * - **Gated on `start_and_cancel_runs`**, the permission for the act it serves,
+ *   rather than on read.
+ * - **Asked with an agent and a connection the caller already named**, in their
+ *   own tenancy, so there is no argument by which it could be pointed at
+ *   somebody else's row.
+ * - **The key goes to the provider client and nowhere else.** It is never part
+ *   of a run header, never in a refusal, and never logged — the run route hands
+ *   it straight to the read and lets it go.
+ */
+/**
+ * A deterministic fingerprint of the target a run-start read reached: the
+ * connection's non-secret config and the sealed shape of its credential.
+ *
+ * **Every field the world depends on, and nothing a timestamp does.** Which
+ * version a run reads and which tools it stamps are decided by the agent the
+ * config names, the address it names, and the key sealed beside it. A clock
+ * says only *when* the row was last written and lands on the millisecond, so
+ * two edits inside one millisecond share a stamp and one slips through. This
+ * hashes the identity itself, so a change to any of it changes the token and no
+ * granularity can hide it.
+ *
+ * **The sealed envelope, never the key inside it.** The credential is folded in
+ * as the ciphertext exactly as the row stores it — a re-seal with the very same
+ * key mints a fresh envelope and so reads as a change, which is the safe way to
+ * be wrong: a needless refusal a retry clears, never a key swap slipping past.
+ * The plaintext never enters the token and the token is a one-way hash, so it
+ * carries nothing a log or a run header must not hold.
+ */
+function connectionIdentityToken(
+  config: Readonly<Record<string, string>>,
+  credentialsEnvelope: string | null,
+): string {
+  const canonicalConfig = Object.keys(config)
+    .sort()
+    .map((key) => `${key}=${config[key]}`)
+    .join(" ");
+  return createHash("sha256")
+    .update(canonicalConfig)
+    .update("  ")
+    .update(credentialsEnvelope ?? " none")
+    .digest("hex");
+}
+
+export type RunStartReach = {
+  /** Which reader the run route hands this to. */
+  readonly connectionType: ConnectionType;
+  readonly config: Readonly<Record<string, string>>;
+  readonly apiKey: string;
+  /**
+   * A fingerprint of the exact target this reach read, carried into the write.
+   *
+   * The world is read from this target *before* the run's transaction opens,
+   * because reading it is a network call and the transaction holds a lock. So
+   * the connection could be edited — its agent, its address, its key — between
+   * this read and the write that snapshots it, and the run would then store a
+   * world read from one target while its record named another. `startRun` reads
+   * the connection again under its lock, fingerprints it the same way, and
+   * refuses if the two differ — so the world it froze and the target it names
+   * are always the same one.
+   */
+  readonly connectionIdentity: string;
+};
+
+export async function resolveRunStartReach(
+  auth: AuthContext,
+  agentId: string,
+  connectionId: string,
+): Promise<RunStartReach | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.projectId === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      connectionType: connection.connectionType,
+      config: connection.config,
+      credentials: connection.credentials,
+    })
+    .from(connection)
+    .where(
+      within(
+        auth,
+        connection,
+        and(
+          eq(connection.id, connectionId),
+          eq(connection.agentId, agentId),
+          eq(connection.projectId, auth.projectId),
+          isNull(connection.archivedAt),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+  if (!connectionTypeReadsPlatformAtRunStart(row.connectionType)) {
+    return undefined;
+  }
+  if (row.credentials === null) return undefined;
+
+  const apiKey = openedApiKey(row.credentials);
+  if (apiKey === null) return undefined;
+
+  const config = stringRecordFromRow(
+    row.config,
+    () =>
+      new Error(
+        `connection ${connectionId} holds config in a shape Egma never ` +
+          `writes; the row needs repairing before anybody can run over it`,
+      ),
+  );
+
+  return {
+    connectionType: row.connectionType as ConnectionType,
+    config,
+    apiKey,
+    connectionIdentity: connectionIdentityToken(config, row.credentials),
+  };
 }
 
 export async function runAlreadyStartedFor(
@@ -1825,6 +2075,17 @@ function openedApiKey(envelope: string): string | null {
  */
 export type SimulationMockedWorld = {
   readonly world: MockedWorld | null;
+  /**
+   * The three classes this run knows about its agent's tools, from whichever
+   * world it has — or null when it has neither and nobody ever asked.
+   *
+   * **Decided here rather than at the reader, because the two lanes must not be
+   * able to disagree.** A run that built a temporary world read its tools from
+   * the configuration it branched; a run that pins a version read them from
+   * that version. Both reads happen before any conversation, both produce the
+   * same three lists, and a stamp is a stamp whichever of them filled it.
+   */
+  readonly classes: ToolCoverageClasses | null;
   readonly answeredFor: readonly string[];
 };
 
@@ -1836,6 +2097,7 @@ export async function simulationMockedWorld(
   const [row] = await db()
     .select({
       mockedWorld: run.mockedWorld,
+      conductedWorld: run.conductedWorld,
       mockToolSnapshot: run.mockToolSnapshot,
       runId: run.id,
       testVersionId: simulation.testVersionId,
@@ -1851,6 +2113,10 @@ export async function simulationMockedWorld(
     row.mockedWorld,
     () => new Error(`run ${row.runId} holds a malformed mocked world`),
   );
+  const conducted = conductedWorldFrom(
+    row.conductedWorld,
+    () => new Error(`run ${row.runId} holds a malformed conducted world`),
+  );
   const frozen = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
   // The same merge the endpoint serves from, so the stamp's `covered` list and
   // the answers actually served can never disagree — including for a tool only
@@ -1863,6 +2129,9 @@ export async function simulationMockedWorld(
   );
   return {
     world,
+    // A run never has both: one built a temporary world on the platform, the
+    // other wrote nothing and carries its answers on each request.
+    classes: world?.coverage ?? conducted?.coverage ?? null,
     answeredFor: answers.map((resolved) => resolved.toolName),
   };
 }

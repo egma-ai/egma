@@ -799,6 +799,16 @@ async function confirmRetellAgent(
 
   const candidate = (() => {
     if (
+      wanted.connectionType === "retell_playground" &&
+      wanted.accessVariant === "retell_playground.api_key" &&
+      wanted.modality === "chat"
+    ) {
+      return {
+        connectionType: "retell_playground" as const,
+        config: { retellAgentId: choice.platformAgentId },
+      };
+    }
+    if (
       wanted.connectionType === "retell_chat_api" &&
       wanted.accessVariant === "retell_chat_api.api_key" &&
       wanted.modality === "chat"
@@ -837,8 +847,8 @@ async function confirmRetellAgent(
   })();
   if (candidate === undefined) {
     return invalid(
-      "a Retell connection is the chat API, a web call, or a phone number, " +
-        "and a phone connection carries the number Egma dials in " +
+      "a Retell connection is the chat API, the playground, a web call, or a " +
+        "phone number, and a phone connection carries the number Egma dials in " +
         "config.phoneNumber",
     );
   }
@@ -848,6 +858,11 @@ async function confirmRetellAgent(
     choice.platformAgentId,
     candidate,
     fetchImpl,
+    // Gated by the registry before it reaches here, and the same value the
+    // run-start read will use.
+    typeof wanted.config["baseUrl"] === "string"
+      ? wanted.config["baseUrl"]
+      : undefined,
   );
   if (checked.kind === "invalid_key") {
     return {
@@ -873,9 +888,12 @@ async function confirmRetellAgent(
       accessVariant: checked.candidate.accessVariant,
       modality: checked.candidate.modality,
       config: checked.candidate.config,
-      // Both lanes Egma opens itself carry the key that opens them. The phone
-      // lane carries none: Egma dials it over its own carrier.
+      // The kinds that conduct with a key of their own keep a copy on the
+      // connection: every exchange they conduct needs it — the chat API, the
+      // playground, and the web call Egma opens itself. A phone connection
+      // dials with the deployment's carrier and holds none.
       ...(checked.candidate.connectionType === "retell_chat_api" ||
+      checked.candidate.connectionType === "retell_playground" ||
       checked.candidate.connectionType === "retell_web_call"
         ? { credentials: { apiKey } }
         : {}),

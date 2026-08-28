@@ -565,8 +565,9 @@ describe("what the shipped simulator can conduct", () => {
     );
     expect(conductableConnectionTypes()).toEqual([
       "retell_chat_api",
-      // The web call joined the list with the plug that places it and the
-      // control plane that hands it the version to place it against.
+      // The playground and the web call both joined the conductable list with
+      // the plugs that place them, in the registry's own order.
+      "retell_playground",
       "retell_web_call",
       "phone_number",
       "livekit_room",

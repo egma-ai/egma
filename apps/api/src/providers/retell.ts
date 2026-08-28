@@ -8,6 +8,8 @@ import {
   type RetellCredential,
 } from "@egma/retell";
 
+import { readPlaygroundWorld } from "./retell-playground.ts";
+
 /**
  * The small, read-only Retell account seam used by provider setup.
  *
@@ -17,6 +19,14 @@ import {
  */
 
 export type RetellConnectionCandidate =
+  | {
+      readonly agentPlatform: "retell";
+      readonly connectionType: "retell_playground";
+      readonly accessVariant: "retell_playground.api_key";
+      readonly modality: "chat";
+      readonly productLabel: string;
+      readonly config: { readonly retellAgentId: string };
+    }
   | {
       readonly agentPlatform: "retell";
       readonly connectionType: "retell_chat_api";
@@ -65,6 +75,10 @@ export type RetellCandidateConfirmation =
   | { readonly kind: "unavailable"; readonly message: string };
 
 type RetellCandidateToConfirm =
+  | {
+      readonly connectionType: "retell_playground";
+      readonly config: { readonly retellAgentId: string };
+    }
   | {
       readonly connectionType: "retell_chat_api";
       readonly config: { readonly retellAgentId: string };
@@ -145,6 +159,24 @@ function webCallCandidate(platformAgentId: string): RetellConnectionCandidate {
   };
 }
 
+function playgroundCandidate(
+  platformAgentId: string,
+): RetellConnectionCandidate {
+  return {
+    agentPlatform: "retell",
+    connectionType: "retell_playground",
+    accessVariant: "retell_playground.api_key",
+    modality: "chat",
+    productLabel: productLabelOf(
+      "retell",
+      "retell_playground",
+      "retell_playground.api_key",
+      "chat",
+    ),
+    config: { retellAgentId: platformAgentId },
+  };
+}
+
 function phoneCandidate(phoneNumber: string): RetellConnectionCandidate {
   return {
     agentPlatform: "retell",
@@ -217,9 +249,24 @@ export async function confirmRetellCandidate(
   platformAgentId: string,
   candidate: RetellCandidateToConfirm,
   fetchImpl: ProviderFetch = fetch,
+  /**
+   * Where Retell answers for this connection, when its config names somewhere
+   * other than Retell's own address.
+   *
+   * **The same address the run start will use.** The door and the run ask one
+   * question — is this agent's engine one this lane can reach — and two
+   * different servers could answer it two different ways: a connection
+   * confirmed against Retell and then conducted against a proxy would have
+   * been checked somewhere it never runs.
+   */
+  baseUrl?: string | undefined,
 ): Promise<RetellCandidateConfirmation> {
   const key = credential(apiKey);
-  const reach = { fetchImpl, signal: AbortSignal.timeout(15_000) };
+  const reach = {
+    ...(baseUrl === undefined ? {} : { url: baseUrl }),
+    fetchImpl,
+    signal: AbortSignal.timeout(15_000),
+  };
   const agents = await listAgents(key, reach);
   if (agents.kind === "invalid-key") return { kind: "invalid_key" };
   if (agents.kind !== "agents") {
@@ -236,6 +283,44 @@ export async function confirmRetellCandidate(
       message:
         "Retell no longer lists that agent. Load the account again and choose another agent.",
     };
+  }
+
+  if (candidate.connectionType === "retell_playground") {
+    if (
+      candidate.config.retellAgentId !== platformAgentId ||
+      agent.modality !== "voice"
+    ) {
+      return {
+        kind: "rejected",
+        message:
+          "The Retell playground tests a Retell **voice** agent in text. That " +
+          "agent is not one; a Retell chat agent is reached through the Chat " +
+          "API instead.",
+      };
+    }
+
+    // **The engine is read here, beside the listing, because the engine is a
+    // platform fact.** A custom LLM's brain and tools live on the customer's
+    // own socket server, so this lane cannot reach it — and being told that
+    // when the connection is registered is a sentence to act on, where being
+    // told it at the first run is a suite that will not start for a reason
+    // nobody expected. The run start asks the same question again through the
+    // same read, so the two refusals are one sentence in one place.
+    const world = await readPlaygroundWorld(
+      {
+        apiKey,
+        agentId: platformAgentId,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      },
+      fetchImpl,
+    );
+    if (world.kind === "refused") {
+      return { kind: "rejected", message: world.message };
+    }
+    if (world.kind !== "world") {
+      return { kind: "unavailable", message: world.message };
+    }
+    return { kind: "ready", candidate: playgroundCandidate(platformAgentId) };
   }
 
   if (candidate.connectionType === "retell_chat_api") {

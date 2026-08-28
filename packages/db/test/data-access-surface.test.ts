@@ -313,6 +313,12 @@ const CONTEXT_REQUIRING = [
   "testsUsingPersona",
   "traceEvidenceStartedAt",
   "resolveProductionGraders",
+  // The second door to a connection's plaintext, for the run start of a kind
+  // that reads its agent's platform. Narrower than a role: only for a kind
+  // that declares the read, gated on starting a run, and asked with an agent
+  // and connection the caller already named. The key it unseals goes to the
+  // provider read and nowhere the run header can keep it.
+  "resolveRunStartReach",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
   // simulation claim, because conducting is the only thing egma does with a
@@ -517,6 +523,11 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
+  // Whether a run over this kind reads the agent's own platform before it
+  // starts. A word from a closed set, exported so the run route and the one
+  // door that unseals a connection for that read agree on which kinds it is
+  // for — never a config or a credential.
+  "connectionTypeReadsPlatformAtRunStart",
   "connectionTypeUsesPlatformCarrier",
   // Which connection lanes a run over them builds a mocked world for. Two
   // names and no gate: the gate itself is a condition inside the claim, where
@@ -582,6 +593,11 @@ const THE_MOCKED_WORLD = [
   "NO_TOOL_COVERAGE_CLASSES",
   "TOOL_COVERAGE_CLASSES",
   "coverageFromClasses",
+  // The world a version-pinned run reads rather than builds: the same two
+  // folds as the mocked world beside them, over the record that says which
+  // version a run conducts against and what that version's tools are.
+  "conductedWorldFrom",
+  "conductedWorldRow",
   "mockToolCoverageFrom",
   "mockToolCoverageRow",
   "mockedWorldFrom",

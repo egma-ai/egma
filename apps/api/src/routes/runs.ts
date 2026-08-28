@@ -1,6 +1,8 @@
 import {
   cancelRun,
+  conductedWorldRow,
   connectionTypeOf,
+  connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
   getAgent,
   getConnection,
@@ -16,6 +18,7 @@ import {
   ProjectOutsideOrganizationError,
   readRunGradingProgress,
   readSimulationGradingStates,
+  resolveRunStartReach,
   runAlreadyStartedFor,
   RUN_STATUSES,
   RunWriteRefusedError,
@@ -23,6 +26,8 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type ConductedWorld,
+  type RunStartReach,
   type ExpectedTestVersion,
   type NewRun,
   type Run,
@@ -56,6 +61,38 @@ import {
 } from "../http/refusals.ts";
 import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
+import {
+  readPlaygroundWorld,
+  type PlatformWorldRead,
+} from "../providers/retell-playground.ts";
+
+/**
+ * How one connection type reads the agent's platform before its run starts.
+ *
+ * The registry says *which* kinds read; this says *how* each of them does it,
+ * and the two are held level by the check below rather than by anybody
+ * remembering. A kind added to the registry's list with no reader here fails
+ * the run out loud naming itself, which is the same discipline the connection
+ * registry keeps about adapters: nothing may claim what no code can do.
+ */
+type RunStartReader = (
+  reach: RunStartReach,
+  fetchImpl: typeof fetch | undefined,
+) => Promise<PlatformWorldRead>;
+
+const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
+  retell_playground: (reach, fetchImpl) =>
+    readPlaygroundWorld(
+      {
+        apiKey: reach.apiKey,
+        agentId: reach.config["retellAgentId"] ?? "",
+        ...(reach.config["baseUrl"] === undefined
+          ? {}
+          : { baseUrl: reach.config["baseUrl"] }),
+      },
+      fetchImpl,
+    ),
+};
 
 export type RunRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -63,9 +100,10 @@ export type RunRoutesOptions = {
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
   /**
-   * Test seam for the platform writes a mocked run's world is built with. The
-   * real one is `fetch`, and nothing in this route reaches a platform for a run
-   * that mocks nothing.
+   * Test seam for the Retell reads and writes a run start makes, on the two
+   * lanes that reach the platform: the draft lane's mocked-world build, and the
+   * playground lane's version-pinning run-start read. The real one is `fetch`,
+   * and a run that neither mocks nor pins a version reaches no platform here.
    */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -195,6 +233,10 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
+    // The one number off the conducted world, which is cheap enough for a
+    // list: a reader scanning a page of runs can see which version each of
+    // them tested. The lists beside it are not, and are answered below.
+    conductedAgentVersion: run.conductedWorld?.agentVersion ?? null,
     // The temporary world, whole: the version branched from, the version
     // minted, the engine it runs on, and each touched number's routing exactly
     // as it was read. A reader sees what Egma promised to put back. Absent from
@@ -203,6 +245,15 @@ function describedHeader(
       ? {
           mockedWorld:
             run.mockedWorld === null ? null : mockedWorldRow(run.mockedWorld),
+          // The world this run read rather than built: the version, the engine
+          // it runs on, and the three classes of that version's tools. On the
+          // detail read for the same reason the mocked world is — the coverage
+          // lists are per-run detail, not something to repeat two hundred times
+          // down a page.
+          conductedWorld:
+            run.conductedWorld === null
+              ? null
+              : conductedWorldRow(run.conductedWorld),
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,
@@ -288,6 +339,9 @@ function describedSimulation(
       simulation.mockToolCoverage === null
         ? null
         : mockToolCoverageRow(simulation.mockToolCoverage),
+    // Evidence pins at the evidence grain: this row says what it conducted,
+    // without a reader having to fetch the run to find out.
+    conductedAgentVersion: simulation.conductedAgentVersion,
   };
 }
 
@@ -452,15 +506,74 @@ export async function runRoutes(
         }
       }
 
-      const started = await startRun(acting.auth, input);
-
-      // The mocked world, built before the run can conduct anything.
+      // Two lanes reach the platform when a run starts, and a run is over at
+      // most one of them. They are dispatched by connection type and never both
+      // run for one run.
       //
-      // It happens after the run exists because the temporary version's tool
-      // URLs carry this run's identifier, and nothing races it: a mocked run's
-      // simulations are unclaimable until the record names a temporary version,
-      // from the instant they are written. A world that cannot be built cancels
-      // the run and is answered as itself — never as a run that started.
+      // **The playground lane reads its world before the run row exists.** A
+      // resolve or a tool read that failed after the row was written would leave
+      // a queued run nobody can conduct honestly; refused here, nothing was
+      // started and the sentence says so. A run admitted without this read would
+      // conduct against a world Egma never looked at, whose coverage stamp would
+      // be a claim about tools nobody saw.
+      const kind = await connectionTypeOf(acting.auth, connectionId);
+      let conducted: ConductedWorld | undefined;
+      let conductedIdentity: string | undefined;
+      if (kind !== undefined && connectionTypeReadsPlatformAtRunStart(kind)) {
+        const reach = await resolveRunStartReach(
+          acting.auth,
+          agentId,
+          connectionId,
+        );
+        if (reach === undefined) {
+          return unprocessable(
+            reply,
+            `there is no active connection ${connectionId} on agent ` +
+              `${agentId} that Egma can read the agent's platform with`,
+          );
+        }
+        // Dispatched on the kind the row actually holds, so the registry's
+        // list and the readers above cannot drift apart in silence.
+        const reader = RUN_START_READERS[reach.connectionType];
+        if (reader === undefined) {
+          throw new Error(
+            `a run over a ${reach.connectionType} connection is declared to ` +
+              `read its agent's platform at run start, and nothing here knows ` +
+              `how to read it`,
+          );
+        }
+        const read = await reader(reach, options.retellFetch);
+        if (read.kind === "refused") {
+          return unprocessable(reply, read.message);
+        }
+        if (read.kind !== "world") {
+          return sendRefusal(reply, "provider_unavailable", read.message);
+        }
+        conducted = read.world;
+        // The fingerprint of the connection the world was read from, carried
+        // into the write so it can refuse if the connection moved in between.
+        conductedIdentity = reach.connectionIdentity;
+      }
+
+      const started = await startRun(acting.auth, {
+        ...input,
+        ...(conducted === undefined
+          ? {}
+          : {
+              conductedWorld: conducted,
+              conductedConnectionIdentity: conductedIdentity,
+            }),
+      });
+
+      // **The draft lane builds its mocked world after the run row exists**, on
+      // no other lane. It happens after `startRun` because the temporary
+      // version's tool URLs carry this run's identifier, and nothing races it: a
+      // mocked run's simulations are unclaimable until the record names a
+      // temporary version, from the instant they are written. This is a no-op
+      // for a playground run — not a mockable draft lane — and for an unticked
+      // agent; only a run over a mockable draft lane whose agent carries the
+      // tick reaches Retell here. A world that cannot be built cancels the run
+      // and is answered as itself, never as a run that started.
       const world = await buildRunMockedWorld(
         acting.auth,
         started,

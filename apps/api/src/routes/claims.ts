@@ -223,17 +223,28 @@ async function modelsBlock(
 }
 
 /**
- * The two fields a simulation of a mocked run carries, or nothing at all.
+ * The version this simulation is placed against and the variables it carries —
+ * one code path for both lanes that name a version, or nothing at all.
  *
- * **The version** is the temporary one the run branched, named explicitly. The
- * platform's own default is "the newest version", which after a branch is
- * whatever was minted most recently anywhere on the account — so a spec that
- * left this out would be a conversation placed against a version nobody chose.
+ * **The version** is named explicitly, because the platform's own default is
+ * "the newest version" — which a concurrent edit or a branch can move between
+ * one simulation and the next. Where it comes from is the only thing the two
+ * lanes differ on:
  *
- * **The variables** are what the platform renders per call, and Egma passes
- * only its own: the attribution variable that carries this simulation's
- * identifier into the tool URL. Everything else falls back to the flow's own
- * declared defaults, which is the documented scope of this version.
+ * - **the draft lane** hands the DRAFT version Egma branched, so the
+ *   conversation reaches the mocked tools on the temporary version;
+ * - **the playground lane** hands the RESOLVED serving version the run read
+ *   once at start, so every simulation of the run tests the one version a real
+ *   caller reaches.
+ *
+ * The draft version wins when both are somehow present, because a draft-lane run
+ * is being conducted against the mocked tools and nothing else would be honest;
+ * in practice a run is over one lane, so at most one is set.
+ *
+ * **The variables** are what the platform renders per call, and Egma passes only
+ * its own: the attribution variable that carries this simulation's identifier
+ * into the tool URL. Everything else falls back to the version's declared
+ * defaults. Both lanes hand it, because both render variables.
  *
  * The attribution variable is **asserted rather than assumed**. The whole tool
  * record of a mocked simulation rides on it: the swapped URL carries
@@ -242,24 +253,30 @@ async function modelsBlock(
  * silently losing every tool fact the run exists to collect. Nothing else
  * catches that, so it is caught here, where the value is put in.
  */
-function mockedWorldSpecOf(
+function runVersionSpecOf(
   run: Run,
   simulationId: string,
 ): Record<string, unknown> {
-  const world = run.mockedWorld;
-  if (world === null || world.draftVersion === null) return {};
+  const draftVersion = run.mockedWorld?.draftVersion ?? null;
+  const version =
+    draftVersion !== null
+      ? draftVersion
+      : run.conductedWorld !== null
+        ? run.conductedWorld.agentVersion
+        : undefined;
+  if (version === undefined) return {};
 
   const variables = dynamicVariablesFor(simulationId);
   if (variables[SIMULATION_VARIABLE] !== simulationId) {
     throw new Error(
-      `simulation ${simulationId} would be conducted in a mocked world whose ` +
-        `variables do not carry ${SIMULATION_VARIABLE}, so no tool call it ` +
-        "made could be traced back to it",
+      `simulation ${simulationId} would be conducted against a named version ` +
+        `whose variables do not carry ${SIMULATION_VARIABLE}, so no tool call ` +
+        "it made could be traced back to it",
     );
   }
 
   return {
-    agent_version: world.draftVersion,
+    agent_version: version,
     dynamic_variables: variables,
   };
 }
@@ -468,12 +485,38 @@ async function assembledSpec(
   // mid-run tears nothing. The simulator receives the answers already
   // decided, exactly as it receives everything else: flattened, with
   // nothing left to look up and nothing left to choose between.
-  const mockTools = resolveMockTools(
+  const resolved = resolveMockTools(
     evidence.mockToolSnapshot,
     claim.testVersionId,
-  ).map((mock) => ({
+  );
+
+  // **Which of the run's answers this lane may actually serve.**
+  //
+  // A run that read the agent's configuration knows which tools Egma can stand
+  // in front of. On such a lane the answers travel to the platform as its own
+  // native mocks, and the platform answers for a name or runs the customer's
+  // real implementation — there is no third thing it can do. So a name Egma
+  // classed *not interceptable by construction* or *not in this version* is
+  // deliberately left off: sending it would be Egma claiming to have stood in
+  // front of a tool that in fact reached the real world, which is the one thing
+  // a coverage stamp exists to prevent.
+  //
+  // Every other lane serves what the run resolved, unfiltered, because Egma
+  // itself is in the tool path there and answers for whatever it is asked.
+  const conductedCoverage = run.conductedWorld?.coverage;
+  const servable =
+    conductedCoverage === undefined
+      ? resolved
+      : resolved.filter((mock) =>
+          conductedCoverage.mocked.includes(mock.toolName),
+        );
+
+  const mockTools = servable.map((mock) => ({
     tool_name: mock.toolName,
     answer: mock.answer,
+    // Carried on every lane, and deliberately never spent on a chat one: a
+    // declared delay is speech-world fidelity, which is the layer chat leaves
+    // out. It rides along so one authored answer serves every modality.
     delay_milliseconds: mock.delayMilliseconds,
   }));
 
@@ -498,10 +541,10 @@ async function assembledSpec(
     throw fault;
   }
 
-  // The mocked world this simulation is conducted in, where the run built one.
-  // Two fields, and both are the platform's own vocabulary: which version to
-  // place the conversation against, and the variables it renders per call.
-  const mockedWorld = mockedWorldSpecOf(run, claim.id);
+  // The version this simulation is placed against and the variables it carries,
+  // for whichever lane named a version — the draft lane's temporary version or
+  // the playground lane's resolved serving version, in one code path.
+  const versionSpec = runVersionSpecOf(run, claim.id);
 
   const spec = {
     contract_version: CONTRACT_VERSION,
@@ -514,7 +557,7 @@ async function assembledSpec(
       config: connection.config,
       credentials: connection.credentials,
     },
-    ...mockedWorld,
+    ...versionSpec,
     // Flat and whole, straight off the pinned version: the name this person
     // gives the agent, who they are, and the language the roleplay runs in.
     // The identity name is the authored one — never the team's label for the
@@ -527,7 +570,14 @@ async function assembledSpec(
     },
     models,
     scenario: { instructions: testVersion.scenario },
+    // The same walls the chat lane has always had, by modality and by nothing
+    // else. A playground exchange is a chat, so it gets the chat numbers.
     limits: SIMULATION_LIMITS[claim.modality],
+    // `agent_version` and `dynamic_variables` are handed by `versionSpec` above,
+    // one path for both lanes — the draft lane's temporary version and the
+    // playground lane's resolved serving version alike. They are not written a
+    // second time here.
+    //
     // Left out entirely where the run mocks nothing, which is what most
     // runs do: a simulation egma answers no tool for is byte for byte the
     // work order it was before mock tools existed, and an empty list

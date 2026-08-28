@@ -64,11 +64,16 @@ nine keyword arguments:
 - ``mock_tools`` — egma's side of the mock-tool exchange for this
   simulation (:class:`egma_simulator.mock_tools.MockToolSeam`), already
   holding the answers the run resolved. Only a plug that can **put egma in
-  the agent's tool path** has any use for it, which today is the room: it
-  offers the exchange to whoever is in the room with it and says so, and
-  that saying-so is what puts a coverage stamp on the record. Every other
-  plug takes it and drops it, and its record honestly claims nothing about
-  tools, because egma was never in the path to learn anything.
+  the agent's tool path** has any use for it, and there are two ways to be
+  in it. A plug can *stand* in the path — the room does: it offers the
+  exchange to whoever is in the room with it and says so. Or it can *hand
+  the answers over* to a platform that serves them itself — the playground
+  does: they ride every request, and the platform matches them by name. In
+  both cases the saying-so is what puts a coverage stamp on the record, and
+  every tool call the plug learns of goes to the seam, which is the only
+  writer that can stamp one ``mocked``. Every other plug takes the seam and
+  drops it, and its record honestly claims nothing about tools, because
+  egma was never in the path to learn anything.
 - ``media`` — how a call reaches the telephone network for this
   simulation (:class:`egma_simulator.config.MediaSettings`), or ``None``
   on a deployment that places no calls. Already resolved: this
@@ -79,7 +84,7 @@ nine keyword arguments:
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
-connection is ever opened. Two of the eight are read for you where a plug
+connection is ever opened. Two of the nine are read for you where a plug
 uses them — :func:`named_version` and :func:`rendered_variables` below —
 so that two plugs reaching one platform cannot disagree about what a
 version reference is or what a variable may hold.
@@ -101,7 +106,12 @@ A chat plug's is three steps, for one simulation, in order, always:
 
 1. ``await open()`` — reach the platform and start the exchange. Returns
    the agent's greeting when the platform opens with one, else ``None``
-   (the persona will then speak first).
+   (the persona will then speak first). A plug whose platform says more
+   about the opening than words may return a whole ``AgentReply`` instead,
+   and the walk reads all three of its facts — ``text``,
+   ``platform_notes``, and ``ended``. An agent that ends the exchange with
+   its own greeting ends the walk there, reported as the agent's doing;
+   ``deliver`` is then never called at all.
 2. ``await deliver(text)`` — hand the persona's turn to the platform and
    return the agent's answer as an ``AgentReply``:
    - ``text`` — what the agent said, or ``None`` for an answer that
@@ -110,6 +120,9 @@ A chat plug's is three steps, for one simulation, in order, always:
      this answer. The walk records any final words and reports the ending
      as the agent's doing. Once returned, ``deliver`` is never called
      again.
+   - ``platform_notes`` — what the platform said about the answer that the
+     agent did not say. Kept on the record beside the turn and never in
+     it, and never shown to the persona.
    ``deliver`` is called once per persona turn, sequentially — a plug
    never sees two deliveries in flight.
 3. ``await close()`` — tear the exchange down. Called exactly once,
@@ -215,6 +228,22 @@ class AgentReply:
     Empty is the ordinary case and never a claim that none happened: most
     ways of reaching an agent say nothing about its tools, and a plug that
     cannot see them reports none rather than guessing."""
+
+    platform_notes: tuple[str, ...] = ()
+    """What the platform said about this answer that the agent did not say.
+
+    A node transition it announced, a message in a role egma has never
+    seen — content that is real, that came from the agent's side, and that
+    **is not speech**. It goes on the record beside the turn and is never
+    part of the turn's own words, for two reasons that are the same
+    reason: the persona is handed the transcript and would read a
+    transition as something said to it, and the whole point of this
+    modality is that one scenario's chat transcript and voice transcript
+    are comparable — which they stop being the moment one of them carries
+    words nobody spoke.
+
+    Empty for every plug that has nothing of the kind, which is most of
+    them."""
 
 
 class PlugError(Exception):
@@ -334,7 +363,7 @@ class ConnectionPlug(Protocol):
     @property
     def provider_reference(self) -> str | None: ...
 
-    async def open(self) -> str | None: ...
+    async def open(self) -> str | AgentReply | None: ...
 
     async def deliver(self, text: str) -> AgentReply: ...
 
@@ -382,6 +411,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
+    from .retell_playground import RetellPlayground
     from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
 
@@ -390,6 +420,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,
+        "retell_playground": RetellPlayground,
         "retell_web_call": RetellWebCall,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

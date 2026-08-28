@@ -86,6 +86,7 @@ const connection = {
       type: "string",
       enum: [
         "retell_chat_api",
+        "retell_playground",
         "retell_web_call",
         "phone_number",
         "livekit_room",
@@ -95,6 +96,7 @@ const connection = {
       type: "string",
       enum: [
         "retell_chat_api.api_key",
+        "retell_playground.api_key",
         "retell_web_call.api_key",
         "phone_number.public_e164",
         "livekit_room.project_credentials",
@@ -187,6 +189,7 @@ const connectionInput = {
       type: "string",
       enum: [
         "retell_chat_api",
+        "retell_playground",
         "retell_web_call",
         "phone_number",
         "livekit_room",
@@ -196,6 +199,7 @@ const connectionInput = {
       type: "string",
       enum: [
         "retell_chat_api.api_key",
+        "retell_playground.api_key",
         "retell_web_call.api_key",
         "phone_number.public_e164",
         "livekit_room.project_credentials",
@@ -407,6 +411,7 @@ export const agentOperations = {
                   type: "string",
                   enum: [
                     "retell_chat_api",
+                    "retell_playground",
                     "retell_web_call",
                     "phone_number",
                     "livekit_room",
@@ -416,6 +421,7 @@ export const agentOperations = {
                   type: "string",
                   enum: [
                     "retell_chat_api.api_key",
+                    "retell_playground.api_key",
                     "retell_web_call.api_key",
                     "phone_number.public_e164",
                     "livekit_room.project_credentials",

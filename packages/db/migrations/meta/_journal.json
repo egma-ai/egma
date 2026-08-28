@@ -15,6 +15,20 @@
       "when": 1787726983377,
       "tag": "0001_persona_rework",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787919810805,
+      "tag": "0002_retell_mocked_world",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787919838694,
+      "tag": "0003_retell_playground",
+      "breakpoints": true
     }
   ]
 }
