@@ -576,12 +576,41 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
 
     room = plug.backend._room
     assert room is not None
-    room.utterances.put_nowait(Utterance(text="The first answer, late.", spoken=False))
+    # Stamped with the turn before this one: a stream that opened while the
+    # first question was outstanding and only finished now.
+    room.utterances.put_nowait(
+        Utterance(text="The first answer, late.", spoken=False, turn=0)
+    )
 
     answered = await plug.deliver("The second question.")
 
     assert answered.text == "The second answer."
     await plug.close()
+
+
+async def test_an_answer_slower_than_its_budget_never_lands_on_the_next_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The whole of it, walked: a slow agent misfiles nothing.
+
+    Every reply here opens its stream promptly and then takes longer to
+    finish than the budget allows, which is the shape that used to put the
+    first question's answer under the second. Each is stamped with the turn
+    it opened in, so each is left off rather than misfiled, and the
+    transcript carries no agent turn at all — an honest empty record
+    instead of a plausible wrong one.
+    """
+    stub = ChatStub(
+        greeting=None,
+        replies=["The first answer.", "The second answer."],
+        answer_delay_seconds=QUIET_SECONDS * 3,
+    )
+    _conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch, scenario="One point. Another point."
+    )
+
+    assert not [text for speaker, text in turns if speaker == "agent"]
+    assert "The first answer." not in [text for _speaker, text in turns]
 
 
 async def test_a_turn_that_produced_nothing_is_an_answer_without_words(
@@ -928,9 +957,14 @@ async def test_egmas_own_words_are_never_read_back_as_the_agents(
     assert await plug.open() == "Front desk."
 
     room = stub.room
+    # Both streams open while the turn is outstanding, which is where a
+    # real one opens: an agent answers after it has been asked, and an
+    # utterance is stamped with the turn it opened in.
+    delivering = asyncio.ensure_future(plug.deliver("One point."))
+    await asyncio.sleep(0)
     room._agent_said(_Echo("One point."), PERSONA_IDENTITY)
     room._agent_said(_Echo("Certainly."), AGENT_IDENTITY)
-    answered = await plug.deliver("One point.")
+    answered = await delivering
 
     assert answered.text == "Certainly."
     await plug.close()

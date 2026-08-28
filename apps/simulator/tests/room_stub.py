@@ -610,13 +610,20 @@ class StubTextRoom(TextRoom):
         the driver did not wait through would end the turn early, and a
         script that only claimed to pause could never catch that.
         """
+        # The turn is taken here, where the agent begins answering, because
+        # that is where its stream opens on a real wire. A reply that then
+        # takes longer than egma waited for it still belongs to the question
+        # it started answering — which is the whole point of stamping.
+        opened = self._turn
         if self.stub.answer_delay_seconds:
             await asyncio.sleep(self.stub.answer_delay_seconds)
         for spoken, said in enumerate(turn):
             if spoken and self.stub.pause_seconds:
                 await asyncio.sleep(self.stub.pause_seconds)
             self.utterances.put_nowait(
-                Utterance(text=said, spoken=self.stub.marks_speech)
+                Utterance(
+                    text=said, spoken=self.stub.marks_speech, turn=opened
+                )
             )
         if not self._replies and self.stub.hangs_up_after_replies:
             self.ended.set()

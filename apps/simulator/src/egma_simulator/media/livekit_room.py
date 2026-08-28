@@ -1224,6 +1224,16 @@ class Utterance:
     which in a chat simulation means the chat setup is missing.
     """
 
+    turn: int
+    """Which persona turn was outstanding when this stream *opened*.
+
+    Stamped at the stream's header rather than at its close, which is what
+    makes it an answer to the question that had been asked — a stream can
+    take longer to finish than egma waited for it, and finishing late does
+    not make it a reply to whatever was asked next. Reading it as one
+    would put the agent's words against a question it never answered.
+    """
+
 
 @dataclass(frozen=True)
 class AgentTurn:
@@ -1275,6 +1285,9 @@ class TextRoom:
         self._leaving = False
         self._reading: set[asyncio.Task[None]] = set()
         self.utterances: asyncio.Queue[Utterance] = asyncio.Queue()
+        self._turn = 0
+        """Which persona turn is outstanding. Nought is the greeting's, which
+        is the only turn the agent takes before it has been asked anything."""
         self.arrivals = asyncio.Event()
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
@@ -1383,21 +1396,16 @@ class TextRoom:
                 ending=ERROR,
             ) from unsent
 
-    def abandon_utterances(self) -> list[Utterance]:
-        """Take whatever is still queued, so it cannot cross a turn.
+    def begin_turn(self) -> int:
+        """Say that a new persona turn is going out, and answer which.
 
-        Anything sitting here when the next persona turn goes out arrived
-        after egma stopped waiting for the last one, which makes it the
-        *previous* turn's answer arriving late. Read as the next turn's, it
-        would put the agent's words against the wrong question on a record
-        a grader reads — so it is taken off the queue instead, and the
-        caller says on the record that it happened. Losing a late answer is
-        a smaller lie than filing it under the wrong turn.
+        Every stream that opens from here on belongs to this turn, and
+        every stream already open belongs to one before it — which is the
+        whole of the rule that keeps an answer under the question it
+        answers.
         """
-        stale: list[Utterance] = []
-        while not self.utterances.empty():
-            stale.append(self.utterances.get_nowait())
-        return stale
+        self._turn += 1
+        return self._turn
 
     async def next_utterance(self, *, within: float) -> Utterance | None:
         """The next finished utterance, or nothing inside the budget.
@@ -1469,13 +1477,19 @@ class TextRoom:
         if identity == PERSONA_IDENTITY:
             return
         reading = asyncio.create_task(
-            self._read(reader), name="livekit-agent-utterance"
+            self._read(reader, self._turn), name="livekit-agent-utterance"
         )
         self._reading.add(reading)
         reading.add_done_callback(self._reading.discard)
 
-    async def _read(self, reader: Any) -> None:
-        """One utterance, whole, or a line about why it was not."""
+    async def _read(self, reader: Any, turn: int) -> None:
+        """One utterance, whole, or a line about why it was not.
+
+        ``turn`` is the one that was outstanding when this stream opened,
+        taken by the caller at the header. It travels with the words
+        because by the time they are all here the answer may be to a
+        question two turns old.
+        """
         attributes = getattr(reader.info, "attributes", None) or {}
         spoken = SPOKEN_TRACK_ATTRIBUTE in attributes
         try:
@@ -1494,7 +1508,9 @@ class TextRoom:
         # the record for it — unless it carried the speaking mark, which
         # is a fact about the agent rather than about the words.
         if said or spoken:
-            self.utterances.put_nowait(Utterance(text=said, spoken=spoken))
+            self.utterances.put_nowait(
+                Utterance(text=said, spoken=spoken, turn=turn)
+            )
 
     async def _settled(self) -> None:
         """Let a stream the agent closed on its way out finish arriving."""
@@ -1557,7 +1573,11 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         greeting is a whole model round trip after a session starts, where
         a quiet period is the gap between two things already being said.
         """
-        return await self._assembled(first_within=seconds, quiet=quiet_seconds)
+        # Nought: the only turn the agent takes before it has been asked
+        # anything is the one it opens with.
+        return await self._assembled(
+            first_within=seconds, quiet=quiet_seconds, turn=0
+        )
 
     async def deliver(
         self, text: str, *, reply_seconds: float, quiet_seconds: float
@@ -1571,27 +1591,23 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         way. Giving the first the second's budget would call a thinking
         agent silent.
 
-        Anything still queued before the turn goes out belongs to the last
-        one and is taken off rather than read as this one's answer. It
-        should be nothing: a turn that ran out of budget is the only way to
-        get here with something waiting, and the record says so.
+        Only what this turn opened counts as this turn's answer. A stream
+        that opened before the question went out is answering an earlier
+        one, however late it finishes, and is left off the record instead
+        of filed under a question it was never asked.
         """
         room = self._room
         if room is None:
             raise MediaBackendError("a persona turn was delivered before a room")
-        for late in room.abandon_utterances():
-            logger.warning(
-                "an utterance arrived after its turn was over and was left off "
-                "the record: %d characters in room %s",
-                len(late.text),
-                self._room_name,
-            )
+        turn = room.begin_turn()
         await room.send(text)
         return await self._assembled(
-            first_within=reply_seconds, quiet=quiet_seconds
+            first_within=reply_seconds, quiet=quiet_seconds, turn=turn
         )
 
-    async def _assembled(self, *, first_within: float, quiet: float) -> AgentTurn:
+    async def _assembled(
+        self, *, first_within: float, quiet: float, turn: int
+    ) -> AgentTurn:
         """One agent turn, out of however many utterances it took.
 
         An utterance ends when its stream closes. The *turn* ends when the
@@ -1611,6 +1627,19 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             utterance = await room.next_utterance(within=budget)
             if utterance is None:
                 break
+            if utterance.turn < turn:
+                # An answer to a question two turns ago, finishing now. The
+                # budget is what makes this rare; the stamp is what keeps it
+                # from being read as an answer to the question just asked.
+                logger.warning(
+                    "an utterance opened in turn %d arrived during turn %d and "
+                    "was left off the record: %d characters in room %s",
+                    utterance.turn,
+                    turn,
+                    len(utterance.text),
+                    self._room_name,
+                )
+                continue
             if utterance.text:
                 said.append(utterance.text)
             speaking = utterance.spoken or room.audio_published.is_set()
