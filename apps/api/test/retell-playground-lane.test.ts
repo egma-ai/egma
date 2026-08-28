@@ -93,6 +93,8 @@ const FLOW = {
 type RetellPlan = {
   /** Which engine the agent version points at. */
   readonly engine?: Record<string, unknown> | undefined;
+  /** What Retell's listing calls this agent's channel. */
+  readonly channel?: "voice" | "chat" | undefined;
   /** The status the agent read answers with. */
   readonly agentStatus?: number | undefined;
   /** The status the engine read answers with. */
@@ -152,7 +154,7 @@ function retell(plan: RetellPlan = {}): {
             {
               agent_id: PLATFORM_AGENT,
               agent_name: "Front desk",
-              channel: "chat",
+              channel: plan.channel ?? "chat",
             },
           ],
           has_more: false,
@@ -292,6 +294,64 @@ describe("a Retell playground connection, through the API", () => {
     expect(strayKey.statusCode).toBe(400);
     expect(String(strayKey.body.message)).toContain('has no key "retellAgentID"');
     expect(JSON.stringify(strayKey.body)).not.toContain(SENTINEL_KEY);
+  });
+});
+
+describe("registering a playground connection against a named Retell agent", () => {
+  /** The registration a connect flow makes: the agent named, the key pasted. */
+  async function register(
+    label: string,
+    plan: RetellPlan,
+  ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+    const { fetchImpl } = retell(plan);
+    api = await createApi(label, { retellFetch: fetchImpl });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    return ask(api.app, "POST", "/v1/agents", key, {
+      agentPlatform: "retell",
+      name: "Front desk",
+      connection: { ...PLAYGROUND, platformAgentId: PLATFORM_AGENT },
+    });
+  }
+
+  it("confirms a voice agent and keeps the key on the connection", async () => {
+    const registered = await register("playground_confirm_voice", {
+      channel: "voice",
+    });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+    const connection = registered.body.connection as {
+      connectionType: string;
+      productLabel: string;
+      credentialsHint: string;
+    };
+    expect(connection.connectionType).toBe("retell_playground");
+    expect(connection.productLabel).toBe("Retell playground");
+    // Every exchange this connection conducts needs the key, so it keeps one.
+    expect(connection.credentialsHint).toBe(SENTINEL_KEY.slice(-4));
+  });
+
+  it("reads back the custom-LLM refusal at the door, not at the first run", async () => {
+    // The engine is a platform fact, so the check lives where the engine is
+    // read — and it is read on the creation path as well as at run start, so
+    // a developer whose agent this lane cannot reach hears about it while they
+    // are registering rather than when a suite refuses to start.
+    const refused = await register("playground_confirm_custom_llm", {
+      channel: "voice",
+      engine: { type: "custom-llm", llm_websocket_url: "wss://acme.example/llm" },
+    });
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(String(refused.body.message)).toContain("custom LLM");
+    expect(String(refused.body.message)).toContain("your own service");
+    expect(String(refused.body.message)).toContain("SDK");
+    expect(JSON.stringify(refused.body)).not.toContain(SENTINEL_KEY);
+  });
+
+  it("refuses a chat agent, which has its own door", async () => {
+    const refused = await register("playground_confirm_chat_agent", {
+      channel: "chat",
+    });
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(String(refused.body.message)).toContain("Chat API");
   });
 });
 
