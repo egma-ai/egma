@@ -73,10 +73,22 @@ import { afterAll, describe, expect, it } from "vitest";
  * changed: it **deletes exactly the rows its own seed created** (identified by
  * the seed's own report of what it added) and **restores exactly the rows it
  * edited, by their id**, to the value each held before the edit — captured at
- * edit time so a rename cannot move the target. Any other row — one a teammate
- * or another process creates or edits while the suite runs — is left completely
- * untouched. So a developer's own authored answers survive the proof, and a
- * concurrent write to an unrelated row is never clobbered.
+ * edit time so a rename cannot move the target.
+ *
+ * And it **reads each of those rows back before it writes**. It undoes a row
+ * only while the row still holds exactly what the suite itself left it as; if
+ * anyone — the developer, another process — changed even one of the two rows
+ * the suite touched, in the window between the suite's edit and its cleanup, the
+ * cleanup leaves that change in place and names the row in a warning rather than
+ * reverting it. So a developer's own authored answers survive the proof, and a
+ * concurrent write is never clobbered.
+ *
+ * **The one residual, stated honestly so nobody re-opens it:** a true
+ * microsecond TOCTOU between that re-read and the write remains. Closing it
+ * entirely would need a write precondition on mock-tool rows — optimistic
+ * concurrency — which the product does not have and which is out of scope for a
+ * test. The read-before-write guard narrows the window to that microsecond and
+ * never does a blind overwrite; that is as far as a test can take it.
  *
  * ## The script it follows
  *
@@ -130,25 +142,40 @@ type MockToolRow = {
 };
 
 /**
+ * One row this suite touched, keyed by id, with **what the suite left it as** so
+ * the teardown can read-before-write.
+ *
+ * - `seeded` — this suite's own seed created it. The teardown deletes it, but
+ *   only while it still holds `left`; if it was changed since, it is left alone.
+ * - `edited` — a **pre-existing** row this suite changed. The teardown writes
+ *   `prior` back, but only while the row still holds `left`; if it was changed
+ *   since, `prior` is not written and the concurrent edit stays.
+ *
+ * `left` is captured after the suite's own edits, so a row the suite seeded and
+ * then edited carries the edited value here, not the seed default.
+ */
+type Touched =
+  | { readonly kind: "seeded"; left: MockToolRow }
+  | { readonly kind: "edited"; readonly prior: MockToolRow; left: MockToolRow };
+
+/**
  * What this suite touched on the Egma side, by id — and only that.
  *
- * `seededIds` are the rows this suite's own seed created (named by the seed's
- * own report of what it added), which the teardown deletes. `editedPrior` holds
- * the value each **pre-existing** row this suite edited had before the edit,
- * keyed by its id, which the teardown writes back. Both are scoped to this
- * suite's own actions: a row it neither created nor edited is never in either,
- * so a concurrent write to an unrelated row is left completely alone.
+ * Every entry is a row this suite itself created or edited. A row it never
+ * touched is never here, so a concurrent write to an unrelated row is left
+ * completely alone; and the teardown reads each of these back before it writes,
+ * so a concurrent write to one of *these* is left alone too.
  */
 const made: {
   runId: string | null;
-  readonly seededIds: Set<string>;
-  readonly editedPrior: Map<string, MockToolRow>;
-} = { runId: null, seededIds: new Set(), editedPrior: new Map() };
+  readonly touched: Map<string, Touched>;
+} = { runId: null, touched: new Map() };
 
-/** Every mock-tool row the project holds right now, whole. */
-async function listMockTools(): Promise<MockToolRow[]> {
+/** Every mock-tool row the project holds right now, whole, by id. */
+async function mockToolsById(): Promise<Map<string, MockToolRow>> {
   const listed = await egma("GET", "/v1/mock-tools?pageSize=200");
-  return (listed.body["mockTools"] as MockToolRow[]) ?? [];
+  const rows = (listed.body["mockTools"] as MockToolRow[]) ?? [];
+  return new Map(rows.map((row) => [row.id, row]));
 }
 
 /** The body that writes one row back to exactly what it held. */
@@ -159,6 +186,23 @@ function restoreBody(row: MockToolRow): Record<string, unknown> {
       : { answer: row.answer }),
     delayMs: row.delayMs,
   };
+}
+
+/**
+ * Whether two rows hold the same authored value — the fields a person edits,
+ * plus the tool name, so a rename counts as a change too. `canonicalJson`
+ * makes it insensitive to object key order. This is what read-before-write
+ * compares: the teardown undoes a row only while it still equals what the suite
+ * left it as.
+ */
+function sameValue(a: MockToolRow, b: MockToolRow): boolean {
+  const shape = (row: MockToolRow) => [
+    row.tool,
+    row.answer ?? null,
+    row.error ?? null,
+    row.delayMs,
+  ];
+  return canonicalJson(shape(a)) === canonicalJson(shape(b));
 }
 
 async function egma(
@@ -203,21 +247,32 @@ afterAll(async () => {
   }
 
   // The Egma side, scoped to exactly the rows this suite created or edited, by
-  // id — never the whole project's table. Each on its own, so one failure
-  // cannot stop the next. A row this suite never touched — including one a
-  // teammate or another process created or edited while it ran — is left
-  // completely alone.
-  //
-  // The rows this suite's own seed created: deleted.
-  for (const id of made.seededIds) {
-    await egma("DELETE", `/v1/mock-tools/${id}`).catch(() => undefined);
-  }
-  // The pre-existing rows this suite edited: written back to exactly what they
-  // held before the edit, by their captured id.
-  for (const [id, prior] of made.editedPrior) {
-    await egma("PATCH", `/v1/mock-tools/${id}`, restoreBody(prior)).catch(
-      () => undefined,
-    );
+  // id — never the whole project's table — and **read before it writes**. Each
+  // touched row is re-read; the suite undoes it only while it still holds what
+  // the suite itself left it as. A row anyone changed since is left exactly as
+  // found and named in a warning, so a developer's concurrent edit to even one
+  // of these two rows is never reverted.
+  const current = await mockToolsById().catch(
+    () => new Map<string, MockToolRow>(),
+  );
+  for (const [id, touched] of made.touched) {
+    const now = current.get(id);
+    if (now === undefined) continue; // already gone — nothing to undo.
+    if (!sameValue(now, touched.left)) {
+      // Somebody changed it after the suite did. Leave the change in place.
+      console.warn(
+        `[live remedy] mock tool ${id} was changed after the suite left it; ` +
+          "left exactly as found, not reverted.",
+      );
+      continue;
+    }
+    if (touched.kind === "seeded") {
+      await egma("DELETE", `/v1/mock-tools/${id}`).catch(() => undefined);
+    } else {
+      await egma("PATCH", `/v1/mock-tools/${id}`, restoreBody(touched.prior)).catch(
+        () => undefined,
+      );
+    }
   }
 });
 
@@ -299,14 +354,19 @@ live("a mocked suite against the live agent", () => {
       "the live agent must declare at least two interceptable tools for this suite",
     ).toBeGreaterThanOrEqual(2);
 
-    // Exactly the rows this suite's own seed created, by id, so the teardown
-    // deletes those and nothing else. The seed reports the names it added —
-    // and it never overwrites an authored answer — so a name it reports is a
-    // row it made.
-    const authored = await listMockTools();
+    // Exactly the rows this suite's own seed created, tracked by id so the
+    // teardown deletes those and nothing else. The seed reports the names it
+    // added — and it never overwrites an authored answer — so a name it reports
+    // is a row it made.
+    const authored = await mockToolsById();
+    const authoredByTool = new Map(
+      [...authored.values()].map((row) => [row.tool, row]),
+    );
     const seededNames = new Set((found.body["seeded"] as string[]) ?? []);
-    for (const row of authored) {
-      if (seededNames.has(row.tool)) made.seededIds.add(row.id);
+    for (const row of authored.values()) {
+      if (seededNames.has(row.tool)) {
+        made.touched.set(row.id, { kind: "seeded", left: row });
+      }
     }
 
     // The seed above has left one row per interceptable tool. Two of them are
@@ -316,17 +376,16 @@ live("a mocked suite against the live agent", () => {
     // on a real call and the latency on the record stays honest.
     const failing = interceptable[0]?.name ?? "";
     const slow = interceptable[1]?.name ?? "";
-    // Resolve the row's id **and** capture what it held, at edit time. A row
-    // this suite did not seed is one that pre-existed, so its prior value is
-    // remembered for a restore; a row the seed just created is left for the
-    // delete above. Capturing the id here means a later rename cannot move the
-    // target out from under the restore.
+    // Resolve the row's id **and** record what it held, at edit time. A row the
+    // seed just created is already tracked as `seeded` (deleted at teardown); a
+    // pre-existing one is tracked as `edited` with the value to write back.
+    // Capturing the id here means a later rename cannot move the target.
     const editTarget = (tool: string): string => {
-      const row = authored.find((one) => one.tool === tool);
+      const row = authoredByTool.get(tool);
       expect(row, `no mock tool answers for ${tool}`).toBeDefined();
       const id = String(row?.id);
-      if (row !== undefined && !made.seededIds.has(id)) {
-        made.editedPrior.set(id, row);
+      if (row !== undefined && !made.touched.has(id)) {
+        made.touched.set(id, { kind: "edited", prior: row, left: row });
       }
       return id;
     };
@@ -340,6 +399,16 @@ live("a mocked suite against the live agent", () => {
       delayMs: AUTHORED_DELAY_MILLISECONDS,
     });
     expect(delayed.status, JSON.stringify(delayed.body)).toBe(200);
+
+    // Record exactly what the suite left every touched row as, now that the
+    // edits have landed. The teardown reads each of these back and undoes it
+    // only while it still equals this — never a blind overwrite of a value
+    // somebody changed since.
+    const afterEdits = await mockToolsById();
+    for (const [id, touched] of made.touched) {
+      const left = afterEdits.get(id);
+      if (left !== undefined) touched.left = left;
+    }
 
     // ── 3. The run. ──
     const started = await egma("POST", "/v1/runs", {
