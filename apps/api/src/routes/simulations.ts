@@ -7,6 +7,7 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
+  mockToolCoverageRow,
   NotPermittedError,
   readTrace,
   readTraceGrading,
@@ -100,12 +101,7 @@ function describedTranscript(
 function describedMockToolCoverage(
   coverage: MockToolCoverage | null,
 ): Record<string, unknown> | null {
-  if (coverage === null) return null;
-  return {
-    discovered: [...coverage.discovered],
-    covered: [...coverage.covered],
-    uncovered: [...coverage.uncovered],
-  };
+  return coverage === null ? null : mockToolCoverageRow(coverage);
 }
 
 /** The exact grader selection frozen for this simulation's test. */

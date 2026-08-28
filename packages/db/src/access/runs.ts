@@ -48,10 +48,21 @@ import {
 import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
 import { openCredentials } from "../sealing.ts";
 import {
+  resolveMockTools,
   type MockToolSnapshot,
   type SnapshotDefault,
   type SnapshotEntry,
 } from "../mock-tools/resolve.ts";
+import {
+  mockToolCoverageFrom,
+  mockToolCoverageRow,
+  type MockToolCoverage,
+} from "../mock-tools/coverage.ts";
+import {
+  mockedWorldFrom,
+  mockedWorldRow,
+  type MockedWorld,
+} from "../mock-tools/world.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -116,6 +127,8 @@ export type Run = {
   readonly triggeredVia: RunTrigger;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: ConnectionSnapshot;
+  /** The temporary platform world this run built, or null when it built none. */
+  readonly mockedWorld: MockedWorld | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -127,11 +140,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type MockToolCoverage = {
-  readonly discovered: readonly string[];
-  readonly covered: readonly string[];
-  readonly uncovered: readonly string[];
-};
+export type { MockToolCoverage, MockedWorld };
 
 export type Simulation = {
   readonly id: string;
@@ -196,6 +205,7 @@ const RUN_COLUMNS = {
   triggeredVia: run.triggeredVia,
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
+  mockedWorld: run.mockedWorld,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -243,6 +253,7 @@ type RunRow = {
   readonly triggeredVia: string;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
+  readonly mockedWorld: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -283,11 +294,7 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
     write.recordingReference = facts.recordingReference.trim() || null;
   }
   if (facts.mockToolCoverage !== undefined) {
-    write.mockToolCoverage = {
-      discovered: [...facts.mockToolCoverage.discovered],
-      covered: [...facts.mockToolCoverage.covered],
-      uncovered: [...facts.mockToolCoverage.uncovered],
-    };
+    write.mockToolCoverage = mockToolCoverageRow(facts.mockToolCoverage);
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
@@ -353,20 +360,15 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   };
 }
 
-function mockToolCoverageFromRow(value: unknown, simulationId: string): MockToolCoverage | null {
-  if (value === null) return null;
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-  }
-  const row = value as Record<string, unknown>;
-  const list = (key: string): readonly string[] => {
-    const held = row[key];
-    if (!Array.isArray(held) || held.some((one) => typeof one !== "string")) {
-      throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-    }
-    return held as string[];
-  };
-  return { discovered: list("discovered"), covered: list("covered"), uncovered: list("uncovered") };
+function mockToolCoverageFromRow(
+  value: unknown,
+  simulationId: string,
+): MockToolCoverage | null {
+  return mockToolCoverageFrom(
+    value,
+    () =>
+      new Error(`simulation ${simulationId} holds malformed mock-tool coverage`),
+  );
 }
 
 function runFromRow(
@@ -374,7 +376,7 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const { status, triggeredVia, connectionSnapshot, ...rest } = row;
+  const { status, triggeredVia, connectionSnapshot, mockedWorld, ...rest } = row;
   return {
     ...rest,
     suiteName,
@@ -382,6 +384,10 @@ function runFromRow(
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
+    mockedWorld: mockedWorldFrom(
+      mockedWorld,
+      () => new Error(`run ${row.id} holds a malformed mocked world`),
+    ),
   };
 }
 
@@ -813,6 +819,36 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
   if (row === undefined) return undefined;
   const { suiteName, suiteDeletedAt, ...header } = row;
   return runFromRow(header, suiteName, suiteDeletedAt !== null);
+}
+
+/**
+ * Write down the temporary world this run built on the agent's platform.
+ *
+ * Called several times across one run, and deliberately: once when the numbers
+ * have been read and before anything is branched, again when the branch lands,
+ * and once more when teardown has put everything back. Each call replaces the
+ * record whole, because a half-written world is worse than a stale one — the
+ * teardown reads what is here and acts on it.
+ *
+ * **It is the one thing a finished run may still be told.** A run's header
+ * freezes when its counts land, and this column is carved out of that freeze:
+ * the record is bookkeeping about somebody's Retell account, not about this
+ * run's numbers, and a crashed run's litter is cleared after the run is over by
+ * definition. The migration's guard permits a change to this column alone.
+ */
+export async function recordMockedWorld(
+  auth: AuthContext,
+  runId: string,
+  world: MockedWorld | null,
+): Promise<Run | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const [updated] = await db()
+    .update(run)
+    .set({ mockedWorld: world === null ? null : mockedWorldRow(world) })
+    .where(theRun(auth, runId))
+    .returning({ id: run.id });
+  if (updated === undefined) return undefined;
+  return getRun(auth, runId);
 }
 
 export type SimulationExecutionEvidence = {
@@ -1507,6 +1543,54 @@ export async function resolveSimulationStanding(
     claimedBy: row.claimedBy,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
+  };
+}
+
+/**
+ * The mocked world one simulation ran in, and which of its tools egma had an
+ * answer for.
+ *
+ * One query, on the report door's terms — no `AuthContext`, because the caller
+ * is egma's own service and the row is the whole of the authority, exactly as
+ * `resolveSimulationStanding` beside it works.
+ *
+ * `answeredFor` is the run's frozen world resolved for **this** simulation's
+ * pinned test version, so a per-test override that answers for a tool the
+ * project does not is counted, and the shared resolution is the one everything
+ * else uses.
+ */
+export type SimulationMockedWorld = {
+  readonly world: MockedWorld | null;
+  readonly answeredFor: readonly string[];
+};
+
+export async function simulationMockedWorld(
+  simulationId: string,
+): Promise<SimulationMockedWorld | undefined> {
+  const [row] = await db()
+    .select({
+      mockedWorld: run.mockedWorld,
+      mockToolSnapshot: run.mockToolSnapshot,
+      runId: run.id,
+      testVersionId: simulation.testVersionId,
+    })
+    .from(simulation)
+    .innerJoin(run, eq(simulation.runId, run.id))
+    .where(eq(simulation.id, simulationId))
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  const world = mockedWorldFrom(
+    row.mockedWorld,
+    () => new Error(`run ${row.runId} holds a malformed mocked world`),
+  );
+  const snapshot = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
+  return {
+    world,
+    answeredFor: resolveMockTools(snapshot, row.testVersionId).map(
+      (resolved) => resolved.toolName,
+    ),
   };
 }
 

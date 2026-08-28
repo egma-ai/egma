@@ -80,6 +80,28 @@ export {
   type SnapshotDefault,
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
+/**
+ * The coverage stamp's vocabulary and its serialization, and the record of the
+ * temporary world a run built. Both are pure: they read and write no store.
+ */
+export {
+  coverageFromClasses,
+  mockToolCoverageFrom,
+  mockToolCoverageRow,
+  NO_MOCK_TOOL_COVERAGE,
+  NO_TOOL_COVERAGE_CLASSES,
+  toolCoverageClassesFrom,
+  TOOL_COVERAGE_CLASSES,
+  type ToolCoverageClass,
+  type ToolCoverageClasses,
+} from "./mock-tools/coverage.ts";
+export {
+  mockedWorldFrom,
+  mockedWorldRow,
+  type MockedWorld,
+  type MockedWorldEngine,
+  type MockedWorldNumber,
+} from "./mock-tools/world.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,

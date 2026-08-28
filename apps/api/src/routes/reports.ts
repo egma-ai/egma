@@ -1,12 +1,16 @@
 import {
   completeSimulation,
+  coverageFromClasses,
   failSimulation,
   markSimulationCanceled,
   resolveSimulationStanding,
+  simulationMockedWorld,
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
+  type MockToolCoverage,
   type Simulation,
+  type SimulationMockedWorld,
   type SimulationStanding,
   type SimulationSummaryFacts,
 } from "@egma/db";
@@ -141,10 +145,49 @@ function reportedMoments(facts: {
   return { startedAt, endedAt };
 }
 
+/**
+ * The stamp this landing writes, out of what the conductor reported and what
+ * the platform already knew.
+ *
+ * **Two writers, one stamp.** A simulator that stands in the tool path reports
+ * three lists and knows nothing about interceptability, because on its seam
+ * every tool the agent declares is reachable — so its two class lists are empty
+ * and empty is the truth. A run whose world was built from a platform
+ * configuration knows the other two classes **before** any conversation
+ * happened, and they are read off the run rather than asked for again.
+ *
+ * When the conductor reports no coverage at all and the run built a mocked
+ * world, the stamp is built from the run alone. That is not this door inventing
+ * a fact: the tool list came from the configuration the temporary version was
+ * branched from, so there was never anything to be late to.
+ *
+ * When neither has anything to say, the stamp is left off, which is the report
+ * saying nobody was ever asked — a different sentence from three empty lists.
+ */
+function coverageOf(
+  facts: NonNullable<StatusEvent["facts"]>,
+  mocked: SimulationMockedWorld | undefined,
+): MockToolCoverage | undefined {
+  const classes = mocked?.world?.coverage;
+  if (facts.mock_tool_coverage !== undefined) {
+    return {
+      ...facts.mock_tool_coverage,
+      notInterceptable: [...(classes?.notInterceptable ?? [])],
+      notInThisVersion: [...(classes?.notInThisVersion ?? [])],
+    };
+  }
+  if (classes === undefined) return undefined;
+  return coverageFromClasses(classes, mocked?.answeredFor ?? []);
+}
+
 /** The terminal facts, as the landings take them. */
-function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
+function summaryFactsOf(
+  event: StatusEvent,
+  mocked: SimulationMockedWorld | undefined,
+): SimulationSummaryFacts {
   const facts = event.facts;
   if (facts === undefined) return {};
+  const coverage = coverageOf(facts, mocked);
   return {
     turnCount: facts.turn_count,
     ...(facts.provider_reference === null
@@ -153,14 +196,7 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
     ...(facts.audio === null
       ? {}
       : { recordingReference: facts.audio.recording }),
-    // Left off where the document left it off, rather than landed as three
-    // empty lists: absent is the report saying nobody was ever asked, and
-    // empty is the asking happening and nothing coming back. Writing one for
-    // the other would be this door inventing a fact the simulator declined to
-    // claim.
-    ...(facts.mock_tool_coverage === undefined
-      ? {}
-      : { mockToolCoverage: facts.mock_tool_coverage }),
+    ...(coverage === undefined ? {} : { mockToolCoverage: coverage }),
     // Absent when incoherent, so the landing's own stamps stand for both.
     ...(reportedMoments(facts) ?? {}),
   };
@@ -453,7 +489,11 @@ async function applyLanding(
   ending: string,
 ): Promise<Simulation | undefined> {
   const conductor = standing.claimedBy ?? "";
-  const facts = summaryFactsOf(event);
+  // Read here rather than once per document: a landing is the only event that
+  // writes a stamp, and a `running` event must not pay for a read it has no
+  // use for.
+  const mocked = await simulationMockedWorld(standing.id);
+  const facts = summaryFactsOf(event, mocked);
 
   if (event.status === "completed") {
     return completeSimulation(standing.auth, standing.id, conductor, {

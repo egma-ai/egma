@@ -296,6 +296,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_web_call",
                               "phone_number",
                               "livekit_room"
                             ]
@@ -304,6 +305,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
                               "livekit_room.customer_token_endpoint"
@@ -547,6 +549,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api",
+                          "retell_web_call",
                           "phone_number",
                           "livekit_room"
                         ]
@@ -555,6 +558,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api.api_key",
+                          "retell_web_call.api_key",
                           "phone_number.public_e164",
                           "livekit_room.project_credentials",
                           "livekit_room.customer_token_endpoint"
@@ -706,6 +710,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -753,6 +760,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -791,6 +799,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -799,6 +808,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -982,6 +992,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -1029,6 +1042,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -1067,6 +1081,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -1075,6 +1090,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -1404,6 +1420,9 @@
                           "pullProductionCalls": {
                             "type": "boolean"
                           },
+                          "mockToolsDuringSimulations": {
+                            "type": "boolean"
+                          },
                           "monitoringConfigured": {
                             "type": "boolean"
                           },
@@ -1471,6 +1490,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
+                                    "retell_web_call",
                                     "phone_number",
                                     "livekit_room"
                                   ]
@@ -1479,6 +1499,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
+                                    "retell_web_call.api_key",
                                     "phone_number.public_e164",
                                     "livekit_room.project_credentials",
                                     "livekit_room.customer_token_endpoint"
@@ -1588,6 +1609,7 @@
                           "monitoringKeyPresent",
                           "monitoringApiKeyHint",
                           "pullProductionCalls",
+                          "mockToolsDuringSimulations",
                           "monitoringConfigured",
                           "lastReceivedAt",
                           "archived",
@@ -1794,6 +1816,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -1841,6 +1866,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -1881,6 +1907,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_web_call",
                               "phone_number",
                               "livekit_room"
                             ]
@@ -1889,6 +1916,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
                               "livekit_room.customer_token_endpoint"
@@ -2101,6 +2129,10 @@
                 "properties": {
                   "name": {
                     "type": "string"
+                  },
+                  "mockToolsDuringSimulations": {
+                    "type": "boolean",
+                    "description": "Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is."
                   }
                 },
                 "additionalProperties": false
@@ -2177,6 +2209,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -2224,6 +2259,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -2397,6 +2433,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api",
+                      "retell_web_call",
                       "phone_number",
                       "livekit_room"
                     ]
@@ -2405,6 +2442,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api.api_key",
+                      "retell_web_call.api_key",
                       "phone_number.public_e164",
                       "livekit_room.project_credentials",
                       "livekit_room.customer_token_endpoint"
@@ -2511,6 +2549,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -2519,6 +2558,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -2833,6 +2873,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -2880,6 +2923,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -3123,6 +3167,9 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "mockToolsDuringSimulations": {
+                          "type": "boolean"
+                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -3170,6 +3217,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -3361,6 +3409,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3369,6 +3418,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -3650,6 +3700,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3658,6 +3709,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -3949,6 +4001,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3957,6 +4010,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -4290,6 +4344,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -4298,6 +4353,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -14353,6 +14409,122 @@
                         }
                       ]
                     },
+                    "mockedWorld": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "servingVersion": {
+                              "type": "integer"
+                            },
+                            "draftVersion": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "engine": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "engineId": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "engineId",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "numbers": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "number": {
+                                    "type": "string"
+                                  },
+                                  "pinned": {
+                                    "type": "boolean"
+                                  },
+                                  "bindings": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "number",
+                                  "pinned",
+                                  "bindings"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "properties": {
+                                "mocked": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInterceptable": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInThisVersion": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "mocked",
+                                "notInterceptable",
+                                "notInThisVersion"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "servingVersion",
+                            "draftVersion",
+                            "engine",
+                            "numbers",
+                            "coverage"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -14473,6 +14645,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -14778,6 +14951,122 @@
                               }
                             ]
                           },
+                          "mockedWorld": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "servingVersion": {
+                                    "type": "integer"
+                                  },
+                                  "draftVersion": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "engine": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "engineId": {
+                                        "type": "string"
+                                      },
+                                      "version": {
+                                        "anyOf": [
+                                          {
+                                            "type": "integer"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "engineId",
+                                      "version"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "numbers": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "number": {
+                                          "type": "string"
+                                        },
+                                        "pinned": {
+                                          "type": "boolean"
+                                        },
+                                        "bindings": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "number",
+                                        "pinned",
+                                        "bindings"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "coverage": {
+                                    "type": "object",
+                                    "properties": {
+                                      "mocked": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "notInterceptable": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "notInThisVersion": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "mocked",
+                                      "notInterceptable",
+                                      "notInThisVersion"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "servingVersion",
+                                  "draftVersion",
+                                  "engine",
+                                  "numbers",
+                                  "coverage"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "expectedSimulationCount": {
                             "type": "integer"
                           },
@@ -14898,6 +15187,7 @@
                           "modality",
                           "productLabel",
                           "environment",
+                          "mockedWorld",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15125,6 +15415,122 @@
                       "anyOf": [
                         {
                           "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockedWorld": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "servingVersion": {
+                              "type": "integer"
+                            },
+                            "draftVersion": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "engine": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "engineId": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "engineId",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "numbers": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "number": {
+                                    "type": "string"
+                                  },
+                                  "pinned": {
+                                    "type": "boolean"
+                                  },
+                                  "bindings": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "number",
+                                  "pinned",
+                                  "bindings"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "properties": {
+                                "mocked": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInterceptable": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInThisVersion": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "mocked",
+                                "notInterceptable",
+                                "notInThisVersion"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "servingVersion",
+                            "draftVersion",
+                            "engine",
+                            "numbers",
+                            "coverage"
+                          ],
+                          "additionalProperties": false
                         },
                         {
                           "type": "null"
@@ -15363,6 +15769,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15667,12 +16074,26 @@
                                     "items": {
                                       "type": "string"
                                     }
+                                  },
+                                  "notInterceptable": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "notInThisVersion": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
                                   }
                                 },
                                 "required": [
                                   "discovered",
                                   "covered",
-                                  "uncovered"
+                                  "uncovered",
+                                  "notInterceptable",
+                                  "notInThisVersion"
                                 ],
                                 "additionalProperties": false
                               },
@@ -16187,6 +16608,122 @@
                         }
                       ]
                     },
+                    "mockedWorld": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "servingVersion": {
+                              "type": "integer"
+                            },
+                            "draftVersion": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "engine": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "engineId": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "engineId",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "numbers": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "number": {
+                                    "type": "string"
+                                  },
+                                  "pinned": {
+                                    "type": "boolean"
+                                  },
+                                  "bindings": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "number",
+                                  "pinned",
+                                  "bindings"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "properties": {
+                                "mocked": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInterceptable": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInThisVersion": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "mocked",
+                                "notInterceptable",
+                                "notInThisVersion"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "servingVersion",
+                            "draftVersion",
+                            "engine",
+                            "numbers",
+                            "coverage"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -16307,6 +16844,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -17127,12 +17665,26 @@
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "notInterceptable": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "notInThisVersion": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
                             }
                           },
                           "required": [
                             "discovered",
                             "covered",
-                            "uncovered"
+                            "uncovered",
+                            "notInterceptable",
+                            "notInThisVersion"
                           ],
                           "additionalProperties": false
                         },

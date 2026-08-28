@@ -63,14 +63,90 @@ export const mockToolSchema = {
   additionalProperties: false,
 } as const;
 
+/**
+ * How isolated one simulation was, in five lists answering two questions.
+ *
+ * `discovered`, `covered` and `uncovered` say what the agent has and what Egma
+ * answered for. The two beside them say *why* something was not answered for,
+ * where the seam knows — and the three classes the product names are read
+ * straight off this: **mocked** is `covered`, **not interceptable by
+ * construction** is `notInterceptable`, and **not in this version** is
+ * `notInThisVersion`. A tool in `uncovered` and in neither class is the
+ * remaining case: Egma stands in front of it and nobody authored an answer, so
+ * its call was refused.
+ */
 export const mockToolCoverageSchema = {
   type: "object",
   properties: {
     discovered: arrayOf(stringSchema),
     covered: arrayOf(stringSchema),
     uncovered: arrayOf(stringSchema),
+    notInterceptable: arrayOf(stringSchema),
+    notInThisVersion: arrayOf(stringSchema),
   },
-  required: ["discovered", "covered", "uncovered"],
+  required: [
+    "discovered",
+    "covered",
+    "uncovered",
+    "notInterceptable",
+    "notInThisVersion",
+  ],
+  additionalProperties: false,
+} as const;
+
+/**
+ * The temporary world a run built on the agent's platform, as a reader sees it.
+ *
+ * It is on the run's header because it is a fact about the whole run: one
+ * temporary version, one set of touched numbers, one configuration the tools
+ * were read from. `bindings` is each touched number's inbound routing exactly
+ * as it was read, which is what teardown puts back — so a reader can see the
+ * routing Egma promised to restore, and a sweep after a crash has the same
+ * bytes to restore from.
+ */
+export const mockedWorldSchema = {
+  type: "object",
+  properties: {
+    servingVersion: integerSchema,
+    draftVersion: nullable(integerSchema),
+    engine: {
+      type: "object",
+      properties: {
+        type: stringSchema,
+        engineId: stringSchema,
+        version: nullable(integerSchema),
+      },
+      required: ["type", "engineId", "version"],
+      additionalProperties: false,
+    },
+    numbers: arrayOf({
+      type: "object",
+      properties: {
+        number: stringSchema,
+        pinned: booleanSchema,
+        bindings: arrayOf({ type: "object", additionalProperties: true }),
+      },
+      required: ["number", "pinned", "bindings"],
+      additionalProperties: false,
+    }),
+    coverage: {
+      type: "object",
+      properties: {
+        mocked: arrayOf(stringSchema),
+        notInterceptable: arrayOf(stringSchema),
+        notInThisVersion: arrayOf(stringSchema),
+      },
+      required: ["mocked", "notInterceptable", "notInThisVersion"],
+      additionalProperties: false,
+    },
+  },
+  required: [
+    "servingVersion",
+    "draftVersion",
+    "engine",
+    "numbers",
+    "coverage",
+  ],
   additionalProperties: false,
 } as const;
 
@@ -140,6 +216,8 @@ const runHeaderSchema = {
     modality: modalitySchema,
     productLabel: stringSchema,
     environment: nullable(stringSchema),
+    /** The temporary platform world this run built, or null when it built none. */
+    mockedWorld: nullable(mockedWorldSchema),
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -169,6 +247,7 @@ const runHeaderSchema = {
     "modality",
     "productLabel",
     "environment",
+    "mockedWorld",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",

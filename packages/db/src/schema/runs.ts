@@ -177,6 +177,27 @@ export const run = pgTable(
      * `{ defaults: [], overrides: {} }`.
      */
     mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
+    /**
+     * The temporary world this run built on the agent's platform, or null when
+     * it built none — which is what most runs are.
+     *
+     * **Written for the teardown and for the sweep, not for the reader.** It
+     * holds the version the run branched from, the temporary version it minted,
+     * the engine that version runs on, and **every touched number's inbound
+     * bindings exactly as they were read** — so teardown puts a binding back
+     * rather than rebuilding one out of the two fields egma happened to look
+     * at, and a later sweep can finish what a crashed run left: delete the
+     * stray version, then restore the pin it recorded here.
+     *
+     * It also carries the three-class coverage stamp of the configuration the
+     * temporary version was built from, which is what lets a simulation say how
+     * isolated it really was without asking the platform again mid-run.
+     *
+     * Nullable, and null means one thing only: this run built no mocked world.
+     * An unmocked run and a mocked run whose world is still being built are
+     * told apart by the run's own status, not by a second empty shape here.
+     */
+    mockedWorld: jsonb("mocked_world"),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**

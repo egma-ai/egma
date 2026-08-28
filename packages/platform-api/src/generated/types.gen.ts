@@ -128,8 +128,8 @@ export type ListConnectionOptionsResponses = {
         items: Array<{
             agentPlatform: 'retell' | 'livekit' | null;
             agentPlatformLabel: string;
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             accessVariantLabel: string;
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -211,6 +211,7 @@ export type ListAgentsResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -223,8 +224,8 @@ export type ListAgentsResponses = {
                 projectId: string;
                 name: string;
                 agentPlatform: 'retell' | 'livekit';
-                connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-                accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+                connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+                accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
                 modality: 'voice' | 'chat';
                 productLabel: string;
                 topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -253,8 +254,8 @@ export type RegisterAgentData = {
         connection?: {
             name?: string;
             agentPlatform: 'retell' | 'livekit' | null;
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             environment?: string;
             config?: {
@@ -342,6 +343,7 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -355,8 +357,8 @@ export type RegisterAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -387,6 +389,7 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -400,8 +403,8 @@ export type RegisterAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -473,6 +476,7 @@ export type GetAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -486,8 +490,8 @@ export type GetAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -510,6 +514,10 @@ export type GetAgentResponse = GetAgentResponses[keyof GetAgentResponses];
 export type UpdateAgentData = {
     body?: {
         name?: string;
+        /**
+         * Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is.
+         */
+        mockToolsDuringSimulations?: boolean;
     };
     path: {
         agentId: string;
@@ -572,6 +580,7 @@ export type UpdateAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -588,8 +597,8 @@ export type AddConnectionData = {
     body: {
         name?: string;
         agentPlatform: 'retell' | 'livekit' | null;
-        connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-        accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
         config?: {
@@ -673,8 +682,8 @@ export type AddConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -759,6 +768,7 @@ export type ArchiveAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -838,6 +848,7 @@ export type RestoreAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -898,8 +909,8 @@ export type GetConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -988,8 +999,8 @@ export type UpdateConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1071,8 +1082,8 @@ export type ArchiveConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1163,8 +1174,8 @@ export type RestoreConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -4035,6 +4046,27 @@ export type ListRunsResponses = {
             modality: 'voice' | 'chat';
             productLabel: string;
             environment: string | null;
+            mockedWorld: {
+                servingVersion: number;
+                draftVersion: number | null;
+                engine: {
+                    type: string;
+                    engineId: string;
+                    version: number | null;
+                };
+                numbers: Array<{
+                    number: string;
+                    pinned: boolean;
+                    bindings: Array<{
+                        [key: string]: unknown;
+                    }>;
+                }>;
+                coverage: {
+                    mocked: Array<string>;
+                    notInterceptable: Array<string>;
+                    notInThisVersion: Array<string>;
+                };
+            } | null;
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
@@ -4133,6 +4165,27 @@ export type CreateRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
+        mockedWorld: {
+            servingVersion: number;
+            draftVersion: number | null;
+            engine: {
+                type: string;
+                engineId: string;
+                version: number | null;
+            };
+            numbers: Array<{
+                number: string;
+                pinned: boolean;
+                bindings: Array<{
+                    [key: string]: unknown;
+                }>;
+            }>;
+            coverage: {
+                mocked: Array<string>;
+                notInterceptable: Array<string>;
+                notInThisVersion: Array<string>;
+            };
+        } | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4217,6 +4270,27 @@ export type GetRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
+        mockedWorld: {
+            servingVersion: number;
+            draftVersion: number | null;
+            engine: {
+                type: string;
+                engineId: string;
+                version: number | null;
+            };
+            numbers: Array<{
+                number: string;
+                pinned: boolean;
+                bindings: Array<{
+                    [key: string]: unknown;
+                }>;
+            }>;
+            coverage: {
+                mocked: Array<string>;
+                notInterceptable: Array<string>;
+                notInThisVersion: Array<string>;
+            };
+        } | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4329,6 +4403,8 @@ export type ListRunSimulationsResponses = {
                 discovered: Array<string>;
                 covered: Array<string>;
                 uncovered: Array<string>;
+                notInterceptable: Array<string>;
+                notInThisVersion: Array<string>;
             } | null;
         }>;
         nextPageToken: string | null;
@@ -4469,6 +4545,27 @@ export type CancelRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
+        mockedWorld: {
+            servingVersion: number;
+            draftVersion: number | null;
+            engine: {
+                type: string;
+                engineId: string;
+                version: number | null;
+            };
+            numbers: Array<{
+                number: string;
+                pinned: boolean;
+                bindings: Array<{
+                    [key: string]: unknown;
+                }>;
+            }>;
+            coverage: {
+                mocked: Array<string>;
+                notInterceptable: Array<string>;
+                notInThisVersion: Array<string>;
+            };
+        } | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4651,6 +4748,8 @@ export type GetSimulationResponses = {
             discovered: Array<string>;
             covered: Array<string>;
             uncovered: Array<string>;
+            notInterceptable: Array<string>;
+            notInThisVersion: Array<string>;
         } | null;
         mockTools: {
             defaults: Array<({

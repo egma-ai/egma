@@ -340,7 +340,7 @@ async function actingProject(
   return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
 }
 
-const AGENT_EDIT_KEYS = ["name"] as const;
+const AGENT_EDIT_KEYS = ["name", "mockToolsDuringSimulations"] as const;
 const ARCHIVE_KEYS = [] as const;
 const AGENT_RESTORE_KEYS = ["name"] as const;
 const CONNECTION_EDIT_KEYS = [
@@ -553,6 +553,23 @@ function retellChoiceIn(
     platformAgentId: named.trim(),
     ...(apiKey === undefined ? { apiKey: undefined } : { apiKey: apiKey.trim() }),
   };
+}
+
+/**
+ * The mock-tools tick as an edit sent it — and `undefined` for an edit that
+ * did not mention it, which leaves it as it is.
+ *
+ * Absence is "keep" rather than "off", unlike the pull flag on a create beside
+ * it, and the two differ because the questions do: a create with no flag is
+ * somebody who has not asked for pulling, while an edit with no flag is
+ * somebody renaming an agent, who must not silently turn a mocked world off.
+ */
+function tickIn(value: unknown): boolean | undefined | Refusal {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") {
+    return invalid("mockToolsDuringSimulations is written as true or false");
+  }
+  return value;
 }
 
 /** Whether this save also starts pulling the agent's production calls. */
@@ -887,6 +904,7 @@ function describedAgent(one: Agent): Record<string, unknown> {
     monitoringKeyPresent: one.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: one.monitoringApiKeyHint,
     pullProductionCalls: one.pullProductionCalls,
+    mockToolsDuringSimulations: one.mockToolsDuringSimulations,
     monitoringConfigured: one.monitoringConfigured,
     // Setup survives a stop because the machine notebook survives it too.
     // Last received remains a bare fact, never a health judgment.
@@ -1603,10 +1621,18 @@ export async function agentRoutes(
    * column was dropped pre-launch (ADR-0015), so two people editing one agent
    * from two browsers is a silent overwrite.
    *
-   * The name and nothing else. The provider's prompt, model and tools are not
-   * here, are not in the read, and are not coming: they live where the customer
-   * configures them, and egma being a second place to edit them would make two
-   * answers to one question with no rule to choose between.
+   * The name and the mock-tools tick, and nothing else. The provider's prompt,
+   * model and tools are not here, are not in the read, and are not coming: they
+   * live where the customer configures them, and egma being a second place to
+   * edit them would make two answers to one question with no rule to choose
+   * between.
+   *
+   * The tick is here and not on a door of its own because it is a **declared
+   * setting on the agent**, exactly as the pull switch is — a boolean the
+   * customer sets and egma reads at the start of every run. What it consents to
+   * is described where the contract describes it, and refusing it for an agent
+   * with no platform key is the access layer's own sentence, relayed word for
+   * word.
    */
   registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1619,11 +1645,15 @@ export async function agentRoutes(
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
 
+    const tick = tickIn(body.mockToolsDuringSimulations);
+    if (isRefusal(tick)) return refused(reply, tick);
+
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
 
     const updated = await updateAgent(acting, agentId, {
       ...(name === undefined ? {} : { name }),
+      ...(tick === undefined ? {} : { mockToolsDuringSimulations: tick }),
     });
 
     if (updated === undefined) return refused(reply, NO_SUCH_AGENT);

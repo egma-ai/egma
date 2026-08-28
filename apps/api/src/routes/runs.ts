@@ -9,6 +9,8 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
+  mockedWorldRow,
+  mockToolCoverageRow,
   NotPermittedError,
   productLabelOf,
   ProjectOutsideOrganizationError,
@@ -175,6 +177,11 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
+    // The temporary world, whole: the version branched from, the version
+    // minted, the engine it runs on, and each touched number's routing exactly
+    // as it was read. A reader sees what Egma promised to put back.
+    mockedWorld:
+      run.mockedWorld === null ? null : mockedWorldRow(run.mockedWorld),
     expectedSimulationCount: run.expectedSimulationCount,
     completedCount: run.completedCount,
     failedCount: run.failedCount,
@@ -255,11 +262,7 @@ function describedSimulation(
     mockToolCoverage:
       simulation.mockToolCoverage === null
         ? null
-        : {
-            discovered: [...simulation.mockToolCoverage.discovered],
-            covered: [...simulation.mockToolCoverage.covered],
-            uncovered: [...simulation.mockToolCoverage.uncovered],
-          },
+        : mockToolCoverageRow(simulation.mockToolCoverage),
   };
 }
 
