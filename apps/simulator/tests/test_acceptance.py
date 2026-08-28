@@ -36,6 +36,7 @@ from conftest import (
     measures_for,
     milliseconds_of,
     phone_spec,
+    playground_spec,
     retell_spec,
     scripted_spec,
     span_attribute,
@@ -44,6 +45,7 @@ from conftest import (
     terminal_event_for,
     turns_for,
 )
+from playground_stub import Reply, ToolTurn
 
 from egma_simulator.model import GOODBYE
 from egma_simulator.recording import channels_of
@@ -740,6 +742,160 @@ async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
     assert terminal["facts"]["ending"] == "error"
     assert "unreachable" in terminal["reason"], terminal["reason"]
     assert "127.0.0.1:1" in terminal["reason"], terminal["reason"]
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
+    workbench, start_simulator, start_playground_stub
+):
+    """The chat door for a Retell **voice** agent, black-box.
+
+    A spec carrying a playground connection block goes in, and what comes
+    back is a record with everything this lane promises on it: the turns,
+    the transition the platform announced, one tool call marked ``mocked``
+    because the run's snapshot covered its name and one carrying no stamp
+    at all because it ran for real, a coverage stamp saying which was
+    which, no audio, and no provider reference — because the playground
+    keeps no record of its own and an id only egma has seen is not a join.
+    """
+    sentinel = "SENTINEL-playground-key-0d4f8b3e6a12"
+    running = await start_playground_stub(
+        api_key=sentinel,
+        replies=[
+            Reply(words="Lakeside Dental, how can I help?", node="greet"),
+            Reply(
+                words="Thursday at half past two, then.",
+                node="offer_slot",
+                tools=[
+                    ToolTurn(
+                        name="get_availability", arguments='{"day":"thursday"}'
+                    ),
+                    ToolTurn(
+                        name="lookup_customer",
+                        arguments='{"phone":"+15551234567"}',
+                        real_result='{"customer_id":"cus_9931"}',
+                    ),
+                ],
+                ends=True,
+            ),
+        ],
+    )
+    spec = playground_spec(
+        "sim-playground-001",
+        base_url=running.base_url,
+        api_key=sentinel,
+        agent_id="agent_lakeside_voice",
+        agent_version=106,
+        dynamic_variables={"egma_simulation": "sim-playground-001"},
+        scenario="I need to move my Tuesday cleaning to Thursday.",
+        mock_tools=[
+            {
+                "tool_name": "get_availability",
+                "answer": {"answer": {"slots": ["thu-1430"]}},
+                "delay_milliseconds": 30000,
+            }
+        ],
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-playground-001"))
+
+    # The transcript, the transition included: a node transition arrives in
+    # a role the record does not know, and the rule for those is that they
+    # are preserved verbatim as the agent's own content rather than lost.
+    assert turns_for(records, "sim-playground-001") == [
+        ("agent", "moved to greet\nLakeside Dental, how can I help?"),
+        ("human", "I need to move my Tuesday cleaning to Thursday."),
+        ("agent", "moved to offer_slot\nThursday at half past two, then."),
+    ]
+
+    terminal = terminal_event_for(records, "sim-playground-001")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "agent_ended"
+    # No audio exists anywhere on this lane, and the record says so.
+    assert terminal["facts"]["audio"] is None
+    # No provider reference exists either, and the record says that too,
+    # rather than carrying an id egma invented for itself.
+    assert terminal["facts"]["provider_reference"] is None
+    assert terminal["facts"]["mock_tool_coverage"] == {
+        "discovered": ["get_availability", "lookup_customer"],
+        "covered": ["get_availability"],
+        "uncovered": ["lookup_customer"],
+    }
+
+    # The tool facts, at the grain the honesty claim is made at: the
+    # covered call carries what Egma answered with and the stamp that says
+    # Egma authored it; the uncovered one carries neither, which is the
+    # record's own way of saying a real backend did the work.
+    spans = [record["span"] for record in spans_for(records, "sim-playground-001")]
+    calls = [span for span in spans if span["name"] == "tool_call"]
+    assert [span_attribute(span, "egma.tool.name") for span in calls] == [
+        "get_availability",
+        "lookup_customer",
+    ]
+    mocked, real = calls
+    assert span_attribute(mocked, "egma.tool.arguments") == '{"day":"thursday"}'
+    assert span_attribute(mocked, "egma.tool.result") == '{"slots":["thu-1430"]}'
+    assert span_attribute(mocked, "egma.tool.provenance") == "mocked"
+    assert span_attribute(mocked, "egma.tool.mock_tool") == "get_availability"
+    assert span_attribute(real, "egma.tool.arguments") == '{"phone":"+15551234567"}'
+    assert span_attribute(real, "egma.tool.result") is None
+    assert span_attribute(real, "egma.tool.provenance") is None
+
+    # And the platform's side of the same story: every request named the
+    # version the spec resolved — never Retell's own moving default — and
+    # carried Egma's answers for it to serve.
+    stub = running.stub
+    assert [request["agent_version"] for request in stub.requests] == [106, 106]
+    assert [mock["tool_name"] for mock in stub.mocks()[0]] == ["get_availability"]
+    assert stub.mocks()[0][0]["input_match_rule"] == "any"
+    assert stub.delivered() == ["I need to move my Tuesday cleaning to Thursday."]
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_playground_billing_wall_fails_loudly_and_says_nothing(
+    workbench, start_simulator, start_playground_stub
+):
+    """The failing conduct, with the key the platform really accepted.
+
+    The request is authorized and then refused for billing, and the
+    platform is careless enough to say the key back in its own error body.
+    The simulation fails with a reason a person can act on — the status,
+    where it came from, and that it is about billing rather than about the
+    agent under test — and the key appears in none of the three places it
+    could surface.
+    """
+    sentinel = "SENTINEL-playground-key-billing-7c1a"
+    running = await start_playground_stub(
+        api_key=sentinel, refusals=(402,), echo_key_in_refusal=True
+    )
+    spec = playground_spec(
+        "sim-playground-billing", base_url=running.base_url, api_key=sentinel
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-playground-billing"))
+
+    assert status_events_for(records, "sim-playground-billing") == [
+        "running",
+        "failed",
+    ]
+    terminal = terminal_event_for(records, "sim-playground-billing")
+    assert terminal["facts"]["ending"] == "error"
+    assert terminal["facts"]["turn_count"] == 0
+    assert "402" in terminal["reason"], terminal["reason"]
+    assert "billing" in terminal["reason"], terminal["reason"]
+    # Nothing was conducted: no exchange happened off the record.
+    assert turns_for(records, "sim-playground-billing") == []
+    # And Egma never stood in this agent's tool path, so it claims nothing
+    # about its tools.
+    assert terminal["facts"].get("mock_tool_coverage") is None
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)

@@ -810,6 +810,50 @@ def retell_spec(
     )
 
 
+def playground_spec(
+    simulation_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    agent_id: str = "agent_stubbed_voice_0001",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    agent_version: object = None,
+    dynamic_variables: dict[str, str] | None = None,
+    mock_tools: list[dict] | None = None,
+) -> dict:
+    """One spec against a Retell playground connection, pointed wherever asked.
+
+    The connection block is exactly what the control plane stores for a
+    ``retell_playground`` connection — the voice agent's id in the config,
+    the key in the credentials — plus the base URL, which is what lets the
+    exchange land on a playground-shaped stub instead of the platform
+    itself. The version and the run's resolved answers ride the spec the
+    way a real run over this lane carries them: the version because it is
+    resolved once and named on every request, the answers because this is
+    the lane whose mock tools ride the request natively.
+    """
+    return a_spec(
+        simulation_id,
+        connection={
+            "agent_platform": "retell",
+            "connection_type": "retell_playground",
+            "access_variant": "retell_playground.api_key",
+            "config": {"retellAgentId": agent_id, "baseUrl": base_url},
+            "credentials": {"apiKey": api_key},
+        },
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+        agent_version=agent_version,
+        dynamic_variables=dynamic_variables,
+        mock_tools=mock_tools,
+    )
+
+
 def assert_kept_secret(
     secret: str, *, records: list[dict], simulator: SimulatorProcess
 ) -> None:
