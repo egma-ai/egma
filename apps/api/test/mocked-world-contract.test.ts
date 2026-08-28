@@ -36,13 +36,21 @@ const RETELL_CHAT = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
+/**
+ * A Retell holding one chat agent with one mockable tool.
+ *
+ * It answers the reads the tick makes as well as the listing setup makes,
+ * because turning the tick on is a read of the account: Egma has to know which
+ * response engine the agent runs on and what its numbers are bound to before it
+ * can promise anything about a mocked run.
+ */
 const RETELL_FETCH: typeof fetch = async (input) => {
   const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`Unexpected Retell read: ${url}`);
-  }
-  return new Response(
-    JSON.stringify({
+  const json = (value: unknown) =>
+    new Response(JSON.stringify(value), { status: 200 });
+
+  if (url.includes("/v2/list-agents")) {
+    return json({
       items: [
         {
           agent_id: "agent_in_retell_1",
@@ -51,9 +59,42 @@ const RETELL_FETCH: typeof fetch = async (input) => {
         },
       ],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+    });
+  }
+  if (url.includes("/v2/list-phone-numbers")) {
+    return json({ items: [], has_more: false });
+  }
+  if (url.includes("/get-agent/")) {
+    return json({
+      agent_id: "agent_in_retell_1",
+      version: 105,
+      is_published: true,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: "conversation_flow_2346a0e8367c",
+        version: 105,
+      },
+    });
+  }
+  if (url.includes("/get-conversation-flow/")) {
+    return json({
+      conversation_flow_id: "conversation_flow_2346a0e8367c",
+      version: 105,
+      tools: [
+        {
+          tool_id: "tool-get_availability",
+          type: "custom",
+          name: "get_availability",
+          description: "Look up open appointment slots.",
+          url: "https://backend.example.com/tools/get_availability",
+          method: "POST",
+          headers: {},
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+    });
+  }
+  throw new Error(`Unexpected Retell read: ${url}`);
 };
 
 async function aCustomer(

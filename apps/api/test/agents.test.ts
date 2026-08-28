@@ -219,6 +219,18 @@ describe("discovering simulation agents", () => {
           name: "Front desk",
           modality: "voice",
           connectionCandidates: [
+            // The web call comes first, and it is offered whether or not the
+            // agent has a number: Egma places this call itself, so there is
+            // nothing to route. It is also the lane a mocked run is conducted
+            // over.
+            {
+              agentPlatform: "retell",
+              connectionType: "retell_web_call",
+              accessVariant: "retell_web_call.api_key",
+              modality: "voice",
+              productLabel: "Retell web call",
+              config: { retellAgentId: "agent_voice_1" },
+            },
             {
               agentPlatform: "retell",
               connectionType: "phone_number",
@@ -248,7 +260,18 @@ describe("discovering simulation agents", () => {
           platformAgentId: "agent_voice_without_number",
           name: "Not routed",
           modality: "voice",
-          connectionCandidates: [],
+          // A voice agent nobody has routed a number to is still reachable:
+          // Egma opens a web call against it.
+          connectionCandidates: [
+            {
+              agentPlatform: "retell",
+              connectionType: "retell_web_call",
+              accessVariant: "retell_web_call.api_key",
+              modality: "voice",
+              productLabel: "Retell web call",
+              config: { retellAgentId: "agent_voice_without_number" },
+            },
+          ],
         },
       ],
     });

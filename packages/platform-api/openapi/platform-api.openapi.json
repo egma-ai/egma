@@ -118,6 +118,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
+                                    "retell_web_call",
                                     "phone_number"
                                   ]
                                 },
@@ -125,6 +126,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
+                                    "retell_web_call.api_key",
                                     "phone_number.public_e164"
                                   ]
                                 },
@@ -2132,7 +2134,11 @@
                   },
                   "mockToolsDuringSimulations": {
                     "type": "boolean",
-                    "description": "Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is."
+                    "description": "Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is. Turning it on runs discovery first and is refused with its reason where the agent cannot be mocked; it also seeds a mock tool, with a deterministic default answer, for every tool Egma can intercept and does not already answer for."
+                  },
+                  "pinNumbersDuringRuns": {
+                    "type": "boolean",
+                    "description": "Consent to Egma pinning a telephone number that follows the platform's `latest` pointer to the version it already resolves to, for the length of each run, and putting the binding back afterwards. Required only when such a number routes to this agent: without it, branching a temporary version would send real callers to it the instant it exists. Sending false, or leaving it out where it is needed, refuses the tick with the reason — a box promising isolation never quietly runs real tools."
                   }
                 },
                 "additionalProperties": false
@@ -2659,6 +2665,329 @@
                   },
                   "required": [
                     "connection"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/mock-tools:discover": {
+      "post": {
+        "operationId": "discoverMockTools",
+        "summary": "Discover the tools a mocked run would stand in front of",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seed": {
+                    "type": "boolean",
+                    "description": "Also seed a mock tool for every interceptable tool this project does not answer for yet. Never overwrites an authored answer: a known name keeps its row. Absent is a read."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What a mocked run over this agent would cover.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mockable": {
+                      "type": "boolean"
+                    },
+                    "refusal": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "custom_llm_engine",
+                                "pin_consent_required",
+                                "phone_only_agent",
+                                "keys_disagree",
+                                "platform_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "reason",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "engine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "retell-llm",
+                            "conversation-flow",
+                            "custom-llm"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "servingVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "coverage": {
+                            "type": "string",
+                            "enum": [
+                              "mocked",
+                              "notInterceptable",
+                              "notInThisVersion"
+                            ]
+                          },
+                          "answered": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type",
+                          "coverage",
+                          "answered"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "toolName": {
+                            "type": "string"
+                          },
+                          "toolType": {
+                            "type": "string"
+                          },
+                          "effect": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "toolName",
+                          "toolType",
+                          "effect"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "number": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "verdicts": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "numeric",
+                                "environment-tag",
+                                "latest-published",
+                                "hijackable"
+                              ]
+                            }
+                          },
+                          "pin": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "number",
+                          "label",
+                          "verdicts",
+                          "pin"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "seeded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "mockable",
+                    "refusal",
+                    "engine",
+                    "servingVersion",
+                    "tools",
+                    "warnings",
+                    "numbers",
+                    "seeded"
                   ],
                   "additionalProperties": false
                 }
