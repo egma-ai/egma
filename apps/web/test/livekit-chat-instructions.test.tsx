@@ -39,11 +39,13 @@ describe("LiveKit chat instructions", () => {
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(2);
 
     const copy = container.textContent ?? "";
-    expect(copy).toContain('context = json.loads(ctx.job.metadata or "{}")');
+    expect(copy).toContain(
+      'chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+    );
     expect(copy).toContain("audio_input=False");
     expect(copy).toContain("TextOutputOptions(sync_transcription=False)");
-    // The prompt carries the worker's name as well, because a worker Egma
-    // cannot dispatch cannot be told the simulation is typed either.
+    // The prompt carries the worker's name as well: dispatching by name is
+    // what puts the one agent under test in the marked room.
     expect(copy).toContain("agent_name in its WorkerOptions");
     // Nothing Egma has to install is asked for.
     expect(copy).not.toContain("pip install");
