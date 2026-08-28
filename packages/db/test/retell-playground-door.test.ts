@@ -129,33 +129,73 @@ describe("the playground door's refusals", () => {
     );
   });
 
-  it("refuses a base URL that is not an http or https address", () => {
+  it("refuses anything that is not a public https address", () => {
+    // **This key decides where the control plane sends the connection's own
+    // Retell key**, from inside the platform, at run start. So it is held to
+    // the same rule as every other customer-written outbound address: https,
+    // a real name, and nothing that resolves in the deployment's own
+    // neighbourhood. A deployment that genuinely reaches Retell through
+    // something on its own network says so in operator configuration, where
+    // the person running the platform can see it — never in a connection row.
     for (const baseUrl of [
+      // Not an address at all.
       "api.retellai.com",
-      "wss://api.retellai.com",
-      "ftp://api.retellai.com",
       "https:api.retellai.com",
-      "https://user:secret@api.retellai.com",
       "https://",
       "",
+      // Not https.
+      "http://api.retellai.com",
+      "wss://api.retellai.com",
+      "ftp://api.retellai.com",
+      // The cloud metadata services, which answer to anything inside.
+      "http://169.254.169.254/latest/meta-data/",
+      "https://169.254.169.254/latest/meta-data/",
+      "http://metadata.google.internal/computeMetadata/v1/",
+      // The platform's own neighbourhood.
+      "https://127.0.0.1:9000/admin",
+      "https://localhost:9000",
+      "https://api.localhost",
+      "https://[::1]:9000",
+      "https://10.0.0.5",
+      // Credentials smuggled into the authority.
+      "https://user:secret@api.retellai.com",
+      // Two ways to read one string.
+      "https://api.retellai.com\\@evil.example",
     ]) {
       expect(
         () => validConfig(KIND, VARIANT, { retellAgentId: AGENT, baseUrl }),
         `baseUrl ${JSON.stringify(baseUrl)}`,
-      ).toThrow(/must be an http or https URL/u);
+      ).toThrow(/must be a public https URL/u);
     }
   });
 
-  it("admits a loopback address, which is what the key is for", () => {
-    // A test conversing with a Retell-shaped server, and a deployment whose
-    // outbound traffic goes through its own proxy. Refusing these would refuse
-    // the two cases the key exists for.
+  it("refuses a fragment, which would swallow the path Egma appends", () => {
+    // The specific trick this key is vulnerable to. Egma adds the completion
+    // path and the agent's id to this value; a `#` makes everything it adds a
+    // fragment, which is never sent — so the request lands wherever the value
+    // itself ended, and the writer of the value chose the whole address.
+    for (const baseUrl of [
+      "https://api.retellai.com/#",
+      "https://evil.example/collect#",
+      "https://evil.example/#/api.retellai.com",
+    ]) {
+      expect(
+        () => validConfig(KIND, VARIANT, { retellAgentId: AGENT, baseUrl }),
+        `baseUrl ${JSON.stringify(baseUrl)}`,
+      ).toThrow(/holds no "#" fragment/u);
+    }
+  });
+
+  it("still takes an ordinary public proxy, which is what the key is for", () => {
     expect(
       validConfig(KIND, VARIANT, {
         retellAgentId: AGENT,
-        baseUrl: "http://127.0.0.1:8787",
+        baseUrl: "https://retell-proxy.acme.example",
       }),
-    ).toEqual({ retellAgentId: AGENT, baseUrl: "http://127.0.0.1:8787" });
+    ).toEqual({
+      retellAgentId: AGENT,
+      baseUrl: "https://retell-proxy.acme.example",
+    });
   });
 
   it("refuses a garbage modality as not a modality at all", () => {

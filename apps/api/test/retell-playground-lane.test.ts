@@ -534,13 +534,19 @@ describe("a run over a Retell playground connection", () => {
 });
 
 /**
- * The stamp and the work order, driven through `startRun`'s own seam.
+ * The stamp, driven through `startRun`'s own seam.
  *
- * The lane above is refused at the door until its plug ships, and what these
- * two prove is everything on the far side of that one boolean: that the
- * resolved version lands on the run **and** on every conversation of it, and
- * that a claim assembled from such a run carries the version, this
- * simulation's variables, and only the answers this lane may honestly serve.
+ * The lane's own proof above goes the whole way over HTTP and is the one that
+ * says the product works. These sit beside it to say two things that door
+ * cannot: what the write does when handed a world **directly**, so the record
+ * shape is pinned independently of whatever the run-start read happened to
+ * resolve; and what it does when handed **none**, which is the case no caller
+ * should ever produce and every caller would produce silently if the write did
+ * not refuse it.
+ *
+ * A connection that reads no platform at run start carries the first of those,
+ * because a lane that pins nothing is exactly where a stray stamp would be
+ * hardest to notice.
  */
 const A_CONDUCTED_WORLD: ConductedWorld = {
   agentVersion: SERVING_VERSION,
@@ -643,6 +649,32 @@ describe("the version a run resolved, on the record", () => {
     );
     expect(alone.statusCode, JSON.stringify(alone.body)).toBe(200);
     expect(alone.body.conductedAgentVersion).toBe(SERVING_VERSION);
+  });
+
+  it("refuses to write a run whose world was never read", async () => {
+    // The guard that makes "never a silent conduct against an unread world" a
+    // property of the write rather than a habit of one caller. The route reads
+    // first and fails loudly; this is what happens if some later caller forgets
+    // to — a refusal, rather than a run conducted against a world nobody
+    // looked at, carrying a coverage stamp nobody checked.
+    const { ada, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
+      "playground_unread_world_refused",
+      PLAYGROUND,
+    );
+
+    await expect(
+      startRun(contextFor(ada, "member"), {
+        suiteId,
+        agentId,
+        connectionId,
+        idempotencyKey: newId("run"),
+      }),
+    ).rejects.toThrow(/without the run-start read of the agent's platform/u);
+
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
   });
 
   it("is absent on a run that pinned none", async () => {

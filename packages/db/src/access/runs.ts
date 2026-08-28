@@ -676,6 +676,25 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
       }
+      // **Never a silent conduct against an unread world**, and said here so
+      // it is a property of the write rather than a habit of one caller. A
+      // kind whose run start reads the agent's platform cannot begin without
+      // what that read produced: the version every request will name, and the
+      // tool classes its coverage stamp is built from. The caller does the
+      // reading — it is somebody else's API and this is one transaction
+      // holding a lock — but arriving here without it is a bug in the caller,
+      // not a run to write, and a run written without it would conduct
+      // against a world nobody looked at and stamp a claim nobody checked.
+      if (
+        connectionTypeReadsPlatformAtRunStart(reached.connectionType) &&
+        input.conductedWorld === undefined
+      ) {
+        throw new Error(
+          `a run over a ${reached.connectionType} connection is conducted ` +
+            `against a named version, so it cannot be started without the ` +
+            `run-start read of the agent's platform`,
+        );
+      }
 
       const graderCandidates = await applicableGraders(auth, tx, projectId);
       const plannedTests: {
@@ -872,8 +891,8 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
  *   it straight to the read and lets it go.
  */
 export type RunStartReach = {
+  /** Which reader the run route hands this to. */
   readonly connectionType: ConnectionType;
-  readonly accessVariant: AccessVariant;
   readonly config: Readonly<Record<string, string>>;
   readonly apiKey: string;
 };
@@ -889,7 +908,6 @@ export async function resolveRunStartReach(
   const [row] = await db()
     .select({
       connectionType: connection.connectionType,
-      accessVariant: connection.accessVariant,
       config: connection.config,
       credentials: connection.credentials,
     })
@@ -919,7 +937,6 @@ export async function resolveRunStartReach(
 
   return {
     connectionType: row.connectionType as ConnectionType,
-    accessVariant: row.accessVariant as AccessVariant,
     config: stringRecordFromRow(
       row.config,
       () =>

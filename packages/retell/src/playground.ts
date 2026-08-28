@@ -236,9 +236,13 @@ function mockOnTheWire(mock: PlaygroundMockTool): Record<string, unknown> {
   return {
     [WIRE.mockToolName]: mock.toolName,
     [WIRE.mockToolMatch]: WIRE.matchAnything,
-    // A string either way, because that is what the transport carries.
-    [WIRE.mockToolOutput]:
-      typeof held === "string" ? held : JSON.stringify(held ?? null),
+    // **Encoded whatever it is, strings included.** The transport carries a
+    // string, so an answer that happens to be one is tempting to pass through
+    // — and passing it through would send `card declined` where the plug
+    // sends `"card declined"`. Every failure branch is a string, so that one
+    // exception would have made the two halves of egma disagree about every
+    // error mock on this lane.
+    [WIRE.mockToolOutput]: JSON.stringify(held ?? null),
     [WIRE.mockToolResult]: !fails,
   };
 }

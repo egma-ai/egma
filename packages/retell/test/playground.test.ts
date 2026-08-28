@@ -295,7 +295,7 @@ describe("one playground exchange", () => {
       {
         [WIRE.mockToolName]: "charge_card",
         [WIRE.mockToolMatch]: WIRE.matchAnything,
-        [WIRE.mockToolOutput]: "card declined",
+        [WIRE.mockToolOutput]: JSON.stringify("card declined"),
         [WIRE.mockToolResult]: false,
       },
     ]);

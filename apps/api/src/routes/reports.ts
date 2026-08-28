@@ -157,10 +157,11 @@ function reportedMoments(facts: {
  * happened, and they are read off the run rather than asked for again.
  *
  * When the conductor reports no coverage at all and the run knows its agent's
- * tools — because it built a temporary world, or because it read the version it
- * conducts against — the stamp is built from the run alone. That is not this door inventing
- * a fact: the tool list came from the configuration the temporary version was
- * branched from, so there was never anything to be late to.
+ * tools — because it built a temporary world, or because it read the version
+ * it conducts against — the stamp is built from the run alone. That is not
+ * this door inventing a fact: either way the tool list came from a
+ * configuration read before the first turn, so there was never anything to be
+ * late to.
  *
  * When neither has anything to say, the stamp is left off, which is the report
  * saying nobody was ever asked — a different sentence from three empty lists.

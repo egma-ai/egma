@@ -200,9 +200,24 @@ export async function confirmRetellCandidate(
   platformAgentId: string,
   candidate: RetellCandidateToConfirm,
   fetchImpl: ProviderFetch = fetch,
+  /**
+   * Where Retell answers for this connection, when its config names somewhere
+   * other than Retell's own address.
+   *
+   * **The same address the run start will use.** The door and the run ask one
+   * question — is this agent's engine one this lane can reach — and two
+   * different servers could answer it two different ways: a connection
+   * confirmed against Retell and then conducted against a proxy would have
+   * been checked somewhere it never runs.
+   */
+  baseUrl?: string | undefined,
 ): Promise<RetellCandidateConfirmation> {
   const key = credential(apiKey);
-  const reach = { fetchImpl, signal: AbortSignal.timeout(15_000) };
+  const reach = {
+    ...(baseUrl === undefined ? {} : { url: baseUrl }),
+    fetchImpl,
+    signal: AbortSignal.timeout(15_000),
+  };
   const agents = await listAgents(key, reach);
   if (agents.kind === "invalid-key") return { kind: "invalid_key" };
   if (agents.kind !== "agents") {
@@ -243,7 +258,11 @@ export async function confirmRetellCandidate(
     // nobody expected. The run start asks the same question again through the
     // same read, so the two refusals are one sentence in one place.
     const world = await readPlaygroundWorld(
-      { apiKey, agentId: platformAgentId },
+      {
+        apiKey,
+        agentId: platformAgentId,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      },
       fetchImpl,
     );
     if (world.kind === "refused") {

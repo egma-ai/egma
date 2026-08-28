@@ -697,6 +697,11 @@ async function confirmRetellAgent(
     choice.platformAgentId,
     candidate,
     fetchImpl,
+    // Gated by the registry before it reaches here, and the same value the
+    // run-start read will use.
+    typeof wanted.config["baseUrl"] === "string"
+      ? wanted.config["baseUrl"]
+      : undefined,
   );
   if (checked.kind === "invalid_key") {
     return {

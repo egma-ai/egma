@@ -27,6 +27,7 @@ import {
   type AuthContext,
   type ConductedSimulation,
   type ConductedWorld,
+  type RunStartReach,
   type ExpectedTestVersion,
   type NewRun,
   type Run,
@@ -59,7 +60,38 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
-import { readPlaygroundWorld } from "../providers/retell-playground.ts";
+import {
+  readPlaygroundWorld,
+  type PlatformWorldRead,
+} from "../providers/retell-playground.ts";
+
+/**
+ * How one connection type reads the agent's platform before its run starts.
+ *
+ * The registry says *which* kinds read; this says *how* each of them does it,
+ * and the two are held level by the check below rather than by anybody
+ * remembering. A kind added to the registry's list with no reader here fails
+ * the run out loud naming itself, which is the same discipline the connection
+ * registry keeps about adapters: nothing may claim what no code can do.
+ */
+type RunStartReader = (
+  reach: RunStartReach,
+  fetchImpl: typeof fetch | undefined,
+) => Promise<PlatformWorldRead>;
+
+const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
+  retell_playground: (reach, fetchImpl) =>
+    readPlaygroundWorld(
+      {
+        apiKey: reach.apiKey,
+        agentId: reach.config["retellAgentId"] ?? "",
+        ...(reach.config["baseUrl"] === undefined
+          ? {}
+          : { baseUrl: reach.config["baseUrl"] }),
+      },
+      fetchImpl,
+    ),
+};
 
 export type RunRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -491,16 +523,17 @@ export async function runRoutes(
               `${agentId} that Egma can read the agent's platform with`,
           );
         }
-        const read = await readPlaygroundWorld(
-          {
-            apiKey: reach.apiKey,
-            agentId: reach.config["retellAgentId"] ?? "",
-            ...(reach.config["baseUrl"] === undefined
-              ? {}
-              : { baseUrl: reach.config["baseUrl"] }),
-          },
-          options.retellFetch,
-        );
+        // Dispatched on the kind the row actually holds, so the registry's
+        // list and the readers above cannot drift apart in silence.
+        const reader = RUN_START_READERS[reach.connectionType];
+        if (reader === undefined) {
+          throw new Error(
+            `a run over a ${reach.connectionType} connection is declared to ` +
+              `read its agent's platform at run start, and nothing here knows ` +
+              `how to read it`,
+          );
+        }
+        const read = await reader(reach, options.retellFetch);
         if (read.kind === "refused") {
           return unprocessable(reply, read.message);
         }

@@ -40,7 +40,14 @@ import {
 /** How long the two run-start reads may take together. */
 const READ_TIMEOUT_MILLISECONDS = 15_000;
 
-export type PlaygroundWorldRead =
+/**
+ * What any run-start platform read answers with.
+ *
+ * Named for the job rather than for this lane, because the run route dispatches
+ * on it: a second kind that reads its platform before a run answers in these
+ * same three shapes or the route cannot treat the two alike.
+ */
+export type PlatformWorldRead =
   | { readonly kind: "world"; readonly world: ConductedWorld }
   /**
    * A settled fact about this agent, which retrying will not change: its
@@ -77,7 +84,7 @@ function credential(value: string): RetellCredential {
 const WHAT_IS_SERVING = "latest";
 
 /** Retell would not answer, said the same way whichever read met it. */
-function unavailable(what: string): PlaygroundWorldRead {
+function unavailable(what: string): PlatformWorldRead {
   return {
     kind: "unavailable",
     message:
@@ -103,7 +110,7 @@ export async function readPlaygroundWorld(
   },
   fetchImpl: ProviderFetch = fetch,
   timeoutMilliseconds = READ_TIMEOUT_MILLISECONDS,
-): Promise<PlaygroundWorldRead> {
+): Promise<PlatformWorldRead> {
   const agentId = input.agentId.trim();
   if (agentId === "") {
     return {

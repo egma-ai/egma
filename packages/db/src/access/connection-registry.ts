@@ -646,51 +646,6 @@ function e164PhoneNumber(key: string, value: unknown): string {
 }
 
 /**
- * Where a Retell-shaped API answers, when it is not Retell's own address.
- *
- * The one config key on this lane that is not about the agent. It exists for
- * the two deployments that need it: a test conversing with a Retell-shaped
- * server, and an installation whose outbound traffic goes through a proxy of
- * its own. Left out — which is the ordinary case — everything reaches Retell.
- *
- * **A value here redirects the connection's own Retell key**, because the key
- * travels as a bearer token to whatever address this names. That is deliberate
- * and is the whole point of the key; it is written down here so that nobody has
- * to work it out from the absence of a rule. Loopback and private addresses are
- * therefore admitted on purpose — refusing them would refuse the proxy and the
- * test this key exists for — while a URL carrying its own credentials or a
- * control character is refused, because neither is an address anybody means.
- */
-function retellApiUrl(key: string, value: unknown): string {
-  const candidate = typeof value === "string" ? value.trim() : "";
-  let parsed: URL | undefined;
-  try {
-    parsed = new URL(candidate);
-  } catch {
-    parsed = undefined;
-  }
-
-  const scheme = parsed?.protocol;
-  if (
-    parsed === undefined ||
-    (scheme !== "http:" && scheme !== "https:") ||
-    !candidate.toLowerCase().startsWith(`${scheme}//`) ||
-    parsed.hostname === "" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    candidate.includes("\\") ||
-    /[\u0000-\u001F\u007F]/u.test(candidate)
-  ) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `the config's ${key} must be an http or https URL, which looks like ` +
-        `https://api.retellai.com`,
-    );
-  }
-  return candidate;
-}
-
-/**
  * The four schemes a LiveKit server URL is written in. All four are accepted
  * because all four are correct: the SDKs normalise between the websocket pair
  * and the HTTP pair themselves, so refusing the one a customer copied out of
@@ -774,6 +729,37 @@ function jsonObjectText(key: string, value: unknown): string {
  * second check is load-bearing because DNS can change after this write.
  */
 function tokenEndpointUrl(key: string, value: unknown): string {
+  return publicHttpsUrl(key, value, "https://example.com/egma/livekit-token");
+}
+
+/**
+ * An address on the public internet that Egma itself will make a request to.
+ *
+ * **The rule every customer-written outbound address is held to**, written
+ * once because it is one rule: a config key a customer fills in decides where
+ * this platform's own process sends a request, and every such key is therefore
+ * a way to ask Egma to fetch something on the customer's behalf. HTTPS only, a
+ * real hostname, and nothing that resolves inside the deployment: a literal
+ * address, `localhost`, or a name under `.localhost` is refused before it is
+ * ever stored.
+ *
+ * **A private address is an operator's setting, never a customer's.** A
+ * deployment that really does reach a provider through something on its own
+ * network says so in its own configuration, where the person who runs the
+ * platform can see it — not in a connection row any member of any organization
+ * can write. That is the whole distinction: this gate guards a value that
+ * arrives over the API from a customer, and no such value may name the
+ * platform's own neighbourhood.
+ *
+ * A URL carrying its own credentials, a backslash, or a control character is
+ * refused too, because none of the three is an address anybody means and each
+ * is a way to make one string parse two ways.
+ *
+ * This is a check at write time and it is not the whole defence: DNS can move
+ * after the row is written, so a caller that resolves the name again at request
+ * time should say so where it does it.
+ */
+function publicHttpsUrl(key: string, value: unknown, example: string): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   let parsed: URL | undefined;
   try {
@@ -806,7 +792,39 @@ function tokenEndpointUrl(key: string, value: unknown): string {
     throw new AgentWriteRefusedError(
       "not_admitted",
       `the config's ${key} must be a public https URL, which looks like ` +
-        `https://example.com/egma/livekit-token`,
+        example,
+    );
+  }
+  return candidate;
+}
+
+/**
+ * Where a Retell-shaped API answers, when it is not Retell's own address.
+ *
+ * The one config key on this lane that is not about the agent, and the one a
+ * deployment fills in when its outbound traffic goes through a proxy of its
+ * own. Left out — which is the ordinary case — everything reaches Retell.
+ *
+ * **A value here redirects the connection's own Retell key**: the key travels
+ * as a bearer token to whatever address this names, and — unlike every other
+ * outbound address in this registry — the request is made by the **control
+ * plane** at run start, from inside the platform. So it is held to the public
+ * rule above and to one more of its own.
+ *
+ * **A fragment is refused, and that is not tidiness.** This value is a *base*:
+ * Egma appends the completion path and the agent's id to it. A `#` anywhere
+ * would make everything Egma appends part of a fragment, which is never sent —
+ * so the request would land on whatever path the value itself ended with, and
+ * the person who wrote the value, rather than Egma, would have chosen the whole
+ * address. A base URL has no fragment in it because a base is not a place.
+ */
+function retellApiUrl(key: string, value: unknown): string {
+  const candidate = publicHttpsUrl(key, value, "https://api.retellai.com");
+  if (candidate.includes("#")) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} is the address Egma adds a path to, so it holds no ` +
+        `"#" fragment; it looks like https://api.retellai.com`,
     );
   }
   return candidate;
