@@ -31,10 +31,15 @@ class LoopbackCounterpart:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
+        agent_version: object = None,
+        dynamic_variables: object = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
+        # There is no platform here to keep versions or render variables:
+        # the counterpart is this process talking to itself.
         del access_variant, credentials, simulation_id, mock_tools, media
+        del agent_version, dynamic_variables
         if modality != "voice":
             raise PlugError(
                 f"the loopback counterpart speaks voice only; a {modality!r} "

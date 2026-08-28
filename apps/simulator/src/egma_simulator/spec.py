@@ -240,6 +240,28 @@ class SimulationSpec:
     models: SelectedModels
     """The only source for LLM, STT, TTS, and technical voice choices."""
 
+    agent_version: int | str | None = None
+    """Which version of the agent under test this simulation is conducted
+    against, exactly as the platform names its versions.
+
+    ``None`` is the ordinary case and means the platform's own default. The
+    simulator neither invents a version nor reinterprets one: a number stays
+    a number and a name stays a name, because the platform is the only thing
+    that knows what either means. A plug reaching a platform with no such
+    idea takes it and drops it.
+    """
+
+    dynamic_variables: dict[str, str] = field(default_factory=dict)
+    """The variables this one simulation is conducted with, for the agent's
+    own platform to render.
+
+    Empty is the ordinary case. Nothing here reads them — egma's own
+    attribution variable included, which is what a tool call the platform
+    makes rides back to this simulation on. They are carried to the plug and
+    handed on byte for byte, because a value the simulator tidied would be a
+    value the agent under test never saw.
+    """
+
     mock_tools: tuple[MockTool, ...] = ()
     """What egma answers for while this simulation runs, already resolved.
 
@@ -263,6 +285,8 @@ class SimulationSpec:
         connection = document["connection"]
         limits = document["limits"]
         return cls(
+            agent_version=document.get("agent_version"),
+            dynamic_variables=dict(document.get("dynamic_variables") or {}),
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=WorkOrderPlatform.from_document(document.get("platform")),
             models=SelectedModels.from_document(document["models"]),

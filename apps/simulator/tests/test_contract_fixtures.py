@@ -50,7 +50,19 @@ def read_json(path: Path) -> dict:
 # the property it names where the keyword names one. The same pins as the
 # TypeScript suite's EXPECTED_REJECTION, kept in its shape on purpose.
 EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
+    # A version reference is the platform's own, and it is passed on
+    # untouched. One made of spaces is present by the letter and absent by
+    # the reading, and it would ask a platform for a version named "   ".
+    "spec/agent-version-blank.json": ("/agent_version", "pattern", None),
     "spec/chat-carrying-speech-key.json": ("/models/stt", "not", None),
+    # A rendered variable is a string. A number here would reach a platform
+    # as whichever spelling of it the sender's JSON writer happened to pick,
+    # so the wire refuses it rather than choosing one.
+    "spec/dynamic-variable-not-a-string.json": (
+        "/dynamic_variables/open_slots",
+        "type",
+        None,
+    ),
     "spec/limits-missing.json": ("", "required", "limits"),
     "spec/adapter-missing.json": (
         "/models/stt",
@@ -202,6 +214,50 @@ def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
         # nothing and does not tidy what somebody wrote.
         padded = f" {persona[field]} "
         validate_spec({**document, "persona": {**persona, field: padded}})
+
+
+def test_a_spec_carries_a_named_version_and_this_simulations_variables():
+    """The two optional fields, absent and present, read the way a plug
+    will be handed them.
+
+    Absent is the ordinary case and is what every spec looked like before
+    this: no version means the platform's own default, and no variables
+    mean an agent conducted with whatever its own configuration says. What
+    is present is passed on untouched — a number stays a number, and an
+    empty value stays an empty value, because a variable set to nothing is
+    not the same as one nobody set.
+    """
+    plain = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+    )
+    assert "agent_version" not in plain
+    assert "dynamic_variables" not in plain
+    spec = SimulationSpec.from_document(plain)
+    assert spec.agent_version is None
+    assert spec.dynamic_variables == {}
+
+    numbered = read_json(
+        contract_dir() / "fixtures" / "spec" / "valid" / "voice-retell-web-call.json"
+    )
+    spec = SimulationSpec.from_document(numbered)
+    assert spec.connection_type == "retell_web_call"
+    assert spec.agent_version == 106
+    assert spec.dynamic_variables == {
+        "egma_simulation": numbered["simulation_id"],
+        "is_existing": "false",
+        "lookup_status": "no_match",
+    }
+
+    named = read_json(
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "chat-retell-over-a-named-version.json"
+    )
+    spec = SimulationSpec.from_document(named)
+    assert spec.agent_version == "latest"
+    assert spec.dynamic_variables["caller_name"] == ""
 
 
 def test_phone_connection_stays_phone_while_models_select_voice_legs():

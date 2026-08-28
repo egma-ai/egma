@@ -1,9 +1,10 @@
-"""CI's Retell: a local HTTP server shaped like Retell's chat API.
+"""CI's Retell: a local HTTP server shaped like Retell's own API.
 
-Three endpoints, the ones the plug speaks — ``create-chat``,
-``create-chat-completion``, ``end-chat`` — answering with Retell's own
-field names, status codes and bearer-key auth, from a script. Real HTTP on
-a loopback port, because the plug's whole job is speaking a platform's wire
+The endpoints the two Retell plugs speak — ``create-chat``,
+``create-chat-completion``, ``end-chat`` for the chat lane and
+``create-web-call`` for the web-call one — answering with Retell's own field
+names, status codes and bearer-key auth, from a script. Real HTTP on a
+loopback port, because a plug's whole job is speaking a platform's wire
 protocol and a mock of that protocol would prove the mock instead.
 
 The stub is deliberately strict where the real platform is: a request
@@ -12,9 +13,14 @@ was never opened is refused 422, and a chat that has ended refuses further
 completions. Those refusals are what the plug's failure paths are tested
 against.
 
-It also records every call it served, so a test can assert the plug drove
-the whole exchange — opened once, delivered in order, ended at the platform
-— rather than only that a transcript came out.
+It also records every call it served — the whole request body included — so
+a test can assert the plug drove the exchange and asked for exactly what the
+spec said: opened once against the named version with this simulation's
+variables attached, delivered in order, ended at the platform.
+
+What it deliberately is **not** is a room. A web call is created here and
+conducted in a LiveKit room somewhere else, so this server hands out the
+access token and stops; the room that token opens is :mod:`room_stub`.
 """
 
 from __future__ import annotations
@@ -71,8 +77,25 @@ class RetellStub:
     to reach. Nothing here can stop a platform doing it; the plug is what
     has to survive it."""
 
+    web_call_token: str = "stub-web-call-token-not-a-real-secret"
+    """What ``create-web-call`` hands back as the way into the room.
+
+    A fresh one per creation, numbered, because Retell's are single-use: a
+    test asserting egma joined with *this* creation's token would pass by
+    accident if every creation minted the same string."""
+
+    refuses_web_call: str | None = None
+    """The platform's own words when it will not create the call at all."""
+
+    web_call_without_a_token: bool = False
+    """A creation the platform answers 2xx with nothing to join by — the
+    shape a plug must refuse rather than carry half an exchange on."""
+
     calls: list[dict] = field(default_factory=list)
     """Every request served, in order — the whole exchange on the record."""
+
+    web_calls: list[dict] = field(default_factory=list)
+    """Every web call created, in order, as the platform holds it."""
 
     chats: dict[str, dict] = field(default_factory=dict)
 
@@ -118,7 +141,14 @@ class RetellStub:
         chat_id = f"chat_{len(self.chats) + 1:04d}"
         self.chats[chat_id] = {"agent_id": agent_id, "delivered": 0, "ended": False}
         self.calls.append(
-            {"endpoint": "create-chat", "agent_id": agent_id, "chat_id": chat_id}
+            {
+                "endpoint": "create-chat",
+                "agent_id": agent_id,
+                "chat_id": chat_id,
+                # The body verbatim, so a test can say what the plug asked
+                # for and — just as much — what it did not ask for.
+                "body": body,
+            }
         )
         opening = [self._message("agent", self.greeting)] if self.greeting else []
         return web.json_response(
@@ -211,6 +241,49 @@ class RetellStub:
             }
         )
 
+    async def _create_web_call(self, request: web.Request) -> web.Response:
+        """One web call, registered — and the way into its room handed back.
+
+        Retell answers this with a LiveKit access token and nothing else
+        about where the room is: the host is Retell's own infrastructure,
+        which the caller already has to know. So does this stub, which
+        knows nothing about rooms at all.
+        """
+        self._authorized(request)
+        body = await request.json()
+        agent_id = body.get("agent_id")
+        if not isinstance(agent_id, str) or not agent_id:
+            raise web.HTTPUnprocessableEntity(text="agent_id is required")
+        if self.refuses_web_call is not None:
+            raise web.HTTPUnprocessableEntity(
+                text=json.dumps({"error_message": self.refuses_web_call}),
+                content_type="application/json",
+            )
+
+        placed = len(self.web_calls) + 1
+        call = {
+            "endpoint": "create-web-call",
+            "call_id": f"call_{placed:04d}",
+            "agent_id": agent_id,
+            "agent_version": body.get("agent_version"),
+            "access_token": f"{self.web_call_token}-{placed}",
+            "body": body,
+        }
+        self.web_calls.append(call)
+        self.calls.append(call)
+        answered = {
+            "call_id": call["call_id"],
+            "call_type": "web_call",
+            "agent_id": agent_id,
+            "call_status": "registered",
+            "access_token": call["access_token"],
+        }
+        if body.get("agent_version") is not None:
+            answered["agent_version"] = body["agent_version"]
+        if self.web_call_without_a_token:
+            del answered["access_token"]
+        return web.json_response(answered, status=201)
+
     async def _end_chat(self, request: web.Request) -> web.Response:
         self._authorized(request)
         chat_id = request.match_info["chat_id"]
@@ -226,6 +299,7 @@ class RetellStub:
         app.router.add_post("/create-chat-completion", self._create_chat_completion)
         app.router.add_get("/get-chat/{chat_id}", self._get_chat)
         app.router.add_patch("/end-chat/{chat_id}", self._end_chat)
+        app.router.add_post("/v2/create-web-call", self._create_web_call)
         return app
 
 

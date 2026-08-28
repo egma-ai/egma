@@ -1,0 +1,53 @@
+{
+  "contract_version": 5,
+  "simulation_id": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
+  "modality": "chat",
+  "connection": {
+    "agent_platform": "retell",
+    "connection_type": "retell_chat_api",
+    "access_variant": "retell_chat_api.api_key",
+    "config": {
+      "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
+    },
+    "credentials": {
+      "apiKey": "fixture-not-a-real-secret-0000000000000000"
+    }
+  },
+  "agent_version": "latest",
+  "dynamic_variables": {
+    "egma_simulation": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
+    "caller_name": ""
+  },
+  "persona": {
+    "name": "Margaret",
+    "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
+    "language": "en-US"
+  },
+  "scenario": {
+    "instructions": "You booked a dental cleaning for next Tuesday and need to move it to Thursday the same week. You do not remember the exact time of the original appointment. Conclude once the new time has been read back to you."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 60
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "adapter": "cartesia",
+      "voice_id": "warm-alto-2",
+      "speed": 0.9
+    }
+  }
+}

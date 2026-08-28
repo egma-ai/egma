@@ -14,7 +14,7 @@ requires reading anything beyond this file, that is a bug in this file.
 ## What a plug receives
 
 A plug is constructed once per simulation, from the claimed spec, with
-six keyword arguments:
+eight keyword arguments:
 
 - ``modality`` — ``"chat"`` or ``"voice"``. A plug that cannot speak the
   requested modality must refuse at construction (raise ``PlugError``).
@@ -34,6 +34,25 @@ six keyword arguments:
   plug that has to *tell the platform* which simulation it is in has any
   use for it, and most have none — a plug that does not need it takes it
   and drops it.
+- ``agent_version`` — which version of the agent under test to conduct
+  against, exactly as its platform names its versions, or ``None`` for the
+  platform's own default. Only a plug reaching a platform that keeps
+  versions has any use for it, and such a plug asks for it **by name every
+  time**: a platform whose default is "the newest one" can be pointed at a
+  version nobody meant between one simulation and the next. It is never
+  parsed, never renumbered and never turned into words — a number stays a
+  number and a name stays a name, because the platform is the only thing
+  that knows what either means. Every other plug takes it and drops it, and
+  its record claims nothing about versions.
+- ``dynamic_variables`` — the variables this one simulation is conducted
+  with, for the agent's platform to render into the world the agent under
+  test sees. A mapping of names to strings, empty in the ordinary case, and
+  **passed on byte for byte**: a plug neither reads them, adds to them, nor
+  tidies a value, because a value the simulator changed is a value the agent
+  never saw. Egma's own attribution variable is among them where the run put
+  one there, and it is what a tool call the platform makes rides back to
+  this simulation on. A plug whose platform renders no such thing takes them
+  and drops them.
 - ``mock_tools`` — egma's side of the mock-tool exchange for this
   simulation (:class:`egma_simulator.mock_tools.MockToolSeam`), already
   holding the answers the run resolved. Only a plug that can **put egma in
@@ -196,6 +215,72 @@ class PlugError(Exception):
         self.ending = ending
 
 
+def named_version(agent_version: object) -> int | str | None:
+    """The version a plug will ask its platform for, read once.
+
+    Here rather than in each plug that uses it, because it is a fact of the
+    claimed spec and not of any one platform: two plugs reaching the same
+    platform must not disagree about what a version reference is.
+
+    What comes out is what went in — a number stays a number, a name stays a
+    name, and neither is renumbered, trimmed into meaning, or turned into the
+    other. Surrounding space is the one thing dropped, because it is nobody's
+    version; a reference of nothing but space is refused rather than sent,
+    since a platform asked for the version named ``"   "`` fails in its own
+    words, far from the spec that said it.
+    """
+    if agent_version is None:
+        return None
+    if isinstance(agent_version, bool) or not isinstance(agent_version, int | str):
+        raise PlugError(
+            "an agent version is how the platform names its versions — a "
+            f"number or a name; got {type(agent_version).__name__}"
+        )
+    if isinstance(agent_version, int):
+        if agent_version < 0:
+            raise PlugError(f"an agent version cannot be {agent_version}")
+        return agent_version
+    if not agent_version.strip():
+        raise PlugError("an agent version must say which version, not nothing")
+    return agent_version.strip()
+
+
+def rendered_variables(dynamic_variables: object) -> dict[str, str]:
+    """The variables one simulation is conducted with, read once.
+
+    Shared for the reason above, and strict for one of its own: these travel
+    to the agent under test unread, so the last place a mistake in them can
+    be named is here. Every value is a string because a rendered variable is
+    a string, and an empty one is kept — a variable set to nothing renders as
+    nothing, which is not what a variable nobody set does.
+
+    A refusal names the variable and never its value: what a simulation
+    carries can be a caller's own details, and a sentence about a mistake
+    should not go on to repeat them.
+    """
+    if dynamic_variables is None:
+        return {}
+    if not isinstance(dynamic_variables, dict):
+        raise PlugError(
+            "dynamic variables are names against strings; got "
+            f"{type(dynamic_variables).__name__}"
+        )
+    unnamed = [name for name in dynamic_variables if not str(name).strip()]
+    if unnamed:
+        raise PlugError("a dynamic variable with no name is set by nobody")
+    unrendered = sorted(
+        str(name)
+        for name, value in dynamic_variables.items()
+        if not isinstance(value, str)
+    )
+    if unrendered:
+        raise PlugError(
+            f"dynamic variable(s) {unrendered} carry something that is not a "
+            "string, and a rendered variable is a string"
+        )
+    return {str(name): value for name, value in dynamic_variables.items()}
+
+
 def failed_ending(fault: BaseException) -> str:
     """Which of the contract's failed endings one fault deserves.
 
@@ -249,7 +334,7 @@ class VoiceConnection(Protocol):
 PlugFactory = Callable[..., ConnectionPlug | VoiceConnection]
 """What the registry hands back: called with ``modality=``,
 ``access_variant=``, ``config=``, ``credentials=``, ``simulation_id=``,
-``mock_tools=`` and ``media=``
+``agent_version=``, ``dynamic_variables=``, ``mock_tools=`` and ``media=``
 keywords, it returns one plug for one simulation — in practice, the plug
 class itself."""
 
@@ -264,6 +349,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
+    from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
 
     return {
@@ -271,5 +357,6 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,
+        "retell_web_call": RetellWebCall,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)
