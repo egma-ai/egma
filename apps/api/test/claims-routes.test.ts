@@ -72,7 +72,7 @@ const LIVEKIT = {
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
-  config: { url: "wss://acme.livekit.cloud" },
+  config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
   credentials: {
     apiKey: "livekit-key-A1B2C3D4WXYZ",
     apiSecret: "livekit-secret-E5F6G7H8QRST",
