@@ -34,7 +34,11 @@ import {
 } from "../src/wizard/test-generation.ts";
 import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
 import { workerIntegrationInstructions } from "../src/wizard/worker-integration-step.ts";
-import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
+import {
+  BANNED,
+  LIVEKIT_SESSION_OBJECT,
+  SCENARIO_HEADING,
+} from "./support/glossary.ts";
 
 const run = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -53,7 +57,10 @@ function referencePart(reference: string, heading: string): string {
   const held = reference
     .split(/^## /mu)
     .find((part) => part.startsWith(`${heading}\n`));
-  expect({ heading, found: held !== undefined }).toEqual({ heading, found: true });
+  expect({ heading, found: held !== undefined }).toEqual({
+    heading,
+    found: true,
+  });
   return held ?? "";
 }
 
@@ -74,7 +81,12 @@ describe("Egma's instruction content", () => {
     expect(discovery.startsWith(publicSkill("integrate-egma"))).toBe(true);
     expect(discovery).toContain(publicSkillDirectory("integrate-egma"));
     expect(discovery).not.toContain("# Connect a Retell agent");
-    for (const marker of ["egma:found", "egma:note", "egma:none", "egma:abort"]) {
+    for (const marker of [
+      "egma:found",
+      "egma:note",
+      "egma:none",
+      "egma:abort",
+    ]) {
       expect(discovery).toContain(marker);
     }
 
@@ -91,7 +103,12 @@ describe("Egma's instruction content", () => {
       },
       2,
     );
-    for (const marker of ["egma:plan", "egma:writing", "egma:wrote", "egma:abort"]) {
+    for (const marker of [
+      "egma:plan",
+      "egma:writing",
+      "egma:wrote",
+      "egma:abort",
+    ]) {
       expect(writing).toContain(marker);
     }
 
@@ -123,14 +140,18 @@ describe("Egma's instruction content", () => {
       1,
     );
     expect(instructions.indexOf(writing)).toBe(0);
-    expect(instructions.indexOf(writing)).toBeLessThan(instructions.indexOf("# Your task"));
+    expect(instructions.indexOf(writing)).toBeLessThan(
+      instructions.indexOf("# Your task"),
+    );
   });
 
   /** Code owns the field names; all prose that asks for them must agree. */
   it("asks for the facts Egma reads back, in the words Egma reads them", () => {
     const unwrapped = (text: string): string => text.replace(/\s+/gu, " ");
     const finding = discoveryInstructions("/repo");
-    const readme = unwrapped(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"));
+    const readme = unwrapped(
+      readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+    );
     const pasted = unwrapped(pasteFallbackMessage());
 
     for (const fact of FACTS) {
@@ -155,7 +176,9 @@ describe("Egma's instruction content", () => {
     ].join("\n");
 
     expect(drivingSkill()).toContain(layout);
-    expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
+    expect(
+      readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+    ).toContain(layout);
   });
 
   it("still reads as prose after examples that contain code fences", () => {
@@ -176,7 +199,11 @@ describe("Egma's instruction content", () => {
     };
 
     const held: readonly (readonly [string, string, string])[] = [
-      ["skills/egma/SKILL.md", drivingSkill(), "## Keep the folder and Egma in step"],
+      [
+        "skills/egma/SKILL.md",
+        drivingSkill(),
+        "## Keep the folder and Egma in step",
+      ],
       [
         "skills/integrate-egma/SKILL.md",
         publicSkill("integrate-egma"),
@@ -196,7 +223,10 @@ describe("Egma's instruction content", () => {
 
     for (const [where, content, heading] of held) {
       expect(content, where).toContain(heading);
-      expect({ where, shownAsCode: insideAFence(content).has(heading) }).toEqual({
+      expect({
+        where,
+        shownAsCode: insideAFence(content).has(heading),
+      }).toEqual({
         where,
         shownAsCode: false,
       });
@@ -205,7 +235,9 @@ describe("Egma's instruction content", () => {
 
   it("says where each kind of mock-tool answer belongs", () => {
     const driving = drivingSkill().replace(/\s+/gu, " ");
-    expect(driving).toContain("Project-wide answers live in `egma/mock-tools.md`");
+    expect(driving).toContain(
+      "Project-wide answers live in `egma/mock-tools.md`",
+    );
     expect(driving).toContain("inside that test file under `## Mock tools`");
 
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
@@ -268,7 +300,9 @@ describe("Egma's instruction content", () => {
     expect(writing).toContain(
       "Where the project has no mocked world, a block here is the only answer Egma will serve",
     );
-    expect(writing).not.toContain("only when this test needs an answer different");
+    expect(writing).not.toContain(
+      "only when this test needs an answer different",
+    );
   });
 
   /**
@@ -323,12 +357,10 @@ describe("Egma's instruction content", () => {
     expect(sdk).toContain("await mockable(agent, ctx, session)");
     expect(sdk).toContain("AgentSession.start");
     expect(sdk).toContain("do not add another\nconnection call");
-    const testingExample = /### Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
-      sdk,
-    )?.[1];
-    const bothExample = /### Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
-      sdk,
-    )?.[1];
+    const testingExample =
+      /### Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(sdk)?.[1];
+    const bothExample =
+      /### Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(sdk)?.[1];
     expect(testingExample).toBeDefined();
     expect(bothExample).toBeDefined();
     expect(testingExample).not.toContain("await ctx.connect()");
@@ -336,16 +368,20 @@ describe("Egma's instruction content", () => {
       bothExample?.indexOf("await mockable(agent, ctx, session)") ?? -1,
     );
     expect(bothExample).not.toContain("await ctx.connect()");
-    expect(bothExample?.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
-      bothExample?.indexOf("await session.start") ?? -1,
-    );
+    expect(
+      bothExample?.indexOf("await mockable(agent, ctx, session)"),
+    ).toBeLessThan(bothExample?.indexOf("await session.start") ?? -1);
     // The monitoring entry, which ticket 02 reuses and this lane never adds.
     expect(sdk).toContain("monitor_livekit(ctx)");
     expect(sdk).toContain("ctx.connect()");
     expect(sdk).toContain("EGMA_URL");
     expect(sdk).toContain("EGMA_API_KEY");
-    expect(integration).toContain("Leave every `.env` file unread and unchanged");
-    expect(sdk).toContain("Keep both values out of changed files and command output");
+    expect(integration).toContain(
+      "Leave every `.env` file unread and unchanged",
+    );
+    expect(sdk).toContain(
+      "Keep both values out of changed files and command output",
+    );
     expect(sdk).not.toContain(".env");
     expect(sdk).toContain("When the entrypoint is unknown");
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
@@ -371,10 +407,11 @@ describe("Egma's instruction content", () => {
     expect(naming).not.toMatch(/^>/mu);
   });
 
-  it("requires the first Python SDK release that follows LiveKit handoffs", () => {
+  it("requires the first Python SDK release that reads the room name", () => {
     const sdk = integrateEgmaReference("integrate-livekit");
 
-    expect(sdk).toContain("`egma>=0.1.1`");
+    expect(sdk).toContain("`egma>=0.2.0`");
+    expect(sdk).not.toContain("0.1.1");
   });
 
   /** The mock-world task owns no worker file or SDK instructions. */
@@ -421,9 +458,13 @@ describe("Egma's instruction content", () => {
     expect(authoring).toContain("TaskGroup");
     expect(authoring).toContain("in-memory state");
     expect(authoring).toContain("egma:none");
-    expect(authoring).toContain("mixes an external effect with agent-runtime control");
+    expect(authoring).toContain(
+      "mixes an external effect with agent-runtime control",
+    );
     expect(authoring).toContain("egma:abort");
-    expect(authoring).toContain("cannot safely run only half of its implementation");
+    expect(authoring).toContain(
+      "cannot safely run only half of its implementation",
+    );
     expect(authoring).not.toContain("For **each real tool**");
   });
 
@@ -447,7 +488,11 @@ describe("Egma's instruction content", () => {
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "connect-retell.md",
+      ),
       "utf8",
     );
     expect(retell).toContain("retell-sdk");
@@ -474,7 +519,11 @@ describe("Egma's instruction content", () => {
 
   it("uses Egma's product words in public and dispatched content", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "connect-retell.md",
+      ),
       "utf8",
     );
     const livekit = readFileSync(
@@ -498,7 +547,11 @@ describe("Egma's instruction content", () => {
         // `call` is an ordinary verb here, not the banned noun for a simulation.
         .replace("Do not call it skipped.", "");
       for (const banned of BANNED) {
-        expect({ name, banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
+        expect({
+          name,
+          banned: String(banned),
+          hit: banned.exec(content)?.[0] ?? null,
+        }).toEqual({
           name,
           banned: String(banned),
           hit: null,
@@ -509,7 +562,8 @@ describe("Egma's instruction content", () => {
   });
 
   it("carves out only the file-format heading from the vocabulary guard", () => {
-    const taken = (text: string): string => text.replaceAll(SCENARIO_HEADING, "");
+    const taken = (text: string): string =>
+      text.replaceAll(SCENARIO_HEADING, "");
 
     expect(taken("## Scenario")).toBe("");
     expect(taken("- **`## Scenario`** is prose.")).toBe("- **** is prose.");
@@ -536,8 +590,12 @@ describe("Egma's instruction content", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
       expect(paths).toContain(`skills/${name}/SKILL.md`);
     }
-    expect(paths).toContain("skills/integrate-egma/references/connect-retell.md");
-    expect(paths).toContain("skills/integrate-egma/references/find-voice-agent.md");
+    expect(paths).toContain(
+      "skills/integrate-egma/references/connect-retell.md",
+    );
+    expect(paths).toContain(
+      "skills/integrate-egma/references/find-voice-agent.md",
+    );
     expect(paths).toContain("skills/integrate-egma/scripts/livekit-local.mjs");
     expect(paths.some((file) => file.startsWith("context/"))).toBe(false);
     for (const removed of [
@@ -554,7 +612,9 @@ describe("Egma's instruction content", () => {
   it("reads every instruction from its package path", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
       const file = publicSkillFile(name);
-      expect(path.relative(PACKAGE_ROOT, file)).toBe(path.join("skills", name, "SKILL.md"));
+      expect(path.relative(PACKAGE_ROOT, file)).toBe(
+        path.join("skills", name, "SKILL.md"),
+      );
       expect(readFileSync(file, "utf8")).toContain(publicSkill(name));
     }
     for (const [referenceName, heading] of [
@@ -569,7 +629,12 @@ describe("Egma's instruction content", () => {
         `${referenceName}.md`,
       );
       expect(path.relative(PACKAGE_ROOT, reference)).toBe(
-        path.join("skills", "integrate-egma", "references", `${referenceName}.md`),
+        path.join(
+          "skills",
+          "integrate-egma",
+          "references",
+          `${referenceName}.md`,
+        ),
       );
       expect(readFileSync(reference, "utf8")).toContain(heading);
     }

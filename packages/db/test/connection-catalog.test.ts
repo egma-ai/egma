@@ -104,9 +104,9 @@ describe("what a browser is told about a simulation connection", () => {
       (keyPair?.fields ?? []).map((field) => [field.key, field]),
     );
     // The agent name is demanded because every egma dispatch is explicit:
-    // dispatch metadata is the only channel that carries the simulation's
-    // modality and the mock-tool address, and a form that let somebody skip
-    // the name would be a form that quietly took both away.
+    // the record must name the agent it graded, and a form that let somebody
+    // skip the name would quietly hand the room to whichever worker was
+    // listening.
     expect(fields.get("url")).toMatchObject({
       label: "LiveKit WebSocket URL",
       required: true,
@@ -115,12 +115,19 @@ describe("what a browser is told about a simulation connection", () => {
       label: "LiveKit agent name",
       required: true,
     });
-    // Room metadata is the optional one, and it is the case that proves a
-    // form can still be told a key may be left out.
+    // The label and the help both name two channels, because the value rides
+    // on two: the room always, and — the agent name above being demanded —
+    // the dispatch always too. A string promising only the room would send a
+    // customer looking for their JSON in one of the two places it can be.
+    // Metadata is also the optional one, the case that proves a form can
+    // still be told a key may be left out.
     expect(fields.get("metadata")).toMatchObject({
+      label: "Agent metadata",
       required: false,
       afterCredentials: true,
     });
+    expect(fields.get("metadata")?.help).toContain("ctx.room.metadata");
+    expect(fields.get("metadata")?.help).toContain("ctx.job.metadata");
 
     const endpoint = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.customer_token_endpoint",
@@ -198,9 +205,7 @@ describe("what a browser is told about a simulation connection", () => {
           "livekit_room.customer_token_endpoint",
         ),
       ),
-    ).toBe(
-      "required",
-    );
+    ).toBe("required");
     expect(
       credentialRuleOf(
         accessVariantById("livekit_room", "livekit_room.project_credentials"),

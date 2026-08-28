@@ -77,7 +77,8 @@ export type ConfigFieldMetadata = {
   /**
    * Keep a supporting config field after the credential fields when that is
    * the order a person needs to fill the form in. Most config comes first;
-   * this is only for a field such as room metadata that completes the setup.
+   * this is only for a field such as the agent metadata that completes the
+   * setup.
    */
   readonly afterCredentials?: true;
 };
@@ -441,9 +442,13 @@ function accessVariantMetadata(
     throw new Error(
       `connection access variant ${variant.id} describes ${described.length} config ` +
         `fields and gates ${gated.length}: ` +
-        (missing.length > 0 ? `${missing.join(", ")} is gated and undescribed` : "") +
+        (missing.length > 0
+          ? `${missing.join(", ")} is gated and undescribed`
+          : "") +
         (missing.length > 0 && invented.length > 0 ? "; " : "") +
-        (invented.length > 0 ? `${invented.join(", ")} is described and ungated` : ""),
+        (invented.length > 0
+          ? `${invented.join(", ")} is described and ungated`
+          : ""),
     );
   }
 
@@ -469,9 +474,7 @@ function accessVariantMetadata(
     label: variant.label,
     fields: variant.fields.map((field) => ({
       ...field,
-      required: isDemanded(
-        variant.config[field.key] as ConfigDemand,
-      ),
+      required: isDemanded(variant.config[field.key] as ConfigDemand),
     })),
     credentialRule: rule,
     credentialHelp: variant.credentialHelp,
@@ -780,14 +783,48 @@ export function livekitServerOrigin(url: string): string {
 }
 
 /**
+ * What LiveKit accepts in any one metadata field.
+ *
+ * The same 512 KiB ceiling covers room metadata, participant metadata and the
+ * metadata a job is dispatched with, so a value written once and carried on
+ * two of those channels is measured against one number.
+ */
+const LIVEKIT_METADATA_BYTES = 512 * 1024;
+
+/**
+ * What egma accepts, which is the ceiling less room to add to the value.
+ *
+ * The stored string is not the whole of what a dispatch carries: a small block
+ * of egma's own context is merged in beside the customer's keys for as long as
+ * SDKs that read it are still running. A value sized to the ceiling exactly
+ * would therefore pass here and be refused by LiveKit mid-simulation, which is
+ * the one outcome this gate exists to prevent. Eight kibibytes is far more
+ * than that block will ever be and costs nothing real: a metadata value is a
+ * tenant and a locale, and anything approaching either number is a payload
+ * that LiveKit's own guidance says to pass by id instead.
+ */
+const METADATA_BYTES = LIVEKIT_METADATA_BYTES - 8 * 1024;
+
+/**
  * A JSON object, carried as the text it was written as.
  *
- * Text rather than a parsed object because it travels verbatim — it is handed
- * to the agent as the room's metadata exactly as it arrives, and re-serialising
- * it here would hand over something the customer never wrote. Checked all the
- * same, and checked at create: a stray comma refused here is a person looking
- * at their own mistake, while the same comma refused at dispatch is a run that
- * has already started and an agent left to make sense of it.
+ * Text rather than a parsed object because one of the two channels it rides
+ * carries it verbatim: the room's metadata is this string exactly as it
+ * arrives, and re-serialising it here would hand the agent something the
+ * customer never wrote. The dispatch's copy is the customer's keys written out
+ * again beside a small block of egma's own, so the room's byte-for-byte
+ * promise is only keepable while the text itself is what gets stored. Checked
+ * all the same, and checked at create: a stray comma refused here is a person
+ * looking at their own mistake, while the same comma refused at dispatch is a
+ * run that has already started and an agent left to make sense of it.
+ *
+ * Size is checked here for that same reason, and it is measured against the
+ * copy that runs out of room first — the dispatch's, which is this string plus
+ * that block. A string LiveKit will not carry
+ * is a connection that opens a room, bills for it, and then fails every
+ * simulation on it at the dispatch — a refusal nobody can act on from the
+ * record it leaves. Measured in UTF-8 bytes, because that is what goes on the
+ * wire and not what a character count would suggest.
  */
 function jsonObjectText(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -803,6 +840,18 @@ function jsonObjectText(key: string, value: unknown): string {
       "not_admitted",
       `the config's ${key} must be a JSON object written in a string, which ` +
         `looks like {"tenant":"acme"}`,
+    );
+  }
+
+  const bytes = Buffer.byteLength(candidate, "utf8");
+  if (bytes > METADATA_BYTES) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} is ${bytes} bytes and egma admits at most ` +
+        `${METADATA_BYTES} on the room and the dispatch — livekit's own ` +
+        `ceiling is ${LIVEKIT_METADATA_BYTES} bytes, and egma holds the ` +
+        `difference back as room for the block it merges into the dispatch; ` +
+        `hold a large value in your own store and put its id here instead`,
     );
   }
   return candidate;
@@ -1041,12 +1090,21 @@ export const CONNECTION_REGISTRY: Readonly<
      * holds no key pair, so it cannot create a room, cannot dispatch a worker
      * and cannot delete anything — which is why `agentName` and `metadata` are
      * not among its keys. Both are powers a key pair buys, and a config key
-     * egma would silently ignore is worse than one it refuses by name.
+     * egma would silently ignore is worse than one it refuses by name. That
+     * holds for `metadata` on both of the channels it rides: creating the
+     * room that carries it and dispatching the worker that is handed it are
+     * the same one power, and the token-endpoint access variant has
+     * neither. Where a customer on that variant wants their agent to read
+     * something, their own
+     * endpoint is what puts it there — it is the side minting the token and
+     * dispatching the worker.
      *
-     * That same missing dispatch is why the two variants no longer speak the
-     * same modalities. Chat needs the agent to be *told* it is in a chat, and
-     * the only channel that tells it is the dispatch metadata the key-pair
-     * variant sends.
+     * That same missing power is why the two variants no longer speak the
+     * same modalities. Chat needs the agent told, before its session opens,
+     * that it is in a chat — and the telling is the name of the room, which
+     * only the side minting the room controls. Egma can ask a customer's
+     * endpoint for a name; it can guarantee one, and dispatch the worker
+     * that must read it, only where it holds the key pair.
      */
     accessVariants: [
       {
@@ -1059,15 +1117,24 @@ export const CONNECTION_REGISTRY: Readonly<
           url: livekitServerUrl,
           // Which worker to dispatch, and demanded rather than offered.
           //
-          // Every egma dispatch is explicit, because dispatch metadata is the
-          // only channel that carries the simulation's modality and the
-          // mock-tool address, and LiveKit's automatic dispatch carries
-          // neither. A nameless connection reached the agent with none of it —
-          // mock tools inert, and no way to ask for chat — so the name is the
-          // price of both, asked for once at create instead of missed at run
-          // time.
+          // Every egma dispatch is explicit. Automatic dispatch — the state a
+          // blank name would leave the worker in — hands the room to
+          // whichever workers are listening, so the record could never say
+          // which agent it graded, and no dispatch would exist for the
+          // configured metadata below to ride on. The name is also how egma
+          // knows this worker again: one agent per server and name, however
+          // many modalities it is tested in. Asked for once at create instead
+          // of missed at run time.
           agentName: nonEmptyString,
-          // Handed to the agent as the room's metadata, exactly as written.
+          // Handed to the agent on both of the channels LiveKit gives it to
+          // read its per-session context from, and each channel carries the
+          // value to a different precision. The room's metadata is this
+          // string byte for byte, always. The dispatch's metadata is these
+          // keys and values written out again, beside a small block of egma's
+          // own, on the dispatch that names the worker above: whitespace the
+          // customer wrote is not preserved there, anything outside ASCII is
+          // escaped so that a value with no UTF-8 form of its own can still
+          // go on the wire, and no key of theirs is touched.
           metadata: optional(jsonObjectText),
         },
         fields: [
@@ -1081,13 +1148,13 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, which is how it hands over the modality and the mock-tool address.",
+            help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, so the record names the agent it graded.",
           },
           {
             key: "metadata",
-            label: "Room metadata",
+            label: "Agent metadata",
             kind: "json",
-            help: 'A JSON object handed to the agent as the room metadata, exactly as written, like {"tenant":"acme"}.',
+            help: 'A JSON object handed to your agent, like {"tenant":"acme"}. The room metadata at ctx.room.metadata carries your string byte for byte, and the dispatch metadata at ctx.job.metadata carries your keys unchanged as well. Egma writes nothing of its own over your keys.',
             afterCredentials: true,
           },
         ],

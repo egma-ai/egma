@@ -66,8 +66,10 @@ every requested entry is present and preserve every existing Egma entry. An
 integration task adds capabilities; it removes one only when the developer asks
 for that removal explicitly.
 
-The Python package is named `egma`. Require `egma>=0.1.1` and add it through the
-dependency file the repository already uses. The Egma SDK does not yet support
+The Python package is named `egma`. Require `egma>=0.2.0` and add it through the
+dependency file the repository already uses. `0.2.0` is the first release in
+which both entries read the job's room name, which is the only signal that
+reaches the worker on all four LiveKit dispatch paths. The Egma SDK does not yet support
 a worker built with `@livekit/agents`; report that boundary and leave a Node
 worker unchanged.
 

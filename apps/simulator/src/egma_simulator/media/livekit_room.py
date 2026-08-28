@@ -79,20 +79,36 @@ Neither is written beside the other: a second copy of the room
 lifecycle would drift from the first, and the first anybody would know
 is a customer's simulation.
 
-## The two metadata channels
+## The two metadata channels are the customer's
 
-Platform integrations have taught agents to expect two, and they carry
-different things:
+Platform integrations have taught agents to expect two, and both of them
+belong to the customer:
 
 - **Room metadata** is the connection's own configured JSON, verbatim.
-  It is the customer's to write and egma's to pass through untouched —
-  the place an agent reads whatever its own deployment needs.
-- **Dispatch metadata** is egma's context and only egma's: which
-  simulation this room is conducting, the modality it is in, who egma is
-  in the room, and which version of the mock-tool exchange that
-  participant speaks. It carries **nothing of the test's content** — no
-  scenario text, no persona, no expected behavior, and no mock answer —
-  because an agent that reads its script stops being under test.
+- **Dispatch metadata** is the same configured JSON. It is the channel
+  LiveKit's own documentation teaches agents to read for per-session
+  context, so an agent that reads it finds its own object there and not
+  somebody else's — which is what an agent doing
+  ``json.loads(ctx.job.metadata)["their_key"]`` needs in order to survive
+  being put under test.
+
+Neither carries **anything of the test's content** — no scenario text, no
+persona, no expected behavior, and no mock answer — because an agent that
+reads its script stops being under test.
+
+**Where egma's own signal lives instead.** Not in either of these. An
+agent learns it is in a simulation from the room's name, which begins
+``egma-sim-`` on every way into a room, and it addresses egma by the
+persona's participant identity — see :mod:`egma_simulator.media.room`,
+where both are declared as the published contracts they are. Dispatch
+metadata cannot carry that signal: it reaches the agent only where egma
+dispatches by name, which is one of the four ways in. On the other three
+there is no dispatch at all, and an agent reading that channel for egma's
+context would find nothing and conclude it was in production while a
+simulation ran around it.
+
+One transitional exception is described at :func:`dispatch_metadata`, and
+it names the condition on which it goes.
 
 ## Answering for the agent's tools
 
@@ -171,12 +187,18 @@ KNOWN_CREDENTIAL_KEYS = frozenset({"apiKey", "apiSecret"})
 URL_SCHEMES = ("ws://", "wss://", "http://", "https://")
 
 ENDPOINT_CONFIG_KEYS = frozenset({"url", "tokenEndpoint"})
-"""What the second shape's config holds — and what it does not.
+"""What the token-endpoint access variant's config holds — and what it
+does not.
 
-No agent name and no room metadata, because both are powers a key pair
-buys: nothing here can dispatch a worker or create the room that would
-carry the metadata. A key the driver would read and quietly do nothing
-with is worse than one it refuses by name.
+No agent name and no metadata, because both are powers a key pair buys.
+Metadata rides two channels and this access variant reaches neither:
+creating the room that carries the room copy and dispatching the worker
+that is handed the dispatch copy are the same one power, held by whoever
+holds the key pair. A key the driver would read and quietly do nothing
+with is worse than one it refuses by name. Where a customer on this
+access variant wants their agent to read something, their own endpoint is
+the side minting the token and dispatching the worker, so their own
+endpoint is what puts it there.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
@@ -319,40 +341,94 @@ async def _token_body(answer: Any) -> bytes:
 
 
 def dispatch_metadata(
-    simulation_id: str, *, modality: str, egma_identity: str
+    configured: str | None,
+    simulation_id: str,
+    *,
+    modality: str,
+    egma_identity: str,
 ) -> str:
-    """egma's context for one dispatched worker, and nothing else's.
+    """What a dispatched worker is handed: the customer's own JSON.
 
-    Four facts, and every one of them is about *where egma is*, never
-    about what the test asks:
+    The connection's configured metadata is the whole of this message's
+    purpose. It rides here for the same reason it rides on the room:
+    dispatch metadata is where LiveKit teaches an agent to read its
+    per-session context, so an agent that reads it must find its own
+    object and not egma's. **Nothing of the test's content is ever added**
+    — no scenario, no persona, no expected behavior, and no mock answer —
+    because an agent that could read its script would stop being under
+    test.
 
-    - ``simulationId`` — which simulation this room is conducting, so an
-      agent can line its own telemetry up with egma's record.
-    - ``modality`` — which kind of simulation this is, ``"voice"`` or
-      ``"chat"``, said by the driver conducting it rather than assumed
-      here. It is the one thing that lets an agent go text-only for a
-      chat run, and this block is the only channel it travels on.
-    - ``egmaIdentity`` — who egma is in this room. It is the address the
-      agent's side sends a mock-tool call to, and it is the whole of the
-      authorisation: a room with no such participant has nobody to ask,
-      which is every production room.
-    - ``protocolVersion`` — which version of that exchange egma speaks,
-      so the other side knows before it says anything.
+    ## The retiring context block
 
-    **Nothing of the test's content, ever.** No scenario, no persona, no
-    expected behavior, and no mock answer — an answer reaches the agent
-    only at the moment it calls the tool, because an agent that could read
-    its script would stop being under test.
+    Underneath the customer's keys, and only where none of them collide,
+    four facts about *where egma is* are added: ``simulationId``,
+    ``modality``, ``egmaIdentity`` and ``protocolVersion``. They are not
+    how an agent finds egma — the room name and the persona identity are,
+    on all four ways into a room — and they are here for one reason only:
+    an SDK older than room-name detection reads this block and nothing
+    else. Take it away today and every worker running such an SDK stops
+    serving mock tools inside a live simulation without saying so, runs
+    the customer's real tools instead, and exports the simulation's own
+    spans through its production door as a conversation that never
+    happened.
+
+    So it stays until it is provably unread, and the condition is
+    recorded rather than remembered: delete this block, its keys, and its
+    collision check once egma's own telemetry reports no hello from an SDK
+    below the room-name minimum for a full release cycle.
+
+    A customer's own key always wins. Where their configured JSON already
+    uses one of these four names, or is not a JSON object at all, their
+    string rides alone byte for byte and the block is dropped. Corrupting
+    a value an agent reads is a worse failure than an old SDK losing its
+    one way into a simulation: the agent's own deployment breaks on a key
+    it was promised, in production shape, inside a run that was meant to
+    test it — while the old SDK's loss is a mock-tool exchange nobody
+    offered, which is where every simulation stood before mock tools.
     """
-    return json.dumps(
-        {
-            "simulationId": simulation_id,
-            "modality": modality,
-            "egmaIdentity": egma_identity,
-            "protocolVersion": PROTOCOL_VERSION,
-        },
-        separators=(",", ":"),
-    )
+    written = configured or ""
+    context = {
+        "simulationId": simulation_id,
+        "modality": modality,
+        "egmaIdentity": egma_identity,
+        "protocolVersion": PROTOCOL_VERSION,
+    }
+    # ``ensure_ascii=True`` on both writes below, and it is a correctness
+    # rule rather than a style one. A configured value may hold a lone
+    # surrogate: ``{"label":"\ud800"}`` is legal JSON, the control plane
+    # admits it, and the room's copy carries it as the six ASCII characters
+    # the customer wrote. Parsed, it is a character with no UTF-8 form at
+    # all, so writing it out raw would put a string on this request that
+    # cannot be encoded onto the wire, and the simulation would die at
+    # dispatch over a value the room carried without complaint.
+    #
+    # What escaping costs is bytes, and only on egma's copy: an agent
+    # reading its own key parses it back to the same value either way.
+    # That is why the room is what promises the string byte for byte, and
+    # the dispatch promises the keys.
+    if not written:
+        return json.dumps(context, separators=(",", ":"), ensure_ascii=True)
+
+    try:
+        held = json.loads(written)
+    except ValueError:
+        held = None
+    if not isinstance(held, dict):
+        return written
+
+    # Read off the block itself rather than from a second list of its
+    # names, so what is checked for and what would be written cannot
+    # drift apart.
+    collided = sorted(set(held) & set(context))
+    if collided:
+        logger.warning(
+            "the configured metadata for this connection already uses %s, so "
+            "the dispatch carries the configured JSON alone; an Egma SDK "
+            "older than room-name detection will not find a simulation here",
+            collided,
+        )
+        return written
+    return json.dumps({**held, **context}, separators=(",", ":"), ensure_ascii=True)
 
 
 def platform_refusal(what_failed: str, code: str, told: str) -> MediaBackendError:
@@ -404,8 +480,15 @@ class RoomSettings:
     """
 
     metadata: str | None = None
-    """The connection's configured JSON, as the room's metadata carries
-    it. ``None`` where the connection configured none."""
+    """The connection's configured JSON, as both metadata channels carry
+    it.
+
+    One field for two channels, because the customer configured one
+    value: :meth:`_create_room` sets it as the room's metadata byte for
+    byte, and :meth:`_dispatch` passes this same string through
+    :func:`dispatch_metadata` for the dispatch's. ``None`` where the
+    connection configured none.
+    """
 
     token_endpoint: str = ""
     """Where egma asks for a token, once per simulation. Empty on the
@@ -735,6 +818,7 @@ class RoomLifecycle:
         self._participant_name = persona_name_for(simulation_id)
         self._room: Any = None
         self._asked_for_a_room = False
+        self._offered = False
 
     @property
     def room_name(self) -> str:
@@ -746,10 +830,26 @@ class RoomLifecycle:
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
 
-        Done the moment the room is joined and before the worker is asked
-        for, because the agent's side says hello as its session starts —
-        a handler registered afterwards would be a race with the first
-        thing the agent does.
+        Done at the join itself, which is the earliest moment it can be
+        done and the only one that is early enough. The agent's side says
+        hello as its session starts, and on three of the four ways into a
+        room nothing egma does decides when that session starts: the
+        worker can already be in the room, mid-hello, while egma is still
+        connecting. A method registered a step later than the connect is a
+        race with the first thing the agent says, and losing it reads on
+        the far side as "no egma here" — every real tool then runs inside
+        a live simulation, and the record says nothing about it.
+
+        Asked for twice, deliberately: once by the room the instant it is
+        entered, and once from :meth:`dial` for a room that offers no such
+        moment. Whichever call gets both methods on is the one that
+        offers the exchange, and the other returns having done nothing.
+        The flag that decides which is which is set only after both
+        registrations return, so the second ask stays a real second
+        chance: a room that refused at the join is a room the fallback
+        can still offer in, and a flag raised before the work would spend
+        that chance on nothing and leave every mocked tool running its
+        own implementation for the whole simulation.
 
         Both methods go on whether or not this simulation mocks anything.
         A room where egma answers for no tools still answers the hello
@@ -768,7 +868,7 @@ class RoomLifecycle:
         offered — and the record then claims nothing about tools, which is
         the truth, because egma never stood in their path.
         """
-        if self._mock_tools is None or self._room is None:
+        if self._mock_tools is None or self._room is None or self._offered:
             return
         try:
             self._room.register_rpc(HELLO_METHOD, self._mock_tools.hello)
@@ -781,6 +881,7 @@ class RoomLifecycle:
                 self._quotable(repr(unoffered)),
             )
             return
+        self._offered = True
         self._mock_tools.standing_ready()
 
     async def _way_in(self) -> WayIn:
@@ -819,11 +920,16 @@ class RoomLifecycle:
         here at all. Dispatching takes the key pair egma deliberately was
         not given, so putting a worker in the room is the endpoint's job
         and egma's part is to be in the room when it arrives.
+
+        On three of the four ways in the agent may have arrived already,
+        so the room is asked who is in it before anybody starts waiting
+        for somebody to come.
         """
         if self._room is None:
             raise MediaBackendError("an agent was requested before a room transport")
         await self._room.wait_connected()
         self._answer_for_mocked_tools()
+        self._room.note_anybody_already_here()
         if not self._settings.mints_its_own:
             return
         await self._dispatch()
@@ -886,19 +992,21 @@ class RoomLifecycle:
         await self._asked(request, "the room could not be created")
 
     async def _dispatch(self) -> None:
-        """One `CreateAgentDispatch`, carrying egma's context and no more."""
+        """One `CreateAgentDispatch`, carrying the connection's own JSON."""
         from livekit import api
 
         request = api.CreateAgentDispatchRequest(
             room=self._room_name,
             agent_name=self._settings.agent_name,
-            # The identity the token grants, not a name invented here: the
-            # agent's side addresses its mock-tool calls to exactly this
-            # participant, so a metadata block naming anybody else would
-            # send them to nobody. Dispatching happens only on the shape
-            # that mints its own token, which is the shape that signs this
-            # identity — see `room_token`.
+            # The identity the token grants, not a name invented here: an
+            # SDK old enough to still read the retiring block addresses
+            # its mock-tool calls to exactly this participant, so a name
+            # invented for the message would send them to nobody.
+            # Dispatching happens only on the access variant that mints its
+            # own token, which is the one that signs this identity — see
+            # `room_token`.
             metadata=dispatch_metadata(
+                self._settings.metadata,
                 self._simulation_id,
                 modality=self.MODALITY,
                 egma_identity=PERSONA_IDENTITY,
@@ -1165,6 +1273,7 @@ class LiveKitRoomBackend(RoomLifecycle):
         """Get a way into the room and build its Pipecat transport."""
         way_in = await self._way_in()
         self._room = self._joined_room(way_in)
+        self._room.answer_when_joined(self._answer_for_mocked_tools)
         return self._room.create_transport()
 
     async def wait_answered(self, seconds: float) -> str:
@@ -1368,6 +1477,24 @@ class TextRoom:
                 ending=ERROR,
             )
 
+    def note_anybody_already_here(self) -> None:
+        """Count whoever was in the room before egma got into it.
+
+        The join above already read the roster once, so this is ordinarily
+        nothing to do — it exists because the lifecycle asks every room
+        the same question at dial, and the answer must never depend on
+        which driver is underneath. One local read, never a raise.
+        """
+        room = self._room
+        if self.arrivals.is_set() or room is None:
+            return
+        try:
+            present = room.remote_participants
+        except Exception:
+            return
+        if present:
+            self.arrivals.set()
+
     def register_rpc(self, method: str, handler: RpcMethod) -> None:
         """Offer one mock-tool method on egma's own participant.
 
@@ -1537,6 +1664,11 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         way_in = await self._way_in()
         self._room = self._joined_room(way_in)
         await self._room.join()
+        # The offer goes on at the join itself, exactly as the voice room
+        # makes it on its connect: egma is in the room from this line, and
+        # a worker can be typing its hello the moment egma is visible.
+        # The second ask in `dial` then returns having nothing to do.
+        self._answer_for_mocked_tools()
 
     def _joined_room(self, way_in: WayIn) -> TextRoom:
         """The way into the room, with a token that opens it and nothing

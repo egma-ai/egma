@@ -41,7 +41,10 @@ export type LiveKitKeyPairRegistration = CommonRegistration & {
   readonly agentName: string;
   /** Which of the two the simulator conducts over this connection. */
   readonly modality: "chat" | "voice";
-  /** JSON object text handed to the worker as room metadata. */
+  /**
+   * JSON object text handed to the worker on the room's metadata and on the
+   * dispatch's both — `agentName` above always names a worker to dispatch.
+   */
   readonly metadata?: string | undefined;
   readonly credentials: ConnectionCredentials;
 };
@@ -64,8 +67,7 @@ export type LiveKitTokenEndpointRegistration = CommonRegistration & {
 };
 
 export type LiveKitRegistration =
-  | LiveKitKeyPairRegistration
-  | LiveKitTokenEndpointRegistration;
+  LiveKitKeyPairRegistration | LiveKitTokenEndpointRegistration;
 
 /** Hold the project key pair without making it printable. */
 export function liveKitKeyPair(

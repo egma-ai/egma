@@ -92,6 +92,44 @@ voice-only and has two access variants:
 These variants control the same connection type. They are not different agent
 platforms.
 
+#### What your agent reads
+
+A `livekit_room.project_credentials` connection takes an optional `metadata`
+key: a JSON object written inside a string. Egma hands it to your agent on both
+of the channels LiveKit gives an agent for its per-session context.
+
+| Channel | Where your agent reads it | When |
+|---|---|---|
+| Room metadata | `ctx.room.metadata` | Always |
+| Dispatch metadata | `ctx.job.metadata` | When the connection names an agent |
+
+Naming an agent is what creates a dispatch for the value to ride on. A blank
+agent name is automatic dispatch, where LiveKit hands the room to whichever
+worker is listening and there is no dispatch to carry anything, so the room is
+the only channel there.
+
+The room carries your string byte for byte. The dispatch carries your keys
+unchanged and, underneath them, four names that say where Egma is:
+`simulationId`, `modality`, `egmaIdentity` and `protocolVersion`. Your own keys
+always win. If your configured JSON already uses one of those four names, or is
+not a JSON object at all, Egma drops the block and the dispatch carries your
+string alone. That block is read only by Egma Python SDK releases below `0.2.0`.
+It is not how the SDK finds a simulation, and it goes when those releases are
+gone.
+
+Egma writes nothing of the test into either channel. No scenario, no persona, no
+expected behavior, and no mock tool answer: an agent that could read its script
+would stop being under test. What tells Egma's SDK it is in a simulation is the
+room's name, not anything placed in your metadata — see
+[the Python SDK](/integrations/python-sdk#how-the-sdk-knows-it-is-in-a-simulation).
+
+The `livekit_room.customer_token_endpoint` variant takes no `metadata` and no
+agent name. Creating the room and dispatching the worker are both powers the
+project key pair buys, and that variant deliberately gives Egma neither, so both
+keys are refused when the connection is created rather than accepted and
+ignored. On that variant your own endpoint is the side that puts a worker in the
+room, so it is also the side that gives the worker anything to read.
+
 ## Create a connection through the API
 
 Create an agent with an inline Retell chat connection:

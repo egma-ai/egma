@@ -331,14 +331,37 @@ describe("the LiveKit worker integration verifier", () => {
     expectVerified(await claim(after, manifest, dependency, before));
   });
 
-  it("rejects an Egma SDK version without AgentTask handoff support", async () => {
+  it.each([
+    {
+      name: "an Egma SDK pin two releases under the floor",
+      dependency: "livekit-agents>=1.6.7\negma>=0.1.0\n",
+    },
+    {
+      name: "the last Egma SDK pin that reads dispatch metadata",
+      dependency: "livekit-agents>=1.6.7\negma>=0.1.1\n",
+    },
+    {
+      name: "an Egma SDK pin that excludes the floor itself",
+      dependency: "livekit-agents>=1.6.7\negma>0.2.0\n",
+    },
+  ])("rejects $name", async ({ dependency }) => {
     const result = await claim(
       WORKER_WITH_DIRECT_MOCKABLE,
       "requirements.txt",
-      "livekit-agents>=1.6.7\negma>=0.1.0\n",
+      dependency,
     );
 
-    expectUnverified(result, "egma>=0.1.1");
+    expectUnverified(result, "egma>=0.2.0");
+  });
+
+  it("accepts an Egma SDK pin at the floor exactly", async () => {
+    expectVerified(
+      await claim(
+        WORKER_WITH_DIRECT_MOCKABLE,
+        "requirements.txt",
+        "livekit-agents>=1.6.7\negma>=0.2.0\n",
+      ),
+    );
   });
 
   it.each([
@@ -844,7 +867,7 @@ describe("the LiveKit worker integration verifier", () => {
     await writeFile(serviceWorker, WORKER_WITH_DIRECT_MOCKABLE, "utf8");
     await writeFile(
       path.join(made.dir, dependencyFile),
-      "livekit-agents>=1.2\negma>=0.1.1\n",
+      "livekit-agents>=1.2\negma>=0.2.0\n",
       "utf8",
     );
 

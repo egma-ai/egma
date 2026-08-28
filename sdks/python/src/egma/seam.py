@@ -53,10 +53,20 @@ from typing import Any
 PROTOCOL_VERSION = 1
 """Which version of this exchange this side speaks.
 
-It rides every hello in both directions, and it arrives ahead of the
-first word in the dispatch metadata, so a mismatch is known before
-anything is wrapped rather than discovered halfway through a
-simulation.
+It rides every hello in both directions, and the hello is the only place
+it rides. One announcement, read where the exchange itself begins, is the
+only reading that stays true when the two halves are deployed apart: a
+number carried anywhere else would be a second answer to the same
+question, and the second answer is the one that goes stale.
+:func:`mocked_tools_in` is where a reply's number is held to this one.
+
+The number moving is a decision this file records rather than a detail.
+It moves when the *bytes* of these messages move, and not otherwise: a
+version raised without a change to the shapes would refuse an egma that
+can read every message this side sends, which is the whole of what a
+self-hoster runs. When a real change does arrive, egma's own half must
+first ship a release that accepts both numbers, and only after that
+population has drained may this side start sending the new one.
 """
 
 HELLO_METHOD = "egma.hello"
@@ -114,6 +124,24 @@ than as its answer so that raising the delay cap moves this with it
 instead of silently leaving it behind.
 """
 
+HELLO_TIMEOUT_SECONDS = MAX_ROUND_TRIP_SECONDS + SERVING_MARGIN_SECONDS
+"""How long a hello may take before this side stops waiting. 10 + 5 = 15.
+
+Shorter than the number above, and deliberately so. The sum above carries
+``LONGEST_DECLARED_DELAY_SECONDS`` because a mock tool may legally hold an
+answer back for that long; a hello has no authored delay to wait out, so
+that term does not belong in it and carrying it anyway would let a stalled
+hello hold the agent silent for 45 seconds.
+
+That matters because of a bound on egma's own side: once egma is in the
+room it gives an agent 30 seconds to join and publish audio, and a
+simulation that runs out of them ends saying the agent never joined. A
+hello is sent before ``AgentSession.start``, so every second spent here is
+a second the agent is not speaking — and a timeout longer than egma's
+would make egma's own record blame the customer's worker for a stall on
+this side of the room.
+"""
+
 MALFORMED_REQUEST = 901
 """A message egma could not read at all."""
 
@@ -161,6 +189,21 @@ because the reading is the same one, and a second constant for the
 difference would be a distinction nothing can produce.
 """
 
+EGMA_NOT_LISTENING_YET = frozenset({1400})
+"""The one code that means "wait", rather than "there is nobody there".
+
+``1400`` is the method the destination does not serve. egma's participant
+is in the room before it registers the two methods of this exchange, and
+on three of the four dispatch paths into an egma room the agent can
+be asking inside that window — so this is the one refusal a census may be
+sent again on, bounded, rather than fallen open on.
+
+It is deliberately a subset of :data:`EGMA_NOT_REACHED` and not of its
+own kind: once the waiting is over, ``1400`` still means egma was never
+reached and the real tool still runs. The two readings do not compete,
+because the first only applies while there is time left to ask again.
+"""
+
 
 class SeamError(Exception):
     """A reply this side cannot read as an answer.
@@ -202,6 +245,21 @@ def hello_request(census: list[dict[str, Any]]) -> str:
     return _serialized({"protocol_version": PROTOCOL_VERSION, "tools": census})
 
 
+def _is_this_version(declared: object) -> bool:
+    """Whether that is the version of the exchange this side speaks.
+
+    Only the number itself will do, and a boolean is refused explicitly.
+    Python counts ``True`` as equal to ``1``, so a reply whose
+    ``protocol_version`` is JSON ``true`` would otherwise pass for version
+    1 and this side would go on to speak an exchange nobody declared —
+    standing couriers in front of an agent's tools on the word of a far
+    side that never said which exchange it was answering in.
+    """
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        return False
+    return declared == PROTOCOL_VERSION
+
+
 def mocked_tools_in(reply: str) -> tuple[str, ...]:
     """The names egma will answer for, read off a hello's reply.
 
@@ -212,7 +270,7 @@ def mocked_tools_in(reply: str) -> tuple[str, ...]:
     """
     answered = _object(HELLO_METHOD, reply)
     version = answered.get("protocol_version")
-    if version != PROTOCOL_VERSION:
+    if not _is_this_version(version):
         raise SeamError(
             f"{HELLO_METHOD} was answered in protocol version {version!r}, and "
             f"this SDK speaks {PROTOCOL_VERSION}"

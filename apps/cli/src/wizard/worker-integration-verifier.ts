@@ -1191,6 +1191,24 @@ function requirementsEgmaDeclarations(source: string): readonly string[] {
     .filter((line) => namesEgma(line));
 }
 
+/**
+ * Whether one declaration pins the SDK at or above the floor Egma needs.
+ *
+ * The floor is `0.2.0` because that is the first release in which `mockable`
+ * and `monitor_livekit` decide from the job's room name. A `livekit_room`
+ * connection can put a worker in an Egma room by four dispatch paths, and a
+ * release below the floor reads dispatch metadata instead, which reaches the
+ * worker on one of those four. Below the floor, therefore, mock tools are
+ * inert on the other three and a simulation's spans leave through the
+ * production door. Neither failure says anything from inside the worker: the
+ * run completes, the real tools answer a synthetic caller, and the coverage
+ * stamp is three empty lists. That silence is why the pin is proved from the
+ * manifest here rather than left for the import to complain about.
+ *
+ * A direct reference — a URL, a path, a VCS checkout, anything carrying `@` —
+ * names no version to compare against the floor, so it is refused rather than
+ * guessed at.
+ */
 function registryEgmaAtLeastMinimum(requirement: string): boolean {
   if (requirement.includes("@")) return false;
   const match = /^\s*egma(?:\s*\[[^\]]+\])?\s*(>=|>|==|~=|\^)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?/iu.exec(
@@ -1198,7 +1216,7 @@ function registryEgmaAtLeastMinimum(requirement: string): boolean {
   );
   if (match === null) return false;
   const version = [Number(match[2]), Number(match[3] ?? 0), Number(match[4] ?? 0)];
-  const minimum = [0, 1, 1];
+  const minimum = [0, 2, 0];
   for (let at = 0; at < minimum.length; at += 1) {
     if ((version[at] ?? 0) === (minimum[at] ?? 0)) continue;
     return (version[at] ?? 0) > (minimum[at] ?? 0);
@@ -1281,7 +1299,7 @@ function manifestPreservationReason(
     declarations.length !== 1 ||
     !registryEgmaAtLeastMinimum(declarations[0] ?? "")
   ) {
-    return `Egma read ${after.shown}, but expected one registry egma>=0.1.1 dependency.`;
+    return `Egma read ${after.shown}, but expected one registry egma>=0.2.0 dependency.`;
   }
   return manifestWithoutEgma(before) === manifestWithoutEgma(after)
     ? null

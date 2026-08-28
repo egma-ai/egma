@@ -34,7 +34,7 @@ from livekit.agents.voice.run_result import (  # noqa: PLC2701
     _run_mock,
     _SessionMockTools,
 )
-from room_stub import StubContext, StubRoom, egma_metadata
+from room_stub import SIMULATION_ROOM, StubContext, StubRoom
 
 
 class ReceptionAgent(Agent):
@@ -79,9 +79,17 @@ async def session() -> AgentSession:
     return AgentSession()
 
 
-def in_a_simulation(room: StubRoom, **metadata: Any) -> StubContext:
-    """A job dispatched by egma into that room."""
-    return StubContext(room, egma_metadata(**metadata))
+def in_a_simulation(
+    room: StubRoom, room_name: str = SIMULATION_ROOM, metadata: str = ""
+) -> StubContext:
+    """A job whose room egma named for a simulation.
+
+    The metadata is empty by default, and that is the point of the
+    default: an egma that names itself nowhere but in the room's name is
+    the ordinary case, and every test that does not say otherwise is
+    written against it.
+    """
+    return StubContext(room, room_name, metadata)
 
 
 def couriers_on(session: AgentSession, agent: Agent) -> dict[str, Any]:

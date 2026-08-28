@@ -315,6 +315,15 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
   return candidate;
 }
 
+/**
+ * What LiveKit accepts in one metadata field, less the room egma keeps back
+ * for the context block it merges into the dispatch beside the customer's
+ * keys. Mirrored from the access layer so the fixture refuses the oversize
+ * value the real platform refuses: a fixture that admits what production
+ * rejects lets a CLI test register a connection nobody could really have.
+ */
+const METADATA_BYTES = 512 * 1024 - 8 * 1024;
+
 /** A JSON object carried as the text it was written as, checked at create. */
 function jsonObjectText(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -327,6 +336,12 @@ function jsonObjectText(key: string, value: unknown): string {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Refusal(
       `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
+    );
+  }
+  const bytes = Buffer.byteLength(candidate, "utf8");
+  if (bytes > METADATA_BYTES) {
+    throw new Refusal(
+      `the config's ${key} is ${bytes} bytes and egma admits at most ${METADATA_BYTES} on the room and the dispatch`,
     );
   }
   return candidate;
@@ -406,9 +421,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     /**
      * Two access variants answer one question: who mints the
      * token that opens the room. Nothing carries over between them — a
-     * connection that names an endpoint holds no key pair, so it cannot
-     * dispatch a worker or carry room metadata, and both keys are refused on
-     * it by name rather than silently ignored.
+     * connection that names an endpoint holds no key pair, so it can neither
+     * create the room that carries metadata nor dispatch the worker that is
+     * handed it, which is one power covering both of the channels a metadata
+     * value rides. `agentName` and `metadata` are therefore not among that
+     * variant's keys, and both are refused on it by name rather than silently
+     * ignored.
      */
     accessVariants: [
       {
@@ -416,11 +434,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         named: "a LiveKit room connection",
         config: {
           url: livekitServerUrl,
-          // Demanded: every egma dispatch is explicit, because dispatch
-          // metadata is the only channel that carries the simulation's
-          // modality and the mock-tool address.
+          // Demanded: every egma dispatch is explicit, so the record names
+          // the agent it graded.
           agentName: nonEmptyString,
-          // Handed to the agent as the room's metadata, exactly as written.
+          // Handed to the agent exactly as written, on both of the channels
+          // LiveKit gives an agent to read its per-session context from: the
+          // room's metadata always, and the dispatch's metadata too — the
+          // demanded `agentName` above always names a worker to dispatch.
           metadata: optional(jsonObjectText),
         },
         credentials: {
@@ -538,11 +558,14 @@ const CONNECTION_OPTIONS = [
   },
 ] as const;
 
-export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map((option) => ({
-  ...option,
-  topology: (REGISTRY[option.connectionType] as Descriptor).topology,
-  simulatorAdapter: (REGISTRY[option.connectionType] as Descriptor).simulatorAdapter,
-}));
+export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map(
+  (option) => ({
+    ...option,
+    topology: (REGISTRY[option.connectionType] as Descriptor).topology,
+    simulatorAdapter: (REGISTRY[option.connectionType] as Descriptor)
+      .simulatorAdapter,
+  }),
+);
 
 function productLabelOf(
   agentPlatform: string | null,
@@ -596,7 +619,12 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_TYPES.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
+const AGENT_KEYS = [
+  "name",
+  "agentPlatform",
+  "projectId",
+  "connection",
+] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -614,7 +642,10 @@ class Refusal extends Error {
   readonly status: number;
   readonly code: string;
 
-  constructor(message: string, options: { status?: number; code?: string } = {}) {
+  constructor(
+    message: string,
+    options: { status?: number; code?: string } = {},
+  ) {
     super(message);
     this.name = "Refusal";
     this.status = options.status ?? 400;
@@ -648,7 +679,9 @@ function refuseUnknownKeyIn(
           "stale.",
       );
     }
-    throw new Refusal(`${what} has no key "${key}"; it holds ${held.join(", ")}`);
+    throw new Refusal(
+      `${what} has no key "${key}"; it holds ${held.join(", ")}`,
+    );
   }
 }
 
@@ -731,7 +764,9 @@ function validConfig(
 
   for (const key of Object.keys(config)) {
     if (!Object.hasOwn(gates, key)) {
-      throw new Refusal(`${what}'s config has no key "${key}"; it holds ${held}`);
+      throw new Refusal(
+        `${what}'s config has no key "${key}"; it holds ${held}`,
+      );
     }
   }
 
@@ -742,7 +777,10 @@ function validConfig(
       if (!isDemanded(demand)) continue;
       throw new Refusal(`${what}'s config needs ${key}`);
     }
-    stored[key] = (typeof demand === "function" ? demand : demand.gate)(key, value);
+    stored[key] = (typeof demand === "function" ? demand : demand.gate)(
+      key,
+      value,
+    );
   }
   return stored;
 }
@@ -821,7 +859,11 @@ function validCredentials(
   const gate = rule.gate ?? credentialString;
   const sealed: Record<string, string> = {};
   for (const field of rule.fields) {
-    sealed[field] = gate(what, field, (credentials as Record<string, unknown>)[field]);
+    sealed[field] = gate(
+      what,
+      field,
+      (credentials as Record<string, unknown>)[field],
+    );
   }
 
   return { sealed, hint: rule.hint(sealed) };
@@ -836,7 +878,10 @@ function validCredentials(
 function validName(name: unknown, what: string): string {
   const trimmed = typeof name === "string" ? name.trim() : "";
   if (trimmed === "") {
-    throw new Refusal(`${what} needs a name`, { status: 422, code: "unprocessable" });
+    throw new Refusal(`${what} needs a name`, {
+      status: 422,
+      code: "unprocessable",
+    });
   }
   return trimmed;
 }
@@ -1116,11 +1161,17 @@ export function agentRoutes(options: {
   };
 
   const authorized = (headers: Record<string, string | undefined>): boolean => {
-    const offered = (headers["authorization"] ?? "").replace(/^Bearer\s+/iu, "");
+    const offered = (headers["authorization"] ?? "").replace(
+      /^Bearer\s+/iu,
+      "",
+    );
     return offered !== "" && options.knowsKey(offered);
   };
 
-  const notAuthenticated: FixtureAnswer = { status: 401, body: NOT_AUTHENTICATED };
+  const notAuthenticated: FixtureAnswer = {
+    status: 401,
+    body: NOT_AUTHENTICATED,
+  };
 
   /**
    * An agent nobody can see reads exactly like an agent nobody wrote. Existence
@@ -1142,16 +1193,24 @@ export function agentRoutes(options: {
       return make();
     } catch (error) {
       if (error instanceof Refusal) {
-        return { status: error.status, body: { error: error.code, message: error.message } };
+        return {
+          status: error.status,
+          body: { error: error.code, message: error.message },
+        };
       }
       throw error;
     }
   };
 
   /** The smallest free `<kind>-<n>` among an agent's living connections. */
-  const freeConnectionName = (agentId: string, connectionType: string): string => {
+  const freeConnectionName = (
+    agentId: string,
+    connectionType: string,
+  ): string => {
     const taken = new Set(
-      connections.filter((held) => held.agentId === agentId).map((held) => held.name),
+      connections
+        .filter((held) => held.agentId === agentId)
+        .map((held) => held.name),
     );
     for (let n = 1; ; n += 1) {
       const candidate = `${connectionType}-${n}`;
@@ -1237,27 +1296,41 @@ export function agentRoutes(options: {
     return {
       // A name sent blank is refused rather than dropped; absent is different
       // and means the smallest free numbered name.
-      name: input["name"] === undefined ? undefined : validName(input["name"], "a connection"),
+      name:
+        input["name"] === undefined
+          ? undefined
+          : validName(input["name"], "a connection"),
       agentPlatform,
       connectionType,
       accessVariant,
       modality,
       productLabel,
       topology: descriptor.topology,
-      environment: typeof input["environment"] === "string" ? input["environment"] : null,
+      environment:
+        typeof input["environment"] === "string" ? input["environment"] : null,
       config,
       credentials,
     };
   };
 
-  const writeConnection = (agent: StoredAgent, input: Admitted): StoredConnection => {
+  const writeConnection = (
+    agent: StoredAgent,
+    input: Admitted,
+  ): StoredConnection => {
     const { connectionType, modality, config, credentials } = input;
     const name = input.name ?? freeConnectionName(agent.id, connectionType);
-    if (connections.some((held) => held.agentId === agent.id && held.name === name)) {
-      throw new Refusal(`a connection named "${name}" already exists on this agent`, {
-        status: 409,
-        code: "name_taken",
-      });
+    if (
+      connections.some(
+        (held) => held.agentId === agent.id && held.name === name,
+      )
+    ) {
+      throw new Refusal(
+        `a connection named "${name}" already exists on this agent`,
+        {
+          status: 409,
+          code: "name_taken",
+        },
+      );
     }
 
     if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
@@ -1361,11 +1434,14 @@ export function agentRoutes(options: {
             // will take is decided before what egma will do is.
             refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
             const envelope =
-              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
+              body["connection"] === undefined
+                ? undefined
+                : connectionIn(body["connection"]);
 
             // A write may name a project in its body. It never names one in
             // its address, and it never names an organization anywhere.
-            const named = typeof body["projectId"] === "string" ? body["projectId"] : null;
+            const named =
+              typeof body["projectId"] === "string" ? body["projectId"] : null;
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
@@ -1375,11 +1451,14 @@ export function agentRoutes(options: {
             // only pushes its production evidence belongs in the roster and
             // has nothing for Egma's simulator to dial.
             const boundTo = agentPlatformIn(body["agentPlatform"]);
-            const inline = envelope === undefined ? undefined : admitConnection(envelope);
+            const inline =
+              envelope === undefined ? undefined : admitConnection(envelope);
 
             if (inline !== undefined) {
               const living = sameVendorAgent(projectId, inline);
-              const same = living.find((held) => held.modality === inline.modality);
+              const same = living.find(
+                (held) => held.modality === inline.modality,
+              );
 
               if (same !== undefined) {
                 // Whole, never merged: what arrived replaces what is stored.
@@ -1387,12 +1466,17 @@ export function agentRoutes(options: {
                 // checked above — a registration egma would refuse never gets
                 // as far as rotating a live credential.
                 const { credentials } = inline;
-                if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
-                same.credentials = credentials === null ? null : credentials.sealed;
-                same.credentialsHint = credentials === null ? null : credentials.hint;
+                if (credentials !== null)
+                  sealed.push(...Object.values(credentials.sealed));
+                same.credentials =
+                  credentials === null ? null : credentials.sealed;
+                same.credentialsHint =
+                  credentials === null ? null : credentials.hint;
                 same.updatedAt = new Date().toISOString();
 
-                const owner = agents.find((held) => held.id === same.agentId) as StoredAgent;
+                const owner = agents.find(
+                  (held) => held.id === same.agentId,
+                ) as StoredAgent;
                 // No row was written, and saying 201 would be the protocol
                 // claiming something the `result` field is there to deny.
                 return {
@@ -1407,7 +1491,9 @@ export function agentRoutes(options: {
 
               const known = living[0];
               if (known !== undefined) {
-                const owner = agents.find((held) => held.id === known.agentId) as StoredAgent;
+                const owner = agents.find(
+                  (held) => held.id === known.agentId,
+                ) as StoredAgent;
                 return {
                   status: 201,
                   body: {
@@ -1419,11 +1505,18 @@ export function agentRoutes(options: {
               }
             }
 
-            if (agents.some((held) => held.projectId === projectId && held.name === name)) {
-              throw new Refusal(`an agent named "${name}" already exists in this project`, {
-                status: 409,
-                code: "name_taken",
-              });
+            if (
+              agents.some(
+                (held) => held.projectId === projectId && held.name === name,
+              )
+            ) {
+              throw new Refusal(
+                `an agent named "${name}" already exists in this project`,
+                {
+                  status: 409,
+                  code: "name_taken",
+                },
+              );
             }
 
             // Both rows or neither: a connection payload the registry turns
@@ -1432,7 +1525,10 @@ export function agentRoutes(options: {
 
             if (inline === undefined) {
               agents.push(agent);
-              return { status: 201, body: { result: "created", agent: agentOut(agent) } };
+              return {
+                status: 201,
+                body: { result: "created", agent: agentOut(agent) },
+              };
             }
 
             const before = connections.length;
@@ -1485,9 +1581,13 @@ export function agentRoutes(options: {
             // usually the one they just registered. The ids sort by mint time,
             // so reversing what was written is the order the real instance
             // reads them in.
-            const mine = agents.filter((agent) => agent.projectId === project).reverse();
+            const mine = agents
+              .filter((agent) => agent.projectId === project)
+              .reverse();
             const from =
-              cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
+              cursor === undefined
+                ? 0
+                : mine.findIndex((held) => held.id === cursor) + 1;
             const page = mine.slice(from, from + PAGE_SIZE);
             const more = mine.length > from + page.length;
 
@@ -1513,7 +1613,9 @@ export function agentRoutes(options: {
         path: "/v1/agents/:agentId",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
-          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          const agent = agents.find(
+            (held) => held.id === request.params["agentId"],
+          );
           if (agent === undefined) return noSuchAgent;
           return {
             status: 200,
@@ -1533,13 +1635,18 @@ export function agentRoutes(options: {
         path: "/v1/agents/:agentId/connections",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
-          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          const agent = agents.find(
+            (held) => held.id === request.params["agentId"],
+          );
           if (agent === undefined) return noSuchAgent;
           return answering(() => ({
             status: 201,
             body: {
               connection: connectionOut(
-                writeConnection(agent, admitConnection(connectionIn(request.body ?? {}))),
+                writeConnection(
+                  agent,
+                  admitConnection(connectionIn(request.body ?? {})),
+                ),
               ),
             },
           }));

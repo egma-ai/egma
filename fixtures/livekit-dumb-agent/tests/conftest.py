@@ -28,10 +28,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 @dataclass
-class StubJob:
-    """A job, down to the one field the SDK reads of one."""
+class StubJobRoom:
+    """The room as the server described it to the worker."""
 
+    name: str
+
+
+@dataclass
+class StubJob:
+    """A job, down to the two fields the SDK reads of one."""
+
+    room: StubJobRoom
     metadata: str
+
+
+@dataclass
+class StubEgmaParticipant:
+    """Somebody in the room by egma's own name, who nothing should ask."""
+
+    identity: str = "egma-persona"
 
 
 @dataclass
@@ -45,13 +60,45 @@ class StubRoom:
     twice and hides which claim broke. Answering means an SDK that spoke
     in a production room goes on to succeed, quietly, and is caught by
     the one thing that would then be untrue — ``asked`` not being empty.
+
+    egma is in the participant list for the same reason. The SDK finds
+    egma by name among the people in the room, so a room with nobody in it
+    would make this suite pass by absence rather than by the room's name
+    being the customer's own.
     """
 
     asked: list[str] = field(default_factory=list)
+    connect_calls: int = 0
+    present: tuple[str, ...] = ("egma-persona",)
+
+    def __post_init__(self) -> None:
+        self.remote_participants = {
+            identity: StubEgmaParticipant(identity) for identity in self.present
+        }
+        self._listeners: list[Any] = []
 
     @property
     def local_participant(self) -> StubRoom:
         return self
+
+    def isconnected(self) -> bool:
+        return True
+
+    def on(self, event: str, callback: Any) -> Any:
+        if event == "participant_connected":
+            self._listeners.append(callback)
+        return callback
+
+    def off(self, event: str, callback: Any) -> None:
+        if callback in self._listeners:
+            self._listeners.remove(callback)
+
+    def arrive(self, identity: str) -> None:
+        """Put somebody in the room the way LiveKit announces one."""
+        participant = StubEgmaParticipant(identity)
+        self.remote_participants[identity] = participant
+        for callback in list(self._listeners):
+            callback(participant)
 
     async def perform_rpc(self, *, method: str, **_rest: Any) -> str:
         self.asked.append(method)
@@ -67,10 +114,32 @@ class StubContext:
     room: StubRoom
     job: StubJob
 
+    async def connect(self) -> None:
+        self.room.connect_calls += 1
 
-def outside_egma(metadata: str = "") -> StubContext:
-    """A job dispatched by anybody but egma, which is every production one."""
-    return StubContext(room=StubRoom(), job=StubJob(metadata=metadata))
+
+def outside_egma(
+    room_name: str = "maple-street-front-desk", metadata: str = ""
+) -> StubContext:
+    """A job in anybody's room but egma's, which is every production one."""
+    return StubContext(
+        room=StubRoom(),
+        job=StubJob(room=StubJobRoom(name=room_name), metadata=metadata),
+    )
+
+
+def inside_egma(room_name: str = "egma-sim-fixture-0001") -> StubContext:
+    """A job in a room egma named, with nobody in it yet.
+
+    Empty on purpose. Nothing dispatches this worker on egma's behalf
+    unless the practice configured a named agent, so the ordinary order is
+    that this agent is in the room first and egma walks in afterwards —
+    which is what ``StubRoom.arrive`` is for.
+    """
+    return StubContext(
+        room=StubRoom(present=()),
+        job=StubJob(room=StubJobRoom(name=room_name), metadata=""),
+    )
 
 
 @pytest.fixture

@@ -4,7 +4,13 @@ import Link from "next/link";
 
 import { CopyBlock } from "./copy-block.tsx";
 
-const INSTALL = "pip install egma";
+// Pinned, because the floor is what makes the guard hold. `monitor_livekit`
+// reads the job's room name to tell a simulation from a production call, and
+// 0.2.0 is the first release that does. An unpinned install can resolve to a
+// release that reads dispatch metadata instead, which reaches the worker on
+// one of the four LiveKit dispatch paths — so on the other three a
+// simulation's spans arrive here as a production conversation.
+const INSTALL = "pip install 'egma>=0.2.0'";
 const HOOK = `from egma import monitor_livekit
 
 async def entrypoint(ctx):

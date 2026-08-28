@@ -1,17 +1,20 @@
 """The property this package is safe by: in a production room it does nothing.
 
 Not "adds negligible latency", not "wraps harmlessly" — **nothing**. The
-same tool objects, no side table written, and not one message put on the
-wire. Everything else this SDK does is worth having only if a customer
-can install it and have their production behavior be literally
-unchanged, so this file comes first and is read as the whole safety
-argument.
+same tool objects, no side table written, not one message put on the
+wire, and no connect the agent was not already making. Everything else
+this SDK does is worth having only if a customer can install it and have
+their production behavior be literally unchanged, so this file comes first
+and is read as the whole safety argument.
 
-Every way of not finding egma ends here the same way, and that is on
-purpose: metadata that is absent, empty, somebody else's, unparseable, or
-egma's own in a version this SDK does not speak. The differences between
-those are differences about the *room*; about what this SDK should do
-they all say one thing.
+The question the SDK asks is the room's name, and only the room's name, so
+this file is mostly a list of names that are not egma's. Every one of them
+is crossed with a list of dispatch metadata — including metadata carrying
+egma's own key names — because that channel is the customer's to fill with
+whatever they like and nothing in it may turn their production room into a
+simulation. A room wrapped by mistake is also a room whose spans are held
+out of Monitoring, and a dropped trace is evidence a customer cannot get
+back.
 """
 
 from __future__ import annotations
@@ -20,11 +23,20 @@ import pytest
 from conftest import ReceptionAgent, couriers_on
 from livekit.agents import AgentTask, ConversationItemAddedEvent, function_tool
 from livekit.agents.llm import AgentHandoff
-from room_stub import StubContext, StubRoom, egma_metadata
+from room_stub import PRODUCTION_ROOM, SIMULATION_ROOM, StubContext, StubRoom
 
 from egma import mockable
 
-NO_EGMA = [
+NOT_A_SIMULATION_ROOM = [
+    pytest.param("", id="no room name at all"),
+    pytest.param(PRODUCTION_ROOM, id="the customer's own room"),
+    pytest.param("egma-sim", id="the prefix without its separator"),
+    pytest.param("egma-simulator-demo", id="a name that merely starts alike"),
+    pytest.param("call-egma-sim-0001", id="the prefix in the middle"),
+    pytest.param("EGMA-SIM-0001", id="the prefix in another case"),
+]
+
+THE_CUSTOMER_S_OWN_METADATA = [
     pytest.param("", id="no metadata at all"),
     pytest.param("   ", id="metadata of blanks"),
     pytest.param('{"tenant":"acme","shift":"nights"}', id="the customer's own"),
@@ -32,6 +44,10 @@ NO_EGMA = [
     pytest.param('"a string"', id="json that is not an object"),
     pytest.param('{"egmaIdentity":""}', id="an egma name that names nobody"),
     pytest.param('{"egmaIdentity":42}', id="an egma name that is not a name"),
+    pytest.param(
+        '{"egmaIdentity":"egma-persona","simulationId":"sim-0001"}',
+        id="the customer's own use of egma's key names",
+    ),
 ]
 
 
@@ -47,12 +63,14 @@ class ProductionTask(AgentTask[None]):
         return f"really booked {day}"
 
 
-@pytest.mark.parametrize("metadata", NO_EGMA)
-async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
+@pytest.mark.parametrize("room_name", NOT_A_SIMULATION_ROOM)
+@pytest.mark.parametrize("metadata", THE_CUSTOMER_S_OWN_METADATA)
+async def test_a_room_egma_did_not_name_is_left_alone(room_name, metadata, session):
     agent = ReceptionAgent()
     before = agent.tools
-    room = StubRoom(connected=False)
-    ctx = StubContext(room, metadata)
+    # egma is standing right there, willing to answer. Nothing may ask it.
+    room = StubRoom(connected=False, mocked_tools=("check_calendar",))
+    ctx = StubContext(room, room_name, metadata)
 
     await mockable(agent, ctx, session)
 
@@ -71,15 +89,45 @@ async def test_a_room_with_no_egma_in_it_is_left_alone(metadata, session):
     # production room a round trip on every session start.
     assert room.asked == []
     assert ctx.connect_calls == 0
+    # Nor was anything left listening for somebody to walk in.
+    assert room.listeners == {}
+
+
+@pytest.mark.parametrize("metadata", THE_CUSTOMER_S_OWN_METADATA)
+async def test_the_customers_dispatch_metadata_is_never_read_as_an_instruction(
+    metadata, session
+):
+    """The channel that is the customer's, down to egma's own key names.
+
+    Dispatch metadata is where LiveKit teaches customers to put a caller's
+    own identifiers, so whatever is in it belongs to them — including the
+    four names egma writes there for older SDK versions. A customer whose
+    own JSON happens to use ``egmaIdentity`` gets exactly the production
+    room they had: their tools untouched, and their conversation still on
+    the record in Monitoring.
+
+    The last parameter is the one this test exists for. The rest are here
+    so the reading is proved to be no reading at all, rather than a
+    reading that this particular JSON happened to fail.
+    """
+    agent = ReceptionAgent()
+    room = StubRoom(connected=False, mocked_tools=("check_calendar",))
+    ctx = StubContext(room, PRODUCTION_ROOM, metadata)
+
+    await mockable(agent, ctx, session)
+
+    assert couriers_on(session, agent) == {}
+    assert room.asked == []
+    assert ctx.connect_calls == 0
 
 
 async def test_a_production_handoff_stays_inert_after_mockable_returns(session):
-    """No metadata also means no listener waiting to wrap a later task."""
+    """A production room also means no listener waiting to wrap a later task."""
     agent = ReceptionAgent()
     task = ProductionTask()
     room = StubRoom(connected=False)
 
-    await mockable(agent, StubContext(room, ""), session)
+    await mockable(agent, StubContext(room, PRODUCTION_ROOM), session)
     session.update_agent(task)
     session.emit(
         "conversation_item_added",
@@ -93,54 +141,24 @@ async def test_a_production_handoff_stays_inert_after_mockable_returns(session):
     assert room.asked == []
 
 
-@pytest.mark.parametrize(
-    "declared",
-    [
-        pytest.param(99, id="a version from the future"),
-        pytest.param(True, id="a boolean, which python counts as one"),
-        pytest.param("1", id="a version written as text"),
-        pytest.param(None, id="no version at all"),
-    ],
-)
-async def test_a_version_this_sdk_cannot_read_wraps_nothing(session, declared):
-    """Only the number itself will do.
+async def test_a_production_room_is_answered_without_a_job_room_object(session):
+    """A context that carries no room on its job is a production room.
 
-    A boolean is the one worth naming: Python counts ``True`` as equal to
-    ``1``, so a metadata field carrying ``true`` would otherwise pass for
-    version 1 and this SDK would speak an exchange nobody declared.
+    Read defensively on purpose. Whatever this is handed, the answer that
+    costs nobody anything is the one it gives — and a caller who passed
+    the wrong object entirely still reaches a worded complaint elsewhere
+    rather than an attribute error raised from inside this SDK.
     """
     agent = ReceptionAgent()
-    room = StubRoom(mocked_tools=("check_calendar",))
+    room = StubRoom(connected=False)
+    ctx = StubContext(room, PRODUCTION_ROOM)
+    ctx.job.room = None
 
-    await mockable(
-        agent, StubContext(room, egma_metadata(protocol_version=declared)), session
-    )
+    await mockable(agent, ctx, session)
 
     assert couriers_on(session, agent) == {}
     assert room.asked == []
-
-
-async def test_a_version_neither_side_speaks_wraps_nothing(session, caplog):
-    """egma is there, and this SDK does not speak its exchange.
-
-    Nothing is wrapped, so every tool runs its own implementation — the
-    same place the absent-egma path lands, reached from the other
-    direction. It is said at error level because, unlike an absent egma,
-    this one is a fault somebody must fix: a simulation ran unisolated.
-    """
-    agent = ReceptionAgent()
-    room = StubRoom(mocked_tools=("check_calendar",))
-
-    with caplog.at_level("ERROR", logger="egma"):
-        await mockable(
-            agent, StubContext(room, egma_metadata(protocol_version=99)), session
-        )
-
-    assert couriers_on(session, agent) == {}
-    # Not even the census: a version mismatch is known before anything is
-    # said, which is the whole reason the version rides the metadata.
-    assert room.asked == []
-    assert "99" in caplog.text
+    assert ctx.connect_calls == 0
 
 
 async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(session):
@@ -155,7 +173,7 @@ async def test_an_agent_with_no_tools_still_reports_and_wraps_nothing(session):
     agent = ToollessAgent()
     room = StubRoom()
 
-    await mockable(agent, StubContext(room, egma_metadata()), session)
+    await mockable(agent, StubContext(room, SIMULATION_ROOM), session)
 
     assert [asked.method for asked in room.asked] == ["egma.hello"]
     assert room.asked[0].body["tools"] == []
