@@ -108,14 +108,10 @@ agent name is automatic dispatch, where LiveKit hands the room to whichever
 worker is listening and there is no dispatch to carry anything, so the room is
 the only channel there.
 
-The room carries your string byte for byte. The dispatch carries your keys
-unchanged and, underneath them, four names that say where Egma is:
-`simulationId`, `modality`, `egmaIdentity` and `protocolVersion`. Your own keys
-always win. If your configured JSON already uses one of those four names, or is
-not a JSON object at all, Egma drops the block and the dispatch carries your
-string alone. That block is read only by Egma Python SDK releases below `0.2.0`.
-It is not how the SDK finds a simulation, and it goes when those releases are
-gone.
+Both channels carry your string byte for byte. Egma adds nothing to either and
+writes neither out again, so an agent reading `ctx.job.metadata` and one reading
+`ctx.room.metadata` see the same bytes you configured — and see them in a
+simulation exactly as they see them in production.
 
 Egma writes nothing of the test into either channel. No scenario, no persona, no
 expected behavior, and no mock tool answer: an agent that could read its script

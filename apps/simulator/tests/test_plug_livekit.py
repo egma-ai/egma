@@ -52,14 +52,8 @@ from egma_simulator.media.livekit_room import (
     TOKEN_RESPONSE_BYTES,
     LiveKitRoomBackend,
     RoomSettings,
-    dispatch_metadata,
 )
-from egma_simulator.media.room import (
-    PERSONA_IDENTITY,
-    ROOM_PREFIX,
-    JoinedRoom,
-    room_token,
-)
+from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX, JoinedRoom
 from egma_simulator.media.scripted_transport import FRAME_SECONDS
 from egma_simulator.mock_tools import PROTOCOL_VERSION, MockToolSeam
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -1076,23 +1070,30 @@ async def test_the_dispatch_carries_the_customers_own_keys_untouched(
         scenario="One point.",
     )
 
-    carried = json.loads(stub.dispatches[0].metadata)
-    assert carried["clinic"] == "lakeside"
-    assert carried["locale"] == "en-GB"
+    assert stub.dispatches[0].metadata == '{"clinic":"lakeside","locale":"en-GB"}'
 
 
-async def test_the_dispatch_survives_a_value_with_no_utf_8_form(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "configured",
+    [
+        '{"clinic":"lakeside","locale":"en-GB"}',
+        '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}',
+        '{"label":"\\ud800"}',
+    ],
+)
+async def test_the_two_channels_carry_the_same_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured: str
 ):
-    """A lone surrogate is legal JSON, so the door admits it and the room
-    carries it. The dispatch has to survive it too.
+    """One value, two channels, and the same bytes on both.
 
-    ``{"label":"\\ud800"}`` is a valid JSON object whose parsed value is a
-    character that has no UTF-8 encoding at all. The room's copy never meets
-    that problem, because it rides as the ASCII the customer wrote. egma's
-    copy is written out again, and written out raw it would be a string that
-    cannot go on the wire — a simulation dead at dispatch over a value the
-    other channel carried without complaint.
+    egma writes the configured string out on neither channel, so there is
+    no second spelling of it to go wrong. That is worth pinning against
+    three shapes a re-serialising driver would have handled differently:
+    plain ASCII, characters outside it, and ``\\ud800`` — a lone surrogate,
+    which is legal JSON the door admits and a character with no UTF-8 form
+    at all. Written out again, the third one is a string that cannot go on
+    the wire, and the simulation would be dead at the dispatch over a value
+    the other channel carried without complaint.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -1100,16 +1101,12 @@ async def test_the_dispatch_survives_a_value_with_no_utf_8_form(
         stub,
         monkeypatch,
         agent_name="front-desk",
-        metadata='{"label":"\\ud800"}',
+        metadata=configured,
         scenario="One point.",
     )
 
-    carried = stub.dispatches[0].metadata
-    # The whole of the claim: it goes on the wire, and it still reads back
-    # as the value the customer configured.
-    carried.encode("utf-8")
-    assert json.loads(carried)["label"] == "\ud800"
-    assert json.loads(carried)["simulationId"]
+    assert stub.dispatches[0].metadata == configured
+    assert stub.rooms[0].metadata == configured
 
 
 async def test_the_dispatch_carries_none_of_the_test(
@@ -1132,141 +1129,22 @@ async def test_the_dispatch_carries_none_of_the_test(
         assert word not in stub.dispatches[0].metadata
 
 
-def test_the_retiring_context_rides_under_the_customers_json():
-    """Both, where they fit: the customer's object with egma's four facts
-    added beneath it.
-
-    egma's own signal is the room's name and the persona's identity, on
-    all four ways into a room. These four keys are here for one reason —
-    an SDK older than room-name detection reads them and nothing else —
-    and the customer's keys are what the message is actually for, so they
-    arrive with their values intact.
-    """
-    carried = json.loads(
-        dispatch_metadata(
-            '{"clinic":"lakeside"}', "sim_01ABC", egma_identity="egma-persona"
-        )
-    )
-
-    assert carried == {
-        "clinic": "lakeside",
-        "simulationId": "sim_01ABC",
-        "modality": "voice",
-        "egmaIdentity": "egma-persona",
-        "protocolVersion": PROTOCOL_VERSION,
-    }
-
-
-def test_a_connection_that_configured_nothing_carries_the_retiring_context_alone():
-    """Nothing of the customer's to carry, so nothing of theirs is at
-    risk — which is the one case where egma's own block is the whole
-    message rather than a few keys under somebody else's."""
-    assert json.loads(
-        dispatch_metadata(None, "sim_01ABC", egma_identity="egma-persona")
-    ) == {
-        "simulationId": "sim_01ABC",
-        "modality": "voice",
-        "egmaIdentity": "egma-persona",
-        "protocolVersion": PROTOCOL_VERSION,
-    }
-
-
-@pytest.mark.parametrize(
-    "configured",
-    [
-        '{"egmaIdentity":"theirs"}',
-        '{"clinic":"lakeside","protocolVersion":9}',
-        '{"modality":"chat"}',
-        '{"simulationId":"their-own-id"}',
-    ],
-)
-def test_a_customers_own_key_wins_over_the_retiring_context(configured: str):
-    """Their value, byte for byte, and egma's block dropped whole.
-
-    Overwriting a key an agent reads breaks the agent's own deployment
-    inside the run that was meant to test it, so it is not traded for
-    anything — not even for an older SDK's one way of finding a
-    simulation, which the room's own name gives it back.
-    """
-    assert (
-        dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
-        == configured
-    )
-
-
-def test_the_two_channels_carry_the_same_value():
-    """One value, two channels, and the same thing read out of both.
-
-    The room carries the configured string untouched and the dispatch
-    carries egma's own writing of it, so the promise the two share is the
-    value rather than the bytes: an agent reading ``ctx.room.metadata`` and
-    one reading ``ctx.job.metadata`` parse their way to the same object.
-
-    egma's copy is escaped on the way out, and it has to be. A configured
-    value may hold a character with no UTF-8 form, and the room never meets
-    that because it rides as the ASCII the customer wrote; written out raw,
-    egma's copy would be a string that cannot go on the wire at all. So the
-    spelling may differ and the value may not, and what is pinned here is
-    the second of those.
-    """
-    configured = '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}'
-    carried = dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
-
-    assert json.loads(carried)["tenant"] == json.loads(configured)["tenant"]
-    assert json.loads(carried)["city"] == json.loads(configured)["city"]
-    # The property the spelling buys, and the reason it is not the room's.
-    carried.encode("utf-8")
-
-
-def test_metadata_that_is_not_an_object_rides_exactly_as_configured():
-    """Nowhere to add anything, so nothing is added and nothing is lost.
-
-    The door stores this as a JSON object in a string and the driver
-    refuses anything else on the way in, so this is unreachable through
-    the product. It is pinned anyway, because the alternative to passing
-    an unparsable string through is corrupting it.
-    """
-    assert (
-        dispatch_metadata("not json at all", "sim_01ABC", egma_identity="p")
-        == "not json at all"
-    )
-
-
-async def test_the_dispatch_names_the_participant_the_token_really_opens(
+async def test_a_connection_that_configured_nothing_dispatches_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The retiring block's identity is the one the token really grants.
+    """No metadata configured, so no metadata sent — on either channel.
 
-    An SDK older than room-name detection sends its mock-tool calls to
-    whoever that block names, so a name invented for the message rather
-    than taken from the token would address a participant that is not in
-    the room — and every mocked tool would quietly run for real, in a
-    live simulation, with nothing on the record to say so. Newer SDKs
-    read the persona identity off the room instead; this is what holds
-    the older ones up until the block goes.
+    There is nothing of egma's to put in an empty message. An agent that
+    reads ``ctx.job.metadata`` on a connection that configured none finds
+    exactly what it finds in its own production rooms.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
         tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
     )
 
-    named = json.loads(stub.dispatches[0].metadata)["egmaIdentity"]
-    minted = jwt_identity(room_token(A_KEY, A_SECRET, stub.rooms[0].name))
-    assert named == minted == PERSONA_IDENTITY
-
-
-def jwt_identity(token: str) -> str:
-    """Whose token this is, read out of the token itself.
-
-    Decoded rather than asserted against a constant, because the question
-    is whether the two really agree — the block is only right if it names
-    the identity the signed token actually grants.
-    """
-    import base64
-
-    claims = token.split(".")[1]
-    padded = claims + "=" * (-len(claims) % 4)
-    return json.loads(base64.urlsafe_b64decode(padded))["sub"]
+    assert stub.dispatches[0].metadata == ""
+    assert stub.rooms[0].metadata == ""
 
 
 @pytest.mark.parametrize(
@@ -1748,7 +1626,8 @@ def test_the_room_is_made_fresh_and_never_reused():
     simulations on one line."""
     settings = RoomSettings.from_connection(
         "livekit_room.project_credentials",
-        {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+        {"url": A_URL},
+        {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     built = [
         LiveKitRoomBackend(settings=settings, simulation_id=A_SIMULATION).room_name
@@ -1763,7 +1642,8 @@ def test_the_settings_never_show_the_secret_when_they_are_printed():
     one, so this one does not carry it."""
     settings = RoomSettings.from_connection(
         "livekit_room.project_credentials",
-        {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+        {"url": A_URL},
+        {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     assert A_SECRET not in repr(settings)
     assert settings.secrets == (A_SECRET,)
@@ -1802,7 +1682,8 @@ def test_the_fake_is_the_real_driver_with_its_network_answered():
     driver = stub.driver(
         settings=RoomSettings.from_connection(
             "livekit_room.project_credentials",
-            {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+            {"url": A_URL},
+            {"apiKey": A_KEY, "apiSecret": A_SECRET},
         ),
         simulation_id=A_SIMULATION,
     )
