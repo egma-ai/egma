@@ -1,0 +1,128 @@
+{
+  "conversation_flow_id": "conversation_flow_2346a0e8367c",
+  "version": 105,
+  "is_published": true,
+  "global_prompt": "You are the after-hours receptionist for a medspa.",
+  "model_choice": { "type": "cascading", "model": "gpt-4.1" },
+  "default_dynamic_variables": { "clinic_name": "Remedy" },
+  "start_node_id": "node-greeting",
+  "begin_tag_display_position": { "x": 0, "y": 0 },
+  "tools": [
+    {
+      "tool_id": "tool-get_availability",
+      "type": "custom",
+      "name": "get_availability",
+      "description": "Look up open appointment slots for a service on a date.",
+      "url": "https://backend.example.com/emrs/boulevard/tools/get_availability",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer sk_live_FIXTURESECRET_availability_9f2b1c",
+        "X-Tenant-Key": "tenant_FIXTURESECRET_remedy_4a71de"
+      },
+      "query_params": { "locale": "en-US" },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "service": { "type": "string", "description": "The service asked for." },
+          "date": { "type": "string", "description": "An ISO-8601 date." }
+        },
+        "required": ["service", "date"]
+      },
+      "response_variables": { "slots": "$.slots" },
+      "speak_during_execution": true,
+      "speak_after_execution": true,
+      "execution_message_description": "Let me check that for you.",
+      "timeout_ms": 20000,
+      "max_retry": 1,
+      "args_at_root": true,
+      "parameter_type": "json",
+      "enable_typing_sound": false
+    },
+    {
+      "tool_id": "tool-book_appointment",
+      "type": "custom",
+      "name": "book_appointment",
+      "description": "Book a slot for a client.",
+      "url": "https://backend.example.com/emrs/boulevard/tools/book_appointment",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer sk_live_FIXTURESECRET_booking_7d40aa"
+      },
+      "query_params": {},
+      "parameters": {
+        "type": "object",
+        "properties": { "slot_id": { "type": "string" } },
+        "required": ["slot_id"]
+      },
+      "timeout_ms": 30000,
+      "args_at_root": true
+    },
+    {
+      "tool_id": "tool-price list",
+      "type": "custom",
+      "name": "price list/lookup?v=2",
+      "description": "A tool whose name carries characters a path has to encode.",
+      "url": "https://backend.example.com/emrs/boulevard/tools/prices",
+      "method": "GET",
+      "headers": { "X-Api-Key": "FIXTURESECRET_prices_11c9ef" },
+      "parameters": { "type": "object", "properties": {} },
+      "args_at_root": true
+    },
+    {
+      "tool_id": "tool-normalise_phone",
+      "type": "code",
+      "name": "normalise_phone",
+      "description": "Runs inside Retell's own sandbox and never leaves it.",
+      "code": "return { number: args.number.replace(/[^0-9+]/g, '') };"
+    },
+    {
+      "tool_id": "tool-transfer_to_front_desk",
+      "type": "transfer_call",
+      "name": "transfer_to_front_desk",
+      "description": "Hands the caller to a person.",
+      "transfer_destination": { "type": "predefined", "number": "+15550001111" }
+    },
+    {
+      "tool_id": "tool-text_directions",
+      "type": "send_sms",
+      "name": "text_directions",
+      "description": "Sends the clinic address by SMS.",
+      "sms_content": { "type": "static", "text": "We are at 1 Example Street." }
+    },
+    {
+      "tool_id": "tool-end_call",
+      "type": "end_call",
+      "name": "end_call",
+      "description": "Ends the conversation."
+    }
+  ],
+  "mcps": [
+    {
+      "mcp_id": "mcp-inventory",
+      "name": "inventory",
+      "url": "https://mcp.example.com/inventory",
+      "headers": { "Authorization": "Bearer FIXTURESECRET_mcp_5be220" },
+      "timeout_ms": 15000
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-greeting",
+      "type": "conversation",
+      "instruction": { "type": "prompt", "text": "Greet the caller." },
+      "edges": [{ "id": "edge-1", "destination_node_id": "node-booking" }]
+    },
+    {
+      "id": "node-booking",
+      "type": "subagent",
+      "instruction": { "type": "prompt", "text": "Book the appointment." },
+      "tool_ids": [
+        "tool-get_availability",
+        "tool-book_appointment",
+        "tool-price list",
+        "tool-normalise_phone"
+      ],
+      "edges": []
+    }
+  ]
+}
