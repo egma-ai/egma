@@ -53,6 +53,36 @@ The script it is built with:
   it will not make the room, or will not dispatch into it.
 - ``refuses_rpc`` — a participant that will not take the mock-tool methods
   at all, which must cost the exchange and never the conversation.
+
+## The same room, carrying typing
+
+A chat simulation is the same room with nobody speaking in it, so it gets
+the same treatment: :class:`ChatRoomStubBackend` is the real chat driver
+with the three requests it makes of a LiveKit answered here, and
+:class:`StubTextRoom` is the real text room with only its join stood in
+for. Everything a chat test then exercises is the driver's own — reading
+an utterance to its close, skipping egma's own words, deciding where a
+turn ends and waiting out the quiet period, and putting the mock-tool
+methods on egma's participant. What is scripted is only what the agent
+does, and the interesting scripts are the ones a real agent produces:
+
+- ``greeting`` / ``replies`` — as above, except that one entry may be a
+  **list** of utterances rather than one. That is a turn arriving in
+  pieces, which is what an agent that says a filler and then answers
+  really sends.
+- ``answer_delay_seconds`` — how long the agent is quiet before it starts
+  a turn.
+- ``pause_seconds`` — the gap *inside* a turn, between two of its
+  utterances. This is the tool-call pause, and it is the whole reason the
+  turn does not end at the first close.
+- ``agent_publishes_audio_track`` / ``marks_speech`` — the two wire facts
+  that say an agent is speaking rather than typing, scriptable separately
+  because they reach egma by different routes and either alone is enough.
+
+The record fields are the voice fake's own — ``rooms``, ``dispatches``,
+``deleted``, ``standing_ready`` — because they are the same facts about
+the same room, and a chat test that reads like a voice one is the point of
+having one connection type answer in two modalities.
 """
 
 from __future__ import annotations
@@ -66,8 +96,11 @@ from typing import Any
 
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.livekit_room import (
+    LiveKitChatRoomBackend,
     LiveKitRoomBackend,
     RoomSettings,
+    TextRoom,
+    Utterance,
     platform_refusal,
 )
 from egma_simulator.media.room import answering
@@ -198,29 +231,8 @@ class StubRoom:
         self._backend.stub.standing_ready.set()
 
     async def perform_rpc(self, method: str, payload: str) -> str:
-        """Call a method on egma's participant, the way the transport does.
-
-        Everything the transport would refuse before egma ever sees it is
-        refused here for the same reasons and with the same codes: a
-        method nobody registered, a request too large to carry, and a
-        reply too large to carry back. What is left is the handler's own
-        answer, or the handler's own refusal.
-        """
-        from livekit import rtc
-
-        if len(payload.encode()) > LARGEST_PAYLOAD_BYTES:
-            raise rtc.RpcError._built_in(
-                rtc.RpcError.ErrorCode.REQUEST_PAYLOAD_TOO_LARGE
-            )
-        handler = self._methods.get(method)
-        if handler is None:
-            raise rtc.RpcError._built_in(rtc.RpcError.ErrorCode.UNSUPPORTED_METHOD)
-        answered = await handler(RpcAsk(payload=payload))
-        if len(answered.encode()) > LARGEST_PAYLOAD_BYTES:
-            raise rtc.RpcError._built_in(
-                rtc.RpcError.ErrorCode.RESPONSE_PAYLOAD_TOO_LARGE
-            )
-        return answered
+        """Call a method on egma's participant, the way the transport does."""
+        return await performed(self._methods, method, payload)
 
     def agent_arrives(self) -> None:
         """The worker turns up, and — unless it is broken — is heard."""
@@ -236,6 +248,29 @@ class StubRoom:
         self._activation = asyncio.create_task(
             transport.activate(), name="room-stub-transport"
         )
+
+
+async def performed(methods: dict[str, Any], method: str, payload: str) -> str:
+    """One call on egma's participant, the way the transport makes it.
+
+    Written once for both rooms, because it is one behaviour: everything
+    the transport would refuse before egma ever sees it is refused here
+    for the same reasons and with the same codes — a method nobody
+    registered, a request too large to carry, and a reply too large to
+    carry back. What is left is the handler's own answer, or the handler's
+    own refusal.
+    """
+    from livekit import rtc
+
+    if len(payload.encode()) > LARGEST_PAYLOAD_BYTES:
+        raise rtc.RpcError._built_in(rtc.RpcError.ErrorCode.REQUEST_PAYLOAD_TOO_LARGE)
+    handler = methods.get(method)
+    if handler is None:
+        raise rtc.RpcError._built_in(rtc.RpcError.ErrorCode.UNSUPPORTED_METHOD)
+    answered = await handler(RpcAsk(payload=payload))
+    if len(answered.encode()) > LARGEST_PAYLOAD_BYTES:
+        raise rtc.RpcError._built_in(rtc.RpcError.ErrorCode.RESPONSE_PAYLOAD_TOO_LARGE)
+    return answered
 
 
 def _test_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
@@ -293,12 +328,7 @@ class RoomStubBackend(LiveKitRoomBackend):
 
     async def _asked(self, request: object, what_failed: str) -> None:
         """The requests the driver really built, answered here instead."""
-        from livekit import api
-
-        if isinstance(request, api.CreateRoomRequest):
-            self._room_asked_for(request, what_failed)
-        else:
-            self._agent_asked_for(request, what_failed)
+        await answered_from_the_script(self, request, what_failed)
 
     def _joined_room(self, way_in: object) -> StubRoom:
         # Recorded rather than used: what a real join would have been
@@ -313,40 +343,53 @@ class RoomStubBackend(LiveKitRoomBackend):
     async def _delete_room(self) -> None:
         self.stub.deleted.append(self.room_name)
 
-    # -- What a scripted LiveKit does with each ------------------------------
 
-    def _room_asked_for(self, request: object, what_failed: str) -> None:
-        if self.stub.refuses_room is not None:
-            raise platform_refusal(
-                what_failed, "invalid_argument", self._quotable(self.stub.refuses_room)
-            )
-        self.stub.rooms.append(
-            CreatedRoom(name=request.name, metadata=request.metadata)
-        )
-        if not self._settings.agent_name:
-            # Automatic dispatch: a worker registered without a name is
-            # given every new room in the project, so making the room
-            # *was* the request and nothing more will be asked for.
-            self.agent_is_coming = self.stub.agent_joins
+# -- What a scripted LiveKit does with each request --------------------------
+#
+# Written once and used by both fakes, because it is one behaviour: the
+# room and the dispatch are the same two requests whether the exchange in
+# the room will be spoken or typed, and a second copy of the refusals and
+# the record-keeping would be a second thing to keep true.
 
-    def _agent_asked_for(self, request: object, what_failed: str) -> None:
-        if self.stub.refuses_dispatch is not None:
-            raise platform_refusal(
-                what_failed, "not_found", self._quotable(self.stub.refuses_dispatch)
-            )
-        self.stub.dispatches.append(
-            Dispatch(
-                room=request.room,
-                agent_name=request.agent_name,
-                metadata=request.metadata,
-            )
+
+async def answered_from_the_script(
+    driver: Any, request: object, what_failed: str
+) -> None:
+    """The requests the driver really built, answered from a script."""
+    from livekit import api
+
+    if isinstance(request, api.CreateRoomRequest):
+        _room_asked_for(driver, request, what_failed)
+    else:
+        _agent_asked_for(driver, request, what_failed)
+
+
+def _room_asked_for(driver: Any, request: Any, what_failed: str) -> None:
+    if driver.stub.refuses_room is not None:
+        raise platform_refusal(
+            what_failed, "invalid_argument", driver._quotable(driver.stub.refuses_room)
         )
-        if not self.stub.agent_joins:
-            return
-        self.agent_is_coming = True
-        room = self._room
-        if isinstance(room, StubRoom):
-            room.agent_arrives()
+    driver.stub.rooms.append(CreatedRoom(name=request.name, metadata=request.metadata))
+
+
+def _agent_asked_for(driver: Any, request: Any, what_failed: str) -> None:
+    if driver.stub.refuses_dispatch is not None:
+        raise platform_refusal(
+            what_failed, "not_found", driver._quotable(driver.stub.refuses_dispatch)
+        )
+    driver.stub.dispatches.append(
+        Dispatch(
+            room=request.room,
+            agent_name=request.agent_name,
+            metadata=request.metadata,
+        )
+    )
+    if not driver.stub.agent_joins:
+        return
+    driver.agent_is_coming = True
+    room = driver._room
+    if room is not None:
+        room.agent_arrives()
 
 
 @dataclass
@@ -369,9 +412,8 @@ class RoomStub:
     """Every room this LiveKit was asked to make, in order."""
 
     dispatches: list[Dispatch] = field(default_factory=list)
-    """Every agent it was asked to put in one, in order. Empty is what
-    automatic dispatch looks like from the server's side: nothing asked
-    for, because the room itself was the request."""
+    """Every agent it was asked to put in one, in order. One per room that
+    was made, because egma dispatches explicitly and always."""
 
     deleted: list[str] = field(default_factory=list)
     """Every room it was asked to delete, in order. Empty is what a
@@ -412,6 +454,281 @@ class RoomStub:
 
     @property
     def room(self) -> StubRoom:
+        """The room egma joined. One simulation joins exactly one."""
+        return self.joined_rooms[-1]
+
+    async def says_hello(
+        self,
+        *tools: str,
+        schemas: dict[str, object] | None = None,
+        protocol_version: int = PROTOCOL_VERSION,
+    ) -> dict:
+        """The census: every tool the agent has, and what egma answers for."""
+        return json.loads(
+            await self.room.perform_rpc(
+                HELLO_METHOD,
+                json.dumps(
+                    {
+                        "protocol_version": protocol_version,
+                        "tools": [
+                            {"name": name, "schema": (schemas or {}).get(name, {})}
+                            for name in tools
+                        ],
+                    }
+                ),
+            )
+        )
+
+    async def calls(self, name: str, arguments: dict | None = None) -> dict:
+        """One tool call, asked of egma and answered by it."""
+        asked: dict = {"name": name}
+        if arguments is not None:
+            asked["arguments"] = arguments
+        return json.loads(await self.room.perform_rpc(TOOL_METHOD, json.dumps(asked)))
+
+
+# -- The same room, carrying typing ------------------------------------------
+
+
+@dataclass(frozen=True)
+class TypedTurn:
+    """One persona turn egma really typed into the room, and where."""
+
+    topic: str
+    text: str
+
+
+class StubLocalParticipant:
+    """Egma's own participant, as much of one as a typed room needs.
+
+    Two things go through it and both are the driver's own calls: the
+    mock-tool methods, already wrapped by the driver in
+    :func:`egma_simulator.media.room.answering`, and the persona's turn on
+    the chat topic. So what a test proves about either is proved about the
+    code, and the topic recorded below is the topic that would have gone
+    on the wire.
+    """
+
+    def __init__(self, room: StubTextRoom) -> None:
+        self._room = room
+        self.methods: dict[str, Any] = {}
+
+    def register_rpc_method(self, method: str, handler: Any) -> None:
+        refusal = self._room.stub.refuses_rpc
+        if refusal is not None:
+            raise RuntimeError(refusal)
+        self.methods[method] = handler
+        self._room.stub.standing_ready.set()
+
+    async def send_text(self, text: str, *, topic: str) -> None:
+        self._room.persona_typed(topic, text)
+
+
+class StubLocalRoom:
+    """What ``rtc.Room`` is to the text room: a participant, and a way out."""
+
+    def __init__(self, participant: StubLocalParticipant) -> None:
+        self.local_participant = participant
+        self.left = False
+
+    async def disconnect(self) -> None:
+        self.left = True
+
+
+class StubTextRoom(TextRoom):
+    """The real text room, with the LiveKit under it answered here.
+
+    Only the join is stood in for, and everything a chat test then walks
+    is the driver's own code: reading each utterance to its close,
+    dropping egma's own words, waiting out the quiet period, deciding
+    where a turn ends, and offering the mock-tool methods on egma's
+    participant. What is scripted is only what the agent does.
+    """
+
+    def __init__(self, backend: ChatRoomStubBackend, **built: Any) -> None:
+        super().__init__(**built)
+        self._backend = backend
+        self._replies: list[str | list[str]] = list(backend.stub.replies)
+        self._speaking: asyncio.Task[None] | None = None
+        self.who_arrived: list[str] = []
+
+    @property
+    def stub(self) -> ChatStub:
+        return self._backend.stub
+
+    async def join(self) -> None:
+        """Enter the room, with nothing under it but this script."""
+        self._room = StubLocalRoom(StubLocalParticipant(self))
+        if self._backend.agent_is_coming:
+            self.agent_arrives()
+
+    async def leave(self) -> None:
+        """Stop the agent mid-sentence, then leave the driver's own way."""
+        speaking, self._speaking = self._speaking, None
+        if speaking is not None and not speaking.done():
+            speaking.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await speaking
+        await super().leave()
+
+    async def perform_rpc(self, method: str, payload: str) -> str:
+        """Call a method on egma's participant, the way the transport does."""
+        return await performed(self._room.local_participant.methods, method, payload)
+
+    # -- The agent's side of the exchange -------------------------------------
+
+    def agent_arrives(self) -> None:
+        """The worker turns up, and says its piece if it has one."""
+        if AGENT_IDENTITY in self.who_arrived:
+            return
+        self.who_arrived.append(AGENT_IDENTITY)
+        self.arrivals.set()
+        if self.stub.agent_publishes_audio_track:
+            self.audio_published.set()
+        if self.stub.greeting is not None:
+            self._agent_says(self.stub.greeting)
+
+    def persona_typed(self, topic: str, text: str) -> None:
+        """Egma's turn arrives, and the agent takes its next one."""
+        self.stub.typed.append(TypedTurn(topic=topic, text=text))
+        if self._replies:
+            self._agent_says(self._replies.pop(0))
+        elif self.stub.hangs_up_after_replies:
+            self.ended.set()
+
+    def _agent_says(self, turn: str | list[str]) -> None:
+        said = [turn] if isinstance(turn, str) else list(turn)
+        self._speaking = asyncio.create_task(
+            self._speaks(said), name="chat-room-stub-turn"
+        )
+
+    async def _speaks(self, turn: list[str]) -> None:
+        """One turn, in however many utterances the script gives it.
+
+        The gaps are really waited out rather than declared, because the
+        thing under test is a rule about time: a pause inside a turn that
+        the driver did not wait through would end the turn early, and a
+        script that only claimed to pause could never catch that.
+        """
+        if self.stub.answer_delay_seconds:
+            await asyncio.sleep(self.stub.answer_delay_seconds)
+        for spoken, said in enumerate(turn):
+            if spoken and self.stub.pause_seconds:
+                await asyncio.sleep(self.stub.pause_seconds)
+            self.utterances.put_nowait(
+                Utterance(text=said, spoken=self.stub.marks_speech)
+            )
+        if not self._replies and self.stub.hangs_up_after_replies:
+            self.ended.set()
+
+
+class ChatRoomStubBackend(LiveKitChatRoomBackend):
+    """The real chat driver, with the calls it makes of a LiveKit answered
+    here: making the room, dispatching into it, and deleting it.
+
+    Three where the voice fake stands in for four. A chat connection never
+    asks a customer's endpoint for a token, because chat is refused on
+    that access variant — egma holds no key pair there, so it could
+    neither dispatch the worker nor tell it to go text-only.
+    """
+
+    def __init__(self, stub: ChatStub, **built: object) -> None:
+        super().__init__(**built)
+        self.stub = stub
+        self.agent_is_coming = False
+
+    async def _asked(self, request: object, what_failed: str) -> None:
+        """The requests the driver really built, answered here instead."""
+        await answered_from_the_script(self, request, what_failed)
+
+    def _joined_room(self, way_in: object) -> StubTextRoom:
+        # Recorded rather than used, exactly as the voice fake records it:
+        # what a real join would have been handed is the only way to see
+        # what egma really went into the room with.
+        self.stub.joined_with.append(way_in)
+        room = StubTextRoom(
+            self,
+            url=way_in.url,
+            token=way_in.token,
+            room_name=self.room_name,
+            quotable=self._quotable,
+        )
+        self.stub.joined_rooms.append(room)
+        return room
+
+    async def _delete_room(self) -> None:
+        self.stub.deleted.append(self.room_name)
+
+
+@dataclass
+class ChatStub:
+    """One scripted LiveKit carrying typing, and the record of what it was
+    asked for.
+
+    The script and the record are the voice fake's wherever they are the
+    same fact about the same room, and its own only where chat really
+    differs — which is what the agent does, never what egma does.
+    """
+
+    greeting: str | None = None
+    """What the agent types the moment it is in the room. Absent: it joins
+    and says nothing, and the persona opens."""
+
+    replies: list[str | list[str]] = field(default_factory=list)
+    """The agent's turns, in order, one per persona turn. A string is a
+    turn that arrived whole; a list is a turn that arrived in pieces, which
+    is what an agent that says a filler and then answers really sends."""
+
+    answer_delay_seconds: float = 0.0
+    """How long the agent is quiet before it starts a turn."""
+
+    pause_seconds: float = 0.0
+    """The gap inside a turn, between two of its utterances — the tool-call
+    pause, and the whole reason a turn does not end at the first close."""
+
+    hangs_up_after_replies: bool = False
+    """When true, the agent's participant leaves once its last reply has
+    been typed, which is what an agent ending the exchange looks like."""
+
+    agent_joins: bool = True
+    """False for the worker that never comes."""
+
+    agent_publishes_audio_track: bool = False
+    """True for the agent that never took the chat setup and is speaking.
+    Reaches egma as a track appearing in the room, before a word is said."""
+
+    marks_speech: bool = False
+    """True for the same agent reaching egma the other way: its words
+    carrying LiveKit's transcribed-track mark. Either one alone is enough,
+    so they are scripted apart."""
+
+    refuses_room: str | None = None
+    refuses_dispatch: str | None = None
+    refuses_rpc: str | None = None
+
+    rooms: list[CreatedRoom] = field(default_factory=list)
+    dispatches: list[Dispatch] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    joined_with: list[object] = field(default_factory=list)
+    backends: list[ChatRoomStubBackend] = field(default_factory=list)
+    joined_rooms: list[StubTextRoom] = field(default_factory=list)
+
+    typed: list[TypedTurn] = field(default_factory=list)
+    """Every persona turn egma really typed, with the topic it went on."""
+
+    standing_ready: asyncio.Event = field(default_factory=asyncio.Event)
+    """Set once egma has offered the mock-tool exchange in the room."""
+
+    def driver(self, **built: object) -> ChatRoomStubBackend:
+        """The factory a plug is handed, in place of the real driver."""
+        backend = ChatRoomStubBackend(self, **built)
+        self.backends.append(backend)
+        return backend
+
+    # -- The agent's side of the mock-tool exchange ---------------------------
+
+    @property
+    def room(self) -> StubTextRoom:
         """The room egma joined. One simulation joins exactly one."""
         return self.joined_rooms[-1]
 

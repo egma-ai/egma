@@ -79,14 +79,49 @@ uv run agent.py dev
 `dev` registers the worker with your LiveKit server and waits for rooms.
 Leave it running; Egma's simulations dispatch it per room.
 
-## The two dispatch styles
+## The six lines that make a chat simulation a chat simulation
 
-- `EGMA_DUMB_AGENT_NAME` blank → the worker registers **unnamed**:
-  automatic dispatch, it joins every new room in the project. The
-  quickstart default, and Egma's blank-`agentName` path.
-- `EGMA_DUMB_AGENT_NAME=front-desk` → the worker registers **named**:
-  it joins only rooms whose dispatch asks for `front-desk`. Egma's
-  named-`agentName` path.
+```python
+context = json.loads(ctx.job.metadata or "{}")
+chat = context.get("modality") == "chat"
+options = room_io.RoomOptions(
+    audio_input=False,
+    audio_output=False,
+    text_output=room_io.TextOutputOptions(sync_transcription=False),
+) if chat else room_io.RoomOptions()
+```
+
+They sit in `entrypoint`, beside the `mockable` line, and the options go
+to `session.start(..., room_options=options)`. Egma sends the modality it
+is conducting in the job's own metadata; these lines read it and answer in
+kind. In a chat simulation the session takes no audio in, sends no audio
+out, and stops tying its transcription to speech it is not producing.
+
+That is the whole customer-side integration — no Egma package, and the
+same shape in Node through its own input and output options.
+
+Without them the agent still answers a chat simulation, because a LiveKit
+session already listens for text. It answers it **aloud**: every reply is
+synthesised, published and transcribed at the speed of the mouth producing
+it, and the customer pays for speech nobody hears. Egma sees the published
+audio track on the wire and stops the simulation at the agent's first
+output rather than grading it.
+
+**A production room carries no Egma metadata**, so `chat` is false there
+and the options are the stock ones. The voice path is untouched by
+construction rather than by care, which is the property
+`tests/test_outside_egma.py` holds this file to.
+
+## Naming the worker
+
+`EGMA_DUMB_AGENT_NAME` is the name this worker registers under, and it is
+required. Egma dispatches by name, always, because dispatch metadata is
+the only channel carrying the modality and the address of Egma's mock-tool
+seam — and LiveKit's automatic dispatch, which is what a worker registered
+without a name gets, carries no dispatch metadata at all.
+
+Naming a worker that was previously unnamed turns automatic dispatch off
+for it: it then joins only the rooms whose dispatch asks for it.
 
 ## Send production telemetry to Egma
 
@@ -118,34 +153,42 @@ second time in Monitoring.
 
 ## The suites that simulate against it
 
-Two opt-in tests in `apps/simulator/tests` conduct whole simulations
+Three opt-in tests in `apps/simulator/tests` conduct whole simulations
 against this worker in a real room:
 
-- `test_live_livekit_room.py` — the conversation itself: a real spoken
-  exchange, the band measured, the recording resolved.
+- `test_live_livekit_room.py` — the spoken exchange itself: real speech,
+  the band measured, the recording resolved.
 - `test_live_mock_tools.py` — the calendar-is-full run, which the one
   command above drives.
+- `test_live_livekit_chat.py` — the typed exchange: the six lines above
+  really read, the turns text-paced, and no audio on the record at all.
 
-Both skip — visibly, naming what is missing — until the environment
-carries all six of:
+All three skip — visibly, naming what is missing — until the environment
+carries what each one needs:
 
-| Variable | Falls back to | What it is |
-| --- | --- | --- |
-| `TEST_LIVEKIT_URL` | `LIVEKIT_URL` | your LiveKit, Cloud or self-hosted |
-| `TEST_LIVEKIT_API_KEY` | `LIVEKIT_API_KEY` | the key that opens the room |
-| `TEST_LIVEKIT_API_SECRET` | `LIVEKIT_API_SECRET` | its other half |
-| `TEST_DEEPGRAM_API_KEY` | `DEEPGRAM_API_KEY` | the persona's ears |
-| `TEST_ELEVENLABS_API_KEY` | `ELEVENLABS_API_KEY` | the persona's voice |
-| `TEST_MODEL_API_KEY` | `OPENAI_API_KEY` | the persona's brain |
+| Variable | Falls back to | What it is | Needed by |
+| --- | --- | --- | --- |
+| `TEST_LIVEKIT_URL` | `LIVEKIT_URL` | your LiveKit, Cloud or self-hosted | all three |
+| `TEST_LIVEKIT_API_KEY` | `LIVEKIT_API_KEY` | the key that opens the room | all three |
+| `TEST_LIVEKIT_API_SECRET` | `LIVEKIT_API_SECRET` | its other half | all three |
+| `TEST_LIVEKIT_AGENT_NAME` | `EGMA_DUMB_AGENT_NAME` | the name this worker registers under | all three |
+| `TEST_MODEL_API_KEY` | `OPENAI_API_KEY` | the persona's brain | all three |
+| `TEST_DEEPGRAM_API_KEY` | `DEEPGRAM_API_KEY` | the persona's ears | the two spoken ones |
+| `TEST_CARTESIA_API_KEY` | `CARTESIA_API_KEY` | the persona's voice | the two spoken ones |
 
-`TEST_LIVEKIT_AGENT_NAME` falls back to `EGMA_DUMB_AGENT_NAME` — the same
-variable this worker registers under — so one value moves both halves and
-the two cannot disagree about which dispatch style is being exercised.
+The typed suite needs neither speech key, and that is the product claim
+written as an environment: a chat simulation invokes no speech-to-text and
+no text-to-speech, so there is nothing to bill and nothing to configure.
 
-The persona's three are Egma's, not this agent's: it is a synthetic caller
-and needs its own speech and its own brain, billed to you by those
-providers. The OpenAI key is read by both, and by two different processes
-for two different jobs.
+`TEST_LIVEKIT_AGENT_NAME` is required rather than optional, because Egma
+dispatches by name always. It falls back to `EGMA_DUMB_AGENT_NAME` — the
+same variable this worker registers under — so one value moves both halves
+and the two cannot disagree about which worker a dispatch asks for.
+
+The persona's models are Egma's, not this agent's: it is a synthetic person
+and needs its own brain, and for a spoken run its own speech, billed to you
+by those providers. The OpenAI key is read by both, and by two different
+processes for two different jobs.
 
 With the worker running, from the repository root:
 

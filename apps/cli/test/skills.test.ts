@@ -40,6 +40,23 @@ const run = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
 
+/**
+ * One top-level part of a reference, so a boundary inside a file can be
+ * asserted as a boundary.
+ *
+ * The LiveKit reference teaches three separate changes, and what each part
+ * must *not* say is as load-bearing as what it says — the chat setup that
+ * names no package, the SDK boundary that stays with the SDK. Reading the
+ * whole file could only prove a string is somewhere in it.
+ */
+function referencePart(reference: string, heading: string): string {
+  const held = reference
+    .split(/^## /mu)
+    .find((part) => part.startsWith(`${heading}\n`));
+  expect({ heading, found: held !== undefined }).toEqual({ heading, found: true });
+  return held ?? "";
+}
+
 describe("Egma's instruction content", () => {
   it("keeps every public skill in the standard standalone shape", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
@@ -254,6 +271,42 @@ describe("Egma's instruction content", () => {
     expect(writing).not.toContain("only when this test needs an answer different");
   });
 
+  /**
+   * The chat setup is the part a customer takes without adopting anything of
+   * Egma's, and that boundary is the whole of its promise: a team told to
+   * install a package to answer in text has a dependency review in front of a
+   * change that is one block of plain LiveKit code.
+   */
+  it("teaches the chat setup without an Egma package or the Python boundary", () => {
+    const reference = integrateEgmaReference("integrate-livekit");
+    const chat = referencePart(reference, "Chat setup");
+
+    expect(chat).toContain('context = json.loads(ctx.job.metadata or "{}")');
+    expect(chat).toContain('chat = context.get("modality") == "chat"');
+    expect(chat).toContain("audio_input=False");
+    expect(chat).toContain("audio_output=False");
+    expect(chat).toContain("TextOutputOptions(sync_transcription=False)");
+
+    // Nothing of Egma's is installed or imported to take it.
+    expect(chat).not.toContain("pip install");
+    expect(chat).not.toContain("from egma import");
+    expect(chat).not.toContain("egma>=");
+
+    // A Node worker is named here as one the setup reaches, and the SDK's
+    // Python-only boundary is written once, inside the part that has it.
+    expect(chat).toContain("@livekit/agents");
+    expect(chat).not.toContain("does not yet support");
+    expect(reference.split("does not yet support")).toHaveLength(2);
+    expect(referencePart(reference, "Egma SDK entries")).toContain(
+      "does not yet support",
+    );
+
+    // The customer's live rooms are untouched by taking it.
+    expect(chat.replace(/\s+/gu, " ")).toContain(
+      "A production room carries no Egma metadata",
+    );
+  });
+
   /** The router owns common safety; the selected reference adds SDK-specific bounds. */
   it("teaches both SDK entries, named credential custody, and the printed fallback", () => {
     const integration = publicSkill("integrate-egma");
@@ -261,7 +314,7 @@ describe("Egma's instruction content", () => {
       path.join(
         publicSkillDirectory("integrate-egma"),
         "references",
-        "integrate-egma-sdk.md",
+        "integrate-livekit.md",
       ),
       "utf8",
     );
@@ -270,10 +323,10 @@ describe("Egma's instruction content", () => {
     expect(sdk).toContain("await mockable(agent, ctx, session)");
     expect(sdk).toContain("AgentSession.start");
     expect(sdk).toContain("do not add another\nconnection call");
-    const testingExample = /## Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+    const testingExample = /### Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
       sdk,
     )?.[1];
-    const bothExample = /## Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
+    const bothExample = /### Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
       sdk,
     )?.[1];
     expect(testingExample).toBeDefined();
@@ -298,8 +351,28 @@ describe("Egma's instruction content", () => {
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
   });
 
+  /**
+   * The name is the price of every dispatch, so it travels with the setup that
+   * needs it rather than surfacing later as a run that reached nothing.
+   */
+  it("makes the registered worker name part of the same integration", () => {
+    const naming = referencePart(
+      integrateEgmaReference("integrate-livekit"),
+      "Name the worker",
+    );
+
+    expect(naming).toContain("WorkerOptions");
+    expect(naming).toContain('agent_name="front-desk"');
+    expect(naming.replace(/\s+/gu, " ")).toContain(
+      "A worker with a registered name no longer joins rooms automatically",
+    );
+    // Said plainly, once. The consequence is real and it is not a hazard.
+    expect(naming).not.toMatch(/\bwarning\b/iu);
+    expect(naming).not.toMatch(/^>/mu);
+  });
+
   it("requires the first Python SDK release that follows LiveKit handoffs", () => {
-    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const sdk = integrateEgmaReference("integrate-livekit");
 
     expect(sdk).toContain("`egma>=0.1.1`");
   });
@@ -356,7 +429,7 @@ describe("Egma's instruction content", () => {
 
   it("gives one worker owner the selected SDK reference and final mode", () => {
     const router = publicSkill("integrate-egma");
-    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const sdk = integrateEgmaReference("integrate-livekit");
     const integration = workerIntegrationInstructions(
       "/repo",
       new Map([["framework", "livekit-agents"]]),
@@ -487,7 +560,7 @@ describe("Egma's instruction content", () => {
     for (const [referenceName, heading] of [
       ["connect-retell", "# Connect a Retell agent"],
       ["find-voice-agent", "# Find the voice agent"],
-      ["integrate-egma-sdk", "# Add the Egma SDK to a LiveKit worker"],
+      ["integrate-livekit", "# Integrate a LiveKit worker with Egma"],
       ["run-livekit-agent-locally", "# Run a LiveKit agent locally"],
     ] as const) {
       const reference = path.join(

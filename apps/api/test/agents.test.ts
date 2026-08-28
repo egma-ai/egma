@@ -95,6 +95,23 @@ async function post(
   };
 }
 
+async function patch(
+  url: string,
+  headers: Record<string, string>,
+  payload: Record<string, unknown>,
+): Promise<Answer> {
+  const response = await api.app.inject({
+    method: "PATCH",
+    url,
+    headers,
+    payload,
+  });
+  return {
+    status: response.statusCode,
+    body: response.json() as Record<string, unknown>,
+  };
+}
+
 async function get(
   url: string,
   headers: Record<string, string>,
@@ -1422,13 +1439,13 @@ describe("a livekit connection", () => {
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
-      config: { url: "wss://acme.livekit.cloud" },
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
       credentials: { apiKey: API_KEY, apiSecret: API_SECRET },
       ...overrides,
     };
   }
 
-  it("is registered with a url alone, and dials out", async () => {
+  it("is registered with a url and a worker to dispatch, and dials out", async () => {
     api = await createApi("agents_livekit_bare");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1448,14 +1465,14 @@ describe("a livekit connection", () => {
       modality: "voice",
       // Derived from the type, never caller-supplied.
       topology: "agent-dials-out",
-      config: { url: "wss://acme.livekit.cloud" },
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
       // The last four of the key. The secret has no hint and no line at all.
       credentialsHint: "WXYZ",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
 
-  it("is registered with an agent name and metadata too, and reads both back", async () => {
+  it("is registered with room metadata too, and reads it back verbatim", async () => {
     api = await createApi("agents_livekit_dispatched");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1487,6 +1504,79 @@ describe("a livekit connection", () => {
       credentialsHint: "WXYZ",
     });
     expect(reached).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * The chat lane through the same door, which is one field of the payload.
+   *
+   * What comes back is the point: the modality and the product label are what
+   * keep a typed score and a spoken one from being read as one number, and
+   * they are the whole of what a reader has to tell them apart by.
+   */
+  it("is registered for chat, and reads back as chat under its own label", async () => {
+    api = await createApi("agents_livekit_chat");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
+      name: "Typed agent",
+      connection: livekitPayload({ modality: "chat" }),
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      productLabel: "LiveKit chat",
+      modality: "chat",
+      topology: "agent-dials-out",
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
+      credentialsHint: "WXYZ",
+    });
+    expect(connectionOf(registered)).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * The name is demanded on an edit as well as on a create, and it has to be:
+   * an edit that could drop it would be a way to turn dispatch back off one
+   * connection at a time, taking the modality flag and the mock tools with it.
+   */
+  it("refuses an edit that takes the worker's name away, and changes nothing", async () => {
+    api = await createApi("agents_livekit_unnamed_edit");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "livekit",
+      name: "Named agent",
+      connection: livekitPayload(),
+    });
+    const agentId = String(agentOf(registered).id);
+    const at = `/v1/agents/${agentId}/connections/${String(connectionOf(registered).id)}`;
+
+    const dropped = await patch(at, withKey(ada.secret), {
+      config: { url: "wss://acme.livekit.cloud" },
+    });
+    expect(dropped.status).toBe(400);
+    expect(dropped.body).toEqual({
+      error: "invalid_request",
+      message: "a LiveKit room connection's config needs agentName",
+    });
+
+    const blanked = await patch(at, withKey(ada.secret), {
+      config: { url: "wss://acme.livekit.cloud", agentName: "   " },
+    });
+    expect(blanked.status).toBe(400);
+    expect(blanked.body).toEqual({
+      error: "invalid_request",
+      message: "the config's agentName must be a non-empty string",
+    });
+
+    const one = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    const [reached] = one.body.connections as Record<string, unknown>[];
+    expect(reached).toMatchObject({
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
+    });
   });
 
   /**
@@ -1578,28 +1668,54 @@ describe("a livekit connection", () => {
     readonly message: string;
   }[] = [
     {
-      named: "a modality a livekit connection does not speak",
-      slug: "wrong_modality",
-      payload: { modality: "chat" },
+      // The kind speaks chat; this way of reaching it cannot. Egma asks the
+      // customer's endpoint for a token and never dispatches the worker, so
+      // there is nowhere to tell the agent to answer in text.
+      named: "chat on the access variant Egma cannot dispatch through",
+      slug: "chat_on_endpoint",
+      payload: {
+        accessVariant: "livekit_room.customer_token_endpoint",
+        modality: "chat",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
+      },
       message:
-        "a livekit_room connection speaks voice, and this one was asked for chat",
+        "a token-endpoint livekit connection speaks voice: Egma asks your " +
+        "endpoint for a token and never dispatches the worker itself, so " +
+        "it has no way to tell the agent to answer in text. Chat is " +
+        "offered on the LiveKit project credentials access variant, where " +
+        "Egma dispatches the named worker and sends the modality with it.",
     },
     {
       named: "a word that is not a modality at all",
       slug: "not_a_modality",
       payload: { modality: "telepathy" },
-      message: '"telepathy" is not a modality; a livekit_room connection speaks voice',
+      message:
+        '"telepathy" is not a modality; a livekit_room connection speaks voice or chat',
     },
     {
       named: "no url",
       slug: "no_url",
-      payload: { config: {} },
+      payload: { config: { agentName: "front-desk" } },
       message: "a LiveKit room connection's config needs url",
+    },
+    {
+      // Every egma dispatch is explicit, because dispatch metadata is the only
+      // channel that carries the modality and the mock-tool address.
+      named: "no worker to dispatch",
+      slug: "no_agent_name",
+      payload: { config: { url: "wss://acme.livekit.cloud" } },
+      message: "a LiveKit room connection's config needs agentName",
     },
     {
       named: "a url in a scheme the SDKs do not take",
       slug: "bad_url",
-      payload: { config: { url: "sip:acme.livekit.cloud" } },
+      payload: {
+        config: { url: "sip:acme.livekit.cloud", agentName: "front-desk" },
+      },
       message:
         "the config's url must be a ws, wss, http or https URL, which looks " +
         "like wss://example.livekit.cloud",
@@ -1616,7 +1732,11 @@ describe("a livekit connection", () => {
       named: "metadata that is not a JSON object",
       slug: "bad_metadata",
       payload: {
-        config: { url: "wss://acme.livekit.cloud", metadata: "tenant=acme" },
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
+          metadata: "tenant=acme",
+        },
       },
       message:
         "the config's metadata must be a JSON object written in a string, " +
@@ -1626,11 +1746,15 @@ describe("a livekit connection", () => {
       named: "a config key a livekit connection has no place for",
       slug: "unknown_config_key",
       payload: {
-        config: { url: "wss://acme.livekit.cloud", roomName: "lobby" },
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
+          roomName: "lobby",
+        },
       },
       message:
         'a LiveKit room connection\'s config has no key "roomName"; it holds url, ' +
-        "agentName (optional), metadata (optional)",
+        "agentName, metadata (optional)",
     },
     {
       // Neither access variant: no key pair, and no endpoint to ask for a

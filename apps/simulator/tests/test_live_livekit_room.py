@@ -11,15 +11,17 @@ one.
 
 Its first execution is on the record: 2026-08-08, against a LiveKit
 Cloud project and the dumb-agent fixture, three simulations conducted
-green — explicit dispatch by name twice (once against a cold worker) and
-automatic dispatch once, every room deleted at teardown, and every
-recording resolved with both speakers audible.
+green — every room deleted at teardown, and every recording resolved with
+both speakers audible. One of those three took LiveKit's automatic
+dispatch, which egma no longer uses at all: the name is required now, for
+the reason below.
 
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
 
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
+    TEST_LIVEKIT_AGENT_NAME=front-desk \\
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_livekit_room.py -v
@@ -53,15 +55,16 @@ apart, which is the point of a contract. The connection block below is
 byte for byte what the door stores for a ``livekit`` connection, so what
 this conducts against is what a registered connection would hand it.
 
-## Both dispatch styles, one test
+## One dispatch style, because there is only one
 
-Which style is exercised is the environment's to say, because it is the
-*worker's* to say: a worker registered without a name takes every new
-room in the project (automatic dispatch), and one registered with a name
-takes only rooms whose dispatch asks for it. ``TEST_LIVEKIT_AGENT_NAME``
-blank is the first; set is the second. The counterpart fixture reads
-``EGMA_DUMB_AGENT_NAME`` for the same choice and this falls back to it,
-so one variable moves both halves and the two cannot disagree.
+Egma dispatches by name, always: dispatch metadata is the only channel
+that carries the modality and the address of egma's mock-tool seam, and
+LiveKit's automatic dispatch carries no dispatch metadata at all. So
+``TEST_LIVEKIT_AGENT_NAME`` is required here rather than optional, and a
+blank one skips this test visibly instead of conducting a run the
+simulator would refuse. It falls back to ``EGMA_DUMB_AGENT_NAME``, which
+is the name the counterpart worker registers under, so one variable moves
+both halves and the two cannot disagree.
 
 ## What is asserted
 
@@ -120,6 +123,7 @@ REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
+    "TEST_LIVEKIT_AGENT_NAME": AGENT_NAME,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
@@ -193,13 +197,10 @@ def room_spec() -> dict:
     """One spec whose connection names a real room in a real project.
 
     Exactly the block the control plane stores for a ``livekit``
-    connection — the server and, where the worker registers one, the
-    agent's name in the config; the key pair in the credentials — and
-    nothing this test invented for itself.
+    connection — the server and the agent's name in the config, the key
+    pair in the credentials — and nothing this test invented for itself.
     """
-    config: dict = {"url": LIVEKIT_URL}
-    if AGENT_NAME:
-        config["agentName"] = AGENT_NAME
+    config = {"url": LIVEKIT_URL, "agentName": AGENT_NAME}
     return a_spec(
         SIMULATION,
         modality="voice",

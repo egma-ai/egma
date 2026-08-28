@@ -96,6 +96,16 @@ type AccessVariant = {
   readonly credentials: CredentialRule;
   /** What a caller sending the *other* access variant's credentials is told. */
   readonly mixedUp?: string;
+  /**
+   * Fewer modalities than the connection type speaks, for a variant that
+   * cannot carry them all — absent means the type's own list. The narrowing
+   * and the sentence explaining it are one field, so a variant cannot lose one
+   * and keep the other.
+   */
+  readonly modalities?: {
+    readonly speaks: readonly string[];
+    readonly refusal: string;
+  };
 };
 
 type Descriptor = {
@@ -104,13 +114,30 @@ type Descriptor = {
   /** The access variants this connection type supports. */
   readonly accessVariants: readonly [AccessVariant, ...AccessVariant[]];
   /**
-   * Which config key decides that two registrations are about one vendor
-   * agent. A type that cannot answer that — a framework the customer runs
-   * themselves has no vendor identifier — declares none and always creates.
+   * How this kind decides that two registrations are about one vendor agent.
+   * A type that cannot decide it — a phone number is where egma dials rather
+   * than who answers — declares nothing and always creates.
+   *
+   * Two halves rather than one config key, because the honest identity is not
+   * always a value sitting in the config: `matchedKeys` is what a lookup can
+   * narrow by, and `identityOf` is what decides.
    */
-  readonly reuseKey?: string;
+  readonly reuse?: ReuseRule;
   /** Whether anything can conduct a run over this connection type today. */
   readonly simulatorAdapter: boolean;
+};
+
+type ReuseRule = {
+  /** Config keys every candidate must match. A filter, never the answer. */
+  readonly matchedKeys: readonly string[];
+  /**
+   * What one config stands for, or `undefined` when it stands for nothing —
+   * which is what makes an access variant carrying none of the keys create
+   * every time.
+   */
+  readonly identityOf: (
+    config: Readonly<Record<string, string>>,
+  ) => string | undefined;
 };
 
 function nonEmptyString(key: string, value: unknown): string {
@@ -172,6 +199,46 @@ function credentialString(what: string, field: string, value: unknown): string {
     );
   }
   return trimmed;
+}
+
+/**
+ * The port each LiveKit scheme means when a url leaves it out. `URL` drops a
+ * port that is already its scheme's default, so `wss://a:443` and `wss://a`
+ * both arrive with none — and putting one back is what makes them one server.
+ * `ws://a:7880` keeps its port, because that one really is a different server.
+ */
+const LIVEKIT_DEFAULT_PORTS: Readonly<Record<string, string>> = {
+  "ws:": "80",
+  "http:": "80",
+  "wss:": "443",
+  "https:": "443",
+};
+
+/**
+ * Which LiveKit server a url names, as one comparable string. The scheme is
+ * dropped because the SDKs normalise between the websocket pair and the HTTP
+ * pair themselves, so two spellings reach one server.
+ *
+ * Copied from the registry rather than imported, like every other gate here:
+ * this fixture re-implements the rules on purpose, so it can never be kinder
+ * than the real thing by borrowing from it.
+ */
+function livekitServerOrigin(url: string): string {
+  const written = url.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written.toLowerCase();
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
+  const port =
+    parsed.port === ""
+      ? (LIVEKIT_DEFAULT_PORTS[parsed.protocol] ?? "")
+      : parsed.port;
+  return port === "" ? host : `${host}:${port}`;
 }
 
 /** The last four of one field — only ever a credential's public half. */
@@ -304,8 +371,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         },
       },
     ],
-    // The provider's own agent id: the first vendor to carry a reuse rule.
-    reuseKey: "retellAgentId",
+    // The provider's own agent id: the simple case the mechanism was built
+    // for, where one config key compared as it was stored is the identity.
+    reuse: {
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
     simulatorAdapter: true,
   },
   phone_number: {
@@ -341,8 +412,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     simulatorAdapter: true,
   },
   livekit_room: {
-    // Voice only, because voice is the lane that exists.
-    modalities: ["voice"],
+    // Chat is here because the plug that conducts one ships beside it: egma
+    // dispatches the named worker with the modality in its metadata and the
+    // agent goes text-only.
+    modalities: ["voice", "chat"],
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
@@ -358,8 +431,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         named: "a LiveKit room connection",
         config: {
           url: livekitServerUrl,
-          // Left out means automatic dispatch: whichever worker is listening.
-          agentName: optional(nonEmptyString),
+          // Demanded: every egma dispatch is explicit, because dispatch
+          // metadata is the only channel that carries the simulation's
+          // modality and the mock-tool address.
+          agentName: nonEmptyString,
           // Handed to the agent as the room's metadata, exactly as written.
           metadata: optional(jsonObjectText),
         },
@@ -378,6 +453,18 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
+        // Voice only, on a kind that speaks both: egma joins a room this
+        // variant's endpoint let it into and never dispatches the worker, so
+        // it has nowhere to ask the agent to go text-only.
+        modalities: {
+          speaks: ["voice"],
+          refusal:
+            "a token-endpoint livekit connection speaks voice: Egma asks your " +
+            "endpoint for a token and never dispatches the worker itself, so " +
+            "it has no way to tell the agent to answer in text. Chat is " +
+            "offered on the LiveKit project credentials access variant, where " +
+            "Egma dispatches the named worker and sends the modality with it.",
+        },
         config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
         credentials: {
           required: true,
@@ -394,7 +481,20 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           "tokens from an apiKey and apiSecret.",
       },
     ],
-    // No reuse rule: the url names a server rather than an agent.
+    // The key is the server the worker stands on and the name it answers to.
+    // Neither half is an identity alone: a whole team shares one server, and
+    // one worker name commonly answers in both a staging project and a
+    // production one. `agentName` is what a lookup narrows by, because it is
+    // the half a plain comparison can settle honestly.
+    reuse: {
+      matchedKeys: ["agentName"],
+      identityOf: (config) => {
+        const url = config["url"];
+        const agentName = config["agentName"];
+        if (url === undefined || agentName === undefined) return undefined;
+        return `${livekitServerOrigin(url)}|${agentName}`;
+      },
+    },
     simulatorAdapter: true,
   },
 };
@@ -422,6 +522,13 @@ const CONNECTION_OPTIONS = [
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     productLabel: "LiveKit project credentials",
+  },
+  {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "chat",
+    productLabel: "LiveKit chat",
   },
   {
     agentPlatform: "livekit",
@@ -571,15 +678,52 @@ function descriptorOf(connectionType: unknown): Descriptor {
   return descriptor;
 }
 
-function validModality(connectionType: string, modality: unknown): string {
+/**
+ * What one access variant of one kind speaks: the type's list unless the
+ * variant narrowed it.
+ */
+function modalitiesOf(
+  descriptor: Descriptor,
+  variant: AccessVariant,
+): readonly string[] {
+  return variant.modalities?.speaks ?? descriptor.modalities;
+}
+
+/**
+ * The modality checked against what this kind speaks *on this access variant*.
+ *
+ * The variant is resolved leniently on purpose. An id no entry claims is a
+ * tuple nobody supports, and `productLabelOf` is what has the sentence for it,
+ * so an unknown one falls back to the kind's own list rather than being
+ * refused here for the wrong reason.
+ */
+function validModality(
+  connectionType: string,
+  accessVariant: unknown,
+  modality: unknown,
+): string {
   const descriptor = descriptorOf(connectionType);
   const named = typeof modality === "string" ? modality : "";
-  if (!descriptor.modalities.includes(named)) {
-    throw new Refusal(
-      `a ${connectionType} connection speaks ${descriptor.modalities.join(" or ")}, and this one was asked for ${named}`,
-    );
+  const wanted = typeof accessVariant === "string" ? accessVariant : "";
+  const variant = descriptor.accessVariants.find((one) => one.id === wanted);
+  const speaking =
+    variant === undefined
+      ? descriptor.modalities
+      : modalitiesOf(descriptor, variant);
+  if (speaking.includes(named)) return named;
+
+  // The kind can do this and the caller's way of reaching it cannot, which is
+  // a different thing to be told — and only the variant knows why.
+  if (
+    variant?.modalities !== undefined &&
+    descriptor.modalities.includes(named)
+  ) {
+    throw new Refusal(variant.modalities.refusal);
   }
-  return named;
+
+  throw new Refusal(
+    `a ${connectionType} connection speaks ${speaking.join(" or ")}, and this one was asked for ${named}`,
+  );
 }
 
 function validConfig(
@@ -1077,7 +1221,11 @@ export function agentRoutes(options: {
     const accessVariant =
       typeof input["accessVariant"] === "string" ? input["accessVariant"] : "";
     const descriptor = descriptorOf(connectionType);
-    const modality = validModality(connectionType, input["modality"]);
+    const modality = validModality(
+      connectionType,
+      accessVariant,
+      input["modality"],
+    );
     const productLabel = productLabelOf(
       agentPlatform,
       connectionType,
@@ -1164,22 +1312,29 @@ export function agentRoutes(options: {
     input: Admitted,
   ): readonly StoredConnection[] => {
     const { connectionType } = input;
-    const reuseKey = REGISTRY[connectionType]?.reuseKey;
-    if (reuseKey === undefined) return [];
+    const reuse = REGISTRY[connectionType]?.reuse;
+    if (reuse === undefined) return [];
 
-    const named = input.config[reuseKey];
-    if (named === undefined || named.trim() === "") return [];
+    const vendorAgent = reuse.identityOf(input.config);
+    if (vendorAgent === undefined) return [];
 
-    // Oldest first, so a repeated registration chooses the same agent every
-    // time. The ids sort by mint time, so the order they were written in and
-    // the order the real instance sorts them by are one thing.
+    // The narrowing keys first, then the rule itself. The second pass is
+    // load-bearing rather than tidy: two spellings of one LiveKit server are
+    // one identity, and comparing stored strings could never say so.
+    //
+    // The platform is deliberately not compared. The real access layer does
+    // not compare it either — the connection type pins it — and a fixture
+    // stricter than the thing it mirrors teaches a client a rule that is not
+    // there.
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
-        held.agentPlatform === input.agentPlatform &&
         held.connectionType === connectionType &&
         held.accessVariant === input.accessVariant &&
-        held.config[reuseKey] === named.trim(),
+        reuse.matchedKeys.every(
+          (key) => held.config[key] === input.config[key],
+        ) &&
+        reuse.identityOf(held.config) === vendorAgent,
     );
   };
 

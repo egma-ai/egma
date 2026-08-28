@@ -235,6 +235,23 @@ export type AccessVariantDescriptor = {
    * access variants are rather than about the machinery that tells them apart.
    */
   readonly mixedUp?: string;
+  /**
+   * Fewer modalities than the connection type speaks, for an access variant
+   * that cannot carry all of them. Absent means the type's own list, which is
+   * the ordinary case: a variant is about who holds the credential, and that is
+   * usually no business of the modality at all.
+   *
+   * The narrowing and the sentence explaining it are one field on purpose.
+   * Whoever is refused here is being told that the *kind* can do the thing and
+   * *their* way of reaching it cannot, which is a fact only the person who
+   * wrote the narrowing knows — and a list without its reason would leave that
+   * refusal to be derived, which is how a caller ends up reading that a
+   * connection speaks voice when the question they had was why.
+   */
+  readonly modalities?: {
+    readonly speaks: readonly Modality[];
+    readonly refusal: string;
+  };
 };
 
 export type ConnectionDescriptor = {
@@ -267,18 +284,47 @@ export type ConnectionDescriptor = {
   /** Whether conducting this kind spends the deployment's shared carrier. */
   readonly usesPlatformCarrier: boolean;
   /**
-   * Which config key holds the vendor's own name for the agent, for the kinds
-   * that have one — and absent for the kinds that do not.
+   * How this kind decides that two registrations are about one vendor agent,
+   * and absent for the kinds that cannot decide it at all.
    *
-   * This is the whole of a kind's create-or-reuse rule. Registering the same
-   * vendor agent twice must not mint a second egma agent, because a retry
-   * after an uncertain network failure is the ordinary case and a duplicate
-   * identity splits a team's results history in half. So a kind that can say
-   * "this is the same agent you already registered" names the key that says
-   * it, and a kind that cannot — a framework the customer runs themselves has
-   * no vendor identifier at all — declares none and always creates.
+   * Registering the same vendor agent twice must not mint a second egma agent,
+   * because a retry after an uncertain network failure is the ordinary case and
+   * a duplicate identity splits a team's results history in half. So a kind
+   * that can say "this is the same agent you already registered" says how, and
+   * a kind that cannot — a phone number is where egma dials rather than who
+   * answers, and two agents may legitimately share one — declares nothing and
+   * always creates.
    */
-  readonly reuseKey?: string | undefined;
+  readonly reuse?: ReuseRule;
+};
+
+/**
+ * A kind's create-or-reuse rule, in two halves.
+ *
+ * Two halves rather than one config key, because the honest identity of a
+ * vendor agent is not always a value sitting in the config. `matchedKeys` is
+ * what a query can narrow the candidates by; `identityOf` is what actually
+ * decides, and it runs over the rows that come back. A LiveKit server written
+ * `wss://acme.livekit.cloud` and the same one written
+ * `https://acme.livekit.cloud:443` are one server, and no SQL comparison will
+ * ever know that.
+ */
+export type ReuseRule = {
+  /**
+   * Config keys a query can narrow candidates by. Every one of them must be
+   * equal for two configs to stand a chance of being one identity — they are a
+   * filter and never the answer.
+   */
+  readonly matchedKeys: readonly string[];
+  /**
+   * What one config stands for, as a single comparable string, or `undefined`
+   * when the config holds no identity at all. Undefined is what makes an access
+   * variant that carries none of the keys create every time rather than reuse
+   * its way onto somebody else's agent.
+   */
+  readonly identityOf: (
+    config: Readonly<Record<string, string>>,
+  ) => string | undefined;
 };
 
 /**
@@ -342,6 +388,13 @@ export function accessVariantById(
  * never asks for and a create that then refuses for missing it; a described key
  * nothing gates would be a box whose answer is silently dropped. Both are
  * caught the first time anything asks for the catalog.
+ *
+ * **An option offering a modality its access variant does not speak is refused
+ * the same way.** The product-label table and the variants' modality lists are
+ * two lists that must agree, and they are held level here rather than by
+ * discipline: an option nobody caught would be a combination a form offers, a
+ * browser sends, and the door then refuses — the one failure a customer cannot
+ * do anything about.
  */
 export type ConnectionOptionMetadata = {
   readonly agentPlatform: AgentPlatform | null;
@@ -470,6 +523,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   {
     agentPlatform: "livekit",
     connectionType: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "chat",
+    productLabel: "LiveKit chat",
+  },
+  {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
@@ -493,9 +553,18 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
 export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] {
   return CONNECTION_OPTIONS.map((option) => {
     const descriptor = descriptorOf(option.connectionType);
-    const variant = accessVariantMetadata(
-      accessVariantById(option.connectionType, option.accessVariant),
+    const described = accessVariantById(
+      option.connectionType,
+      option.accessVariant,
     );
+    const speaks = modalitiesOf(descriptor, described);
+    if (!speaks.includes(option.modality)) {
+      throw new Error(
+        `connection option ${option.productLabel} offers ${option.modality} ` +
+          `on ${option.accessVariant}, which speaks ${speaks.join(" or ")}`,
+      );
+    }
+    const variant = accessVariantMetadata(described);
     return {
       ...option,
       agentPlatformLabel:
@@ -672,6 +741,60 @@ function livekitServerUrl(key: string, value: unknown): string {
 }
 
 /**
+ * The port each of those four schemes means when a url leaves it out.
+ *
+ * `URL` drops a port that is already its scheme's default, so `wss://a:443`
+ * and `wss://a` both arrive with no port at all — and putting one back is what
+ * makes them one server rather than two. It has to be substituted rather than
+ * simply ignored, because `ws://a:7880` really is a different server from
+ * `wss://a`, and a rule that dropped every port would fold a self-hosted
+ * LiveKit onto whatever else runs on that host.
+ */
+const LIVEKIT_DEFAULT_PORTS: Readonly<Record<string, string>> = {
+  "ws:": "80",
+  "http:": "80",
+  "wss:": "443",
+  "https:": "443",
+};
+
+/**
+ * Which LiveKit server a url names, as one comparable string.
+ *
+ * The scheme is deliberately dropped. The SDKs normalise between the websocket
+ * pair and the HTTP pair themselves, so `wss://acme.livekit.cloud` and
+ * `https://acme.livekit.cloud` reach one server, and a customer who typed one
+ * in the browser and the other in the terminal must not end up with two egma
+ * agents for one worker. Host case and a trailing root dot go the same way and
+ * for the same reason. What is left — host and port — is exactly what tells a
+ * team's staging project from their production one.
+ *
+ * This is a comparison key and never a value anybody dials: the url is stored
+ * as it was written, because what goes to the SDK should be what the customer
+ * pasted.
+ *
+ * A url the gate would refuse can never reach a stored row, so an unparseable
+ * one answers with what it was given rather than throwing. It then compares
+ * equal only to itself, which is the safe answer for a row nobody can explain.
+ */
+export function livekitServerOrigin(url: string): string {
+  const written = url.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written.toLowerCase();
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const port =
+    parsed.port === ""
+      ? (LIVEKIT_DEFAULT_PORTS[parsed.protocol] ?? "")
+      : parsed.port;
+  return port === "" ? host : `${host}:${port}`;
+}
+
+/**
  * A JSON object, carried as the text it was written as.
  *
  * Text rather than a parsed object because it travels verbatim — it is handed
@@ -840,8 +963,13 @@ export const CONNECTION_REGISTRY: Readonly<
         ],
       },
     ],
-    // The provider's own agent id: the first vendor to carry a reuse rule.
-    reuseKey: "retellAgentId",
+    // The provider's own agent id: the first vendor to carry a reuse rule, and
+    // the simple case the mechanism was built for — one config key, compared as
+    // it was stored, is the whole identity.
+    reuse: {
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
     simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
@@ -904,10 +1032,12 @@ export const CONNECTION_REGISTRY: Readonly<
   livekit_room: {
     label: "LiveKit room",
     agentPlatforms: ["livekit"],
-    // Voice only, and only because voice is the lane that exists. The registry
-    // may not claim what no code can run, so `chat` arrives here in the same
-    // commit as the code that conducts a livekit chat.
-    modalities: ["voice"],
+    // The registry may not claim what no code can run, so `chat` is here only
+    // because the chat plug that conducts one ships beside it: egma dispatches
+    // the named worker with the modality in its metadata, the agent goes
+    // text-only, and the exchange rides the `lk.chat` and `lk.transcription`
+    // topics on the room lane the voice driver already owns.
+    modalities: ["voice", "chat"],
     // The first occupant of this topology: egma opens a room and the
     // customer's agent joins it. That is what makes an agent running on a
     // laptop reachable at all — nothing has to dial in to it.
@@ -927,6 +1057,11 @@ export const CONNECTION_REGISTRY: Readonly<
      * and cannot delete anything — which is why `agentName` and `metadata` are
      * not among its keys. Both are powers a key pair buys, and a config key
      * egma would silently ignore is worse than one it refuses by name.
+     *
+     * That same missing dispatch is why the two variants no longer speak the
+     * same modalities. Chat needs the agent to be *told* it is in a chat, and
+     * the only channel that tells it is the dispatch metadata the key-pair
+     * variant sends.
      */
     accessVariants: [
       {
@@ -937,11 +1072,16 @@ export const CONNECTION_REGISTRY: Readonly<
           // The LiveKit server: a customer's cloud project, or the one they
           // run.
           url: livekitServerUrl,
-          // Which worker to dispatch. Left out on purpose by most: a blank
-          // agent name means automatic dispatch, where whichever worker is
-          // listening takes the room, and that is the state every quickstart
-          // agent runs in.
-          agentName: optional(nonEmptyString),
+          // Which worker to dispatch, and demanded rather than offered.
+          //
+          // Every egma dispatch is explicit, because dispatch metadata is the
+          // only channel that carries the simulation's modality and the
+          // mock-tool address, and LiveKit's automatic dispatch carries
+          // neither. A nameless connection reached the agent with none of it —
+          // mock tools inert, and no way to ask for chat — so the name is the
+          // price of both, asked for once at create instead of missed at run
+          // time.
+          agentName: nonEmptyString,
           // Handed to the agent as the room's metadata, exactly as written.
           metadata: optional(jsonObjectText),
         },
@@ -956,7 +1096,7 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch, where whichever worker is listening takes the room.",
+            help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, which is how it hands over the modality and the mock-tool address.",
           },
           {
             key: "metadata",
@@ -1002,6 +1142,20 @@ export const CONNECTION_REGISTRY: Readonly<
         named: "a token-endpoint livekit connection",
         id: "livekit_room.customer_token_endpoint",
         label: "Customer token endpoint [Advanced]",
+        // Voice only, on a kind that speaks both. Egma joins a room this
+        // variant's endpoint let it into; it never dispatches the worker, so
+        // there is no dispatch metadata of egma's on the job and nowhere to
+        // ask the agent to go text-only. Offering chat here would be egma
+        // promising a text simulation and then running a spoken one.
+        modalities: {
+          speaks: ["voice"],
+          refusal:
+            "a token-endpoint livekit connection speaks voice: Egma asks your " +
+            "endpoint for a token and never dispatches the worker itself, so " +
+            "it has no way to tell the agent to answer in text. Chat is " +
+            "offered on the LiveKit project credentials access variant, where " +
+            "Egma dispatches the named worker and sends the modality with it.",
+        },
         config: {
           // Where the join goes, unless the endpoint's answer names another.
           url: livekitServerUrl,
@@ -1052,10 +1206,28 @@ export const CONNECTION_REGISTRY: Readonly<
     ],
     simulatorAdapter: true,
     usesPlatformCarrier: false,
-    // No reuse rule, deliberately: the url names a server rather than an
-    // agent, whole teams share one, and the agent name is absent in the
-    // ordinary case. There is nothing here that could honestly say two
-    // registrations are about one agent, so each registration creates.
+    // The key is the server the worker stands on and the name it answers to.
+    //
+    // Neither half is an identity alone. A url names a server that a whole
+    // team shares, and a name is one a team commonly reuses across its staging
+    // and production projects — so matching on either would fold two agents
+    // into one. Together they name a worker, and that is what demanding the
+    // name bought: registering the same worker from the UI one day and the CLI
+    // the next lands on one agent, so a chat score and a voice score
+    // accumulate somewhere they can be read side by side.
+    //
+    // `agentName` is what the query narrows on because it is the half SQL can
+    // compare honestly. The origin is settled afterwards, in `identityOf`,
+    // where two spellings of one server can be seen for what they are.
+    reuse: {
+      matchedKeys: ["agentName"],
+      identityOf: (config) => {
+        const url = config["url"];
+        const agentName = config["agentName"];
+        if (url === undefined || agentName === undefined) return undefined;
+        return `${livekitServerOrigin(url)}|${agentName}`;
+      },
+    },
   },
 };
 
@@ -1065,6 +1237,26 @@ function nameOf(
   variant: AccessVariantDescriptor,
 ): string {
   return variant.named ?? `a ${connectionType} connection`;
+}
+
+/**
+ * What one access variant of one kind actually speaks.
+ *
+ * The type's list is the answer unless the variant narrowed it, so a kind whose
+ * variants are all about who holds the credential says its modalities once and
+ * nothing repeats them. Every rule that asks about a modality asks here, so a
+ * narrowing cannot be honoured at one door and forgotten at the next.
+ *
+ * It takes the two descriptors rather than reading them off a pair of ids, for
+ * `gatedConfig`'s reason: the rule can then be exercised on a made-up kind, and
+ * the test that proves it is about the rule rather than about whichever real
+ * variant happens to narrow today.
+ */
+export function modalitiesOf(
+  descriptor: ConnectionDescriptor,
+  variant: AccessVariantDescriptor,
+): readonly Modality[] {
+  return variant.modalities?.speaks ?? descriptor.modalities;
 }
 
 /** The connection types something can actually conduct a run over today. */
@@ -1090,12 +1282,14 @@ export function connectionIsConductable(
   modality: string,
 ): boolean {
   const descriptor = CONNECTION_REGISTRY[connectionType as ConnectionType];
-  return (
-    descriptor !== undefined &&
-    descriptor.simulatorAdapter &&
-    descriptor.accessVariants.some((variant) => variant.id === accessVariant) &&
-    descriptor.modalities.includes(modality as Modality)
+  if (descriptor === undefined || !descriptor.simulatorAdapter) return false;
+  const variant = descriptor.accessVariants.find(
+    (one) => one.id === accessVariant,
   );
+  if (variant === undefined) return false;
+  // The variant's own list, never the kind's, or a stored row on a narrowed
+  // variant would be dispatched for a modality the door refused to write.
+  return modalitiesOf(descriptor, variant).includes(modality as Modality);
 }
 
 /** Whether this kind needs the deployment carrier on its claimed work order. */
@@ -1162,26 +1356,54 @@ export function descriptorOf(connectionType: string): ConnectionDescriptor {
   return descriptor;
 }
 
-/** The modality checked against the connection type's own list. */
+/**
+ * The modality checked against what this kind speaks *on this access variant*.
+ *
+ * The variant is resolved leniently and on purpose. An id no entry claims is a
+ * tuple nobody supports, and `productLabelOf` has the sentence for it — so this
+ * falls back to the kind's own list rather than reaching for
+ * `accessVariantById`, whose fault would answer 500 where the door answers 400
+ * today and would take the useful sentence with it.
+ */
 export function validModality(
   connectionType: ConnectionType,
+  accessVariant: string,
   modality: string,
 ): Modality {
   const descriptor = descriptorOf(connectionType);
-  if (!descriptor.modalities.includes(modality as Modality)) {
-    const speaks = descriptor.modalities.join(" or ");
-    if (!MODALITIES.includes(modality as Modality)) {
-      throw new AgentWriteRefusedError(
-        "not_admitted",
-        `"${modality}" is not a modality; a ${connectionType} connection speaks ${speaks}`,
-      );
-    }
+  const variant = descriptor.accessVariants.find(
+    (one) => one.id === accessVariant,
+  );
+  const speaking =
+    variant === undefined
+      ? descriptor.modalities
+      : modalitiesOf(descriptor, variant);
+  if (speaking.includes(modality as Modality)) return modality as Modality;
+
+  // The kind can do this and the caller's way of reaching it cannot, which is
+  // a different thing to be told — and the variant wrote the sentence that
+  // tells it, because only the variant knows why.
+  if (
+    variant?.modalities !== undefined &&
+    descriptor.modalities.includes(modality as Modality)
+  ) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `a ${connectionType} connection speaks ${speaks}, and this one was asked for ${modality}`,
+      variant.modalities.refusal,
     );
   }
-  return modality as Modality;
+
+  const speaks = speaking.join(" or ");
+  if (!MODALITIES.includes(modality as Modality)) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `"${modality}" is not a modality; a ${connectionType} connection speaks ${speaks}`,
+    );
+  }
+  throw new AgentWriteRefusedError(
+    "not_admitted",
+    `a ${connectionType} connection speaks ${speaks}, and this one was asked for ${modality}`,
+  );
 }
 
 /**

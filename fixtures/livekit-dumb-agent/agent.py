@@ -40,6 +40,27 @@ all** — no wrapper, no message, the same two callables — so this file
 behaves identically whether or not egma is anywhere near it, which is the
 property `tests/test_outside_egma.py` holds it to.
 
+## The six lines that make a chat simulation a chat simulation
+
+Egma sends the modality it is conducting in the job's own metadata, and
+these six lines read it and answer in kind: in a chat simulation the
+session takes no audio in, sends no audio out, and stops tying its
+transcription to speech it is not producing. That is the whole of the
+customer-side integration — no egma package, and the same shape in Node
+through its own input and output options.
+
+Without them the agent still answers a chat simulation, because a LiveKit
+session already listens for text. It answers it *aloud*: every reply is
+synthesised, published, and transcribed at the speed of the mouth
+producing it, so a fourteen-word answer takes nearly five seconds and the
+customer pays for speech nobody hears. Egma sees that on the wire and
+stops the simulation rather than grading it.
+
+**A production room carries no egma metadata**, so ``chat`` is false there
+and the options are the stock ones. The voice path is untouched by
+construction rather than by care — which is the property
+``tests/test_outside_egma.py`` already holds this file to.
+
 ## The export that makes this agent visible in Egma
 
 ``monitor_livekit(ctx)`` is the public SDK setup. This fixture calls it when
@@ -47,25 +68,26 @@ property `tests/test_outside_egma.py` holds it to.
 can still run without a Monitoring setup. A real monitored worker calls the
 function directly and treats missing configuration as an error.
 
-Dispatch style is chosen by environment, so both of egma's paths are
-testable with the same file:
-
-- ``EGMA_DUMB_AGENT_NAME`` unset or blank — the worker registers unnamed,
-  which is automatic dispatch: it walks into every new room in the
-  project, egma's test rooms included.
-- ``EGMA_DUMB_AGENT_NAME=front-desk`` — the worker registers under that
-  name and joins only when a room's dispatch asks for it.
+``EGMA_DUMB_AGENT_NAME`` is the name this worker registers under, and it
+is the one prerequisite of the whole arrangement. Egma dispatches by name,
+always, because dispatch metadata is the only channel carrying the
+modality and the address of egma's mock-tool seam — and LiveKit's
+automatic dispatch, which is what a worker registered without a name gets,
+carries no dispatch metadata at all. Naming a worker that was previously
+unnamed turns automatic dispatch off for it: it then joins only the rooms
+whose dispatch asks for it.
 
 Run it with the project's own values in the environment (see README):
 
     uv run agent.py dev
 """
 
+import json
 import os
 
 from egma import mockable, monitor_livekit
 from livekit import agents
-from livekit.agents import Agent, AgentSession, function_tool
+from livekit.agents import Agent, AgentSession, function_tool, room_io
 from livekit.plugins import openai, silero
 
 INSTRUCTIONS = (
@@ -145,7 +167,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # the agent's tools are all attached and nothing has been said yet.
     # Outside a simulation this returns having touched nothing.
     await mockable(agent, ctx, session)
-    await session.start(agent=agent, room=ctx.room)
+    # The six lines. A production room carries no egma metadata, so `chat`
+    # is false there and these are the stock options.
+    context = json.loads(ctx.job.metadata or "{}")
+    chat = context.get("modality") == "chat"
+    options = (
+        room_io.RoomOptions(
+            audio_input=False,
+            audio_output=False,
+            text_output=room_io.TextOutputOptions(sync_transcription=False),
+        )
+        if chat
+        else room_io.RoomOptions()
+    )
+    await session.start(agent=agent, room=ctx.room, room_options=options)
     await session.generate_reply(
         instructions="Greet the caller with the practice name and ask how you can help."
     )

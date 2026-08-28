@@ -37,12 +37,9 @@ import { ArchiveConfirm } from "./archive.tsx";
 import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 import { ConnectionFields, type Draft } from "./[agentId]/connections/fields.tsx";
 import {
-  configForLiveKitDispatch,
-  liveKitDispatchForm,
-  LiveKitDispatchSetup,
-  savedLiveKitDispatch,
-  type LiveKitDispatch,
-} from "./[agentId]/connections/livekit-dispatch.tsx";
+  liveKitAgentNameForm,
+  LiveKitAgentName,
+} from "./[agentId]/connections/livekit-agent-name.tsx";
 
 /**
  * One way egma reaches an agent, read and changed in the panel the board draws
@@ -77,10 +74,16 @@ type Answered = { readonly connection: ListedConnection };
 type Editing = {
   readonly name: string;
   readonly draft: Draft;
-  readonly dispatch: LiveKitDispatch;
-  /** What the dispatch mode was when editing began, so "changed" is truthful. */
-  readonly startingDispatch: LiveKitDispatch;
 };
+
+/**
+ * Why Save is not available on a LiveKit room with no worker name.
+ *
+ * Written once because it is said three times — on the control, to a screen
+ * reader, and in the panel — and three copies of one sentence are three
+ * sentences waiting to disagree.
+ */
+const LIVEKIT_NAME_NEEDED = "Enter the exact LiveKit agent name.";
 
 export function ConnectionSheet({
   projectId,
@@ -156,46 +159,26 @@ export function ConnectionSheet({
   const connection = answer?.status === "ready" ? answer.value.connection : null;
   const option = connection === null ? undefined : optionNamed(catalog, connection);
 
-  const liveKitForm = liveKitDispatchForm({
+  const liveKitForm = liveKitAgentNameForm({
     connectionType: connection?.connectionType,
     option,
     config: editing?.draft.config ?? {},
-    mode: editing?.dispatch ?? "named",
   });
   const changed =
     connection !== null &&
     editing !== null &&
     (editing.name !== connection.name ||
-      editing.dispatch !== editing.startingDispatch ||
       JSON.stringify(editing.draft.config) !== JSON.stringify(connection.config));
   useUnsavedChanges(changed && !saving, saving);
 
   function startEditing(): void {
     if (connection === null) return;
-    const dispatch = savedLiveKitDispatch(connection.config);
     setRefused(null);
     setNameProblem(null);
     setEditing({
       name: connection.name,
       draft: { config: { ...connection.config }, credentials: {} },
-      dispatch,
-      startingDispatch: dispatch,
     });
-  }
-
-  function chooseLiveKitDispatch(next: LiveKitDispatch): void {
-    setEditing((current) =>
-      current === null
-        ? current
-        : {
-            ...current,
-            dispatch: next,
-            draft: {
-              ...current.draft,
-              config: configForLiveKitDispatch(current.draft.config, next),
-            },
-          },
-    );
   }
 
   async function save(): Promise<void> {
@@ -208,10 +191,7 @@ export function ConnectionSheet({
       return;
     }
     if (!liveKitForm.ready) {
-      setRefused({
-        error: "unprocessable",
-        message: "Enter the exact LiveKit agent name, or choose automatic dispatch.",
-      });
+      setRefused({ error: "unprocessable", message: LIVEKIT_NAME_NEEDED });
       return;
     }
 
@@ -312,10 +292,8 @@ export function ConnectionSheet({
             credentialsEditable={false}
             beforeCredentialFields={
               !liveKitForm.enabled ? undefined : (
-                <LiveKitDispatchSetup
-                  mode={liveKitForm.mode}
+                <LiveKitAgentName
                   agentName={liveKitForm.agentName}
-                  onModeChange={chooseLiveKitDispatch}
                   onAgentNameChange={(agentName) =>
                     setEditing((current) =>
                       current === null
@@ -335,9 +313,7 @@ export function ConnectionSheet({
           />
           {refused === null ? null : <Problem>{refused.message}</Problem>}
           {liveKitForm.ready ? null : (
-            <Help id={whySaid}>
-              Enter the exact LiveKit agent name, or choose automatic dispatch.
-            </Help>
+            <Help id={whySaid}>{LIVEKIT_NAME_NEEDED}</Help>
           )}
         </>
       );
@@ -430,11 +406,7 @@ export function ConnectionSheet({
                   disabled={saving || !changed || !liveKitForm.ready}
                   size="lg"
                   type="submit"
-                  title={
-                    liveKitForm.ready
-                      ? undefined
-                      : "Enter the exact LiveKit agent name, or choose automatic dispatch."
-                  }
+                  title={liveKitForm.ready ? undefined : LIVEKIT_NAME_NEEDED}
                   aria-describedby={liveKitForm.ready ? undefined : whySaid}
                 >
                   {saving ? "Saving…" : "Save"}

@@ -53,9 +53,15 @@ and hands back the transcript; by hand it is::
 
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
+    TEST_LIVEKIT_AGENT_NAME=front-desk \\
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_mock_tools.py -v -s
+
+The agent's name is required, not optional: egma dispatches explicitly,
+because dispatch metadata is the only channel carrying the address of
+egma's mock-tool seam — which is to say that this test's whole subject
+travels on it.
 
 Each name falls back to the plain one the tool's own CLI reads, so one
 environment starts the worker and runs this. It skips — visibly, never
@@ -97,6 +103,7 @@ REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
+    "TEST_LIVEKIT_AGENT_NAME": AGENT_NAME,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
@@ -250,9 +257,7 @@ WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
 
 def mocked_spec() -> dict:
     """One spec: a real room, a real worker, and one tool egma answers for."""
-    config: dict = {"url": LIVEKIT_URL}
-    if AGENT_NAME:
-        config["agentName"] = AGENT_NAME
+    config = {"url": LIVEKIT_URL, "agentName": AGENT_NAME}
     return a_spec(
         SIMULATION,
         modality="voice",

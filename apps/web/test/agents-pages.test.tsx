@@ -297,7 +297,67 @@ const TYPES = {
           key: "agentName",
           label: "LiveKit agent name",
           kind: "text",
+          required: true,
+          help: "The exact name registered by the deployed LiveKit worker.",
+          afterCredentials: false,
+        },
+        {
+          key: "metadata",
+          label: "Room metadata",
+          kind: "json",
           required: false,
+          help: "JSON handed to the agent.",
+          afterCredentials: true,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "Used to create the room.",
+      credentialFields: [
+        {
+          field: "apiKey",
+          label: "LiveKit API key",
+          kind: "secret",
+          required: true,
+          help: "The key id.",
+        },
+        {
+          field: "apiSecret",
+          label: "LiveKit API secret",
+          kind: "secret",
+          required: true,
+          help: "The key secret.",
+        },
+      ],
+    },
+    /*
+     * Chat and voice on one access variant, which is the shape the server
+     * really serves: the two rows differ in one word, and a lookup that reads
+     * the variant alone cannot tell them apart.
+     */
+    {
+      agentPlatform: "livekit",
+      agentPlatformLabel: "LiveKit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      accessVariantLabel: "API key and secret",
+      modality: "chat",
+      productLabel: "LiveKit chat",
+      topology: "egma-dials-out",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "url",
+          label: "LiveKit WebSocket URL",
+          kind: "url",
+          required: true,
+          help: "Your LiveKit project or self-hosted server.",
+          afterCredentials: false,
+        },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: true,
           help: "The exact name registered by the deployed LiveKit worker.",
           afterCredentials: false,
         },
@@ -976,6 +1036,17 @@ describe("goal-first agent setup", () => {
     fireEvent.click(
       await screen.findByRole("radio", { name: new RegExp(`^${name}`) }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  }
+
+  /** The LiveKit lane's first screen, which comes before any credential box. */
+  async function chooseLiveKitModality(name: "Chat" | "Voice"): Promise<void> {
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${name}`) }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   }
 
@@ -1748,6 +1819,7 @@ describe("goal-first agent setup", () => {
     });
     render(<RegisterAgentPage />);
     await choose("Run simulations", "LiveKit");
+    await chooseLiveKitModality("Voice");
     await fillLiveKitSimulation();
 
     expect(
@@ -1789,6 +1861,211 @@ describe("goal-first agent setup", () => {
     });
   });
 
+  /**
+   * The choice a person understands comes before the plumbing it settles.
+   *
+   * Chat and voice are two different things to test, and which one this is
+   * decides what the credential screen may even offer — so a credential box on
+   * screen before the question has been answered would be asking for the
+   * wrong values half the time.
+   */
+  it("asks how the agent is tested before any LiveKit credential box", async () => {
+    sheetAnswers();
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "LiveKit");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getAllByRole("radio").map((choice) => choice.textContent),
+    ).toEqual([
+      expect.stringContaining("Voice"),
+      expect.stringContaining("Chat"),
+    ]);
+    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
+    expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
+    expect(screen.queryByLabelText("API key*")).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Connection type*" }),
+    ).toBeNull();
+    expect(sent).toEqual([]);
+  });
+
+  it("saves a LiveKit chat connection and offers no way in but project credentials", async () => {
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: liveKitAgent,
+            connection: {
+              ...liveKitConnection,
+              modality: "chat",
+              productLabel: "LiveKit chat",
+            },
+          },
+        },
+        {
+          status: 200,
+          body: {
+            agents: [{ ...liveKitAgent, connections: [liveKitConnection] }],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "LiveKit");
+    await chooseLiveKitModality("Chat");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect LiveKit for simulations",
+      }),
+    ).toBeDefined();
+    // Egma has to dispatch the worker to tell it the simulation is typed, so
+    // there is one way in and nothing that pretends otherwise.
+    expect(
+      screen.queryByRole("combobox", { name: "Connection type*" }),
+    ).toBeNull();
+    expect(screen.queryByText("Token endpoint")).toBeNull();
+    expect(screen.queryByLabelText("Token endpoint*")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {
+      target: { value: "front-desk" },
+    });
+    fireEvent.change(screen.getByLabelText("WebSocket URL*"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("API key*"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("API secret*"), {
+      target: { value: "livekit-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+      ).toBe(true);
+    });
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    expect(registration?.body).toEqual({
+      name: "front-desk",
+      agentPlatform: "livekit",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+        modality: "chat",
+        config: {
+          url: "wss://rooms.example.test",
+          agentName: "front-desk",
+        },
+        credentials: {
+          apiKey: "livekit-key",
+          apiSecret: "livekit-secret",
+        },
+      },
+    });
+
+    // The setup Egma cannot perform, handed over after the connection exists.
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add the chat setup to your LiveKit agent",
+      }),
+    ).toBeDefined();
+    expect(
+      screen.getAllByRole("button", { name: "Copy" }),
+    ).toHaveLength(2);
+    const shown = document.body.textContent ?? "";
+    expect(shown).toContain('chat = context.get("modality") == "chat"');
+    expect(shown).toContain("TextOutputOptions(sync_transcription=False)");
+    expect(shown).not.toMatch(/chat (is )?(ready|configured|on)\b/i);
+    expect(shown).not.toContain("Verified");
+  });
+
+  /**
+   * The second modality on an agent Egma already holds.
+   *
+   * One vendor agent is one Egma agent, so the chat run and the voice run of
+   * the same test suite can be read side by side. A second registration here
+   * would split that history in half.
+   */
+  it("adds chat to an agent that already exists instead of minting a twin", async () => {
+    routed.search =
+      "?sheet=connect&agent=agt_livekit&goal=simulation&platform=livekit";
+    sheetAnswers({
+      "/v1/agents/agt_livekit": {
+        status: 200,
+        body: { agent: liveKitAgent, connections: [liveKitConnection] },
+      },
+      "/v1/agents/agt_livekit/connections": {
+        status: 201,
+        body: {
+          connection: {
+            ...liveKitConnection,
+            id: "con_livekit_chat",
+            modality: "chat",
+            productLabel: "LiveKit chat",
+          },
+        },
+      },
+    });
+    render(<AgentsPage />);
+
+    await chooseLiveKitModality("Chat");
+    fireEvent.change(await screen.findByLabelText("LiveKit agent name*"), {
+      target: { value: "front-desk" },
+    });
+    fireEvent.change(screen.getByLabelText("WebSocket URL*"), {
+      target: { value: "wss://rooms.example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("API key*"), {
+      target: { value: "livekit-key" },
+    });
+    fireEvent.change(screen.getByLabelText("API secret*"), {
+      target: { value: "livekit-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) =>
+          call.url.startsWith("/v1/agents/agt_livekit/connections"),
+        ),
+      ).toBe(true);
+    });
+    expect(
+      sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+    ).toBe(false);
+    const added = sent.find((call) =>
+      call.url.startsWith("/v1/agents/agt_livekit/connections"),
+    );
+    expect(added?.body).toEqual({
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      modality: "chat",
+      config: {
+        url: "wss://rooms.example.test",
+        agentName: "front-desk",
+      },
+      credentials: {
+        apiKey: "livekit-key",
+        apiSecret: "livekit-secret",
+      },
+    });
+  });
+
   it("stores a LiveKit token endpoint without asking for the project secret", async () => {
     sheetAnswers({
       "/v1/agents": [
@@ -1822,6 +2099,7 @@ describe("goal-first agent setup", () => {
     });
     render(<RegisterAgentPage />);
     await choose("Run simulations", "LiveKit");
+    await chooseLiveKitModality("Voice");
 
     fireEvent.change(
       await screen.findByRole("combobox", { name: "Connection type*" }),
@@ -1944,6 +2222,7 @@ describe("goal-first agent setup", () => {
     });
     render(<RegisterAgentPage />);
     await choose("Set up both", "LiveKit");
+    await chooseLiveKitModality("Voice");
     await fillLiveKitSimulation();
 
     expect(
@@ -2024,6 +2303,8 @@ describe("goal-first agent setup", () => {
       await screen.findByText("Egma could not describe the connection options."),
     ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    // The modality choices are the catalog's, so this screen waits for it too.
+    await chooseLiveKitModality("Voice");
     expect(
       await screen.findByRole("heading", {
         name: "Connect LiveKit for simulations",
@@ -2223,9 +2504,9 @@ describe("one connection's page", () => {
 
     await openConnectionMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" }));
-    expect(
-      (screen.getByLabelText("Dispatch method*") as HTMLSelectElement).value,
-    ).toBe("named");
+    // The name is the whole of the LiveKit decision here: every dispatch is
+    // explicit, so there is no method left to choose between.
+    expect(screen.queryByLabelText("Dispatch method*")).toBeNull();
     expect(
       (screen.getByLabelText("LiveKit agent name*") as HTMLInputElement).value,
     ).toBe("front-desk");
@@ -2244,7 +2525,15 @@ describe("one connection's page", () => {
     });
   });
 
-  it("preserves automatic dispatch until a legacy LiveKit connection selects a named agent", async () => {
+  /**
+   * A LiveKit connection saved before the name was demanded.
+   *
+   * Egma cannot reach that agent: the dispatch metadata is the only channel
+   * that carries the modality and the mock-tool address, and there is no
+   * dispatch without a name. So the editor asks for one and refuses to save
+   * until it has it, rather than writing the row back the way it was.
+   */
+  it("requires a name from a LiveKit connection that was saved without one", async () => {
     const unnamed = {
       ...CONNECTION,
       agentPlatform: "livekit",
@@ -2259,15 +2548,19 @@ describe("one connection's page", () => {
 
     await openConnectionMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" }));
-    const dispatch = screen.getByLabelText("Dispatch method*") as HTMLSelectElement;
-    expect(dispatch.value).toBe("automatic");
-    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
+    expect(screen.queryByLabelText("Dispatch method*")).toBeNull();
+    expect(
+      (screen.getByLabelText("LiveKit agent name*") as HTMLInputElement).value,
+    ).toBe("");
 
-    fireEvent.change(dispatch, { target: { value: "named" } });
-    expect((screen.getByLabelText("LiveKit agent name*") as HTMLInputElement).value).toBe("");
     const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    expect(save.title).toContain("exact LiveKit agent name");
+    expect(save.title).toBe("Enter the exact LiveKit agent name.");
+    expect(
+      screen.getByText("Enter the exact LiveKit agent name."),
+    ).toBeDefined();
+    expect(screen.queryByText(/automatic dispatch/i)).toBeNull();
+
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {
       target: { value: "customer-support" },
     });

@@ -66,6 +66,47 @@ function registration(overrides: {
   };
 }
 
+/**
+ * The same registration for a LiveKit worker, whose identity is two things
+ * rather than one: the server it stands on and the name it answers to.
+ *
+ * A builder of its own rather than a wider `registration`, because what makes
+ * these tests worth having is the composite — the url and the agent name vary
+ * independently, and a builder that hid one of them behind the other would
+ * have nothing left to prove.
+ */
+function livekitRegistration(overrides: {
+  readonly name?: string;
+  readonly modality?: "chat" | "voice";
+  readonly url?: string;
+  readonly agentName?: string;
+  readonly apiSecret?: string;
+}): NewAgent {
+  return {
+    name: overrides.name ?? "Room worker",
+    agentPlatform: "livekit",
+    connection: {
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      modality: overrides.modality ?? "voice",
+      config: {
+        url: overrides.url ?? "wss://acme.livekit.cloud",
+        agentName: overrides.agentName ?? "front-desk",
+      },
+      credentials: {
+        apiKey: "livekit-key-A1B2C3D4WXYZ",
+        apiSecret: overrides.apiSecret ?? "livekit-secret-E5F6G7H8QRST",
+      },
+    },
+  };
+}
+
+/** A worker name nothing else in this shared database answers to. */
+function aWorkerName(): string {
+  return `worker-${newId("con").slice(-6)}`;
+}
+
 beforeAll(async () => {
   database = await createConnectedDatabase("agents_register");
 
@@ -231,4 +272,257 @@ describe("a credential rotated by a reused registration", () => {
     expect(sealed).not.toContain("1111ZZZZ");
   });
 
+});
+
+/**
+ * The composite reuse rule, against a real database.
+ *
+ * Retell's rule is one config value compared as it was stored, and Postgres
+ * can decide it on its own. LiveKit's cannot be decided in SQL at all: the
+ * identity is a normalized server origin and a worker name, and
+ * `wss://acme.livekit.cloud` and `https://acme.livekit.cloud:443` are one
+ * server that no `=` will ever match. So the query narrows on the name and the
+ * rule settles the rest, and these are the cases that tell the two apart.
+ */
+describe("one LiveKit worker registered twice", () => {
+  it("answers reused, and replaces the sealed pair whole", async () => {
+    const worker = aWorkerName();
+
+    const first = await registerAgent(
+      actingIn(acme.project),
+      livekitRegistration({
+        name: "Rotating worker",
+        agentName: worker,
+        apiSecret: "livekit-secret-first-0000AAAA",
+      }),
+    );
+    const before = await database.sql<{ credentials: string }>(
+      "select credentials from connection where id = $1",
+      [first.connection?.id ?? ""],
+    );
+
+    const second = await registerAgent(
+      actingIn(acme.project),
+      livekitRegistration({
+        name: "Rotating worker",
+        agentName: worker,
+        apiSecret: "livekit-secret-second-1111ZZZZ",
+      }),
+    );
+
+    expect(first.result).toBe("created");
+    expect(second.result).toBe("reused");
+    expect(second.agent.id).toBe(first.agent.id);
+    expect(second.connection?.id).toBe(first.connection?.id);
+
+    const after = await database.sql<{ credentials: string }>(
+      "select credentials from connection where id = $1",
+      [first.connection?.id ?? ""],
+    );
+    const sealed = after.rows[0]?.credentials ?? "";
+    expect(sealed).not.toBe(before.rows[0]?.credentials);
+    expect(sealed.startsWith("v1.")).toBe(true);
+    expect(sealed).not.toContain("0000AAAA");
+    expect(sealed).not.toContain("1111ZZZZ");
+  });
+
+  /**
+   * The spellings a customer meets in one afternoon: the websocket url their
+   * dashboard shows, the https one their SDK docs show, and either with the
+   * port written out. They reach one server, so they must land on one agent.
+   */
+  it("is one worker however the server url is spelled", async () => {
+    const worker = aWorkerName();
+
+    const first = await registerAgent(
+      actingIn(acme.project),
+      livekitRegistration({
+        name: "Spelled worker",
+        agentName: worker,
+        url: "wss://acme.livekit.cloud",
+      }),
+    );
+    expect(first.result).toBe("created");
+
+    for (const url of [
+      "https://acme.livekit.cloud",
+      "wss://acme.livekit.cloud:443",
+      "https://ACME.livekit.cloud:443/",
+    ]) {
+      const again = await registerAgent(
+        actingIn(acme.project),
+        livekitRegistration({
+          name: "Spelled worker",
+          agentName: worker,
+          url,
+        }),
+      );
+      expect(again.result).toBe("reused");
+      expect(again.agent.id).toBe(first.agent.id);
+      expect(again.connection?.id).toBe(first.connection?.id);
+    }
+
+    // And the url the first registration wrote is the one still stored: reuse
+    // rotates the credential and leaves the config it found alone.
+    const { rows } = await database.sql<{ config: Record<string, string> }>(
+      "select config from connection where id = $1",
+      [first.connection?.id ?? ""],
+    );
+    expect(rows[0]?.config["url"]).toBe("wss://acme.livekit.cloud");
+  });
+
+  /**
+   * A staging project and a production one commonly run a worker of the same
+   * name, and their results must never be read as one agent's.
+   *
+   * The two registrations carry different *agent* names on purpose. With one
+   * name the second would find no match, fall through to a create, and lose to
+   * the agent name index — which would fail this test for a reason that has
+   * nothing to do with the reuse rule.
+   */
+  it("stays two agents when one worker name answers on two servers", async () => {
+    const worker = aWorkerName();
+
+    const staging = await registerAgent(
+      actingIn(acme.project),
+      livekitRegistration({
+        name: "Staging's worker",
+        agentName: worker,
+        url: "wss://staging.livekit.cloud",
+      }),
+    );
+    const production = await registerAgent(
+      actingIn(acme.project),
+      livekitRegistration({
+        name: "Production's worker",
+        agentName: worker,
+        url: "wss://production.livekit.cloud",
+      }),
+    );
+
+    expect(staging.result).toBe("created");
+    expect(production.result).toBe("created");
+    expect(production.agent.id).not.toBe(staging.agent.id);
+  });
+
+  /**
+   * The retry a coding agent makes after an uncertain network failure, on the
+   * composite rule: the lock is taken on the normalized identity, so four
+   * registrations spelling one server four ways still queue behind each other.
+   */
+  it("settles four racing registrations onto one agent", async () => {
+    const worker = aWorkerName();
+
+    const racing = await Promise.all(
+      [
+        "wss://racing.livekit.cloud",
+        "https://racing.livekit.cloud",
+        "wss://racing.livekit.cloud:443",
+        "https://RACING.livekit.cloud:443",
+      ].map((url) =>
+        registerAgent(
+          actingIn(acme.project),
+          livekitRegistration({
+            name: "Racing worker",
+            agentName: worker,
+            url,
+          }),
+        ),
+      ),
+    );
+
+    expect(new Set(racing.map((one) => one.agent.id)).size).toBe(1);
+    expect(new Set(racing.map((one) => one.connection?.id)).size).toBe(1);
+
+    const results = racing.map((one) => one.result);
+    expect(results.filter((one) => one === "created")).toHaveLength(1);
+    expect(results.filter((one) => one === "reused")).toHaveLength(3);
+
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from agent where project_id = $1 and name = $2",
+      [acme.project, "Racing worker"],
+    );
+    expect(rows[0]?.count).toBe("1");
+  });
+});
+
+/**
+ * The branch the chat lane exists for: one worker, tested both ways, with one
+ * results history to read the two scores against each other in.
+ *
+ * Proven in both orders, because which modality a team reaches for first is
+ * their business and neither may be the one that gets the agent.
+ */
+describe("one LiveKit worker tested over chat and over voice", () => {
+  it.each([
+    { first: "voice", second: "chat" },
+    { first: "chat", second: "voice" },
+  ] as const)(
+    "adds a connection to the agent it already has, $first then $second",
+    async ({ first, second }) => {
+      const worker = aWorkerName();
+      const name = `Both ways, ${first} first`;
+
+      const opened = await registerAgent(
+        actingIn(acme.project),
+        livekitRegistration({ name, agentName: worker, modality: first }),
+      );
+      const added = await registerAgent(
+        actingIn(acme.project),
+        livekitRegistration({ name, agentName: worker, modality: second }),
+      );
+
+      expect(opened.result).toBe("created");
+      expect(added.result).toBe("connection_added");
+      expect(added.agent.id).toBe(opened.agent.id);
+      expect(added.connection?.id).not.toBe(opened.connection?.id);
+      expect(added.connection?.modality).toBe(second);
+      expect(added.connection?.productLabel).toBe(
+        second === "chat" ? "LiveKit chat" : "LiveKit project credentials",
+      );
+
+      const reached =
+        (await listConnections(actingIn(acme.project), opened.agent.id)) ?? [];
+      expect(reached.map((one) => one.modality).sort()).toEqual([
+        "chat",
+        "voice",
+      ]);
+    },
+  );
+});
+
+/**
+ * The token-endpoint shape holds no agent name at all, so the rule finds no
+ * identity in it and every registration through it creates. That is the whole
+ * job of an identity that may answer nothing.
+ */
+describe("a LiveKit connection that names no worker", () => {
+  it("creates every time, because nothing in it stands for one agent", async () => {
+    const endpoint = {
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      modality: "voice",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
+    } as const;
+
+    const first = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Endpoint worker",
+      connection: endpoint,
+    });
+    const again = await registerAgent(actingIn(acme.project), {
+      agentPlatform: "livekit",
+      name: "Endpoint worker, second team",
+      connection: endpoint,
+    });
+
+    expect(first.result).toBe("created");
+    expect(again.result).toBe("created");
+    expect(again.agent.id).not.toBe(first.agent.id);
+  });
 });

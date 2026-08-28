@@ -6,6 +6,14 @@ import {
 } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
+// Straight from the source, because these two are how the registry answers the
+// question the catalog's guard asks, and neither belongs on the package
+// surface: what a browser is handed is the projection, never the registry.
+import {
+  descriptorOf,
+  modalitiesOf,
+} from "../src/access/connection-registry.ts";
+
 /**
  * The connection catalog a form is drawn from, and the rules that keep it honest.
  *
@@ -95,17 +103,20 @@ describe("what a browser is told about a simulation connection", () => {
     const fields = new Map(
       (keyPair?.fields ?? []).map((field) => [field.key, field]),
     );
-    // A blank agent name is automatic dispatch, which is the state every
-    // quickstart agent runs in — so demanding it would make somebody write a
-    // value down to mean the default they already had.
+    // The agent name is demanded because every egma dispatch is explicit:
+    // dispatch metadata is the only channel that carries the simulation's
+    // modality and the mock-tool address, and a form that let somebody skip
+    // the name would be a form that quietly took both away.
     expect(fields.get("url")).toMatchObject({
       label: "LiveKit WebSocket URL",
       required: true,
     });
     expect(fields.get("agentName")).toMatchObject({
       label: "LiveKit agent name",
-      required: false,
+      required: true,
     });
+    // Room metadata is the optional one, and it is the case that proves a
+    // form can still be told a key may be left out.
     expect(fields.get("metadata")).toMatchObject({
       required: false,
       afterCredentials: true,
@@ -117,6 +128,66 @@ describe("what a browser is told about a simulation connection", () => {
     expect(endpoint?.fields.find((field) => field.key === "url")?.label).toBe(
       "LiveKit WebSocket URL",
     );
+  });
+
+  /**
+   * The product-label table and the access variants' modality lists are two
+   * lists that must agree, and they are held level by a loud refusal when the
+   * catalog is built rather than by discipline. An option nobody caught would
+   * be a combination a form offers, a browser sends, and the door then refuses
+   * — the one failure a customer cannot do anything about.
+   */
+  it("offers no option a named access variant does not speak", () => {
+    expect(() => connectionOptionMetadata()).not.toThrow();
+
+    for (const option of connectionOptionMetadata()) {
+      const descriptor = descriptorOf(option.connectionType);
+      const variant = accessVariantById(
+        option.connectionType,
+        option.accessVariant,
+      );
+      expect(modalitiesOf(descriptor, variant)).toContain(option.modality);
+    }
+  });
+
+  /**
+   * The chat lane's whole product surface, as the catalog says it: one more
+   * row on the variant where Egma dispatches the worker itself, and nothing
+   * new on the one where it cannot.
+   */
+  it("offers LiveKit chat on project credentials and nowhere else", () => {
+    const livekit = connectionOptionMetadata().filter(
+      (one) => one.connectionType === "livekit_room",
+    );
+
+    expect(
+      livekit.map((one) => `${one.accessVariant}/${one.modality}`),
+    ).toEqual([
+      "livekit_room.project_credentials/voice",
+      "livekit_room.project_credentials/chat",
+      "livekit_room.customer_token_endpoint/voice",
+    ]);
+
+    expect(
+      livekit.find(
+        (one) =>
+          one.accessVariant === "livekit_room.project_credentials" &&
+          one.modality === "chat",
+      ),
+    ).toMatchObject({
+      agentPlatform: "livekit",
+      productLabel: "LiveKit chat",
+      topology: "agent-dials-out",
+      credentialRule: "required",
+    });
+
+    expect(
+      livekit.some(
+        (one) =>
+          one.accessVariant === "livekit_room.customer_token_endpoint" &&
+          one.modality === "chat",
+      ),
+    ).toBe(false);
   });
 
   it("reads each explicit stored access variant without inferring from config", () => {

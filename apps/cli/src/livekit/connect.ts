@@ -2,7 +2,11 @@
  * Register a LiveKit agent through Egma's platform API.
  *
  * LiveKit has two connection shapes. A project key pair lets Egma mint room
- * tokens. A token endpoint keeps the signing secret on the customer's side.
+ * tokens, and is the shape that can speak chat as well as voice, because it is
+ * the shape where Egma dispatches the worker itself and can tell it which of
+ * the two this simulation is. A token endpoint keeps the signing secret on the
+ * customer's side, and speaks voice alone for the same reason.
+ *
  * This module only builds and registers those shapes. It never contacts a
  * LiveKit server or a token endpoint during setup.
  */
@@ -33,8 +37,10 @@ type CommonRegistration = {
 
 export type LiveKitKeyPairRegistration = CommonRegistration & {
   readonly variant: typeof LIVEKIT_KEY_PAIR_VARIANT;
-  /** Omit for automatic dispatch. */
-  readonly agentName?: string | undefined;
+  /** The name the customer's worker registers under, and Egma dispatches. */
+  readonly agentName: string;
+  /** Which of the two the simulator conducts over this connection. */
+  readonly modality: "chat" | "voice";
   /** JSON object text handed to the worker as room metadata. */
   readonly metadata?: string | undefined;
   readonly credentials: ConnectionCredentials;
@@ -44,6 +50,15 @@ export type LiveKitTokenEndpointRegistration = CommonRegistration & {
   readonly variant: typeof LIVEKIT_TOKEN_ENDPOINT_VARIANT;
   /** Egma asks this endpoint for a room token once per simulation. */
   readonly tokenEndpoint: string;
+  /**
+   * Voice, and only voice.
+   *
+   * Egma never dispatches the worker on this variant, so it has no channel to
+   * tell the agent that this simulation is typed. The field stays here so the
+   * two shapes read the same way, and its type is what refuses chat before a
+   * request is built.
+   */
+  readonly modality: "voice";
   /** Auth headers for the public token endpoint. */
   readonly credentials: ConnectionCredentials;
 };
@@ -83,9 +98,8 @@ function optionalText(value: string | undefined): string | undefined {
 export function liveKitConnection(input: LiveKitRegistration): NewConnection {
   const config: Record<string, string> = { url: input.url.trim() };
   if (input.variant === LIVEKIT_KEY_PAIR_VARIANT) {
-    const agentName = optionalText(input.agentName);
     const metadata = optionalText(input.metadata);
-    if (agentName !== undefined) config.agentName = agentName;
+    config.agentName = input.agentName.trim();
     if (metadata !== undefined) config.metadata = metadata;
   } else {
     config.tokenEndpoint = input.tokenEndpoint.trim();
@@ -98,7 +112,7 @@ export function liveKitConnection(input: LiveKitRegistration): NewConnection {
     agentPlatform: "livekit",
     connectionType: "livekit_room",
     accessVariant: input.variant,
-    modality: "voice",
+    modality: input.modality,
     ...(input.environment === undefined
       ? {}
       : { environment: input.environment.trim() }),
@@ -110,10 +124,16 @@ export function liveKitConnection(input: LiveKitRegistration): NewConnection {
 /**
  * Register one LiveKit agent and its first connection.
  *
- * All ordinary platform endings remain values. In particular, `name-taken`
- * is returned to the wizard instead of silently joining a new LiveKit target
- * to an agent with the same name: a LiveKit URL names a server, not one agent,
- * so there is no safe automatic reuse key.
+ * A LiveKit target now has a safe reuse key — the server's normalized origin
+ * and the worker's registered name — so registering the same worker again
+ * lands on the agent that already holds it, and its chat and voice results
+ * accumulate in one place. The platform owns that rule; this module only sends
+ * a connection complete enough for it to be applied.
+ *
+ * All ordinary platform endings remain values. `name-taken` now means what it
+ * says and nothing more: the Egma agent name asked for is held by a different
+ * vendor agent. Renaming this one is the answer, and the wizard says so rather
+ * than joining two targets under one row.
  */
 export function connectLiveKit(
   input: LiveKitRegistration,

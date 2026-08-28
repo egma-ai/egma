@@ -28,9 +28,11 @@ creates the room, dispatches the worker and deletes the room at the end:
 - ``url`` (string, required) — the customer's LiveKit, ``ws``/``wss`` or
   ``http``/``https``. Cloud and self-hosted are the same URL and the same
   API; nothing here knows the difference.
-- ``agentName`` (string, optional) — which agent to dispatch. Absent or
-  blank: automatic dispatch, which is what a worker registered without a
-  name already gets.
+- ``agentName`` (string, required) — the name the agent's worker
+  registered under. Required rather than optional, because egma always
+  dispatches explicitly: dispatch metadata is the only channel that
+  carries the modality and the address of egma's mock-tool seam, and
+  LiveKit's automatic dispatch carries no dispatch metadata at all.
 - ``metadata`` (a JSON object in a string, optional) — carried on the
   room, verbatim, for the agent to read.
 
@@ -128,9 +130,9 @@ class LiveKitRoom:
         # one, and it is the one below. The keyword is for tests, which put
         # a room-shaped fake behind the same seam rather than stand up a
         # LiveKit.
-        self._backend = _built(
+        self._backend = build_driver(
             driver or LiveKitRoomBackend,
-            settings=_read(access_variant, config, credentials),
+            settings=read_connection(access_variant, config, credentials),
             simulation_id=simulation_id,
             mock_tools=mock_tools,
         )
@@ -186,18 +188,27 @@ class LiveKitRoom:
         await self._backend.teardown()
 
 
-def _read(
+def read_connection(
     access_variant: str, config: dict[str, Any], credentials: object
 ) -> RoomSettings:
-    """The connection, read by the driver that uses it, in the plug's words."""
+    """The connection, read by the driver that uses it, in the plug's words.
+
+    Public because the chat plug next door reads the *same* connection
+    block with the *same* driver and owes a refusal in the same words. A
+    second copy of this would be a second set of sentences to keep true.
+    """
     try:
         return RoomSettings.from_connection(access_variant, config, credentials)
     except MediaBackendError as refused:
         raise PlugError(str(refused), ending=refused.ending) from refused
 
 
-def _built(factory, **arguments) -> Any:
-    """One room driver, or the plug's own refusal in its words."""
+def build_driver(factory, **arguments) -> Any:
+    """One room driver, or the plug's own refusal in its words.
+
+    Public for the reason above: both plugs build a driver, and both owe
+    the same refusal when a connection turns out to be unusable.
+    """
     try:
         return factory(**arguments)
     except MediaBackendError as refused:
