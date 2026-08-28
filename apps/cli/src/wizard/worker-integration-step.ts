@@ -177,10 +177,10 @@ function workerIntegrationTask(
 }
 
 /*
- * The chat setup rides this dispatch whatever modality the developer chooses
- * later. A production or voice room has no chat mark, so its room options stay
- * unchanged. Chat correctness is proved by the wire when the agent first
- * answers, not by a second parser of the worker's source.
+ * In testing modes, the chat setup rides this dispatch before the developer
+ * chooses chat or voice. A production or voice room has no chat mark, so its
+ * room options stay unchanged. Chat correctness is proved by the wire when the
+ * agent first answers, not by a second parser of the worker's source.
  */
 export function workerIntegrationInstructions(
   cwd: string,
