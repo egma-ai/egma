@@ -2,12 +2,14 @@ import { newId } from "@egma/ids";
 import {
   connectionOptionMetadata,
   createPersona,
+  getSimulation,
   startRun,
   type ConductedWorld,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
+import { reportPathFor } from "../src/routes/reports.ts";
 import { readPlaygroundWorld } from "../src/providers/retell-playground.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
@@ -169,6 +171,8 @@ async function aCustomerReadyToRun(
   label: string,
   connection: typeof PLAYGROUND | typeof RETELL_CHAT,
   plan: RetellPlan = {},
+  /** A trace store, for the one test that lands a terminal report. */
+  traceStore = false,
 ): Promise<{
   ada: Customer;
   key: string;
@@ -176,9 +180,16 @@ async function aCustomerReadyToRun(
   connectionId: string;
   suiteId: string;
   asked: string[];
+  /** Every line the platform logged while this test ran, in order. */
+  logs: string[];
 }> {
   const { fetchImpl, asked } = retell(plan);
-  api = await createApi(label, { retellFetch: fetchImpl });
+  const logs: string[] = [];
+  api = await createApi(label, {
+    retellFetch: fetchImpl,
+    logTo: { write: (line: string) => logs.push(line) },
+    ...(traceStore ? { traceStore: true } : {}),
+  });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -214,6 +225,7 @@ async function aCustomerReadyToRun(
     connectionId: (registered.body.connection as { id: string }).id,
     suiteId: String(suite.body.id),
     asked,
+    logs,
   };
 }
 
@@ -492,6 +504,50 @@ const A_CONDUCTED_WORLD: ConductedWorld = {
   },
 };
 
+describe("the sentinel Retell key", () => {
+  it("reaches Retell and nothing else, on a run that starts and one that fails", async () => {
+    // Planted in the connection, used for two provider reads, and then looked
+    // for in every place a person or a machine would ever read: the responses,
+    // the platform log, and the rows a reader can ask for.
+    for (const plan of [{}, { agentStatus: 401 }, { engineStatus: 503 }]) {
+      const { key, agentId, connectionId, suiteId, logs, asked } =
+        await aCustomerReadyToRun(
+          `playground_sentinel_${Object.keys(plan)[0] ?? "happy"}`,
+          PLAYGROUND,
+          plan,
+        );
+
+      const started = await ask(api.app, "POST", "/v1/runs", key, {
+        suiteId,
+        agentId,
+        connectionId,
+        idempotencyKey: newId("run"),
+      });
+      expect(started.body, JSON.stringify(started.body)).toBeDefined();
+
+      // The key went out as a bearer token, which is the one place it belongs.
+      expect(asked.length).toBeGreaterThan(0);
+
+      // And it is in none of the three places anybody reads.
+      expect(JSON.stringify(started.body)).not.toContain(SENTINEL_KEY);
+      expect(logs.join("\n")).not.toContain(SENTINEL_KEY);
+
+      const listed = await ask(api.app, "GET", "/v1/runs", key);
+      expect(JSON.stringify(listed.body)).not.toContain(SENTINEL_KEY);
+
+      const read = await ask(
+        api.app,
+        "GET",
+        `/v1/agents/${agentId}`,
+        key,
+      );
+      expect(JSON.stringify(read.body)).not.toContain(SENTINEL_KEY);
+
+      await api.close();
+    }
+  });
+});
+
 describe("the version a run resolved, on the record", () => {
   it("lands on the run and on every conversation of it", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
@@ -551,6 +607,106 @@ describe("the version a run resolved, on the record", () => {
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
     expect(header.body.conductedAgentVersion).toBeNull();
     expect(header.body.conductedWorld).toBeNull();
+  });
+});
+
+describe("the coverage stamp a version-pinned run puts on its record", () => {
+  it("is built from the version Egma read, and tolerates a plug with no provider reference", async () => {
+    const { ada, key, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun(
+        "playground_stamp_coverage",
+        RETELL_CHAT,
+        {},
+        true,
+      );
+
+    const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
+      tool: "check_availability",
+      answer: { ok: true },
+      delayMs: 0,
+    });
+    expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
+
+    await startRun(contextFor(ada, "member"), {
+      suiteId,
+      agentId,
+      connectionId,
+      idempotencyKey: newId("run"),
+      conductedWorld: A_CONDUCTED_WORLD,
+    });
+
+    const claimed = await api.app.inject({
+      method: "POST",
+      url: CLAIMS_PATH,
+      headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+      payload: { claimant: "sim-under-test", capacity: 1, contract_versions: [5] },
+    });
+    const simulationId = String(
+      (claimed.json() as { specs: { simulation_id: string }[] }).specs[0]
+        ?.simulation_id,
+    );
+
+    const post = async (events: readonly Record<string, unknown>[]) =>
+      api.app.inject({
+        method: "POST",
+        url: reportPathFor(simulationId),
+        headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
+        payload: { contract_version: 1, simulation_id: simulationId, events },
+      });
+
+    expect(
+      (
+        await post([
+          {
+            kind: "status",
+            event_id: "evt-pg-000001",
+            at: "2026-08-05T09:00:00.000000Z",
+            status: "running",
+            reason: null,
+          },
+        ])
+      ).statusCode,
+    ).toBe(200);
+
+    // The plug reports no stamp of its own and **no provider reference**: the
+    // playground stores nothing on Retell's side, so there is no id to hold the
+    // exchange by, and everything downstream has to take that as an answer
+    // rather than as a missing field.
+    const landed = await post([
+      {
+        kind: "status",
+        event_id: "evt-pg-000002",
+        at: "2026-08-05T09:02:10.551000Z",
+        status: "completed",
+        reason: null,
+        facts: {
+          ending: "persona_concluded",
+          started_at: "2026-08-05T09:00:00.000000Z",
+          ended_at: "2026-08-05T09:02:10.551000Z",
+          turn_count: 8,
+          audio: null,
+          provider_reference: null,
+        },
+      },
+    ]);
+    expect(landed.statusCode, landed.body).toBe(200);
+
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    // Built from the run alone, and nothing about it was late: the tool list
+    // came from the version Egma resolved before the first persona turn.
+    expect(row?.mockToolCoverage).toEqual({
+      discovered: [
+        "check_availability",
+        "transfer_to_front_desk",
+        "inventory",
+      ],
+      covered: ["check_availability"],
+      uncovered: ["transfer_to_front_desk", "inventory"],
+      notInterceptable: ["transfer_to_front_desk"],
+      notInThisVersion: ["inventory"],
+    });
+    expect(row?.providerReference).toBeNull();
+    expect(row?.conductedAgentVersion).toBe(SERVING_VERSION);
   });
 });
 

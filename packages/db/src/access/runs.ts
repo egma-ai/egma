@@ -58,6 +58,7 @@ import {
   mockToolCoverageFrom,
   mockToolCoverageRow,
   type MockToolCoverage,
+  type ToolCoverageClasses,
 } from "../mock-tools/coverage.ts";
 import {
   mockedWorldFrom,
@@ -1863,6 +1864,17 @@ function openedApiKey(envelope: string): string | null {
  */
 export type SimulationMockedWorld = {
   readonly world: MockedWorld | null;
+  /**
+   * The three classes this run knows about its agent's tools, from whichever
+   * world it has — or null when it has neither and nobody ever asked.
+   *
+   * **Decided here rather than at the reader, because the two lanes must not be
+   * able to disagree.** A run that built a temporary world read its tools from
+   * the configuration it branched; a run that pins a version read them from
+   * that version. Both reads happen before any conversation, both produce the
+   * same three lists, and a stamp is a stamp whichever of them filled it.
+   */
+  readonly classes: ToolCoverageClasses | null;
   readonly answeredFor: readonly string[];
 };
 
@@ -1874,6 +1886,7 @@ export async function simulationMockedWorld(
   const [row] = await db()
     .select({
       mockedWorld: run.mockedWorld,
+      conductedWorld: run.conductedWorld,
       mockToolSnapshot: run.mockToolSnapshot,
       runId: run.id,
       testVersionId: simulation.testVersionId,
@@ -1889,6 +1902,10 @@ export async function simulationMockedWorld(
     row.mockedWorld,
     () => new Error(`run ${row.runId} holds a malformed mocked world`),
   );
+  const conducted = conductedWorldFrom(
+    row.conductedWorld,
+    () => new Error(`run ${row.runId} holds a malformed conducted world`),
+  );
   const frozen = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
   // The same merge the endpoint serves from, so the stamp's `covered` list and
   // the answers actually served can never disagree — including for a tool only
@@ -1901,6 +1918,9 @@ export async function simulationMockedWorld(
   );
   return {
     world,
+    // A run never has both: one built a temporary world on the platform, the
+    // other wrote nothing and carries its answers on each request.
+    classes: world?.coverage ?? conducted?.coverage ?? null,
     answeredFor: answers.map((resolved) => resolved.toolName),
   };
 }
