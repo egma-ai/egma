@@ -249,6 +249,22 @@ function appointmentIntegrationSteps(): FakeStep[] {
   ];
 }
 
+function unsupportedManifestIntegrationSteps(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    {
+      kind: "write-file",
+      path: "setup.cfg",
+      content: "[options]\ninstall_requires =\n    egma>=0.2.0\n",
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest setup.cfg\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
 function integrationPreservingMonitoringWithoutConnect(): FakeStep[] {
   return [
     {
@@ -505,6 +521,7 @@ function connectionSetupStep(
     readonly dispatchName?: string;
     readonly integratedDispatchName?: string;
     readonly entrypoint?: string;
+    readonly dependencyManifest?: string;
     readonly fetchImpl?: typeof fetch;
   } = {},
 ) {
@@ -520,6 +537,7 @@ function connectionSetupStep(
     dispatchName: discovery.dispatchName ?? "front-desk-worker",
     integratedDispatchName: discovery.integratedDispatchName ?? "",
     entrypoint: discovery.entrypoint ?? "agent.py",
+    dependencyManifest: discovery.dependencyManifest ?? "requirements.txt",
     fetchImpl: discovery.fetchImpl ?? connectionFetch(),
   });
 }
@@ -971,6 +989,24 @@ describe("LiveKit in the wizard", () => {
     expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(
       APPOINTMENT_WORKER_AFTER,
     );
+  });
+
+  it("rejects an unsupported local manifest before remote setup or test writing", async () => {
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: unsupportedManifestIntegrationSteps(),
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        "supports only pyproject.toml or requirements.txt",
+      ),
+    });
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.suites.suites).toHaveLength(0);
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
   });
 
   /**

@@ -741,6 +741,8 @@ async function runWizardWithAgent(
       integratedDispatchName: workerIntegration?.dispatchName ?? "",
       entrypoint:
         workerIntegration?.files?.worker ?? found.facts.get("entrypoint") ?? "",
+      dependencyManifest:
+        workerIntegration?.files?.dependencyManifest ?? "",
       // The row monitoring created, when it ran: one agent row for one voice
       // agent, so this connection attaches to it rather than starting a second.
       existingAgent:
@@ -830,23 +832,12 @@ async function runWizardWithAgent(
 
   let localWorker: LocalLiveKitWorker | null = null;
   if (connected.connected.localWorker !== null) {
-    const dependencyManifest = workerIntegration?.files?.dependencyManifest;
-    if (dependencyManifest === undefined) {
-      const report: ExitReport = {
-        kind: "failed",
-        reason:
-          "The coding agent reported no Python dependency manifest for this LiveKit worker, so Egma did not start the worker or create a run.",
-      };
-      ui.setExit(report);
-      return report;
-    }
     ui.pushStatus(
       `${ACTION_MARK} Starting local LiveKit worker ${connected.connected.localWorker.dispatchName}.`,
     );
     const started = await (options.startLiveKitWorker ?? startLocalLiveKitWorker)({
       cwd,
       ...connected.connected.localWorker,
-      dependencyManifest,
       signal,
       onOutput: (chunk) => log.write(chunk),
     });

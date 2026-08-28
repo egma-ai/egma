@@ -24,6 +24,7 @@ import {
   liveKitTokenHeaders,
   type LiveKitRegistration,
 } from "../livekit/connect.ts";
+import { localLiveKitWorkerFileIssue } from "../livekit/local-worker.ts";
 import {
   addConnection,
   type Registered,
@@ -72,6 +73,8 @@ export type LiveKitConnectionSetupStepOptions = {
   readonly integratedDispatchName?: string | undefined;
   /** The repository-relative worker entrypoint read from source. */
   readonly entrypoint: string;
+  /** The repository-relative Python manifest reported after integration. */
+  readonly dependencyManifest: string;
   /**
    * The agent this sitting is already about, when monitoring created it.
    *
@@ -101,6 +104,7 @@ export type LiveKitConnected = {
       readonly credentials: ConnectionCredentials;
       readonly dispatchName: string;
       readonly entrypoint: string;
+      readonly dependencyManifest: string;
     } | null;
   } | null;
 };
@@ -488,6 +492,15 @@ export async function liveKitConnectionSetupStep(
         "Connect with LiveKit project credentials to test this agent over chat.",
     );
   }
+  if (variant.accessVariant === LIVEKIT_KEY_PAIR_VARIANT) {
+    const issue = localLiveKitWorkerFileIssue(
+      entrypoint,
+      options.dependencyManifest,
+    );
+    if (issue !== null) {
+      return ending(`${issue} Egma did not create a connection or write tests.`);
+    }
+  }
 
   const ordered = wizardFields(variant);
   const required = await collectRequiredFields(
@@ -538,6 +551,7 @@ export async function liveKitConnectionSetupStep(
       credentials: heldCredentials,
       dispatchName,
       entrypoint,
+      dependencyManifest: options.dependencyManifest,
     };
   } else {
     input = {
