@@ -20,9 +20,12 @@ const agent = {
       enum: ["retell", "livekit"],
     },
     platformAgentId: nullable({ type: "string" }),
+    retellModality: nullable({ type: "string", enum: ["voice", "chat"] }),
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
     pullProductionCalls: { type: "boolean" },
+    /** Whether pull monitoring has ever been started for this agent. */
+    monitoringConfigured: { type: "boolean" },
     /**
      * When a production call last arrived for this agent, or null while none
      * has. A bare fact and never a condition: the agent says whether it pulls
@@ -41,9 +44,11 @@ const agent = {
     "name",
     "agentPlatform",
     "platformAgentId",
+    "retellModality",
     "monitoringKeyPresent",
     "monitoringApiKeyHint",
     "pullProductionCalls",
+    "monitoringConfigured",
     "lastReceivedAt",
     "archived",
     "archivedAt",
@@ -286,6 +291,12 @@ export const agentOperations = {
               properties: {
                 platformAgentId: { type: "string" },
                 name: { type: "string" },
+                modality: {
+                  type: "string",
+                  enum: ["chat", "voice"],
+                  description:
+                    "The modality Retell reports for this agent, including when no supported connection candidate is available yet.",
+                },
                 connectionCandidates: arrayOf({
                   type: "object",
                   properties: {
@@ -319,7 +330,12 @@ export const agentOperations = {
                   additionalProperties: false,
                 }),
               },
-              required: ["platformAgentId", "name", "connectionCandidates"],
+              required: [
+                "platformAgentId",
+                "name",
+                "modality",
+                "connectionCandidates",
+              ],
               additionalProperties: false,
             }),
           },
@@ -332,7 +348,7 @@ export const agentOperations = {
       403: refusalResponse,
       422: refusalResponse,
       429: rateLimitResponse,
-      500: refusalResponse,
+      503: refusalResponse,
     },
   }),
 

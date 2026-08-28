@@ -582,14 +582,14 @@ describe("what the exchange measured", () => {
 });
 
 describe("what egma made of the exchange", () => {
-  it("shows grading progress, the combined score, and individual grades", async () => {
+  it("shows grading progress, the total average score, and individual grades", async () => {
     stub({ status: 200, body: detail() });
     await open();
     await settled();
 
     const grades = screen.getByLabelText("Grades");
     expect(within(grades).getByText("Grading state")).toBeTruthy();
-    expect(within(grades).getByText("Combined score")).toBeTruthy();
+    expect(within(grades).getByText("Total avg score")).toBeTruthy();
     expect(within(grades).getByText("Expected behaviors")).toBeTruthy();
     expect(within(grades).getAllByText("1").length).toBeGreaterThan(0);
     expect(grades.textContent).toContain("not a pass or fail result");

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { archiveAgent, listAgents } from "@egma/platform-api/client";
+import {
+  archiveAgent,
+  getAgent,
+  listAgents,
+  stopMonitoring,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import type { Refusal } from "@/lib/api.ts";
@@ -16,19 +21,31 @@ import { firstProjectOf, roleOf } from "@/lib/me.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { projectLanding, projectPath } from "@/lib/project-context.ts";
 import { canAuthor } from "@/lib/roles.ts";
+import { cn } from "@/lib/utils";
 import { DataTable, type Column } from "@/ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
-import { ListInstant } from "@/ui/relative-time.tsx";
+import { useMinuteClock } from "@/ui/relative-time.tsx";
 import { useProjectRead } from "@/ui/resource.ts";
 import { SearchField } from "@/ui/section.tsx";
 import { PageBody, PageHeader, ProductPage, useShellSession } from "@/ui/shell.tsx";
 
 import { ArchiveConfirm } from "./archive.tsx";
-import { ConnectAgentSheet } from "./connect-sheet.tsx";
-import { ConnectionsOnRow } from "./connection-facts.tsx";
+import {
+  type AgentDetailsReadState,
+  AgentDetailsReadStateSheet,
+  AgentDetailsSheet,
+  CapabilityState,
+  MonitoringEvidence,
+  monitoringCapabilityOf,
+  simulationCapabilityOf,
+} from "./agent-details-sheet.tsx";
+import {
+  ConnectAgentSheet,
+  type ConnectAgentGoal,
+  type ConnectAgentPlatform,
+} from "./connect-sheet.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
 import { RenameAgentSheet } from "./rename-sheet.tsx";
-import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 
 /**
  * The agents of one project: the landing page of the product, and the one
@@ -68,7 +85,14 @@ import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 
 /** The panel a route insists on, whatever the query string says. */
 export type ForcedSheet =
-  | { readonly kind: "connect"; readonly agentId?: string; readonly onboarding?: boolean }
+  | {
+      readonly kind: "connect";
+      readonly agentId?: string;
+      readonly goal?: ConnectAgentGoal;
+      readonly platform?: ConnectAgentPlatform;
+      readonly onboarding?: boolean;
+    }
+  | { readonly kind: "agent"; readonly agentId: string }
   | { readonly kind: "connection"; readonly agentId: string; readonly connectionId: string };
 
 export function AgentsScreen({
@@ -129,6 +153,11 @@ export function AgentsScreen({
   const [loadingMore, setLoadingMore] = useState(false);
   /** Why the next page did not arrive, until somebody asks for it again. */
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
+  const [stoppingAgent, setStoppingAgent] = useState<string | null>(null);
+  const [stopRefused, setStopRefused] = useState<{
+    readonly agentId: string;
+    readonly refusal: Refusal;
+  } | null>(null);
   /** The agent a confirmation is standing in front of. */
   const [archiving, setArchiving] = useState<ListedAgentWithConnections | null>(null);
   /** The agent whose name is being changed, in the sheet that changes it. */
@@ -157,9 +186,118 @@ export function AgentsScreen({
 
   const agents = answer?.status === "ready" ? answer.value.agents : [];
   const items = [...agents, ...(carried?.agents ?? [])];
+  const now = useMinuteClock();
 
   const home = projectPath(projectId, "agents");
   const sheet = openSheet(forced, query);
+  const requestedAgentId = sheet?.kind === "agent" ? sheet.agentId : null;
+  const listedDetailsAgent =
+    sheet?.kind === "agent"
+      ? (items.find((agent) => agent.id === sheet.agentId) ?? null)
+      : null;
+  const [fetchedDetails, setFetchedDetails] = useState<
+    | {
+        readonly projectId: string;
+        readonly agentId: string;
+        readonly status: "loading";
+      }
+    | {
+        readonly projectId: string;
+        readonly agentId: string;
+        readonly status: "ready";
+        readonly agent: ListedAgentWithConnections;
+      }
+    | {
+        readonly projectId: string;
+        readonly agentId: string;
+        readonly status: "missing" | "failed";
+        readonly refusal: Refusal;
+      }
+    | null
+  >(null);
+  const [detailsAttempt, setDetailsAttempt] = useState(0);
+  const [detailsOpener, setDetailsOpener] = useState<{
+    readonly agentId: string;
+    readonly element: HTMLElement | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (requestedAgentId === null || listedDetailsAgent !== null) {
+      setFetchedDetails(null);
+      return;
+    }
+
+    let current = true;
+    setFetchedDetails({
+      projectId,
+      agentId: requestedAgentId,
+      status: "loading",
+    });
+    void platformAnswer(
+      getAgent(
+        { agentId: requestedAgentId, projectId },
+        { client: platformClient },
+      ),
+    ).then((read) => {
+      if (!current) return;
+      if (read.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (read.status !== "ready") {
+        setFetchedDetails({
+          projectId,
+          agentId: requestedAgentId,
+          status: read.status,
+          refusal: read.refusal,
+        });
+        return;
+      }
+      setFetchedDetails({
+        projectId,
+        agentId: requestedAgentId,
+        status: "ready",
+        agent: {
+          ...read.value.agent,
+          connections: read.value.connections.filter(
+            (connection) => !connection.archived,
+          ),
+        },
+      });
+    });
+
+    return () => {
+      current = false;
+    };
+  }, [projectId, requestedAgentId, listedDetailsAgent, detailsAttempt]);
+
+  const fetchedDetailsForRoute =
+    fetchedDetails?.projectId === projectId &&
+    fetchedDetails.agentId === requestedAgentId
+      ? fetchedDetails
+      : null;
+
+  const detailsAgent =
+    listedDetailsAgent ??
+    (fetchedDetailsForRoute?.status === "ready"
+      ? fetchedDetailsForRoute.agent
+      : null);
+  const detailsReadState: AgentDetailsReadState | null =
+    requestedAgentId === null ||
+    listedDetailsAgent !== null ||
+    detailsAgent !== null
+      ? null
+      : fetchedDetailsForRoute?.status === "missing" ||
+          fetchedDetailsForRoute?.status === "failed"
+        ? {
+            status: fetchedDetailsForRoute.status,
+            refusal: fetchedDetailsForRoute.refusal,
+          }
+        : { status: "loading" };
+  const returnDetailsFocusTo =
+    detailsOpener?.agentId === requestedAgentId
+      ? detailsOpener.element
+      : null;
 
   /**
    * One page for every role, and the control that changes data is disabled
@@ -181,6 +319,49 @@ export function AgentsScreen({
   const whyNotChange = mayAuthor
     ? undefined
     : `Your ${String(role)} role cannot change agents. Ask an organization admin to change your role.`;
+
+  async function stopPullMonitoring(agentId: string): Promise<void> {
+    const asked = projectId;
+    const stoppedWasCarried =
+      carried?.agents.some((agent) => agent.id === agentId) ?? false;
+    setStoppingAgent(agentId);
+    setStopRefused(null);
+    const answer = await platformAnswer(
+      stopMonitoring({ agentId, projectId: asked }, { client: platformClient }),
+    );
+    setStoppingAgent(null);
+    if (showing.current !== asked) return;
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setStopRefused({ agentId, refusal: answer.refusal });
+      return;
+    }
+    if (stoppedWasCarried) {
+      setAfter((current) => {
+        if (current === null || current.project !== asked) return current;
+        return {
+          project: current.project,
+          page: {
+            ...current.page,
+            agents: current.page.agents.map((agent) =>
+              agent.id === agentId
+                ? {
+                    ...agent,
+                    monitoringConfigured: true,
+                    pullProductionCalls: false,
+                  }
+                : agent,
+            ),
+          },
+        };
+      });
+      return;
+    }
+    refresh();
+  }
 
   /**
    * The one action this screen is for, and the same control wherever it stands.
@@ -204,87 +385,60 @@ export function AgentsScreen({
       </Button>
     );
 
+  const openAgent = (
+    agent: ListedAgentWithConnections,
+    opener: HTMLElement | null,
+  ) => {
+    setDetailsOpener({ agentId: agent.id, element: opener });
+    router.push(`${home}?sheet=agent&agent=${encodeURIComponent(agent.id)}`);
+  };
+
   function columns(): readonly Column<ListedAgentWithConnections>[] {
     return [
       {
-        key: "name",
-        header: "Name",
+        key: "agent",
+        header: "Agent",
         primary: true,
-        width: "260px",
-        /*
-         * **The agent's name is plain text and nothing else**, which is what
-         * `6ZJ-0` draws. This list is the one agent screen: everything a
-         * person came here to read is already on the row, so the name names
-         * the agent rather than promising a second page behind it. Only the
-         * connections in the next column are links, and now the underline
-         * means one thing on this row — press this and a connection opens.
-         *
-         * **There is nothing behind the name any more.** The agent page is
-         * retired and its address lands here (founder ruling, 2026-08-24), so
-         * the name is a name: what a person came to read is the row, and what
-         * a person can do to the agent is in its ⋮.
-         */
-        cell: (agent) => agent.name,
+        width: "280px",
+        cell: (agent) => (
+          <AgentRowOpener
+            agent={agent}
+            onOpen={(opener) => openAgent(agent, opener)}
+          />
+        ),
       },
       {
-        /*
-         * **Read from the connections first.** An agent's own platform column
-         * is written only when Start monitoring binds it, so an agent with a
-         * live Retell connection still says nothing about itself. What a person
-         * means by "which platform is this on" is answered by the way in.
-         *
-         * **And by every way in.** An agent reached on Retell and on LiveKit
-         * is on both, so the cell names both rather than whichever connection
-         * was made first.
-         */
         key: "platform",
         header: "Platform",
         width: "160px",
         cell: agentPlatformText,
       },
       {
-        key: "connections",
-        header: "Connections",
+        key: "simulation",
+        header: "Simulation",
+        width: "160px",
+        cell: (agent) => (
+          <CapabilityState state={simulationCapabilityOf(agent)} />
+        ),
+      },
+      {
+        key: "monitoring",
+        header: "Production monitoring",
         width: "360px",
-        cell: (agent) => (
-          <ConnectionsOnRow
-            agentName={agent.name}
-            connections={agent.connections}
-            hrefOf={(one) =>
-              `${home}?sheet=connection&agent=${encodeURIComponent(agent.id)}&connection=${encodeURIComponent(one.id)}`
-            }
-          />
-        ),
-      },
-      {
-        key: "created",
-        header: "Created",
-        hideOnMobile: true,
-        cell: (agent) => <ListInstant instant={agent.createdAt} />,
-      },
-      {
-        key: "menu",
-        header: "Actions",
-        action: true,
-        /*
-         * **Two items, and they are the two things the row is.** The row is
-         * the agent now — there is no detail page to open and no second place
-         * to connect from — so the menu holds renaming it and deleting it and
-         * nothing else (`I2Z-0`).
-         */
-        cell: (agent) => (
-          <RowMenu label={`Actions for ${agent.name}`}>
-            <RowMenuItem onSelect={() => setRenaming(agent)} why={whyNotChange}>
-              Rename agent
-            </RowMenuItem>
-            <RowMenuDestructive
-              onSelect={() => setArchiving(agent)}
-              why={whyNotChange}
-            >
-              Delete agent
-            </RowMenuDestructive>
-          </RowMenu>
-        ),
+        cell: (agent) => {
+          const state = monitoringCapabilityOf(agent);
+          if (state === "Configured via code") {
+            return <CapabilityState state={state} />;
+          }
+          return (
+            <div className="flex min-w-0 flex-col gap-1 whitespace-normal">
+              <CapabilityState state={state} />
+              <span className="text-faint">
+                <MonitoringEvidence agent={agent} now={now} />
+              </span>
+            </div>
+          );
+        },
       },
     ];
   }
@@ -329,7 +483,7 @@ export function AgentsScreen({
       return (
         <Empty
           title="No agents in this project yet"
-          lead="Connect the voice agent you want to test: Egma asks for its details, then for a way to reach it."
+          lead="Add an agent to run simulations, monitor production traffic, or do both."
           action={connect()}
         />
       );
@@ -392,6 +546,8 @@ export function AgentsScreen({
           columns={columns()}
           rows={items}
           keyOf={(agent) => agent.id}
+          onRowActivate={(agent, opener) => openAgent(agent, opener)}
+          {...(detailsAgent === null ? {} : { currentKey: detailsAgent.id })}
           {...(cursor === null
             ? {}
             : {
@@ -461,6 +617,8 @@ export function AgentsScreen({
           projectId={projectId}
           agents={items}
           {...(sheet.agentId === undefined ? {} : { agentId: sheet.agentId })}
+          {...(sheet.goal === undefined ? {} : { goal: sheet.goal })}
+          {...(sheet.platform === undefined ? {} : { platform: sheet.platform })}
           onboarding={sheet.onboarding === true}
           mayAuthor={mayAuthor}
           role={role}
@@ -480,6 +638,34 @@ export function AgentsScreen({
           }}
         />
       ) : null}
+
+      {detailsAgent === null || renaming !== null || archiving !== null ? null : (
+        <AgentDetailsSheet
+          agent={detailsAgent}
+          home={home}
+          now={now}
+          mayAuthor={mayAuthor}
+          {...(whyNotChange === undefined ? {} : { whyNotChange })}
+          stopping={stoppingAgent === detailsAgent.id}
+          stopRefused={
+            stopRefused?.agentId === detailsAgent.id ? stopRefused.refusal : null
+          }
+          onStopMonitoring={() => void stopPullMonitoring(detailsAgent.id)}
+          onRename={() => setRenaming(detailsAgent)}
+          onDelete={() => setArchiving(detailsAgent)}
+          onClose={close}
+          returnFocusTo={returnDetailsFocusTo}
+        />
+      )}
+
+      {detailsReadState === null || renaming !== null || archiving !== null ? null : (
+        <AgentDetailsReadStateSheet
+          state={detailsReadState}
+          onRetry={() => setDetailsAttempt((attempt) => attempt + 1)}
+          onClose={close}
+          returnFocusTo={returnDetailsFocusTo}
+        />
+      )}
 
       {sheet?.kind === "connection" ? (
         <ConnectionSheet
@@ -526,6 +712,7 @@ export function AgentsScreen({
           onClose={() => setArchiving(null)}
           onArchived={() => {
             setArchiving(null);
+            router.replace(home);
             reload();
           }}
         >
@@ -533,6 +720,36 @@ export function AgentsScreen({
         </ArchiveConfirm>
       )}
     </ProductPage>
+  );
+}
+
+/**
+ * The keyboard path for the row's one reading action.
+ *
+ * A pointer can open the details sheet from any non-control part of the row.
+ * The named button keeps the same action available to a keyboard and gives it
+ * the product focus indicator without changing the table's semantics.
+ */
+function AgentRowOpener({
+  agent,
+  onOpen,
+}: {
+  readonly agent: ListedAgentWithConnections;
+  readonly onOpen: (opener: HTMLElement) => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "block max-w-full cursor-pointer overflow-hidden border-0 bg-transparent p-0",
+        "text-left text-sm text-foreground text-ellipsis whitespace-nowrap",
+        "transition-colors duration-(--duration-hover) ease-out",
+        "pointer-hover:text-brand motion-reduce:transition-none",
+      )}
+      onClick={(event) => onOpen(event.currentTarget)}
+      type="button"
+    >
+      {agent.name}
+    </button>
   );
 }
 
@@ -553,10 +770,32 @@ function openSheet(
   const agentId = query.get("agent");
   const connectionId = query.get("connection");
   if (kind === "connect") {
-    return { kind: "connect", ...(agentId === null ? {} : { agentId }) };
+    const goal = connectGoal(query.get("goal"));
+    const platform = connectPlatform(query.get("platform"));
+    return {
+      kind: "connect",
+      ...(agentId === null ? {} : { agentId }),
+      ...(goal === undefined ? {} : { goal }),
+      ...(platform === undefined ? {} : { platform }),
+    };
+  }
+  if (kind === "agent" && agentId !== null) {
+    return { kind: "agent", agentId };
   }
   if (kind === "connection" && agentId !== null && connectionId !== null) {
     return { kind: "connection", agentId, connectionId };
   }
   return null;
+}
+
+/** Only providers implemented by this setup flow can become sheet state. */
+function connectPlatform(value: string | null): ConnectAgentPlatform | undefined {
+  return value === "retell" || value === "livekit" ? value : undefined;
+}
+
+/** Only the three public setup goals can become sheet state. */
+function connectGoal(value: string | null): ConnectAgentGoal | undefined {
+  return value === "simulation" || value === "monitoring" || value === "both"
+    ? value
+    : undefined;
 }

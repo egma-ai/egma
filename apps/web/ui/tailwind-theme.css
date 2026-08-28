@@ -267,6 +267,16 @@
   --control-height: var(--control-lg);
   --tap-target: 44px;
 
+  /*
+   * The narrow Ember edge that marks an active or attention surface.
+   *
+   * It is a state mark rather than layout spacing, so its two-pixel width is
+   * named here instead of being smuggled into a component through Tailwind's
+   * spacing scale. Rows and callouts share it because both use the same
+   * active-attention grammar from `DESIGN.md`.
+   */
+  --active-edge-width: 2px;
+
   /* Motion tokens. */
   --duration-press: 120ms;
   --duration-hover: 140ms;

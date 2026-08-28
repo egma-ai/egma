@@ -175,18 +175,24 @@ export type Agent = {
   readonly agentPlatform: AgentPlatform;
   /** That platform's own id for it, or null. */
   readonly platformAgentId: string | null;
+  /**
+   * The durable Retell connection modality: Voice when any Retell voice path
+   * has ever existed, otherwise Chat when any Retell chat path has existed.
+   */
+  readonly retellModality: "voice" | "chat" | null;
   /** The last characters of the sealed monitoring key, or null. */
   readonly monitoringApiKeyHint: string | null;
   /** The declared pull switch. Off until somebody turns it on. */
   readonly pullProductionCalls: boolean;
+  /** Whether pull monitoring has ever been started for this agent. */
+  readonly monitoringConfigured: boolean;
   /**
    * When a production call last arrived for this agent, or null while none
    * has. Read from the machine notebook, which is where the drainer stamps it.
    *
    * It travels with the agent because the agent is where a person reads it:
-   * whether it pulls and when it last received are the two facts the agent
-   * shows about monitoring, and there is no condition word beside them
-   * (ADR-0015, ruling 6).
+   * whether pull is on, whether it has ever been configured, and when a call
+   * last arrived are the stored facts the monitoring view derives from.
    */
   readonly lastReceivedAt: Date | null;
   /** When it stopped being available for new work, or null while it is. */
@@ -253,8 +259,10 @@ type AgentRow = {
   readonly name: string;
   readonly agentPlatform: string;
   readonly platformAgentId: string | null;
+  readonly retellModality: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
+  readonly monitoringConfigured: boolean;
   readonly lastReceivedAt: Date | null;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -263,7 +271,11 @@ type AgentRow = {
 
 /** The platform column is narrowed by assertion; its CHECK already refuses the rest. */
 function agentFromRow(row: AgentRow): Agent {
-  return { ...row, agentPlatform: row.agentPlatform as AgentPlatform };
+  return {
+    ...row,
+    agentPlatform: row.agentPlatform as AgentPlatform,
+    retellModality: row.retellModality as Agent["retellModality"],
+  };
 }
 
 const notArchived: SQL = isNull(agent.archivedAt);
@@ -295,6 +307,43 @@ const LAST_RECEIVED_AT = sql`(
        = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
 )`.mapWith(monitoringState.lastReceivedAt);
 
+/**
+ * Whether the pull switch has ever created this agent's machine notebook.
+ *
+ * The notebook survives when pull is stopped, while sealing a key for a
+ * simulation connection does not create one. Its existence therefore keeps
+ * "not configured" distinct from "configured, then stopped" without a second
+ * stored flag that could disagree with the notebook.
+ */
+const MONITORING_CONFIGURED = sql`exists (
+  select 1 from ${monitoringState}
+   where ${monitoringState.agentId}
+       = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
+)`.mapWith(agent.pullProductionCalls);
+
+/**
+ * The Retell modality this agent's full connection history establishes.
+ *
+ * Archived rows stay in the table, so this deliberately has no active-row
+ * filter. A Retell chat path pins its own platform. A phone path counts only
+ * when its agent is Retell, because phone numbers also reach LiveKit agents.
+ * Voice sorts first so it remains the answer when both paths have existed.
+ */
+const RETELL_MODALITY = sql`(
+  select ${connection.modality} from ${connection}
+   where ${connection.agentId}
+       = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
+     and (
+       ${connection.connectionType} = 'retell_chat_api'
+       or (
+         ${connection.connectionType} = 'phone_number'
+         and ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.agentPlatform.name)} = 'retell'
+       )
+     )
+   order by case when ${connection.modality} = 'voice' then 0 else 1 end
+   limit 1
+)`.mapWith(connection.modality);
+
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
   id: agent.id,
@@ -302,8 +351,10 @@ const COLUMNS = {
   name: agent.name,
   agentPlatform: agent.agentPlatform,
   platformAgentId: agent.platformAgentId,
+  retellModality: RETELL_MODALITY,
   monitoringApiKeyHint: agent.monitoringApiKeyHint,
   pullProductionCalls: agent.pullProductionCalls,
+  monitoringConfigured: MONITORING_CONFIGURED,
   lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,
   createdAt: agent.createdAt,
@@ -814,6 +865,20 @@ export async function insertAgentWithin(
   return agentFromRow(inserted);
 }
 
+/** Read one agent through the same derived columns, on the caller's connection. */
+async function readAgentWithin(
+  on: Queryable,
+  auth: AuthContext,
+  id: string,
+): Promise<Agent | undefined> {
+  const [row] = await on
+    .select(COLUMNS)
+    .from(agent)
+    .where(theAgentEvenArchived(auth, id))
+    .limit(1);
+  return row === undefined ? undefined : agentFromRow(row);
+}
+
 /**
  * Everything a write to this factory settles before it touches the database:
  * where the rows land, what the agent is called, and the inline connection
@@ -875,7 +940,9 @@ export async function createAgent(
       { id: written.id, projectId, agentPlatform: written.agentPlatform },
       inline,
     );
-    return { ...written, connection: wired };
+    const standing = await readAgentWithin(tx, auth, written.id);
+    if (standing === undefined) throw new Error("the wired agent was not found");
+    return { ...standing, connection: wired };
   });
 }
 
@@ -945,15 +1012,18 @@ export async function registerAgent(
 
   const bothRows = async (tx: Queryable): Promise<Registration> => {
     const written = await insertAgentWithin(tx, auth, projectId, identity);
+    const wired = await insertConnection(
+      tx,
+      auth,
+      { id: written.id, projectId, agentPlatform: written.agentPlatform },
+      inline,
+    );
+    const standing = await readAgentWithin(tx, auth, written.id);
+    if (standing === undefined) throw new Error("the registered agent was not found");
     return {
       result: "created",
-      agent: written,
-      connection: await insertConnection(
-        tx,
-        auth,
-        { id: written.id, projectId, agentPlatform: written.agentPlatform },
-        inline,
-      ),
+      agent: standing,
+      connection: wired,
     };
   };
 
@@ -1032,15 +1102,18 @@ export async function registerAgent(
     const known = living[0];
     if (known !== undefined) {
       const home = agentFromRow(known.identity);
+      const wired = await insertConnection(
+        tx,
+        auth,
+        { id: home.id, projectId, agentPlatform: home.agentPlatform },
+        inline,
+      );
+      const standing = await readAgentWithin(tx, auth, home.id);
+      if (standing === undefined) throw new Error("the extended agent was not found");
       return {
         result: "connection_added",
-        agent: home,
-        connection: await insertConnection(
-          tx,
-          auth,
-          { id: home.id, projectId, agentPlatform: home.agentPlatform },
-          inline,
-        ),
+        agent: standing,
+        connection: wired,
       };
     }
 
@@ -1062,13 +1135,7 @@ export async function getAgent(
   id: string,
 ): Promise<Agent | undefined> {
   authorize(auth, "read", here(auth));
-
-  const [row] = await db()
-    .select(COLUMNS)
-    .from(agent)
-    .where(theAgentEvenArchived(auth, id))
-    .limit(1);
-  return row === undefined ? undefined : agentFromRow(row);
+  return readAgentWithin(db(), auth, id);
 }
 
 const DEFAULT_PAGE_SIZE = 50;

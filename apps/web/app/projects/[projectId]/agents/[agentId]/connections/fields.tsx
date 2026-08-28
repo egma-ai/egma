@@ -36,10 +36,14 @@ export type Draft = {
 function ConfigControl({
   field,
   value,
+  disabled,
+  placeholder,
   onChange,
 }: {
   readonly field: ConfigField;
   readonly value: string;
+  readonly disabled: boolean;
+  readonly placeholder?: string;
   readonly onChange: (value: string) => void;
 }) {
   const id = `config-${field.key}`;
@@ -61,6 +65,8 @@ function ConfigControl({
           id={id}
           value={value}
           rows={3}
+          disabled={disabled}
+          placeholder={placeholder}
           aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
@@ -69,6 +75,9 @@ function ConfigControl({
         <Input
           id={id}
           value={value}
+          disabled={disabled}
+          placeholder={placeholder}
+          type={field.kind === "url" ? "url" : "text"}
           aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           autoComplete="off"
@@ -84,10 +93,14 @@ function ConfigControl({
 function CredentialControl({
   field,
   value,
+  disabled,
+  placeholder,
   onChange,
 }: {
   readonly field: CredentialField;
   readonly value: string;
+  readonly disabled: boolean;
+  readonly placeholder?: string;
   readonly onChange: (value: string) => void;
 }) {
   const id = `credential-${field.field}`;
@@ -106,6 +119,8 @@ function CredentialControl({
           id={id}
           value={value}
           rows={3}
+          disabled={disabled}
+          placeholder={placeholder}
           aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
@@ -115,6 +130,8 @@ function CredentialControl({
           id={id}
           value={value}
           type="password"
+          disabled={disabled}
+          placeholder={placeholder}
           autoComplete="new-password"
           aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
@@ -133,6 +150,9 @@ export function ConnectionFields({
   onChange,
   credentialsEditable,
   beforeCredentialFields,
+  disabled = false,
+  configPlaceholders = {},
+  credentialPlaceholders = {},
 }: {
   readonly option: ConnectionOption;
   readonly draft: Draft;
@@ -149,6 +169,9 @@ export function ConnectionFields({
   readonly credentialsEditable: boolean;
   /** Provider-specific setup that belongs after target fields and before secrets. */
   readonly beforeCredentialFields?: ReactNode;
+  readonly disabled?: boolean;
+  readonly configPlaceholders?: Readonly<Record<string, string>>;
+  readonly credentialPlaceholders?: Readonly<Record<string, string>>;
 }) {
   const setConfig = (key: string, value: string) =>
     onChange({ ...draft, config: { ...draft.config, [key]: value } });
@@ -168,6 +191,8 @@ export function ConnectionFields({
           key={field.key}
           field={field}
           value={draft.config[field.key] ?? ""}
+          disabled={disabled}
+          placeholder={configPlaceholders[field.key]}
           onChange={(value) => setConfig(field.key, value)}
         />
       ))}
@@ -182,6 +207,8 @@ export function ConnectionFields({
               key={field.field}
               field={field}
               value={draft.credentials[field.field] ?? ""}
+              disabled={disabled}
+              placeholder={credentialPlaceholders[field.field]}
               onChange={(value) => setCredential(field.field, value)}
             />
           ))}
@@ -193,6 +220,8 @@ export function ConnectionFields({
           key={field.key}
           field={field}
           value={draft.config[field.key] ?? ""}
+          disabled={disabled}
+          placeholder={configPlaceholders[field.key]}
           onChange={(value) => setConfig(field.key, value)}
         />
       ))}

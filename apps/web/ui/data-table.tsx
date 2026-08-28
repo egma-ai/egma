@@ -145,17 +145,9 @@ export function DataTable<Row>({
   /**
    * The row whose record is open in the sheet beside the list.
    *
-   * **It is the light grey soft surface, not Ember Wash.** `DESIGN.md` gives
-   * an open row the wash, and the developer replaced it for this state on
-   * 2026-08-25 on the Paper canvas — "remove orange hover, I would prefer a
-   * light grey" — because the wash is the primary action's own fill and a row
-   * wearing it reads as something to press rather than something already open.
-   * The design source of truth records the change after the founders' sync;
-   * until then this comment is where it is written down.
-   *
-   * The colour is not the whole of the state: the row also carries
-   * `aria-current`, so a reader who cannot see the grey is still told which
-   * row the open sheet belongs to.
+   * `DESIGN.md` gives current rows Ember Wash and a non-colour state mark.
+   * The leading Ember edge supplies the visual mark, and `aria-current`
+   * supplies the same fact to a reader that cannot see it.
    */
   readonly currentKey?: string;
   /**
@@ -304,13 +296,12 @@ export function DataTable<Row>({
                     "motion-reduce:transition-none",
                   ],
                   /*
-                   * The open row keeps its grey under the pointer. The hover
-                   * mix is a lighter wash of the same colour, so letting it
-                   * apply here would make the one row somebody is pointing at
-                   * *and* has open the palest row in the table.
-                   */
+                   * A current row uses the shared selected wash and the Ember
+                   * leading mark, so the state remains visible without colour.
+                   * Hover stays off that row because it is already current.
+                  */
                   current
-                    ? "bg-surface-soft"
+                    ? "relative bg-selected before:absolute before:inset-y-0 before:left-0 before:w-(--active-edge-width) before:bg-brand"
                     : onRowActivate !== undefined && ROW_HOVER,
                 )}
                 data-current={current ? "true" : undefined}

@@ -64,6 +64,7 @@ function held<T>(answer: Answer, key: string): T {
 type AgentBody = {
   readonly id: string;
   readonly name: string;
+  readonly retellModality: "voice" | "chat" | null;
   readonly description: string | null;
   readonly revision: string;
   readonly archived: boolean;
@@ -215,8 +216,10 @@ describe("the Egma-owned half of an agent", () => {
     expect(shape).toMatchObject({
       agentPlatform: "retell",
       platformAgentId: null,
+      retellModality: null,
       monitoringKeyPresent: false,
       pullProductionCalls: false,
+      monitoringConfigured: false,
       lastReceivedAt: null,
     });
     expect(Object.keys(shape)).toContain("lastReceivedAt");
@@ -228,6 +231,35 @@ describe("the Egma-owned half of an agent", () => {
     });
     expect(tried.status).toBe(400);
     expect(String(tried.body.message)).toContain("prompt");
+  });
+
+  it("keeps Retell Chat after its active connection is archived", async () => {
+    api = await createApi("agents_browser_retell_modality_history");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agent = await anAgent(ada, "Front desk");
+    const chat = await aConnection(ada, agent.id);
+
+    const active = await browser("GET", `/v1/agents/${agent.id}`, ada);
+    expect(held<AgentBody>(active, "agent").retellModality).toBe("chat");
+
+    const archived = await browser(
+      "POST",
+      `/v1/agents/${agent.id}/connections/${chat.id}/archive`,
+      ada,
+      {},
+    );
+    expect(archived.status).toBe(200);
+
+    const after = await browser("GET", `/v1/agents/${agent.id}`, ada);
+    expect(held<AgentBody>(after, "agent").retellModality).toBe("chat");
+    expect(held<readonly ConnectionBody[]>(after, "connections")).toEqual([]);
+
+    const listed = await browser("GET", "/v1/agents", ada);
+    const [row] = held<
+      readonly (AgentBody & { readonly connections: readonly ConnectionBody[] })[]
+    >(listed, "agents");
+    expect(row?.retellModality).toBe("chat");
+    expect(row?.connections).toEqual([]);
   });
 
   it("takes the last write, because there is no revision to be stale against", async () => {

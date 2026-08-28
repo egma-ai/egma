@@ -1,7 +1,9 @@
 import {
+  addConnection,
   archiveAgent,
   claimDueMonitoringPull,
   createAgent,
+  disablePullProductionCalls,
   enablePullProductionCalls,
   readAgentPullState,
   type AuthContext,
@@ -205,6 +207,181 @@ describe("starting monitoring", () => {
     expect(state?.monitoringApiKeyHint).toBe(RETELL_KEY.slice(-4));
     // The notebook opened on the historical import rather than on regular work.
     expect(state?.scanKind).toBe("historical_import");
+  });
+
+  it("resumes with the stored key without adding another connection", async () => {
+    api = await createApi("monitoring_routes_resume_stored_key");
+    const ada = await signUp(api.app, "ada-resume@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    await addConnection(at(ada), agentId, {
+      name: "phone",
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+    });
+
+    for (let turn = 0; turn < 2; turn += 1) {
+      const stopped = await api.app.inject({
+        method: "POST",
+        url: `/v1/monitoring/agents/${agentId}/stop?projectId=${ada.projectId}`,
+        headers: { cookie: ada.cookie },
+      });
+      expect(stopped.statusCode, stopped.body).toBe(200);
+
+      const resumed = await api.app.inject({
+        method: "POST",
+        url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+        headers: { cookie: ada.cookie },
+        payload: {
+          agentPlatform: "retell",
+          watch: [{ platformAgentId: "agent_voice_1", agentId }],
+        },
+      });
+      expect(resumed.statusCode, resumed.body).toBe(200);
+      expect(resumed.json()).toMatchObject({
+        watching: [
+          {
+            agentId,
+            platformAgentId: "agent_voice_1",
+            created: false,
+            pullProductionCalls: true,
+          },
+        ],
+        refused: [],
+      });
+    }
+
+    const rows = await api.database.sql<{
+      agents: string;
+      connections: string;
+    }>(
+      "select (select count(*) from agent) as agents, " +
+        "(select count(*) from connection) as connections",
+    );
+    expect(rows.rows[0]).toEqual({ agents: "1", connections: "1" });
+    const state = await readAgentPullState(at(ada), agentId);
+    expect(state?.pullProductionCalls).toBe(true);
+    expect(state?.monitoringApiKeyHint).toBe(RETELL_KEY.slice(-4));
+  });
+
+  it("does not spend a stored key on a different Retell agent", async () => {
+    api = await createApi("monitoring_routes_resume_wrong_platform_agent");
+    const ada = await signUp(api.app, "ada-wrong-agent@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    await disablePullProductionCalls(at(ada), agentId);
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        watch: [{ platformAgentId: "agent_voice_2", agentId }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(422);
+    const state = await readAgentPullState(at(ada), agentId);
+    expect(state?.pullProductionCalls).toBe(false);
+    expect(state?.platformAgentId).toBe("agent_voice_1");
+    expect(state?.monitoringApiKeyHint).toBe(RETELL_KEY.slice(-4));
+  });
+
+  it("refuses a supplied key that tries to rebind an existing agent", async () => {
+    api = await createApi("monitoring_routes_supplied_key_rebind");
+    const ada = await signUp(api.app, "ada-supplied-rebind@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    await disablePullProductionCalls(at(ada), agentId);
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: "key_live_monitoring_other_agent_WXYZ",
+        watch: [{ platformAgentId: "agent_voice_2", agentId }],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    expect(answered.json()).toEqual({
+      watching: [],
+      refused: [
+        {
+          platformAgentId: "agent_voice_2",
+          reason: "contested",
+          message:
+            "Front desk is Retell agent agent_voice_1. Register agent_voice_2 as its own agent.",
+        },
+      ],
+    });
+    expect(await readAgentPullState(at(ada), agentId)).toMatchObject({
+      pullProductionCalls: false,
+      platformAgentId: "agent_voice_1",
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+    });
+  });
+
+  it("refuses an omitted key before changing any agent when one entry has no stored key", async () => {
+    api = await createApi("monitoring_routes_resume_missing_key");
+    const ada = await signUp(api.app, "ada-mixed-resume@acme.example", "Acme");
+    const storedAgentId = await pulling(ada);
+    await disablePullProductionCalls(at(ada), storedAgentId);
+    const missing = await createAgent(at(ada), {
+      agentPlatform: "retell",
+      name: "Second desk",
+    });
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        watch: [
+          { platformAgentId: "agent_voice_1", agentId: storedAgentId },
+          { platformAgentId: "agent_voice_2", agentId: missing.id },
+        ],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(422);
+    expect(refused.json()).toMatchObject({
+      message:
+        "Enter a Retell API key. Without one, every selected agent must already have a stored monitoring key.",
+    });
+    expect(
+      (await readAgentPullState(at(ada), storedAgentId))?.pullProductionCalls,
+    ).toBe(false);
+    expect(
+      (await readAgentPullState(at(ada), missing.id))?.pullProductionCalls,
+    ).toBe(false);
+  });
+
+  it("does not treat a supplied blank key as permission to use the stored key", async () => {
+    api = await createApi("monitoring_routes_resume_blank_key");
+    const ada = await signUp(api.app, "ada-blank-resume@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    await disablePullProductionCalls(at(ada), agentId);
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: " ",
+        watch: [{ platformAgentId: "agent_voice_1", agentId }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(422);
+    expect((await readAgentPullState(at(ada), agentId))?.pullProductionCalls).toBe(
+      false,
+    );
   });
 
   it("registers an unregistered platform agent on the spot", async () => {

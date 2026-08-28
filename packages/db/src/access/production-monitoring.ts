@@ -277,6 +277,16 @@ function boundPlatformAgentId(value: string): string {
   return platformAgentId;
 }
 
+/** Refuse replacing the one platform identity an Egma agent already owns. */
+function refuseDifferentPlatformAgent(
+  held: { readonly name: string; readonly platformAgentId: string | null },
+  asked: string,
+): void {
+  if (held.platformAgentId !== null && held.platformAgentId !== asked) {
+    throw new AgentAlreadyBoundError(held.name, held.platformAgentId, asked);
+  }
+}
+
 /**
  * Turn pull on for one agent: bind it to its platform, seal its monitoring
  * key, and open its notebook.
@@ -307,7 +317,10 @@ export async function enablePullProductionCalls(
 
   await db().transaction(async (tx) => {
     const [held] = await tx
-      .select({ id: agent.id })
+      .select({
+        name: agent.name,
+        platformAgentId: agent.platformAgentId,
+      })
       .from(agent)
       .where(
         and(
@@ -322,6 +335,7 @@ export async function enablePullProductionCalls(
         "That agent is not in this project, or has been archived.",
       );
     }
+    refuseDifferentPlatformAgent(held, platformAgentId);
     await bindAndOpen(tx, auth, projectId, {
       agentId: input.agentId,
       agentPlatform: input.agentPlatform,
@@ -483,16 +497,7 @@ export async function sealAgentMonitoringKey(
         "That agent is not in this project, or has been archived.",
       );
     }
-    if (
-      held.platformAgentId !== null &&
-      held.platformAgentId !== platformAgentId
-    ) {
-      throw new AgentAlreadyBoundError(
-        held.name,
-        held.platformAgentId,
-        platformAgentId,
-      );
-    }
+    refuseDifferentPlatformAgent(held, platformAgentId);
 
     await tx
       .update(agent)
@@ -510,10 +515,9 @@ export async function sealAgentMonitoringKey(
 /**
  * The plaintext monitoring key one agent holds, or nothing when it holds none.
  *
- * **It never leaves the server.** The one caller is the API listing a Retell
- * account for an agent that has already been given its key: the browser asks
- * by agent id, and the answer is a list of agents rather than the secret that
- * read it.
+ * **It never leaves the server.** API routes use it only to call Retell or to
+ * resume monitoring for the named agent. Their answers contain provider data
+ * or monitoring state, never the secret that authorized the operation.
  */
 export async function agentMonitoringKey(
   auth: AuthContext,

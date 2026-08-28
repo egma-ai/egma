@@ -768,21 +768,12 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
-    /*
-     * **The empty state carries the one monitoring verb, and it opens a sheet
-     * over this page rather than leading to one.** The address it points at is
-     * this page's own with the picker asked for in the query, which is what
-     * makes Back close it and a copied link reopen it (board `JGS-0`).
-     */
+    /* The empty state enters the shared Agents-owned setup flow once. */
     const offered = screen.getAllByRole("link", { name: LIST.monitorAgent });
-    // Two of them, and deliberately: the header carries the action wherever
-    // this page is, and the empty card carries the same one where somebody is
-    // actually reading about it. Both are the same address, and both carry the
-    // window this page is on rather than dropping it.
-    expect(offered).toHaveLength(2);
+    expect(offered).toHaveLength(1);
     for (const one of offered) {
       expect(one.getAttribute("href")).toBe(
-        "/projects/prj_2/monitoring/transcripts?window=24h&sheet=monitor",
+        "/projects/prj_2/agents?sheet=connect&goal=monitoring",
       );
     }
   });
@@ -894,37 +885,27 @@ describe("what a quiet Monitoring page says", () => {
  * **Monitoring is one verb on this screen, and v0 shows nothing else about
  * it.**
  *
- * The separate monitoring screen is retired, so the action that used to lead
- * away from here now opens a sheet over it. And the management half — stop
+ * The separate monitoring screen is retired, so the action now enters the
+ * shared setup flow on Agents. And the management half — stop
  * pulling, turn it on again, when something last arrived — has no interface at
  * launch: the API keeps `stopMonitoring`, and surfacing it is its own effort.
  * A screen that grew a stop button would be that decision made by drift.
  */
 describe("the one monitoring action this screen carries", () => {
-  it("heads the page with it, and asks for the picker in the address", async () => {
+  it("heads the page with it, and states the Monitoring goal in the address", async () => {
     stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("table", { name: LIST.tableLabel });
     const action = screen.getByRole("link", { name: LIST.monitorAgent });
-    // The page it points at is the page it is on. Nothing navigates away, so
-    // nothing reloads, and the query is the whole of what changes.
     expect(action.getAttribute("href")).toBe(
-      "/projects/prj_2/monitoring/transcripts?window=24h&sheet=monitor",
+      "/projects/prj_2/agents?sheet=connect&goal=monitoring",
     );
     // And the old address is not what it points at any more.
     expect(action.getAttribute("href")).not.toContain("/monitoring/start");
   });
 
-  /**
-   * **The sheet opens on the URL the person is already on, whole.**
-   *
-   * The window is a filter they chose, and it lives in the address. An action
-   * that built a fresh query would throw it away on the way open: the list
-   * behind the sheet would jump from thirty days back to one, and closing the
-   * sheet would leave them there wondering what they pressed.
-   */
-  it("keeps the window the person chose in the address it opens on", async () => {
+  it("uses the same setup address from any trace window", async () => {
     atWindow(WIDEST);
     stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
     render(<MonitoringTranscriptsPage />);
@@ -932,7 +913,7 @@ describe("the one monitoring action this screen carries", () => {
     await screen.findByRole("table", { name: LIST.tableLabel });
     expect(
       screen.getByRole("link", { name: LIST.monitorAgent }).getAttribute("href"),
-    ).toBe(`/projects/prj_2/monitoring/transcripts?window=${WIDEST}&sheet=monitor`);
+    ).toBe("/projects/prj_2/agents?sheet=connect&goal=monitoring");
   });
 
   /**
@@ -958,7 +939,7 @@ describe("the one monitoring action this screen carries", () => {
     // rather than only in a title attribute nobody hears.
     expect(screen.queryByRole("link", { name: LIST.monitorAgent })).toBeNull();
     expect(
-      screen.getByText(/Your viewer role cannot start monitoring/u),
+      screen.getByText(/Your viewer role cannot set up monitoring/u),
     ).toBeDefined();
   });
 

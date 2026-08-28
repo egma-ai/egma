@@ -1,5 +1,7 @@
 import {
+  AgentAlreadyBoundError,
   AgentWriteRefusedError,
+  agentMonitoringKey,
   authorize,
   disablePullProductionCalls,
   enablePullProductionCalls,
@@ -313,16 +315,48 @@ export async function monitoringRoutes(
           "pushes its own spans and needs no setup here.",
       );
     }
+    const apiKeyWasSupplied = Object.hasOwn(body, "apiKey");
     const apiKey = apiKeyIn(body);
-    // Checked once, here, because one key serves every entry: a key too short
-    // to be one the platform issued is the request's problem, and reporting it
-    // once per tick below would say the same thing as many times as there are
-    // ticks.
-    if (apiKey === undefined || apiKey.length < SHORTEST_KEY) {
+    // A supplied key serves every entry. A resumed agent may instead spend
+    // only the key already sealed onto that same Egma agent.
+    if (
+      apiKeyWasSupplied &&
+      (apiKey === undefined || apiKey.length < SHORTEST_KEY)
+    ) {
       return unprocessable(reply, "Enter a Retell API key.");
     }
     const wanted = watchListIn(body);
     if (typeof wanted === "string") return unprocessable(reply, wanted);
+
+    // Resolve every stored key before any switch is changed. This keeps an
+    // omitted-key request atomic at its credential boundary: one missing key
+    // refuses the whole request before an earlier entry can start.
+    const storedKeys = new Map<string, string>();
+    if (apiKey === undefined) {
+      for (const one of wanted) {
+        if (one.agentId === undefined) {
+          return unprocessable(
+            reply,
+            "Enter a Retell API key. Without one, every selected agent must already have a stored monitoring key.",
+          );
+        }
+        const stored = await agentMonitoringKey(resolved.auth, one.agentId);
+        if (stored === undefined) {
+          return unprocessable(
+            reply,
+            "Enter a Retell API key. Without one, every selected agent must already have a stored monitoring key.",
+          );
+        }
+        const state = await readAgentPullState(resolved.auth, one.agentId);
+        if (state?.platformAgentId !== one.platformAgentId) {
+          return unprocessable(
+            reply,
+            "This agent's stored monitoring key belongs to a different Retell agent. Load the account again and choose the agent already connected to it.",
+          );
+        }
+        storedKeys.set(one.agentId, stored);
+      }
+    }
 
     // One roster read for the whole commit. Inside the loop it re-asked the
     // same question once per tick and could still answer staler than the
@@ -333,6 +367,12 @@ export async function monitoringRoutes(
     const refused: Refused[] = [];
 
     for (const one of wanted) {
+      const monitoringKey =
+        apiKey ??
+        (one.agentId === undefined ? undefined : storedKeys.get(one.agentId));
+      if (monitoringKey === undefined) {
+        throw new Error("Monitoring key preflight did not resolve this entry.");
+      }
       let agentId = one.agentId;
       let agentName = one.name ?? one.platformAgentId;
       let created = false;
@@ -400,13 +440,13 @@ export async function monitoringRoutes(
                 name: agentName,
                 agentPlatform: RETELL,
                 platformAgentId: one.platformAgentId,
-                apiKey,
+                apiKey: monitoringKey,
               })
             : await enablePullProductionCalls(resolved.auth, {
                 agentId,
                 agentPlatform: RETELL,
                 platformAgentId: one.platformAgentId,
-                apiKey,
+                apiKey: monitoringKey,
               });
         started.push({
           agentId: state.agentId,
@@ -416,6 +456,14 @@ export async function monitoringRoutes(
           pullProductionCalls: state.pullProductionCalls,
         });
       } catch (error) {
+        if (error instanceof AgentAlreadyBoundError) {
+          refused.push({
+            platformAgentId: one.platformAgentId,
+            reason: "contested",
+            message: error.message,
+          });
+          continue;
+        }
         /*
          * The archive race: the agent was alive when this entry read it and
          * archived before the switch was written. Same answer as the check

@@ -17,11 +17,6 @@ export type LiveKitDispatchForm = {
   readonly option: ConnectionOption | undefined;
 };
 
-/** A new LiveKit connection uses the safest, deterministic dispatch contract. */
-export function newLiveKitDispatch(): LiveKitDispatch {
-  return "named";
-}
-
 /** Recover the dispatch contract represented by a saved connection. */
 export function savedLiveKitDispatch(
   config: LiveKitConfig,
@@ -29,12 +24,7 @@ export function savedLiveKitDispatch(
   return (config.agentName?.trim() ?? "") === "" ? "automatic" : "named";
 }
 
-/**
- * Describe the LiveKit-specific part of a connection form.
- *
- * Both create and edit use this model so field extraction and readiness cannot
- * drift apart. The returned option omits `agentName`, which this module owns.
- */
+/** Describe the LiveKit-specific part of an existing connection form. */
 export function liveKitDispatchForm({
   connectionType,
   option,
@@ -71,16 +61,14 @@ export function configForLiveKitDispatch(
   config: LiveKitConfig,
   mode: LiveKitDispatch,
 ): LiveKitConfig {
-  if (mode === "named") {
-    return config;
-  }
+  if (mode === "named") return config;
 
   const next = { ...config };
   delete next.agentName;
   return next;
 }
 
-/** The two valid LiveKit dispatch contracts, shown the same way on create and edit. */
+/** Preserve both dispatch contracts when an existing connection is edited. */
 export function LiveKitDispatchSetup({
   mode,
   agentName,
@@ -95,7 +83,7 @@ export function LiveKitDispatchSetup({
   return (
     <>
       <Field
-        label="Dispatch method"
+        label="Dispatch method*"
         htmlFor="livekit-dispatch"
         hint={
           mode === "named"
@@ -105,6 +93,7 @@ export function LiveKitDispatchSetup({
       >
         <Select
           id="livekit-dispatch"
+          aria-required="true"
           value={mode}
           onChange={(event) =>
             onModeChange(event.target.value as LiveKitDispatch)
@@ -116,12 +105,13 @@ export function LiveKitDispatchSetup({
       </Field>
       {mode === "named" ? (
         <Field
-          label="LiveKit agent name"
+          label="LiveKit agent name*"
           htmlFor="livekit-agent-name"
           hint="Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room."
         >
           <Input
             id="livekit-agent-name"
+            aria-required="true"
             value={agentName}
             required
             placeholder="The deployed agent's exact name"

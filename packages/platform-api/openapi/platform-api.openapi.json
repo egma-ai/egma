@@ -95,6 +95,14 @@
                           "name": {
                             "type": "string"
                           },
+                          "modality": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ],
+                            "description": "The modality Retell reports for this agent, including when no supported connection candidate is available yet."
+                          },
                           "connectionCandidates": {
                             "type": "array",
                             "items": {
@@ -152,6 +160,7 @@
                         "required": [
                           "platformAgentId",
                           "name",
+                          "modality",
                           "connectionCandidates"
                         ],
                         "additionalProperties": false
@@ -225,7 +234,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -667,6 +676,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -681,6 +704,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -723,9 +749,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -924,6 +952,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -938,6 +980,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -980,9 +1025,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -1327,6 +1374,20 @@
                               }
                             ]
                           },
+                          "retellModality": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "voice",
+                                  "chat"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "monitoringKeyPresent": {
                             "type": "boolean"
                           },
@@ -1341,6 +1402,9 @@
                             ]
                           },
                           "pullProductionCalls": {
+                            "type": "boolean"
+                          },
+                          "monitoringConfigured": {
                             "type": "boolean"
                           },
                           "lastReceivedAt": {
@@ -1520,9 +1584,11 @@
                           "name",
                           "agentPlatform",
                           "platformAgentId",
+                          "retellModality",
                           "monitoringKeyPresent",
                           "monitoringApiKeyHint",
                           "pullProductionCalls",
+                          "monitoringConfigured",
                           "lastReceivedAt",
                           "archived",
                           "archivedAt",
@@ -1698,6 +1764,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -1712,6 +1792,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -1754,9 +1837,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -2062,6 +2147,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -2076,6 +2175,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -2118,9 +2220,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -2699,6 +2803,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -2713,6 +2831,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -2755,9 +2876,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -2970,6 +3093,20 @@
                             }
                           ]
                         },
+                        "retellModality": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "voice",
+                                "chat"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "monitoringKeyPresent": {
                           "type": "boolean"
                         },
@@ -2984,6 +3121,9 @@
                           ]
                         },
                         "pullProductionCalls": {
+                          "type": "boolean"
+                        },
+                        "monitoringConfigured": {
                           "type": "boolean"
                         },
                         "lastReceivedAt": {
@@ -3026,9 +3166,11 @@
                         "name",
                         "agentPlatform",
                         "platformAgentId",
+                        "retellModality",
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
                         "archivedAt",
@@ -9561,7 +9703,8 @@
                     ]
                   },
                   "apiKey": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "A Retell key for new agents. It may be omitted only when every watch entry names an existing agent that already stores its monitoring key."
                   },
                   "watch": {
                     "type": "array",
@@ -9588,7 +9731,6 @@
                 },
                 "required": [
                   "agentPlatform",
-                  "apiKey",
                   "watch"
                 ],
                 "additionalProperties": false

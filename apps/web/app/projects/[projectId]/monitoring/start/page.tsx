@@ -1,36 +1,27 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useParams, useSearchParams } from "next/navigation";
-
-import { AGENT_PARAMETER } from "../../../../../lib/monitoring.ts";
-import { AppShell } from "../../../../../ui/shell.tsx";
-import { TranscriptsScreen } from "../transcripts/screen.tsx";
+import { monitoringSetupPath } from "../setup-path.ts";
 
 /**
- * The old Start-monitoring address, kept as a deep link and nothing else.
+ * The old Start-monitoring address, kept as a forwarding deep link.
  *
- * **The page it named is gone.** Its agent and connection selects, its "List
- * Retell agents" button and its tick list were a whole screen for one verb —
- * and the screen the verb belongs on is Transcripts, where its results land.
- * The picker that replaced it is a sheet over that screen (boards `JGS-0`,
- * `JN2-0`, `JTL-0`).
+ * **There is one setup flow.** Agents owns Connect agent and the provider-
+ * specific Monitoring goal. This route carries an old link into that flow
+ * instead of rendering a second monitoring form.
  *
- * **It renders rather than redirects**, which is what the blanket rule asks
- * for: a link somebody saved, or a message the CLI printed, lands on the
- * Transcripts screen with the picker already open, in one load. A redirect
- * would be a second navigation for a link that already named exactly one
- * thing.
- *
- * `?agent=` rides through. It named which agent the flow was about when the
- * old page read it, and it means the same thing to the picker.
+ * `?agent=` rides through. It still names the agent the setup flow should
+ * begin from; `goal=monitoring` states why the person entered the flow.
  */
-export default function StartMonitoringPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const agentId = useSearchParams().get(AGENT_PARAMETER);
-
-  return (
-    <AppShell>
-      <TranscriptsScreen projectId={projectId} forced={{ agentId }} />
-    </AppShell>
-  );
+export default async function StartMonitoringPage({
+  params,
+  searchParams,
+}: {
+  readonly params: Promise<{ readonly projectId: string }>;
+  readonly searchParams: Promise<{
+    readonly agent?: string | readonly string[];
+  }>;
+}) {
+  const [{ projectId }, asked] = await Promise.all([params, searchParams]);
+  const agentId = typeof asked.agent === "string" ? asked.agent : undefined;
+  redirect(monitoringSetupPath(projectId, agentId));
 }

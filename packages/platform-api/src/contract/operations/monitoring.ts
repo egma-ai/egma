@@ -198,10 +198,14 @@ export const monitoringOperations = {
         type: "object",
         properties: {
           agentPlatform: { type: "string", enum: ["retell"] },
-          apiKey: { type: "string" },
+          apiKey: {
+            type: "string",
+            description:
+              "A Retell key for new agents. It may be omitted only when every watch entry names an existing agent that already stores its monitoring key.",
+          },
           watch: arrayOf(watchRequest),
         },
-        required: ["agentPlatform", "apiKey", "watch"],
+        required: ["agentPlatform", "watch"],
         additionalProperties: false,
       },
     },

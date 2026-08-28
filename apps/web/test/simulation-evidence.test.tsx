@@ -304,7 +304,7 @@ describe("one simulation's grades", () => {
     expect(screen.queryByText("simulator_error")).toBeNull();
   });
 
-  it("shows the combined score without creating an overall pass or fail", async () => {
+  it("shows the total average score without creating an overall pass or fail", async () => {
     page();
     render(<SimulationEvidencePage />);
 
@@ -329,12 +329,67 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("Combined score")).toBeTruthy();
+    expect(within(summary).getByText("Total avg score")).toBeTruthy();
     expect(within(summary).getByText("0.50")).toBeTruthy();
     expect(within(summary).getByText("Duration")).toBeTruthy();
     expect(within(summary).getByText("40s")).toBeTruthy();
     expect(within(summary).getByText("Total turns")).toBeTruthy();
     expect(within(summary).queryByText(/overall|verdict/iu)).toBeNull();
+  });
+
+  it("shows a dash for every summary value that was not recorded", async () => {
+    page({
+      read: evidence({
+        combinedScore: null,
+        measures: { durationMs: null, turnCount: null, toolCallCount: null },
+        metrics: [],
+        transcript: null,
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    const summary = await screen.findByRole("region", {
+      name: "Simulation summary",
+    });
+    expect(within(summary).getAllByText("-")).toHaveLength(4);
+    expect(within(summary).queryByText("Not available")).toBeNull();
+    expect(within(summary).getAllByText("Not recorded")).toHaveLength(4);
+    for (const meaning of within(summary).getAllByText("Not recorded")) {
+      expect(meaning.className).toContain("sr-only");
+    }
+  });
+
+  it("keeps recorded zero summary values instead of treating them as empty", async () => {
+    page({
+      read: evidence({
+        combinedScore: 0,
+        measures: { durationMs: 0, turnCount: 0, toolCallCount: 0 },
+        metrics: [
+          {
+            measure: "turn_response_latency",
+            unit: "milliseconds",
+            derived: false,
+            samples: [0],
+            spanIds: ["span_agent"],
+            mean: 0,
+            p50: 0,
+            p90: 0,
+            partial: false,
+          },
+        ],
+        transcript: null,
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    const summary = await screen.findByRole("region", {
+      name: "Simulation summary",
+    });
+    expect(within(summary).getByText("0.00")).toBeTruthy();
+    expect(within(summary).getByText("0s")).toBeTruthy();
+    expect(within(summary).getByText("0")).toBeTruthy();
+    expect(within(summary).getByText("0 ms")).toBeTruthy();
+    expect(within(summary).queryByText("-")).toBeNull();
   });
 
   /**
@@ -424,7 +479,9 @@ describe("one simulation's grades", () => {
       .toBeTruthy();
     expect(screen.getByText("Waiting for this grader to return a grade."))
       .toBeTruthy();
-    expect(screen.getByText("Not available")).toBeTruthy();
+    const summary = screen.getByRole("region", { name: "Simulation summary" });
+    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).queryByText("Not available")).toBeNull();
     expect(document.body.textContent).not.toContain("gradingJobs");
   });
 
@@ -449,7 +506,9 @@ describe("one simulation's grades", () => {
     expect(screen.getByText(/could not complete every requested grade/iu))
       .toBeTruthy();
     expect(screen.getAllByText("errored").length).toBeGreaterThan(0);
-    expect(screen.getByText("Not available")).toBeTruthy();
+    const summary = screen.getByRole("region", { name: "Simulation summary" });
+    expect(within(summary).getByText("-")).toBeTruthy();
+    expect(within(summary).queryByText("Not available")).toBeNull();
   });
 
   it("regrades the whole simulation and keeps the action from viewers", async () => {
@@ -507,6 +566,26 @@ describe("one simulation's grades", () => {
 });
 
 describe("the transcript time rail", () => {
+  it("shows one simple empty conversation state", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+
+    render(
+      <ChatTranscript
+        transcript={{ ...transcript, turns: [], spans: [] } as never}
+      />,
+    );
+
+    expect(screen.getByText("-")).toBeTruthy();
+    expect(screen.getByText("No conversation recorded")).toBeTruthy();
+    expect(screen.queryByText("Nothing was said")).toBeNull();
+    expect(
+      screen.queryByText("Egma filed no spoken turns for this simulation."),
+    ).toBeNull();
+  });
+
   it("seeks speech without autoplay and expands exact tool requests and responses", () => {
     const read = evidence();
     const tool = {
