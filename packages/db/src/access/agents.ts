@@ -1359,6 +1359,13 @@ export async function updateAgent(
  * rather than name a constraint: mocking works by egma creating a temporary
  * version of the agent on the platform, and there is nothing to create it with
  * until the agent's platform identity and key are set.
+ *
+ * **It returns when the error is not its own**, and that is the whole contract
+ * of a recogniser sitting in a chain of them: an edit can break two rules, so
+ * each recogniser answers for the one it knows and leaves the rest alone. One
+ * that rethrew instead would be the last word on every failure, and the
+ * recognisers after it — the duplicate-name refusal among them — would never
+ * run.
  */
 function refuseUntickableAgent(error: unknown): void {
   if (lostToConstraint(error, "agent_mock_tools_need_platform_key")) {
@@ -1370,7 +1377,6 @@ function refuseUntickableAgent(error: unknown): void {
         "create one with. Connect the agent to its platform first.",
     );
   }
-  throw error;
 }
 
 /**

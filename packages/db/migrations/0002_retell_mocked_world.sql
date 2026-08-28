@@ -48,9 +48,33 @@ ALTER TABLE "run" ADD COLUMN "mocked_world" jsonb;--> statement-breakpoint
 -- written by the in-process seam, where every tool the agent declares is
 -- reachable and nothing is un-interceptable by construction — so the empty
 -- lists below are that seam's honest answer rather than a placeholder.
+--
+-- **The guard has to come off around it, and only around it.**
+-- `simulation_lifecycle_guard` refuses *every* update to a row that has landed
+-- `completed`, `failed` or `canceled` — which is the whole point of it, and
+-- which is also every row this backfill touches: a coverage stamp is a terminal
+-- fact, and `simulation_mock_tool_coverage_only_when_ended` means a row cannot
+-- carry one until it has ended. So on any database that has ever finished a
+-- stamped simulation this statement raises, the migration rolls back, and the
+-- API cannot boot — an empty development database is the only place it would
+-- have appeared to work.
+--
+-- Disabling the trigger is therefore not a shortcut around the invariant, it is
+-- the invariant being told that this one additive backfill is not a rewrite of
+-- history: no lifecycle column moves, and the two lists are added empty, so
+-- every terminal row means afterwards exactly what it meant before.
+--
+-- The runner sends the whole file inside one `begin`/`commit`, and disabling a
+-- trigger is itself transactional in Postgres — so a failure anywhere in the
+-- backfill rolls the disable back with it. The guard cannot be left off by a
+-- migration that did not finish.
+ALTER TABLE "simulation" DISABLE TRIGGER "simulation_lifecycle_guard";--> statement-breakpoint
+
 UPDATE "simulation"
 SET "mock_tool_coverage" = "mock_tool_coverage" || '{"notInterceptable": [], "notInThisVersion": []}'::jsonb
 WHERE "mock_tool_coverage" IS NOT NULL;--> statement-breakpoint
+
+ALTER TABLE "simulation" ENABLE TRIGGER "simulation_lifecycle_guard";--> statement-breakpoint
 
 -- The run header freezes when its counts land, and the mocked world is carved
 -- out of that freeze.
