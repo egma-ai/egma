@@ -1066,6 +1066,52 @@ async def test_a_finished_state_never_ends_a_turn_that_owes_itself_a_stream(
     await plug.close()
 
 
+async def test_the_server_dropping_egma_is_answered_at_once_not_after_the_drain(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """A room that is gone is not a turn that is slow.
+
+    The bound on a still-open stream is spent so that words already on
+    their way reach the record. Egma losing the room means nothing is on
+    its way and there is no record to reach: the answer is the fault
+    raised out of the turn, and paying the bound first would delay it by
+    the whole drain and then file a line saying these words will be
+    refused by the turn after — when the exchange has no turn after.
+    """
+    caplog.set_level(logging.WARNING)
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+    assert await plug.open() is None
+    room = stub.room
+
+    delivering = asyncio.ensure_future(plug.deliver("Anything on Thursday?"))
+    await asyncio.sleep(0)
+    # A stream opens and never closes, so the turn is owed an utterance —
+    # and then the server drops egma out of the room.
+    room._agent_said(_Echo("Thursday at", closes_when=asyncio.Event()), AGENT_IDENTITY)
+    await asyncio.sleep(0)
+    began = asyncio.get_running_loop().time()
+    room.failed.set()
+
+    with pytest.raises(PlugError) as dropped:
+        await delivering
+    took = asyncio.get_running_loop().time() - began
+
+    assert failed_ending(dropped.value) == ERROR
+    assert "while the exchange was under way" in str(dropped.value)
+    assert took < DRAIN_SECONDS / 2, (
+        f"the fault took {took:.2f}s to surface against a {DRAIN_SECONDS:.1f}s "
+        "drain, so it waited out a bound meant for a stream still arriving"
+    )
+    assert not [
+        record
+        for record in caplog.records
+        if "open-stream path" in record.getMessage()
+    ], "a room that is gone owes no turn after, and nothing may say it does"
+    await plug.close()
+
+
 async def test_a_stream_that_cannot_be_read_says_which_path_lost_the_words(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):

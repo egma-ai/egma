@@ -1908,16 +1908,23 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         record and the answer nowhere.
 
         **And every stream this turn opened has to have closed.** Neither
-        a finished state, nor a spent quiet period, nor anything else ends
-        a turn while a stream stamped with it is still open. That is not a
-        refinement: a stream is stamped when it *opens*, so one that opens
-        promptly and finishes late still belongs to the question it began
-        answering — and a turn that ended on what had already arrived
-        threw those words away, because the next turn then refuses them
-        for being older. The record read as if the agent began
+        a finished state nor a spent quiet period ends a turn while a
+        stream stamped with it is still open. That is not a refinement: a
+        stream is stamped when it *opens*, so one that opens promptly and
+        finishes late still belongs to the question it began answering —
+        and a turn that ended on what had already arrived threw those
+        words away, because the next turn then refuses them for being
+        older. The record read as if the agent began
         mid-sentence, with nothing on it saying a word had gone. The wait
         is bounded, because one stalled stream must not hold a whole
         simulation; when the bound is what ends it, the log says so.
+
+        Two things do cut that wait short, and neither of them is a turn
+        being recorded: an audio track in the room, which is the wire
+        saying this agent is speaking and is refused above this driver at
+        its first output, and the server dropping egma, which raises below
+        this loop. Waiting for words in either case would spend a bound on
+        a turn nothing will read.
 
         The turn's utterances are joined in the order their streams
         *opened*, which is the order the agent said them. Arrival order is
@@ -1960,6 +1967,13 @@ class LiveKitChatRoomBackend(RoomLifecycle):
                 # the end of a bound.
                 if room.audio_published.is_set():
                     speaking = True
+                    break
+                # The server dropped egma, which is a fault rather than a
+                # turn. The raise below this loop is the whole answer, and
+                # waiting the bound out would spend it on a room that is
+                # gone — and then file a line saying the words will be
+                # refused by the turn after, when there is no turn after.
+                if room.failed.is_set():
                     break
                 # Nothing more will arrive on its own. What can still
                 # arrive is a stream this turn already owns.

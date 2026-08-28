@@ -65,14 +65,18 @@ when it has finished does not pay it at all.
 one text stream per utterance and closes it when that utterance is done,
 and a stream is stamped with the turn that was outstanding when it
 **opened** — so one that opens promptly and finishes late still belongs
-to the question it began answering. Nothing ends a turn while a stream
-stamped with it is still open: not a finished state, not a spent quiet
-period. Egma waits for it, bounded by :data:`TURN_DRAIN_SECONDS` so one
-stalled stream cannot hold a whole simulation, and says in the log when
-that bound is what ended the wait. This half is a fix, not a nicety: the
-turn used to end on what had already arrived, the next turn refused those
-words for being older, and a customer read an agent turn that began
-part-way through a sentence with nothing to say a word had gone.
+to the question it began answering. Neither half of the rule above ends a
+turn while a stream stamped with it is still open: not a finished state,
+not a spent quiet period. Egma waits for it, bounded by
+:data:`TURN_DRAIN_SECONDS` so one stalled stream cannot hold a whole
+simulation, and says in the log when that bound is what ended the wait.
+Only two things cut that wait short, and neither of them is a turn being
+recorded: an audio track in the room, which this plug refuses as a
+missing chat setup, and the server dropping egma, which ends the
+simulation. This half is a fix, not a nicety: the turn used to end on
+what had already arrived, the next turn refused those words for being
+older, and a customer read an agent turn that began part-way through a
+sentence with nothing to say a word had gone.
 
 The turn's utterances are joined in the order their streams *opened*,
 which is the order the agent said them and not the order they finished.
