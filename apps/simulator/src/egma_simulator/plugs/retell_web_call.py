@@ -65,20 +65,31 @@ from ..client import UNREACHABLE
 from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import URL_SCHEMES, LiveKitRoomBackend, RoomSettings
-from ..redaction import REDACTED
-from . import PlugError, named_version, rendered_variables
-from .retell import DEFAULT_BASE_URL
+from . import PlugError, named_version, quotable, rendered_variables
+from .retell import CREDENTIAL_KEYS, DEFAULT_BASE_URL
 
 RETELL_ROOM_HOST = "wss://retell-ai-4ihahnq7.livekit.cloud"
 """Where every Retell web call's room is.
 
-Retell's own infrastructure, and the same host for every account: its
-browser SDK connects to this one URL with the token the API hands back.
-It is a value here, and overridable by the connection's ``roomHost``, for
-the two reasons a constant of somebody else's is: a deployment can follow
-Retell moving its infrastructure without waiting for a release of egma,
-and there is exactly one place to change when a new SDK release moves it.
-Track it against ``retell-client-js-sdk`` when that package is bumped.
+Retell's own infrastructure, and the same host for every account: the API
+hands back an access token and nothing about where to spend it, because
+its browser SDK has the host built in.
+
+**Where this value comes from, so the next person can check it.** Read on
+2026-08-27 out of ``retell-client-js-sdk`` version 2.0.8, ``src/index.ts``,
+which calls ``room.connect("wss://retell-ai-4ihahnq7.livekit.cloud",
+accessToken)`` with the host as a literal. That package is **not a
+dependency of this repository** — nothing here runs Retell's browser SDK —
+so there is no lockfile entry to diff against and no build that would
+notice it moving. To re-verify, read that file at the newest published
+version of the package and compare the literal. The same reading confirmed
+the token is a LiveKit room JWT, which is why the room media below can join
+it at all.
+
+Because nothing automatic can catch a change, the connection's ``roomHost``
+is the escape hatch: a deployment can follow Retell moving its
+infrastructure without waiting for a release of egma, and this constant is
+the one place to change when the next SDK reading says it moved.
 """
 
 CREATE_PATH = "/v2/create-web-call"
@@ -97,16 +108,7 @@ limit doing the job instead, which would put ``limit_reached`` on a record
 whose real story is that nothing ever turned up.
 """
 
-QUOTED_REFUSAL_CHARS = 200
-"""How much of a refusal's body is quoted into the reason: enough to carry
-the platform's own words about what was wrong, short of pasting a page."""
-
 _KNOWN_KEYS = {"retellAgentId", "baseUrl", "roomHost"}
-
-_CREDENTIAL_KEYS = {"apiKey"}
-"""Exactly what the control plane seals for a retell connection. Refused
-strictly, and for the same reason it is refused there: a secret handed over
-that nothing reads was handed over by mistake."""
 
 
 class RetellWebCall:
@@ -182,7 +184,7 @@ class RetellWebCall:
             raise PlugError(
                 "a retell web-call connection needs credentials shaped {apiKey}"
             )
-        stray = set(credentials) - _CREDENTIAL_KEYS
+        stray = set(credentials) - CREDENTIAL_KEYS
         if stray:
             raise PlugError(
                 f"retell web-call credentials hold no key(s) {sorted(stray)}; "
@@ -247,13 +249,17 @@ class RetellWebCall:
             # second attempt on this call is a request whose answer is
             # already known, and asking would only make the reason worse.
             raise PlugError(
-                "a retell web call is created once and joined once — its "
-                "access token is spent on that join — so conducting again "
-                "needs a new call"
+                "a retell web call is joined once — its access token is "
+                "spent on that join — so conducting again needs a new call"
             )
-        self._conducted = True
 
+        # Marked once there is something to spend, and not before: a
+        # creation that failed minted no token and left no call at Retell,
+        # so it is a thing that did not happen rather than a thing already
+        # used up, and saying otherwise would send whoever reads the reason
+        # looking for a call that never existed.
         token = await self._create_call()
+        self._conducted = True
         self._room = self._built(
             settings=RoomSettings(url=self._room_host, given_token=token),
             simulation_id=self._simulation_id,
@@ -324,13 +330,13 @@ class RetellWebCall:
         except UNREACHABLE as unreachable:
             raise PlugError(
                 f"retell was unreachable at {url}: "
-                f"{self._quotable(repr(unreachable))}"
+                f"{quotable(repr(unreachable), self._api_key)}"
             ) from unreachable
 
         if status // 100 != 2:
             raise PlugError(
                 f"retell answered {status} to {CREATE_PATH} at {self._base_url} "
-                f"and created no web call: {self._quotable(body)}"
+                f"and created no web call: {quotable(body, self._api_key)}"
             )
         try:
             document = json.loads(body)
@@ -360,7 +366,7 @@ class RetellWebCall:
         self._call_id = call_id
         return token
 
-    def _creation(self) -> dict:
+    def _creation(self) -> dict[str, Any]:
         """What one web call is created with.
 
         Which agent, and — only where the spec said so — which version of
@@ -406,6 +412,3 @@ class RetellWebCall:
             f"new call has to be created"
         )
 
-    def _quotable(self, told: str) -> str:
-        """The platform's own words, minus the key, short enough to read."""
-        return told.replace(self._api_key, REDACTED)[:QUOTED_REFUSAL_CHARS]

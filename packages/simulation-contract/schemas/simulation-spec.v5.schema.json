@@ -125,7 +125,7 @@
       }
     },
     "agent_version": {
-      "description": "Which version of the agent under test this simulation is conducted against, exactly as the platform names its versions: a number where a platform numbers them, a name where it names them. Absent is the ordinary case and means the platform's own default. The simulator never invents a version and never reinterprets one — what is written here is what the platform is asked for — and a connection that cannot be conducted over a named version takes it and drops it.",
+      "description": "Which version of the agent under test this simulation is conducted against, exactly as the platform names its versions: a number where a platform numbers them, a name where it names them. Absent is the ordinary case and means the platform's own default. The simulator never invents a version and never reinterprets one — what is written here is what the platform is asked for — and a connection that cannot be conducted over a named version takes it and drops it. A name has only to say something, so surrounding space is accepted here and dropped on the way to the platform: it is spacing, never part of a version.",
       "oneOf": [
         { "type": "integer", "minimum": 0 },
         { "type": "string", "minLength": 1, "pattern": "\\S" }

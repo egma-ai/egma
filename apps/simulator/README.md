@@ -49,9 +49,12 @@ touching the others:
   travels. One driver per way in, behind a four-method seam: create a
   Pipecat transport, dial, wait until somebody answers, tear it down.
   `livekit.py` places real phone calls over the SIP trunk carried by the
-  claimed work order; `livekit_room.py` holds an exchange in the
-  customer's own room and dispatches their agent into it, where "dial" means asking for a
-  worker rather than placing a call; `scripted.py` is the local stand-in
+  claimed work order; `livekit_room.py` holds an exchange in a room
+  joined three ways — one egma makes and dispatches into, one a
+  customer's own endpoint mints the way into, and one a platform opened
+  for a call of its own — where "dial" means asking for a worker rather
+  than placing a call, and asks for nobody at all on the two shapes egma
+  holds no key pair for; `scripted.py` is the local stand-in
   that answers a call nobody placed, and is what CI runs on. The two that
   join a room share `room.py`, which is the joining itself. Nothing above
   the seam — the plug's lifecycle, the pipeline, the recording, the
@@ -502,7 +505,8 @@ src/egma_simulator/
   media/          The media-backend seam: how a voice exchange's Pipecat
                   transport is created. Its __init__ docstring is the
                   driver author's whole brief; livekit.py places real calls over a SIP
-                  trunk, livekit_room.py dispatches an agent into a room,
+                  trunk, livekit_room.py joins a room three ways and
+                  dispatches an agent into the one egma makes,
                   room.py is the joining the two of them share, and
                   scripted.py is the one CI converses through.
   pipeline.py     One pipeline per simulation, built from its spec: which

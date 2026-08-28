@@ -217,9 +217,22 @@ async def test_a_chat_carrying_neither_asks_for_exactly_what_it_always_did(
     assert running.stub.calls[0]["body"] == {"agent_id": "agent_plain"}
 
 
-@pytest.mark.parametrize("version", [106, "latest", "prod"])
+@pytest.mark.parametrize(
+    ("spelled", "sent"),
+    [
+        (106, 106),
+        ("latest", "latest"),
+        ("prod", "prod"),
+        # The wire asks a name only to say something, so a padded one is a
+        # document the schema accepts and this side has to settle: space
+        # around a version is spacing and never part of it, and asking a
+        # platform for the version named "  latest  " would fail in the
+        # platform's own words, a long way from the spec that said it.
+        ("  latest  ", "latest"),
+    ],
+)
 async def test_a_chat_is_opened_against_the_version_the_spec_named(
-    start_retell_stub, version: object
+    start_retell_stub, spelled: object, sent: object
 ):
     """A version rides to Retell exactly as the spec spelled it.
 
@@ -231,14 +244,14 @@ async def test_a_chat_is_opened_against_the_version_the_spec_named(
     running = await start_retell_stub(api_key=SENTINEL_KEY, greeting="Front desk.")
     plug = retell(
         {"retellAgentId": "agent_drafted", "baseUrl": running.base_url},
-        agent_version=version,
+        agent_version=spelled,
     )
     await plug.open()
     await plug.close()
 
     assert running.stub.calls[0]["body"] == {
         "agent_id": "agent_drafted",
-        "agent_version": version,
+        "agent_version": sent,
     }
 
 

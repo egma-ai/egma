@@ -160,6 +160,19 @@ with is worse than one it refuses by name.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
+PLATFORM_NAMED_ROOM = "the room the platform opened"
+"""What egma calls a room it did not name.
+
+The given-token shape joins a room somebody else made, and its real name
+belongs to them: egma is handed a way in and never told what the room is
+called. So this is a description and deliberately not an identifier —
+Pipecat prints the room name into every connect and disconnect line, and a
+name invented here would read like a room that could be looked up, in
+telemetry where no such room exists. What joins the two sides on this
+shape is the platform's own id for the exchange, which the plug carries as
+the provider reference.
+"""
+
 ENDPOINT_SCHEME = "https://"
 
 TOKEN_ALIASES = ("token", "participantToken", "accessToken")
@@ -646,9 +659,14 @@ class LiveKitRoomBackend:
         # A room egma opens itself is named after nothing, because nobody
         # else has to recognise it. A room egma asks for a token into is
         # named after the simulation, because the endpoint being asked has
-        # to be able to check the name against its own rules.
+        # to be able to check the name against its own rules. A room a
+        # platform opened is **not named here at all**: it has a name
+        # already, egma is never told it, and inventing one would put a
+        # string in every log line that exists in nobody's telemetry.
         self._room_name = (
-            fresh_room_name()
+            PLATFORM_NAMED_ROOM
+            if settings.given_token
+            else fresh_room_name()
             if settings.mints_its_own
             else room_name_for(simulation_id)
         )
@@ -659,8 +677,11 @@ class LiveKitRoomBackend:
     @property
     def room_name(self) -> str:
         """The room this exchange is conducted in — one room, one
-        simulation, and what the report carries as the provider
-        reference."""
+        simulation, and what the report carries as the provider reference
+        on the two shapes where egma named it. On the shape where a
+        platform did, this is :data:`PLATFORM_NAMED_ROOM`: a description
+        rather than a name, and the provider reference is the platform's
+        own id for the exchange instead."""
         return self._room_name
 
     async def create_transport(self) -> VoiceMedia:

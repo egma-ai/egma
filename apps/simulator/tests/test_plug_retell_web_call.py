@@ -33,7 +33,8 @@ from room_stub import RoomStub
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, NOT_ANSWERED
-from egma_simulator.media.livekit_room import RoomSettings
+from egma_simulator.media.livekit_room import PLATFORM_NAMED_ROOM, RoomSettings
+from egma_simulator.media.room import ROOM_PREFIX, room_name_for
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
@@ -196,6 +197,20 @@ async def web_call_walk(
     return conducted, turns, assembled
 
 
+def assert_egma_only_joined(room: RoomStub) -> None:
+    """Egma made no room, asked for nobody, and deleted nothing.
+
+    All three halves of the same property, and the safety-carrying one:
+    the room belongs to Retell. Egma holds a token that opens it and
+    nothing more, so a request to create, to dispatch or to delete would
+    be a power egma does not have — and asking for one would spend a
+    request to be refused, or, worse, would work against the wrong LiveKit.
+    """
+    assert room.rooms == [], "egma made no room; Retell opened it"
+    assert room.dispatches == [], "egma asked for nobody; Retell puts its own agent in"
+    assert room.deleted == [], "egma deleted nothing; Retell closes what it made"
+
+
 def test_the_registry_knows_the_retell_web_call_plug():
     assert plug_for("retell_web_call") is RetellWebCall
 
@@ -268,6 +283,7 @@ async def test_a_web_call_spec_conducts_a_whole_simulation(
     # And the record's join to Retell's telemetry is the call, which is the
     # one name both sides can look this exchange up by.
     assert conducted.provider_reference == created["call_id"]
+    assert_egma_only_joined(room)
 
     # The recording resolves, the way it does for every voice simulation.
     audio = assembled.audio
@@ -302,7 +318,7 @@ async def test_the_agent_ending_the_call_is_the_agent_ending_it(
         ("human", "Sentence number 1."),
         ("agent", "I am afraid I have to go. Goodbye."),
     ]
-    assert room.deleted == [], "the room is Retell's to close"
+    assert_egma_only_joined(room)
 
 
 async def test_a_limit_ends_the_call_and_egma_still_leaves(
@@ -325,7 +341,7 @@ async def test_a_limit_ends_the_call_and_egma_still_leaves(
 
     assert conducted.ending == "limit_reached"
     assert not room.room.joined, "egma left the room it was in"
-    assert room.deleted == []
+    assert_egma_only_joined(room)
 
 
 async def test_a_call_naming_no_version_and_no_variables_asks_for_the_agent(
@@ -408,6 +424,29 @@ async def test_a_creation_retell_refuses_is_a_fault_in_its_words(
     assert SENTINEL_KEY not in told
     assert room.joined_with == [], "no room is joined for a call that was refused"
     assert plug.provider_reference is None
+
+
+async def test_a_creation_that_failed_left_nothing_to_be_spent(start_retell_stub):
+    """A creation Retell refused minted no token and left no call.
+
+    So the next attempt is a first attempt, and what it gets back is the
+    platform's refusal again — never "the token is spent", which would send
+    whoever reads it looking for a call that was never created.
+    """
+    running = await start_retell_stub(
+        api_key=SENTINEL_KEY, refuses_web_call="that agent has no version 106"
+    )
+    plug = web_call(RoomStub(), base_url=running.base_url)
+
+    for _attempt in range(2):
+        with pytest.raises(PlugError) as refused:
+            await plug.prepare()
+        told = str(refused.value)
+        assert "has no version 106" in told
+        assert "spent" not in told
+    await plug.close()
+
+    assert len(running.stub.calls) == 2, "each attempt really asked Retell"
 
 
 async def test_a_creation_that_hands_back_no_way_in_is_refused(start_retell_stub):
@@ -555,7 +594,7 @@ async def test_an_agent_that_never_joins_is_never_the_agent_failing(
     told = str(never_came.value)
     assert running.stub.web_calls[0]["call_id"] in told
     assert "never put an agent in it" in told
-    assert room.deleted == []
+    assert_egma_only_joined(room)
 
 
 async def test_an_agent_that_joins_and_publishes_nothing_never_joined_either(
@@ -619,7 +658,7 @@ async def test_egma_leaves_the_room_however_the_simulation_ends(
         tmp_path, natural, monkeypatch, base_url=running.base_url, scenario="One point."
     )
     assert not natural.room.joined
-    assert natural.deleted == []
+    assert_egma_only_joined(natural)
 
     canceled = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
     conducted, _turns, _assembled = await web_call_walk(
@@ -632,7 +671,8 @@ async def test_egma_leaves_the_room_however_the_simulation_ends(
     )
     assert conducted.status == "canceled"
     assert not canceled.room.joined
-    assert canceled.deleted == []
+    assert_egma_only_joined(canceled)
+
 
 
 class CancelsOnceUnderWay(WalkControls):
@@ -705,6 +745,33 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
     for piece in produced:
         assert SENTINEL_KEY not in piece
         assert minted not in piece
+
+
+async def test_egma_never_invents_a_name_for_a_room_retell_named(
+    start_retell_stub,
+):
+    """The room has a name already, and egma is never told it.
+
+    Pipecat prints the room name into every connect and disconnect line, so
+    a name made up here — ``egma-sim-<simulation>``, the one egma uses for
+    rooms it opens itself — would put a string in the logs that exists in
+    nobody's telemetry and that no one can look up on either side. What
+    joins the two records is Retell's call id, which the plug carries as
+    the provider reference instead.
+    """
+    running = await start_retell_stub(api_key=SENTINEL_KEY)
+    room = RoomStub(greeting="Remedy after hours.")
+    plug = web_call(room, base_url=running.base_url)
+    await plug.prepare()
+    await plug.close()
+
+    named = room.backends[0].room_name
+    assert named == PLATFORM_NAMED_ROOM
+    assert not named.startswith(ROOM_PREFIX), "that prefix is for rooms egma opens"
+    assert A_SIMULATION not in named
+    assert room_name_for(A_SIMULATION) != named
+    # And the reference the record really carries is Retell's own.
+    assert plug.provider_reference == running.stub.web_calls[0]["call_id"]
 
 
 def test_the_way_in_is_a_secret_the_settings_know_they_hold():
@@ -832,9 +899,13 @@ async def test_the_room_is_reached_at_the_host_the_connection_named(
 
 
 def test_the_plug_and_the_stub_agree_on_where_a_web_call_is_created():
-    """Otherwise every test above pins this suite's habits, not Retell's:
-    a stub that served whatever path it was asked for would prove nothing
-    about the one Retell really answers on."""
+    """The two sides of this suite name one path, rather than a stub that
+    serves whatever it is asked for.
+
+    It does not say the path is Retell's — nothing hermetic can. What
+    settles that is the API reference, and the ``/v2/`` prefix the shared
+    Retell client already uses for the calls it makes.
+    """
     from retell_stub import RetellStub
 
     served = {

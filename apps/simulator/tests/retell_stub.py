@@ -254,23 +254,29 @@ class RetellStub:
         agent_id = body.get("agent_id")
         if not isinstance(agent_id, str) or not agent_id:
             raise web.HTTPUnprocessableEntity(text="agent_id is required")
+
+        # Recorded before the refusal, not after it: a request a platform
+        # turned down is still a request it was asked, and a test that
+        # wants to know whether egma really asked again has nowhere else to
+        # look. Only a call that was really created joins `web_calls`.
+        call = {
+            "endpoint": "create-web-call",
+            "agent_id": agent_id,
+            "agent_version": body.get("agent_version"),
+            "body": body,
+        }
+        self.calls.append(call)
         if self.refuses_web_call is not None:
+            call["refused"] = self.refuses_web_call
             raise web.HTTPUnprocessableEntity(
                 text=json.dumps({"error_message": self.refuses_web_call}),
                 content_type="application/json",
             )
 
         placed = len(self.web_calls) + 1
-        call = {
-            "endpoint": "create-web-call",
-            "call_id": f"call_{placed:04d}",
-            "agent_id": agent_id,
-            "agent_version": body.get("agent_version"),
-            "access_token": f"{self.web_call_token}-{placed}",
-            "body": body,
-        }
+        call["call_id"] = f"call_{placed:04d}"
+        call["access_token"] = f"{self.web_call_token}-{placed}"
         self.web_calls.append(call)
-        self.calls.append(call)
         answered = {
             "call_id": call["call_id"],
             "call_type": "web_call",

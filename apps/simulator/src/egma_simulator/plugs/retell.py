@@ -58,8 +58,14 @@ from typing import Any
 import aiohttp
 
 from ..client import UNREACHABLE
-from ..redaction import REDACTED
-from . import AgentReply, PlugError, ToolCall, named_version, rendered_variables
+from . import (
+    AgentReply,
+    PlugError,
+    ToolCall,
+    named_version,
+    quotable,
+    rendered_variables,
+)
 
 DEFAULT_BASE_URL = "https://api.retellai.com"
 """Retell's own API, where a connection with no base URL is reached."""
@@ -75,16 +81,13 @@ TIMEOUT_SECONDS = 60.0
 on the agent's own model, and anything past it is a platform that has
 stopped answering rather than one thinking."""
 
-QUOTED_REFUSAL_CHARS = 200
-"""How much of a refusal's body is quoted into the reason: enough to carry
-the platform's own words about what was wrong, short of pasting a page."""
-
 _KNOWN_KEYS = {"retellAgentId", "baseUrl"}
 
-_CREDENTIAL_KEYS = {"apiKey"}
-"""Exactly what the control plane seals for a retell connection. Refused
-strictly, and for the same reason it is refused there: a secret handed over
-that nothing reads was handed over by mistake."""
+CREDENTIAL_KEYS = {"apiKey"}
+"""Exactly what the control plane seals for a retell connection, whichever
+way a simulation reaches one. Refused strictly, and for the same reason it
+is refused there: a secret handed over that nothing reads was handed over
+by mistake."""
 
 
 class RetellChat:
@@ -144,7 +147,7 @@ class RetellChat:
             raise PlugError(
                 "a retell connection needs credentials shaped {apiKey}"
             )
-        stray = set(credentials) - _CREDENTIAL_KEYS
+        stray = set(credentials) - CREDENTIAL_KEYS
         if stray:
             raise PlugError(
                 f"retell credentials hold no key(s) {sorted(stray)}; they are "
@@ -221,7 +224,7 @@ class RetellChat:
         finally:
             await session.close()
 
-    def _opening(self) -> dict:
+    def _opening(self) -> dict[str, Any]:
         """The one request that opens the exchange.
 
         Which agent, and — only where the spec said so — which version of it
@@ -239,10 +242,6 @@ class RetellChat:
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}
-
-    def _quotable(self, told: str) -> str:
-        """The platform's own words, minus the key, short enough to read."""
-        return told.replace(self._api_key, REDACTED)[:QUOTED_REFUSAL_CHARS]
 
     async def _call(self, method: str, path: str, payload: dict) -> dict:
         """One Retell call, or a refusal saying what happened without the key."""
@@ -264,13 +263,13 @@ class RetellChat:
         except UNREACHABLE as unreachable:
             raise PlugError(
                 f"retell was unreachable at {url}: "
-                f"{self._quotable(repr(unreachable))}"
+                f"{quotable(repr(unreachable), self._api_key)}"
             ) from unreachable
 
         if status // 100 != 2:
             raise PlugError(
                 f"retell answered {status} to {path} at {self._base_url}: "
-                f"{self._quotable(body)}"
+                f"{quotable(body, self._api_key)}"
             )
         try:
             document = json.loads(body)

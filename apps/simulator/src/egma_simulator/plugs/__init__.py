@@ -14,10 +14,15 @@ requires reading anything beyond this file, that is a bug in this file.
 ## What a plug receives
 
 A plug is constructed once per simulation, from the claimed spec, with
-eight keyword arguments:
+nine keyword arguments:
 
 - ``modality`` — ``"chat"`` or ``"voice"``. A plug that cannot speak the
   requested modality must refuse at construction (raise ``PlugError``).
+- ``access_variant`` — which authority and configuration path inside the
+  connection type this spec means. It is always spelled out and is never
+  inferred from which config keys turned up, so a plug that holds one
+  variant refuses every other at construction, and a plug that holds two
+  reads the connection the way the named one says to.
 - ``config`` — the connection's non-secret reach configuration, exactly as
   authored. **Its keys belong to the plug**: nothing else reads them, no
   schema constrains them, and each plug documents and validates its own.
@@ -42,8 +47,11 @@ eight keyword arguments:
   version nobody meant between one simulation and the next. It is never
   parsed, never renumbered and never turned into words — a number stays a
   number and a name stays a name, because the platform is the only thing
-  that knows what either means. Every other plug takes it and drops it, and
-  its record claims nothing about versions.
+  that knows what either means. The one thing dropped is space around it,
+  which is nobody's version: the wire accepts ``"  latest  "`` because the
+  contract only asks a name to say something, and what goes to the platform
+  is ``"latest"``. Every other plug takes it and drops it, and its record
+  claims nothing about versions.
 - ``dynamic_variables`` — the variables this one simulation is conducted
   with, for the agent's platform to render into the world the agent under
   test sees. A mapping of names to strings, empty in the ordinary case, and
@@ -169,6 +177,11 @@ from typing import Protocol, runtime_checkable
 
 from ..contract import ERROR
 from ..media import VoiceMedia
+from ..redaction import REDACTED
+
+QUOTED_REFUSAL_CHARS = 200
+"""How much of a refusal's body is quoted into a reason: enough to carry
+the platform's own words about what was wrong, short of pasting a page."""
 
 
 @dataclass(frozen=True)
@@ -216,6 +229,23 @@ class PlugError(Exception):
     def __init__(self, message: str, *, ending: str = ERROR) -> None:
         super().__init__(message)
         self.ending = ending
+
+
+def quotable(told: str, *secrets: str) -> str:
+    """Somebody else's words, minus this connection's own, short enough to
+    read.
+
+    A refusal is worth far more with the platform's own sentence in it, and
+    those words are not the quoter's to trust: a platform careless enough
+    to echo a key back would otherwise put it in a failure reason and in
+    the traceback logged beneath it. So the scrubbing happens here, where
+    the secret is known — and here rather than in each plug, because two
+    plugs reaching one platform must not scrub it two different ways.
+    """
+    for secret in secrets:
+        if secret:
+            told = told.replace(secret, REDACTED)
+    return told[:QUOTED_REFUSAL_CHARS]
 
 
 def named_version(agent_version: object) -> int | str | None:
