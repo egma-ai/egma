@@ -652,6 +652,16 @@ async function confirmRetellAgent(
 
   const candidate = (() => {
     if (
+      wanted.connectionType === "retell_playground" &&
+      wanted.accessVariant === "retell_playground.api_key" &&
+      wanted.modality === "chat"
+    ) {
+      return {
+        connectionType: "retell_playground" as const,
+        config: { retellAgentId: choice.platformAgentId },
+      };
+    }
+    if (
       wanted.connectionType === "retell_chat_api" &&
       wanted.accessVariant === "retell_chat_api.api_key" &&
       wanted.modality === "chat"
@@ -676,8 +686,9 @@ async function confirmRetellAgent(
   })();
   if (candidate === undefined) {
     return invalid(
-      "a Retell connection is the chat API or a phone number, and a phone " +
-        "connection carries the number Egma dials in config.phoneNumber",
+      "a Retell connection is the chat API, the playground, or a phone " +
+        "number, and a phone connection carries the number Egma dials in " +
+        "config.phoneNumber",
     );
   }
 
@@ -686,6 +697,11 @@ async function confirmRetellAgent(
     choice.platformAgentId,
     candidate,
     fetchImpl,
+    // Gated by the registry before it reaches here, and the same value the
+    // run-start read will use.
+    typeof wanted.config["baseUrl"] === "string"
+      ? wanted.config["baseUrl"]
+      : undefined,
   );
   if (checked.kind === "invalid_key") {
     return {
@@ -711,7 +727,11 @@ async function confirmRetellAgent(
       accessVariant: checked.candidate.accessVariant,
       modality: checked.candidate.modality,
       config: checked.candidate.config,
-      ...(checked.candidate.connectionType === "retell_chat_api"
+      // The two kinds that conduct with a key of their own keep a copy on the
+      // connection: every exchange they conduct needs it. A phone connection
+      // dials with the deployment's carrier and holds none.
+      ...(checked.candidate.connectionType === "retell_chat_api" ||
+      checked.candidate.connectionType === "retell_playground"
         ? { credentials: { apiKey } }
         : {}),
     },

@@ -296,6 +296,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_playground",
                               "retell_web_call",
                               "phone_number",
                               "livekit_room"
@@ -305,6 +306,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_playground.api_key",
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
@@ -549,6 +551,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api",
+                          "retell_playground",
                           "retell_web_call",
                           "phone_number",
                           "livekit_room"
@@ -558,6 +561,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api.api_key",
+                          "retell_playground.api_key",
                           "retell_web_call.api_key",
                           "phone_number.public_e164",
                           "livekit_room.project_credentials",
@@ -799,6 +803,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -808,6 +813,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -1081,6 +1087,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -1090,6 +1097,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -1490,6 +1498,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
+                                    "retell_playground",
                                     "retell_web_call",
                                     "phone_number",
                                     "livekit_room"
@@ -1499,6 +1508,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
+                                    "retell_playground.api_key",
                                     "retell_web_call.api_key",
                                     "phone_number.public_e164",
                                     "livekit_room.project_credentials",
@@ -1907,6 +1917,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_playground",
                               "retell_web_call",
                               "phone_number",
                               "livekit_room"
@@ -1916,6 +1927,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_playground.api_key",
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
@@ -2433,6 +2445,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api",
+                      "retell_playground",
                       "retell_web_call",
                       "phone_number",
                       "livekit_room"
@@ -2442,6 +2455,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api.api_key",
+                      "retell_playground.api_key",
                       "retell_web_call.api_key",
                       "phone_number.public_e164",
                       "livekit_room.project_credentials",
@@ -2549,6 +2563,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -2558,6 +2573,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -3409,6 +3425,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -3418,6 +3435,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -3700,6 +3718,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -3709,6 +3728,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -4001,6 +4021,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -4010,6 +4031,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -4344,6 +4366,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_playground",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -4353,6 +4376,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_playground.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -14409,6 +14433,16 @@
                         }
                       ]
                     },
+                    "conductedAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -14529,6 +14563,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "conductedAgentVersion",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -14618,6 +14653,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14834,6 +14879,16 @@
                               }
                             ]
                           },
+                          "conductedAgentVersion": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "expectedSimulationCount": {
                             "type": "integer"
                           },
@@ -14954,6 +15009,7 @@
                           "modality",
                           "productLabel",
                           "environment",
+                          "conductedAgentVersion",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15187,6 +15243,16 @@
                         }
                       ]
                     },
+                    "conductedAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -15406,6 +15472,83 @@
                         }
                       ]
                     },
+                    "conductedWorld": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "agentVersion": {
+                              "type": "integer"
+                            },
+                            "engine": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "engineId": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "engineId",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "coverage": {
+                              "type": "object",
+                              "properties": {
+                                "mocked": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInterceptable": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "notInThisVersion": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "mocked",
+                                "notInterceptable",
+                                "notInThisVersion"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "agentVersion",
+                            "engine",
+                            "coverage"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "connectionSnapshot": {
                       "type": "object",
                       "properties": {
@@ -15535,6 +15678,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "conductedAgentVersion",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15548,6 +15692,7 @@
                     "startedAt",
                     "finishedAt",
                     "mockedWorld",
+                    "conductedWorld",
                     "connectionSnapshot",
                     "agent",
                     "connection"
@@ -15867,6 +16012,16 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "conductedAgentVersion": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -15886,7 +16041,8 @@
                           "endedAt",
                           "modality",
                           "hasRecording",
-                          "mockToolCoverage"
+                          "mockToolCoverage",
+                          "conductedAgentVersion"
                         ],
                         "additionalProperties": false
                       }
@@ -16374,6 +16530,16 @@
                         }
                       ]
                     },
+                    "conductedAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -16494,6 +16660,7 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "conductedAgentVersion",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -16965,6 +17132,16 @@
                       "anyOf": [
                         {
                           "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "conductedAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
                         },
                         {
                           "type": "null"
@@ -17593,6 +17770,7 @@
                     "startedAt",
                     "endedAt",
                     "providerReference",
+                    "conductedAgentVersion",
                     "hasRecording",
                     "measures",
                     "metrics",

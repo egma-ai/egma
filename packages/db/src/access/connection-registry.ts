@@ -455,6 +455,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "retell",
+    connectionType: "retell_playground",
+    accessVariant: "retell_playground.api_key",
+    modality: "chat",
+    productLabel: "Retell playground",
+  },
+  {
+    agentPlatform: "retell",
     connectionType: "retell_web_call",
     accessVariant: "retell_web_call.api_key",
     modality: "voice",
@@ -722,6 +729,37 @@ function jsonObjectText(key: string, value: unknown): string {
  * second check is load-bearing because DNS can change after this write.
  */
 function tokenEndpointUrl(key: string, value: unknown): string {
+  return publicHttpsUrl(key, value, "https://example.com/egma/livekit-token");
+}
+
+/**
+ * An address on the public internet that Egma itself will make a request to.
+ *
+ * **The rule every customer-written outbound address is held to**, written
+ * once because it is one rule: a config key a customer fills in decides where
+ * this platform's own process sends a request, and every such key is therefore
+ * a way to ask Egma to fetch something on the customer's behalf. HTTPS only, a
+ * real hostname, and nothing that resolves inside the deployment: a literal
+ * address, `localhost`, or a name under `.localhost` is refused before it is
+ * ever stored.
+ *
+ * **A private address is an operator's setting, never a customer's.** A
+ * deployment that really does reach a provider through something on its own
+ * network says so in its own configuration, where the person who runs the
+ * platform can see it — not in a connection row any member of any organization
+ * can write. That is the whole distinction: this gate guards a value that
+ * arrives over the API from a customer, and no such value may name the
+ * platform's own neighbourhood.
+ *
+ * A URL carrying its own credentials, a backslash, or a control character is
+ * refused too, because none of the three is an address anybody means and each
+ * is a way to make one string parse two ways.
+ *
+ * This is a check at write time and it is not the whole defence: DNS can move
+ * after the row is written, so a caller that resolves the name again at request
+ * time should say so where it does it.
+ */
+function publicHttpsUrl(key: string, value: unknown, example: string): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   let parsed: URL | undefined;
   try {
@@ -754,7 +792,39 @@ function tokenEndpointUrl(key: string, value: unknown): string {
     throw new AgentWriteRefusedError(
       "not_admitted",
       `the config's ${key} must be a public https URL, which looks like ` +
-        `https://example.com/egma/livekit-token`,
+        example,
+    );
+  }
+  return candidate;
+}
+
+/**
+ * Where a Retell-shaped API answers, when it is not Retell's own address.
+ *
+ * The one config key on this lane that is not about the agent, and the one a
+ * deployment fills in when its outbound traffic goes through a proxy of its
+ * own. Left out — which is the ordinary case — everything reaches Retell.
+ *
+ * **A value here redirects the connection's own Retell key**: the key travels
+ * as a bearer token to whatever address this names, and — unlike every other
+ * outbound address in this registry — the request is made by the **control
+ * plane** at run start, from inside the platform. So it is held to the public
+ * rule above and to one more of its own.
+ *
+ * **A fragment is refused, and that is not tidiness.** This value is a *base*:
+ * Egma appends the completion path and the agent's id to it. A `#` anywhere
+ * would make everything Egma appends part of a fragment, which is never sent —
+ * so the request would land on whatever path the value itself ended with, and
+ * the person who wrote the value, rather than Egma, would have chosen the whole
+ * address. A base URL has no fragment in it because a base is not a place.
+ */
+function retellApiUrl(key: string, value: unknown): string {
+  const candidate = publicHttpsUrl(key, value, "https://api.retellai.com");
+  if (candidate.includes("#")) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} is the address Egma adds a path to, so it holds no ` +
+        `"#" fragment; it looks like https://api.retellai.com`,
     );
   }
   return candidate;
@@ -849,6 +919,86 @@ export const CONNECTION_REGISTRY: Readonly<
     ],
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
+    simulatorAdapter: true,
+    usesPlatformCarrier: false,
+  },
+  retell_playground: {
+    label: "Retell playground",
+    agentPlatforms: ["retell"],
+    /**
+     * Chat, and a chat with a **voice** agent — which is the whole of why this
+     * kind exists.
+     *
+     * `retell_chat_api` reaches a Retell *chat* agent. A Retell voice agent has
+     * no chat door there at all, so the only way to test one was to dial it.
+     * Retell's own dashboard tests a voice agent in text through the
+     * agent-playground-completion API, and this is that door: the same test
+     * suite over chat and over voice against one agent, which is the diagnostic
+     * the domain model promises — passes on text, fails on voice means the
+     * prompt is fine and the speech stack is broken.
+     *
+     * Voice is not admitted here, and never will be: a playground exchange
+     * synthesizes nothing and hears nothing. A voice simulation of the same
+     * agent is a phone or a web-call connection beside this one, on the same
+     * Egma agent, so both histories accumulate under one identity.
+     */
+    modalities: ["chat"],
+    // Retell brokers the exchange exactly as it brokers a chat session: Egma
+    // makes an outbound request and Retell runs the agent behind it.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_playground.api_key",
+        label: "Retell API key",
+        named: "a Retell playground connection",
+        config: {
+          retellAgentId: nonEmptyString,
+          // Left out by everybody but a test and a proxied deployment.
+          baseUrl: optional(retellApiUrl),
+        },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+          {
+            key: "baseUrl",
+            label: "Retell API URL",
+            kind: "url",
+            help: "Where Retell's API answers. Leave it empty to reach Retell itself; fill it in only for a deployment that goes through its own proxy.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the text exchanges this connection conducts. A read gives " +
+          "back its last four characters, so you can tell two keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
+      },
+    ],
+    // The same vendor agent as the voice connection beside it, deliberately:
+    // chat and voice land as two connections on **one** Egma agent, so the
+    // comparison the model promises is between two histories of one identity
+    // rather than between twins.
+    reuseKey: "retellAgentId",
+    // The plug ships. `egma_simulator.plugs.retell_playground.RetellPlayground`
+    // is registered for this kind and conducts the exchange: the whole history
+    // out, the agent's new messages back, with egma's answers carried on each
+    // request. So a run over a playground connection is one egma can conduct,
+    // and this says so in the same change that brought the adapter.
     simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
@@ -1165,6 +1315,62 @@ export function connectionIsConductable(
     descriptor.accessVariants.some((variant) => variant.id === accessVariant) &&
     descriptor.modalities.includes(modality as Modality)
   );
+}
+
+/**
+ * The connection types whose run start reads the agent's own platform.
+ *
+ * **A named set rather than a fact worked out from something else**, because
+ * what it unlocks is narrow and specific: the one door that opens a
+ * connection's sealed credential outside the simulator. A run over one of these
+ * kinds cannot honestly begin until Egma has read which version the agent
+ * serves and what that version's tools are, and reading either means reaching
+ * the platform with the connection's own key.
+ *
+ * Every other kind reads nothing at run start and gets nothing unsealed.
+ */
+const READS_PLATFORM_AT_RUN_START: ReadonlySet<string> = new Set([
+  // The playground names its version on every request, so the version has to
+  // be resolved once before the first one — and the three-class coverage stamp
+  // comes from the same read.
+  "retell_playground",
+]);
+
+/** Whether a run over this kind has to read the platform before it starts. */
+export function connectionTypeReadsPlatformAtRunStart(
+  connectionType: string,
+): boolean {
+  return READS_PLATFORM_AT_RUN_START.has(connectionType);
+}
+
+/**
+ * The config key, if any, whose value decides **where a connection's sealed
+ * credential is sent** — and which therefore may not be changed on its own.
+ *
+ * A sealed credential is write-only: a read never gives it back, so a member
+ * who can edit a connection is trusted to *replace* the secret, never to *see*
+ * it. On most kinds that holds on its own, because nothing a member writes
+ * moves where the secret goes. On a kind whose run start sends that secret to
+ * an address the config names, it does not: changing the address alone, and
+ * leaving the sealed key in place, aims the key the member cannot read at a
+ * host the member chose. That is a read of the secret by another name.
+ *
+ * So the key that names the address is declared here, and an edit that changes
+ * it has to supply the credential to send with it — you may redirect the key
+ * only if you also put a key there. The absence of an entry is the ordinary
+ * case: a kind whose secret goes to one fixed provider has no such key, and its
+ * config is free to change without a credential.
+ */
+const CREDENTIAL_REDIRECTING_CONFIG_KEY: Readonly<Record<string, string>> = {
+  // Egma's own control plane sends the connection's Retell key to `baseUrl` at
+  // run start, so moving `baseUrl` moves the key.
+  retell_playground: "baseUrl",
+};
+
+export function credentialRedirectingConfigKey(
+  connectionType: string,
+): string | undefined {
+  return CREDENTIAL_REDIRECTING_CONFIG_KEY[connectionType];
 }
 
 /** Whether this kind needs the deployment carrier on its claimed work order. */
