@@ -148,7 +148,7 @@ describe("discovering simulation agents", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("returns normalized chat and phone candidates, never provider data or the key", async () => {
+  it("returns normalized playground, web-call, chat and phone candidates, never provider data or the key", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
@@ -219,10 +219,21 @@ describe("discovering simulation agents", () => {
           name: "Front desk",
           modality: "voice",
           connectionCandidates: [
-            // The web call comes first, and it is offered whether or not the
-            // agent has a number: Egma places this call itself, so there is
-            // nothing to route. It is also the lane a mocked run is conducted
-            // over.
+            // The playground first: the chat door a voice agent otherwise has
+            // none of. It is offered for every voice agent — whether its engine
+            // is one the playground can reach is answered when the connection is
+            // confirmed, not from a listing.
+            {
+              agentPlatform: "retell",
+              connectionType: "retell_playground",
+              accessVariant: "retell_playground.api_key",
+              modality: "chat",
+              productLabel: "Retell playground",
+              config: { retellAgentId: "agent_voice_1" },
+            },
+            // The web call is offered whether or not the agent has a number:
+            // Egma places this call itself, so there is nothing to route. It is
+            // also the lane a mocked run is conducted over.
             {
               agentPlatform: "retell",
               connectionType: "retell_web_call",
@@ -261,8 +272,16 @@ describe("discovering simulation agents", () => {
           name: "Not routed",
           modality: "voice",
           // A voice agent nobody has routed a number to is still reachable:
-          // Egma opens a web call against it.
+          // over the playground in text, and over a web call Egma opens.
           connectionCandidates: [
+            {
+              agentPlatform: "retell",
+              connectionType: "retell_playground",
+              accessVariant: "retell_playground.api_key",
+              modality: "chat",
+              productLabel: "Retell playground",
+              config: { retellAgentId: "agent_voice_without_number" },
+            },
             {
               agentPlatform: "retell",
               connectionType: "retell_web_call",

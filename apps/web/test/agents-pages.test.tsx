@@ -253,6 +253,38 @@ const TYPES = {
     {
       agentPlatform: "retell",
       agentPlatformLabel: "Retell",
+      connectionType: "retell_playground",
+      accessVariant: "retell_playground.api_key",
+      accessVariantLabel: "Retell API key",
+      modality: "chat",
+      productLabel: "Retell playground",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "retellAgentId",
+          label: "Retell agent ID",
+          kind: "text",
+          required: true,
+          help: "The voice agent's own identifier in Retell.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialFields: [
+        {
+          field: "apiKey",
+          label: "Retell API key",
+          kind: "secret",
+          required: true,
+          help: "Copied from your Retell dashboard.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "retell",
+      agentPlatformLabel: "Retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       accessVariantLabel: "Public E.164 number",
@@ -1552,6 +1584,139 @@ describe("goal-first agent setup", () => {
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
+  });
+
+  /** A voice agent as discovery now describes one, playground door and all. */
+  const voiceWithPlayground = {
+    agents: [
+      {
+        platformAgentId: "agent_voice_1",
+        name: "Front desk",
+        modality: "voice",
+        connectionCandidates: [
+          {
+            agentPlatform: "retell",
+            connectionType: "retell_playground",
+            accessVariant: "retell_playground.api_key",
+            modality: "chat",
+            productLabel: "Retell playground",
+            config: { retellAgentId: "agent_voice_1" },
+          },
+          {
+            agentPlatform: "retell",
+            connectionType: "retell_web_call",
+            accessVariant: "retell_web_call.api_key",
+            modality: "voice",
+            productLabel: "Retell web call",
+            config: { retellAgentId: "agent_voice_1" },
+          },
+          {
+            agentPlatform: "retell",
+            connectionType: "phone_number",
+            accessVariant: "phone_number.public_e164",
+            modality: "voice",
+            productLabel: "Retell phone",
+            config: { phoneNumber: "+14155550100" },
+          },
+        ],
+      },
+    ],
+  };
+
+  it("leads a Simulation voice agent with the modality question, and chat mints the playground", async () => {
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: voiceWithPlayground },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: { ...AGENT, name: "Front desk", platformAgentId: "agent_voice_1" },
+            connection: { ...CONNECTION, connectionType: "retell_playground" },
+          },
+        },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    // The modality question leads: chat or voice, before any plumbing. A phone
+    // picker is not on screen yet.
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    expect(screen.queryByLabelText("Phone number*")).toBeNull();
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Chat/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+      ).toBe(true);
+    });
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    // Choosing text mints the playground with the same key, against the voice
+    // agent it conducts in text.
+    expect(registration?.body).toEqual({
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_playground",
+        accessVariant: "retell_playground.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_voice_1" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+  });
+
+  it("takes a Simulation voice agent to the phone picker when voice is chosen", async () => {
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: voiceWithPlayground },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: { ...AGENT, name: "Front desk", platformAgentId: "agent_voice_1" },
+            connection: MEASURED_CONNECTION,
+          },
+        },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: /^Voice/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // The voice route: the phone picker, which the modality question led into.
+    const numbers = (await screen.findByLabelText(
+      "Phone number*",
+    )) as HTMLSelectElement;
+    expect([...numbers.options].map((one) => one.value)).toContain(
+      "phone:+14155550100",
+    );
   });
 
   it("uses one Retell key for Both and stores the selected voice route", async () => {

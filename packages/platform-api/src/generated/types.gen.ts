@@ -86,8 +86,8 @@ export type DiscoverAgentsResponses = {
             modality: 'chat' | 'voice';
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
-                connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number';
-                accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
+                connectionType: 'retell_chat_api' | 'retell_playground' | 'retell_web_call' | 'phone_number';
+                accessVariant: 'retell_chat_api.api_key' | 'retell_playground.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
                 config: {

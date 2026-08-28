@@ -141,6 +141,7 @@ export type AgentSetupStep =
   | "platform"
   | "retell-key"
   | "retell-agent"
+  | "retell-modality"
   | "retell-phone"
   | "retell-chat"
   | "livekit-simulation"
@@ -155,11 +156,21 @@ export function stepAfterPlatform(
   return goal === "monitoring" ? "livekit-monitoring" : "livekit-simulation";
 }
 
-/** Retell reports modality. The person chooses the agent, not the modality. */
+/**
+ * Where a chosen Retell agent leads.
+ *
+ * A chat agent has one door and goes straight to it. A voice agent has two —
+ * chat over the playground, voice over a call — so when the goal is a
+ * simulation the flow asks which before any plumbing: that is the modality
+ * question, and it leads. Monitoring and Both need the voice connection for
+ * production pull, so they keep going to the voice route without the question.
+ */
 export function stepAfterRetellAgent(
   modality: "chat" | "voice",
+  goal: AgentSetupGoal,
 ): AgentSetupStep {
-  return modality === "voice" ? "retell-phone" : "retell-chat";
+  if (modality === "chat") return "retell-chat";
+  return goal === "simulation" ? "retell-modality" : "retell-phone";
 }
 
 /** The single Back graph shared by every rendering of the setup flow. */
@@ -180,7 +191,12 @@ export function previousAgentSetupStep({
       return "platform";
     case "retell-agent":
       return "retell-key";
+    case "retell-modality":
+      return "retell-agent";
     case "retell-phone":
+      // A voice agent reaches the phone step through the modality question when
+      // the goal is a simulation, and straight from the agent otherwise.
+      return goal === "simulation" ? "retell-modality" : "retell-agent";
     case "retell-chat":
       return "retell-agent";
     case "livekit-monitoring":
