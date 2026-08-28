@@ -70,21 +70,34 @@ A chat simulation is the same room with nobody speaking in it, so it gets
 the same treatment: :class:`ChatRoomStubBackend` is the real chat driver
 with the three requests it makes of a LiveKit answered here, and
 :class:`StubTextRoom` is the real text room with only its join stood in
-for. Everything a chat test then exercises is the driver's own — reading
-an utterance to its close, skipping egma's own words, deciding where a
-turn ends and waiting out the quiet period, and putting the mock-tool
-methods on egma's participant. What is scripted is only what the agent
-does, and the interesting scripts are the ones a real agent produces:
+for. Everything a chat test then exercises is the driver's own — stamping
+each stream at its header, reading it to its close, skipping egma's own
+words, reading the agent's own state, deciding where a turn ends and
+waiting out whatever it has to wait out, and putting the mock-tool methods
+on egma's participant. What is scripted is only what the agent does, and
+the interesting scripts are the ones a real agent produces:
 
 - ``greeting`` / ``replies`` — as above, except that one entry may be a
   **list** of utterances rather than one. That is a turn arriving in
   pieces, which is what an agent that says a filler and then answers
-  really sends.
+  really sends. Each utterance goes in as a *stream* handed to the
+  driver's header handler, never as a finished utterance on its queue.
+- ``ClosesLate(text, closes_after_seconds)`` in place of any of those
+  strings — an utterance whose stream opens with its turn and closes after
+  it. The one thing a queue of finished utterances cannot say, and the
+  shape the agent's opening words were lost in.
 - ``answer_delay_seconds`` — how long the agent is quiet before it starts
   a turn.
 - ``pause_seconds`` — the gap *inside* a turn, between two of its
   utterances. This is the tool-call pause, and it is the whole reason the
   turn does not end at the first close.
+- ``agent_states`` — what the agent publishes on ``lk.agent.state``, one
+  list per turn, each published once that turn's last stream has closed.
+  ``None`` is an agent that publishes nothing at all, and a turn scripted
+  as ``["listening"]`` alone is the coalesced one where egma never saw
+  ``thinking`` or ``speaking`` go by.
+- ``agent_state_at_start`` — the state a session announces when it starts,
+  before it has greeted anybody. It means ready, not finished.
 - ``agent_publishes_audio_track`` / ``marks_speech`` — the two wire facts
   that say an agent is speaking rather than typing, scriptable separately
   because they reach egma by different routes and either alone is enough.
@@ -106,11 +119,13 @@ from typing import Any
 
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.livekit_room import (
+    AGENT_STATE_ATTRIBUTE,
+    SPOKEN_TRACK_ATTRIBUTE,
+    TRANSCRIPTION_TOPIC,
     LiveKitChatRoomBackend,
     LiveKitRoomBackend,
     RoomSettings,
     TextRoom,
-    Utterance,
     platform_refusal,
 )
 from egma_simulator.media.room import answering
@@ -624,31 +639,130 @@ class StubLocalParticipant:
 
 
 class StubLocalRoom:
-    """What ``rtc.Room`` is to the text room: a participant, and a way out."""
+    """What ``rtc.Room`` is to the text room: a participant, a way out, and
+    every handler the driver registered on it.
+
+    The handlers are kept rather than ignored because they are the wire:
+    what LiveKit hands each event, and in what order, is the one thing a
+    fake cannot derive from the driver, and a script that reached past
+    them would prove nothing about the unpacking each one does.
+    """
 
     def __init__(self, participant: StubLocalParticipant) -> None:
         self.local_participant = participant
         self.left = False
+        self.handlers: dict[str, Any] = {}
+        """Every ``room.on`` handler, under the event name it answers."""
+        self.text_streams: dict[str, Any] = {}
+        """Every text-stream handler, under the topic it reads."""
+
+    def on(self, event: str) -> Any:
+        """``rtc.Room.on``, which is a decorator that keeps the handler."""
+
+        def keep(handler: Any) -> Any:
+            self.handlers[event] = handler
+            return handler
+
+        return keep
+
+    def register_text_stream_handler(self, topic: str, handler: Any) -> None:
+        self.text_streams[topic] = handler
 
     async def disconnect(self) -> None:
         self.left = True
 
 
+class StubParticipant:
+    """What the attributes event carries beside the attributes.
+
+    A participant object and never an identity string, because the driver
+    reads the identity off it: a fake that handed over the string already
+    would be doing the driver's work and proving its own.
+    """
+
+    def __init__(self, identity: str) -> None:
+        self.identity = identity
+
+
+@dataclass(frozen=True)
+class ClosesLate:
+    """One utterance whose stream opens with its turn and closes after it.
+
+    The shape a queue of finished utterances cannot express and the one a
+    real agent produces all the time: the header is on the wire and
+    stamped, and the words are still being written. Scripted with a delay
+    rather than an event so a test can place the close on either side of
+    the wait it is testing — inside it, where the words are still the
+    turn's, or beyond every bound, where they are lost and said to be.
+    """
+
+    text: str
+    closes_after_seconds: float
+
+
+Scripted = str | ClosesLate | list[str | ClosesLate]
+"""One scripted agent turn: one utterance, or several in order."""
+
+
+class ScriptedStreamInfo:
+    """What a text stream's header carries, as much as egma reads of it."""
+
+    def __init__(self, attributes: dict[str, str]) -> None:
+        self.attributes = attributes
+        self.topic = TRANSCRIPTION_TOPIC
+
+
+class ScriptedStream:
+    """One transcription stream, opened by the scripted agent.
+
+    Read by the driver's own reader task, so the stamping at the header,
+    the strip at the close, the drop of egma's own words and the line in
+    the log about a stream that never closed are all real code under test.
+    """
+
+    def __init__(
+        self, said: str, *, spoken: bool, closes_after_seconds: float = 0.0
+    ) -> None:
+        self.info = ScriptedStreamInfo(
+            {SPOKEN_TRACK_ATTRIBUTE: "TR_0001"} if spoken else {}
+        )
+        self._said = said
+        self._closes_after_seconds = closes_after_seconds
+        self.closed = asyncio.Event()
+        """Set where the wire would send the trailer. What a script waits
+        on to place the agent's state after its words, the way a session
+        produces them."""
+
+    async def read_all(self) -> str:
+        if self._closes_after_seconds:
+            await asyncio.sleep(self._closes_after_seconds)
+        self.closed.set()
+        return self._said
+
+
 class StubTextRoom(TextRoom):
     """The real text room, with the LiveKit under it answered here.
 
-    Only the join is stood in for, and everything a chat test then walks
-    is the driver's own code: reading each utterance to its close,
-    dropping egma's own words, waiting out the quiet period, deciding
-    where a turn ends, and offering the mock-tool methods on egma's
-    participant. What is scripted is only what the agent does.
+    Only reaching a LiveKit is stood in for, and everything a chat test
+    then walks is the driver's own code: registering the handlers it reads
+    the wire through, stamping each stream at its header, reading it to
+    its close, dropping egma's own words, taking the agent's own state off
+    the attribute channel, deciding where a turn ends and waiting out
+    whatever it has to wait out, and offering the mock-tool methods on
+    egma's participant. Even the join registers through the driver, so a
+    script fires the very handlers a real room fires. What is scripted is
+    only what the agent does.
     """
 
     def __init__(self, backend: ChatRoomStubBackend, **built: Any) -> None:
         super().__init__(**built)
         self._backend = backend
-        self._replies: list[str | list[str]] = list(backend.stub.replies)
+        self._replies: list[Scripted] = list(backend.stub.replies)
         self._speaking: asyncio.Task[None] | None = None
+        self._stating: set[asyncio.Task[None]] = set()
+        self._published_state: str | None = None
+        """The last state this agent really published. Only a change
+        travels the wire, so only a change goes out from here."""
         self.who_arrived: list[str] = []
 
     @property
@@ -657,17 +771,24 @@ class StubTextRoom(TextRoom):
 
     async def join(self) -> None:
         """Enter the room, with nothing under it but this script."""
-        self._room = StubLocalRoom(StubLocalParticipant(self))
+        room = StubLocalRoom(StubLocalParticipant(self))
+        # The driver's own registration, run here rather than stood in
+        # for: what a script fires below is the handler a real room fires,
+        # taking what a real room hands it.
+        self._watch(room)
+        self._room = room
         if self._backend.agent_is_coming:
             self.agent_arrives()
 
     async def leave(self) -> None:
         """Stop the agent mid-sentence, then leave the driver's own way."""
         speaking, self._speaking = self._speaking, None
-        if speaking is not None and not speaking.done():
-            speaking.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await speaking
+        stating, self._stating = self._stating, set()
+        for running in (speaking, *stating):
+            if running is not None and not running.done():
+                running.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await running
         await super().leave()
 
     async def perform_rpc(self, method: str, payload: str) -> str:
@@ -684,8 +805,38 @@ class StubTextRoom(TextRoom):
         self.arrivals.set()
         if self.stub.agent_publishes_audio_track:
             self.audio_published.set()
+        # A session announces itself the moment it starts, which is before
+        # it has greeted anybody. Scripted here rather than with the
+        # greeting's own states for exactly that reason: the state that
+        # arrives here means ready, and a rule that read it as finished
+        # would end the greeting before the agent said a word.
+        if self.stub.agent_state_at_start is not None:
+            self.agent_publishes_state(self.stub.agent_state_at_start)
         if self.stub.greeting is not None:
             self._agent_says(self.stub.greeting)
+
+    def agent_publishes_state(self, state: str) -> None:
+        """One ``lk.agent.state`` change, the way LiveKit delivers one.
+
+        Into the handler the driver registered for
+        ``participant_attributes_changed``, with the changed attributes
+        first and the participant second. That order is this event's
+        alone — every other participant event in ``livekit.rtc`` puts the
+        participant first — so it is the one thing here a fake must not
+        skip past: a stub calling one method deeper would leave the whole
+        suite green with the two arguments the wrong way round.
+
+        Only a *change* goes out, because only changed attributes travel.
+        An agent setting the state it is already in publishes nothing,
+        which is the same fact that makes two fast transitions coalesce
+        into one.
+        """
+        if state == self._published_state:
+            return
+        self._published_state = state
+        self._room.handlers["participant_attributes_changed"](
+            {AGENT_STATE_ATTRIBUTE: state}, StubParticipant(AGENT_IDENTITY)
+        )
 
     def persona_typed(self, topic: str, text: str) -> None:
         """Egma's turn arrives, and the agent takes its next one."""
@@ -696,49 +847,94 @@ class StubTextRoom(TextRoom):
             # The stream's header lands while the send is still resolving,
             # so the stamp is whatever the counter says mid-send — which
             # is the greeting era, because the turn has not begun yet.
-            self.utterances.put_nowait(
-                Utterance(
-                    text=late_greeting,
-                    spoken=self.stub.marks_speech,
-                    turn=self._turn,
-                )
+            self._agent_said(
+                ScriptedStream(late_greeting, spoken=self.stub.marks_speech),
+                AGENT_IDENTITY,
             )
         if self._replies:
             self._agent_says(self._replies.pop(0))
         elif self.stub.hangs_up_after_replies:
             self.ended.set()
 
-    def _agent_says(self, turn: str | list[str]) -> None:
-        said = [turn] if isinstance(turn, str) else list(turn)
+    def _agent_says(self, turn: Scripted) -> None:
+        said = [turn] if isinstance(turn, (str, ClosesLate)) else list(turn)
         self._speaking = asyncio.create_task(
             self._speaks(said), name="chat-room-stub-turn"
         )
 
-    async def _speaks(self, turn: list[str]) -> None:
+    async def _speaks(self, turn: list[str | ClosesLate]) -> None:
         """One turn, in however many utterances the script gives it.
 
         The gaps are really waited out rather than declared, because the
         thing under test is a rule about time: a pause inside a turn that
         the driver did not wait through would end the turn early, and a
         script that only claimed to pause could never catch that.
+
+        Every utterance goes in as a *stream* handed to the driver's own
+        header handler, never as a finished utterance dropped on its
+        queue. That is what lets a script say the thing a queue cannot —
+        this stream is open and its words are not here yet — and it means
+        the stamping, the reading and the dropping of egma's own words are
+        all the driver's code in every test below.
         """
-        # The turn is taken here, where the agent begins answering, because
-        # that is where its stream opens on a real wire. A reply that then
-        # takes longer than egma waited for it still belongs to the question
-        # it started answering — which is the whole point of stamping.
-        opened = self._turn
+        # Which turn the streams are stamped with is the driver's to
+        # decide, at each header, exactly as on a real wire. A reply that
+        # then takes longer than egma waited for it still belongs to the
+        # question it started answering — which is the whole point of
+        # stamping.
         if self.stub.answer_delay_seconds:
             await asyncio.sleep(self.stub.answer_delay_seconds)
+        opened = self._turn
+        streams: list[ScriptedStream] = []
         for spoken, said in enumerate(turn):
             if spoken and self.stub.pause_seconds:
                 await asyncio.sleep(self.stub.pause_seconds)
-            self.utterances.put_nowait(
-                Utterance(
-                    text=said, spoken=self.stub.marks_speech, turn=opened
-                )
+            stream = ScriptedStream(
+                said.text if isinstance(said, ClosesLate) else said,
+                spoken=self.stub.marks_speech,
+                closes_after_seconds=(
+                    said.closes_after_seconds if isinstance(said, ClosesLate) else 0.0
+                ),
             )
+            streams.append(stream)
+            self._agent_said(stream, AGENT_IDENTITY)
+        # Scheduled rather than awaited: the state still follows this
+        # turn's last close, and the departure below still does not wait
+        # for it. Awaiting it here made a scripted state a barrier the
+        # streams had to clear first, which quietly took the race out of
+        # every test that scripted both.
+        stating = asyncio.create_task(
+            self._then_states(opened, streams), name="chat-room-stub-states"
+        )
+        self._stating.add(stating)
+        stating.add_done_callback(self._stating.discard)
+        # The departure does not wait for the streams to be read, because
+        # on a real wire it does not: a participant's last words and its
+        # leaving reach egma through one queue and the words are read in a
+        # task the departure runs ahead of. That race is the whole reason
+        # the driver lets a departing stream settle, and a fake that
+        # queued the words first would never run it.
         if not self._replies and self.stub.hangs_up_after_replies:
             self.ended.set()
+
+    async def _then_states(
+        self, turn: int, streams: list[ScriptedStream]
+    ) -> None:
+        """Publish this turn's states, once its last stream has closed.
+
+        In that order because that is the order a real session produces
+        them: the words are forwarded and only then does the state go back
+        to listening. A script that published the state first would be
+        scripting an agent that finishes before it speaks, and would let a
+        broken rule pass.
+        """
+        scripted = self.stub.agent_states
+        if scripted is None or turn >= len(scripted):
+            return
+        for stream in streams:
+            await stream.closed.wait()
+        for state in scripted[turn]:
+            self.agent_publishes_state(state)
 
 
 class ChatRoomStubBackend(LiveKitChatRoomBackend):
@@ -789,14 +985,16 @@ class ChatStub:
     differs — which is what the agent does, never what egma does.
     """
 
-    greeting: str | None = None
+    greeting: Scripted | None = None
     """What the agent types the moment it is in the room. Absent: it joins
     and says nothing, and the persona opens."""
 
-    replies: list[str | list[str]] = field(default_factory=list)
+    replies: list[Scripted] = field(default_factory=list)
     """The agent's turns, in order, one per persona turn. A string is a
     turn that arrived whole; a list is a turn that arrived in pieces, which
-    is what an agent that says a filler and then answers really sends."""
+    is what an agent that says a filler and then answers really sends. A
+    :class:`ClosesLate` in either place is an utterance whose stream opens
+    with the rest of its turn and closes after them."""
 
     answer_delay_seconds: float = 0.0
     """How long the agent is quiet before it starts a turn."""
@@ -827,6 +1025,27 @@ class ChatStub:
     """True for the same agent reaching egma the other way: its words
     carrying LiveKit's transcribed-track mark. Either one alone is enough,
     so they are scripted apart."""
+
+    agent_states: list[list[str]] | None = None
+    """The states the agent publishes on ``lk.agent.state``, one list per
+    turn, turn nought being the greeting's. Each turn's states are
+    published once that turn's last stream has closed, which is the order a
+    real session produces them in.
+
+    ``None`` — the default — is an agent that publishes no state at all,
+    which is every agent that is not a LiveKit session and is why the
+    quiet period is still a real path. A turn scripted with
+    ``["listening"]`` alone is the coalesced case: the platform dropped the
+    intermediate publishes and egma never saw ``thinking`` or ``speaking``,
+    which is exactly why nothing may wait to see them. A state the agent
+    is already in publishes nothing, here as on the wire, so repeating one
+    from the turn before scripts silence rather than a second arrival."""
+
+    agent_state_at_start: str | None = None
+    """A state published the moment the worker arrives, before any
+    greeting. ``listening`` here is what a real session announces when it
+    starts, and it means ready rather than finished — the one state a
+    turn-end rule must not act on."""
 
     refuses_room: str | None = None
     refuses_dispatch: str | None = None

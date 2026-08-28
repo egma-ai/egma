@@ -139,7 +139,7 @@ export type GenerateStepOptions = {
 export type BetweenReview = {
   /** Set only when the walk cannot carry on from here. */
   readonly halted: ExitReport | null;
-  /** Files outside `egma/` it changed, for the gate to name. */
+  /** Integration files outside `egma/` reported for the gate to name. */
   readonly changed?: readonly string[] | undefined;
 };
 

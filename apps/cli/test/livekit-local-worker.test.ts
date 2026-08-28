@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   LIVEKIT_WORKER_READY_MARK,
+  localLiveKitWorkerFileIssue,
   startLocalLiveKitWorker,
   windowsTreeKillArguments,
   windowsTreeKillFailed,
@@ -28,6 +29,21 @@ async function helper(source: string): Promise<{ readonly dir: string; readonly 
 }
 
 describe("the local LiveKit worker", () => {
+  it("checks launcher file compatibility without reading customer source", () => {
+    expect(
+      localLiveKitWorkerFileIssue("src/agent.py", "pyproject.toml"),
+    ).toBeNull();
+    expect(
+      localLiveKitWorkerFileIssue("service/..worker.py", "service/requirements.txt"),
+    ).toBeNull();
+    expect(localLiveKitWorkerFileIssue("agent.py", "setup.cfg")).toContain(
+      "supports only pyproject.toml or requirements.txt",
+    );
+    expect(
+      localLiveKitWorkerFileIssue("agent.py", "service/requirements.txt"),
+    ).toContain("must be in the LiveKit worker project directory");
+  });
+
   it("keeps credentials in the child environment and redacts relayed output", async () => {
     const apiKey = "livekit-secret";
     const apiSecret = "livekit-secret-value";

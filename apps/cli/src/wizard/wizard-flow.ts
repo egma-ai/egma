@@ -36,6 +36,7 @@ import {
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
 import { folderPathsIn, readConfig } from "../folder/egma-folder.ts";
 import {
+  localLiveKitWorkerFileIssue,
   startLocalLiveKitWorker,
   type LocalLiveKitWorker,
   type StartLocalLiveKitWorker,
@@ -71,6 +72,7 @@ import {
   type LiveKitConnected,
 } from "./livekit-connection-setup-step.ts";
 import { mockAuthoringStep } from "./mock-authoring-step.ts";
+import { acceptRepositoryFileClaim } from "./repository-file-claim.ts";
 import { runStep } from "./run-step.ts";
 import { ACTION_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
@@ -78,7 +80,6 @@ import {
   workerIntegrationStep,
   type WorkerIntegration,
 } from "./worker-integration-step.ts";
-import { verifyWorkerIntegration } from "./worker-integration-verifier.ts";
 import {
   INITIAL_WIZARD_STATE,
   transitionWizard,
@@ -576,14 +577,9 @@ async function runWizardWithAgent(
   const goal = goalFrom(said ?? null);
   advance({ type: "goal-chosen", goal });
 
-  // One task owns the customer's worker and dependency manifest for the whole
-  // sitting. It receives the final mode once, before remote monitoring setup,
-  // test generation, or mock authoring can begin.
-  //
-  // It also runs before the connection step asks chat or voice, which is why
-  // that task carries the chat setup for every walk rather than for a chat one:
-  // the alternative is a second visit to the worker, and the whole point of one
-  // owner is that there is no second visit.
+  // The coding agent receives the complete worker integration before remote
+  // setup begins. It reports the files and names the deterministic steps need;
+  // those steps do not parse or approve the customer's source.
   let workerIntegration: WorkerIntegration | null = null;
   if (agentPlatform === "livekit") {
     workerIntegration = await workerIntegrationStep({
@@ -599,11 +595,11 @@ async function runWizardWithAgent(
       ui.setExit(workerIntegration.halted);
       return workerIntegration.halted;
     }
-    if (!workerIntegration.supportsSdk || workerIntegration.contract === null) {
+    if (!workerIntegration.supportsSdk || workerIntegration.files === null) {
       const report: ExitReport = {
         kind: "failed",
         reason:
-          `${workerIntegration.unverifiedReason ?? "Egma could not verify this LiveKit worker's Python integration."} ` +
+          `${workerIntegration.reason ?? "The coding agent did not complete the LiveKit worker integration."} ` +
           "Egma did not create remote resources or start a local worker.",
       };
       ui.setExit(report);
@@ -644,7 +640,7 @@ async function runWizardWithAgent(
       facts: found.facts,
       integratedAgentName: monitoringAgentName,
       configuredAgentId: configured.kind === "found" ? configured.id : null,
-      workerWired: workerIntegration?.entry !== null,
+      workerWired: workerIntegration?.files !== null,
       ...(options.connectionFetchImpl === undefined
         ? {}
         : { fetchImpl: options.connectionFetchImpl }),
@@ -745,7 +741,10 @@ async function runWizardWithAgent(
       // offered beside discovery's and the walk stops only when neither source
       // has a name.
       integratedDispatchName: workerIntegration?.dispatchName ?? "",
-      entrypoint: found.facts.get("entrypoint") ?? "",
+      entrypoint:
+        workerIntegration?.files?.worker ?? found.facts.get("entrypoint") ?? "",
+      dependencyManifest:
+        workerIntegration?.files?.dependencyManifest ?? "",
       // The row monitoring created, when it ran: one agent row for one voice
       // agent, so this connection attaches to it rather than starting a second.
       existingAgent:
@@ -770,6 +769,7 @@ async function runWizardWithAgent(
   advance({ type: "connection-ready" });
 
   const registered = connected.connected.registered;
+  const localWorkerSetup = connected.connected.localWorker;
   const written = await generateStep({
     ui,
     drivenAgent,
@@ -801,41 +801,52 @@ async function runWizardWithAgent(
         },
       });
       if (authored.halted !== null) return { halted: authored.halted };
-      if (workerIntegration === null || workerIntegration.contract === null) {
+      if (workerIntegration === null || workerIntegration.files === null) {
         return {
           halted: {
             kind: "failed",
             reason:
-              "Egma has no verified LiveKit worker integration, so it did not open review or push tests.",
+              "The coding agent did not complete the LiveKit worker integration, so Egma did not show the local test review or upload tests to Egma.",
           },
         };
       }
-      const afterAuthoring = await verifyWorkerIntegration(
-        cwd,
-        workerIntegration.contract,
-      );
-      if (afterAuthoring.kind === "unverified") {
-        return {
-          halted: {
-            kind: "failed",
-            reason:
-              `${afterAuthoring.reason} ` +
-              "Egma did not open review, push tests, start the local worker, or create a run.",
-          },
-        };
+      if (localWorkerSetup !== null) {
+        const [worker, dependency] = await Promise.all([
+          acceptRepositoryFileClaim(
+            cwd,
+            localWorkerSetup.entrypoint,
+            "the LiveKit worker",
+          ),
+          acceptRepositoryFileClaim(
+            cwd,
+            localWorkerSetup.dependencyManifest,
+            "the Python dependency manifest",
+          ),
+        ]);
+        const refusal =
+          worker.kind === "refused"
+            ? worker.reason
+            : dependency.kind === "refused"
+              ? dependency.reason
+              : localLiveKitWorkerFileIssue(worker.file, dependency.file);
+        if (refusal !== null) {
+          return {
+            halted: {
+              kind: "failed",
+              reason: `${refusal} Egma did not show the local test review or upload tests to Egma.`,
+            },
+          };
+        }
       }
       advance({ type: "mocks-ready" });
       return {
         halted: null,
-        changed:
-          workerIntegration === null || workerIntegration.contract === null
-            ? []
-            : [
-                ...new Set([
-                  workerIntegration.contract.workerFile,
-                  workerIntegration.contract.dependencyFile,
-                ]),
-              ],
+        changed: [
+          ...new Set([
+            workerIntegration.files.worker,
+            workerIntegration.files.dependencyManifest,
+          ]),
+        ],
       };
     },
     onReviewApproved: (count) => advance({ type: "review-approved", count }),
@@ -850,50 +861,14 @@ async function runWizardWithAgent(
     return written.report;
   }
 
-  // Read the worker again after every coding-agent task and before starting a
-  // local process or creating a run. A later task cannot silently undo the one
-  // integration owner's work.
-  if (agentPlatform === "livekit" && workerIntegration !== null) {
-    const finalVerification =
-      workerIntegration.contract === null
-        ? {
-            kind: "unverified" as const,
-            reason:
-              workerIntegration.unverifiedReason ??
-              "Egma has no verified LiveKit worker integration for this run.",
-          }
-        : await verifyWorkerIntegration(cwd, workerIntegration.contract);
-    if (finalVerification.kind === "unverified") {
-      const report: ExitReport = {
-        kind: "failed",
-        reason:
-          `${finalVerification.reason} ` +
-          "Egma did not start the local worker or create a run.",
-      };
-      ui.setExit(report);
-      return report;
-    }
-  }
-
   let localWorker: LocalLiveKitWorker | null = null;
   if (connected.connected.localWorker !== null) {
-    const dependencyManifest = workerIntegration?.contract?.dependencyFile;
-    if (dependencyManifest === undefined) {
-      const report: ExitReport = {
-        kind: "failed",
-        reason:
-          "Egma has no verified Python dependency manifest for this LiveKit worker, so it did not start the worker or create a run.",
-      };
-      ui.setExit(report);
-      return report;
-    }
     ui.pushStatus(
       `${ACTION_MARK} Starting local LiveKit worker ${connected.connected.localWorker.dispatchName}.`,
     );
     const started = await (options.startLiveKitWorker ?? startLocalLiveKitWorker)({
       cwd,
       ...connected.connected.localWorker,
-      dependencyManifest,
       signal,
       onOutput: (chunk) => log.write(chunk),
     });

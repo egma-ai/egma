@@ -66,11 +66,11 @@ export type MonitoringSetupOptions = {
   readonly goal: "monitoring" | "both";
   /** What the find-the-agent step reported, by fact name. */
   readonly facts: Facts;
-  /** The name settled by the one worker-integration owner, when it found one. */
+  /** The name reported by the coding agent after worker integration. */
   readonly integratedAgentName: string | null;
   /** The stable agent already committed for this worker, when there is one. */
   readonly configuredAgentId: string | null;
-  /** Whether the requested worker integration was verified before setup. */
+  /** Whether the coding agent reported a completed worker integration. */
   readonly workerWired: boolean;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
   /** How long to wait for the first conversation. Egma's own pace when omitted. */
@@ -270,7 +270,7 @@ async function watchOnRetell(
 /**
  * LiveKit: platform registration, credential minting, and environment custody.
  *
- * The worker was already reconciled by the flow's single integration owner.
+ * The worker was already reconciled by the developer's coding agent.
  * This step owns only the remote setup and the environment values it mints.
  */
 async function pushFromLiveKit(

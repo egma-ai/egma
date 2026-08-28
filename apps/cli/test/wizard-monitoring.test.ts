@@ -65,7 +65,7 @@ const startFakeLocalWorker: StartLocalLiveKitWorker = async () => {
   };
 };
 
-/** The one task that owns the worker and dependency manifest for every mode. */
+/** The coding-agent task that completes the worker integration for every mode. */
 const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mocked-world dispatch and nothing else. */
 const MOCK_AUTHORING_TASK = "Write the mocked world for";
@@ -139,15 +139,6 @@ const WORKER_BOTH = WORKER_BEFORE.replace(
     "from livekit import agents",
     "from egma import mockable, monitor_livekit\nfrom livekit import agents",
   );
-
-/** A testing-only rewrite, used to prove the final Both check catches clobbering. */
-const WORKER_TESTING_ONLY = WORKER_BEFORE.replace(
-  "    await session.start(agent=agent, room=ctx.room)",
-  "    await mockable(agent, ctx, session)\n    await session.start(agent=agent, room=ctx.room)",
-).replace(
-  "from livekit import agents",
-  "from egma import mockable\nfrom livekit import agents",
-);
 
 let platform: Platform;
 let workspace: Workspace;
@@ -261,6 +252,7 @@ function appliesBothEntries(): FakeStep[] {
     { kind: "say", text: "egma:found worker-entry agent.py\n" },
     { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -274,13 +266,6 @@ function reportsIntegratedWorker(agentName = "front-desk"): FakeStep[] {
       text: "egma:found dependency-manifest requirements.txt\n",
     },
     { kind: "say", text: `egma:found agent-name ${agentName}\n` },
-    { kind: "stop", reason: "end_turn" },
-  ];
-}
-
-function clobbersMonitoringDuringMockAuthoring(): FakeStep[] {
-  return [
-    { kind: "write-file", path: "agent.py", content: WORKER_TESTING_ONLY },
     { kind: "stop", reason: "end_turn" },
   ];
 }
@@ -702,8 +687,12 @@ describe("choosing monitoring on LiveKit", () => {
     // environment file — the key is Egma's own code's to write.
     const sent = await dispatched();
     const edit = sent.find((task) => task.includes(WORKER_INTEGRATION_TASK)) ?? "";
+    const task = edit.slice(edit.lastIndexOf("# Your task"));
     expect(edit).toContain("Never open, write, or mention a `.env` file");
     expect(edit).not.toContain(minted.secret);
+    expect(task).not.toContain("## Chat setup");
+    expect(task).not.toContain("## The worker's name");
+    expect(task).not.toContain("egma:found dispatch-name");
 
     // The lines survive the screen, one to a line, for the deployment.
     expect(exitLines(report)).toContain(`export EGMA_API_KEY=${minted.secret}`);
@@ -1120,15 +1109,15 @@ describe("choosing both", () => {
       worker.indexOf("await session.start"),
     );
 
-    // The final mode reaches one worker owner with the exact public SDK
+    // The final mode reaches one coding-agent task with the exact public SDK
     // reference. The later mock-world task owns only mock answers and test
-    // overrides, so it cannot contradict or undo the integration.
+    // overrides.
     const sent = await dispatched();
-    const workerOwners = sent.filter(
-      (task) => task.includes("worker file where") && task.includes("dependency manifest"),
+    const integrations = sent.filter((task) =>
+      task.includes(WORKER_INTEGRATION_TASK),
     );
-    expect(workerOwners).toHaveLength(1);
-    const integration = workerOwners[0] ?? "";
+    expect(integrations).toHaveLength(1);
+    const integration = integrations[0] ?? "";
     expect(integration).toContain(WORKER_INTEGRATION_TASK);
     expect(integration).toContain("final mode is **both**");
     const sdkReference = (
@@ -1151,37 +1140,6 @@ describe("choosing both", () => {
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
   });
 
-  it("propagates a verifier rejection when a later task removes monitoring", async () => {
-    await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
-    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
-
-    const { report, ui } = await walk({
-      goal: "both",
-      steps: liveKitDiscovery(),
-      stepsByTask: [
-        { contains: WORKER_INTEGRATION_TASK, steps: appliesBothEntries() },
-        { contains: MOCK_AUTHORING_TASK, steps: clobbersMonitoringDuringMockAuthoring() },
-        {
-          contains: GENERATE_TASK,
-          steps: writesOneTest("late-repair", "front-desk-tests"),
-        },
-      ],
-      answers: {
-        "connection:variant": "livekit_room.project_credentials",
-        "connection:config:url": "wss://acme.livekit.cloud",
-        "connection:credentials:apiKey": LIVEKIT_API_KEY,
-        "connection:credentials:apiSecret": LIVEKIT_API_SECRET,
-      },
-    });
-
-    expect(report).toMatchObject({ kind: "failed" });
-    if (report.kind !== "failed") throw new Error("expected the final verification");
-    expect(report.reason).toContain("worker changed after integration approval");
-    expect(report.reason).toContain("did not open review, push tests");
-    expect(ui.record.gate).toBeNull();
-    expect(platform.tests.tests).toHaveLength(0);
-    expect(platform.running.runs).toHaveLength(0);
-  });
 });
 
 describe("the .env writer's own guarantees", () => {

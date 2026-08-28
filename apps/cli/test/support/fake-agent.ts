@@ -11,7 +11,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Readable, Writable } from "node:stream";
@@ -43,6 +43,7 @@ export type FakeStep =
     }
   | { kind: "read-file"; path: string; recordAs: string }
   | { kind: "write-file"; path: string; content: string; recordAs?: string }
+  | { kind: "remove-file"; path: string }
   | { kind: "cursor-ask-question"; recordAs: string }
   | { kind: "cursor-create-plan"; recordAs: string }
   /** Noise on standard error, the way a real agent writes its own progress. */
@@ -272,6 +273,10 @@ async function run(): Promise<void> {
           flush();
           break;
         }
+
+        case "remove-file":
+          rmSync(path.resolve(cwd, step.path), { force: true });
+          break;
 
         case "write-file": {
           try {

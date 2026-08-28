@@ -107,6 +107,60 @@ const WORKER_AFTER = WORKER_BEFORE.replace(
   "from egma import mockable\nfrom livekit import agents",
 );
 
+/** The inline-agent shape used by LiveKit's appointment-scheduling example. */
+const APPOINTMENT_WORKER_BEFORE = [
+  "from livekit import agents",
+  "from livekit.agents import Agent, AgentSession",
+  "",
+  "",
+  "class DefaultAgent(Agent):",
+  "    pass",
+  "",
+  "",
+  "async def entrypoint(ctx: agents.JobContext) -> None:",
+  "    await ctx.connect()",
+  "    session = AgentSession()",
+  "    await session.start(agent=DefaultAgent(), room=ctx.room)",
+  "",
+  "",
+  'if __name__ == "__main__":',
+  "    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))",
+  "",
+].join("\n");
+
+/** The complete edit the coding agent must make for an Egma testing run. */
+const APPOINTMENT_WORKER_AFTER = [
+  "from egma import mockable",
+  "from livekit import agents",
+  "from livekit.agents import Agent, AgentSession",
+  "from livekit.agents.voice.room_io import RoomOptions, TextOutputOptions",
+  "",
+  "",
+  "class DefaultAgent(Agent):",
+  "    pass",
+  "",
+  "",
+  "async def entrypoint(ctx: agents.JobContext) -> None:",
+  "    await ctx.connect()",
+  '    chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+  "    options = RoomOptions(",
+  "        audio_input=False,",
+  "        audio_output=False,",
+  "        text_output=TextOutputOptions(sync_transcription=False),",
+  "    ) if chat else RoomOptions()",
+  "    agent = DefaultAgent()",
+  "    session = AgentSession()",
+  "    await mockable(agent, ctx, session)",
+  "    await session.start(agent=agent, room=ctx.room, room_options=options)",
+  "",
+  "",
+  'if __name__ == "__main__":',
+  "    agents.cli.run_app(",
+  '        agents.WorkerOptions(entrypoint_fnc=entrypoint, agent_name="appointment-scheduling"),',
+  "    )",
+  "",
+].join("\n");
+
 /** A worker that already sends monitoring evidence before Testing is chosen. */
 const WORKER_MONITORED_BEFORE = WORKER_BEFORE.replace(
   "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
@@ -175,6 +229,42 @@ function integrationSteps(): FakeStep[] {
   ];
 }
 
+function appointmentIntegrationSteps(): FakeStep[] {
+  return [
+    {
+      kind: "write-file",
+      path: "agent.py",
+      content: APPOINTMENT_WORKER_AFTER,
+    },
+    {
+      kind: "write-file",
+      path: "requirements.txt",
+      content: REQUIREMENTS_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name appointment-scheduling\n" },
+    { kind: "say", text: "egma:found dispatch-name appointment-scheduling\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function unsupportedManifestIntegrationSteps(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    {
+      kind: "write-file",
+      path: "setup.cfg",
+      content: "[options]\ninstall_requires =\n    egma>=0.2.0\n",
+    },
+    { kind: "say", text: "egma:found worker-entry agent.py\n" },
+    { kind: "say", text: "egma:found dependency-manifest setup.cfg\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "say", text: "egma:found dispatch-name front-desk-worker\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
 function integrationPreservingMonitoringWithoutConnect(): FakeStep[] {
   return [
     {
@@ -212,6 +302,14 @@ function mockingSteps(): FakeStep[] {
 
 function noMockingSteps(): FakeStep[] {
   return [
+    { kind: "say", text: "egma:none no external dependency tools to mock\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+function mockingRemovesManifestSteps(): FakeStep[] {
+  return [
+    { kind: "remove-file", path: "requirements.txt" },
     { kind: "say", text: "egma:none no external dependency tools to mock\n" },
     { kind: "stop", reason: "end_turn" },
   ];
@@ -394,13 +492,13 @@ function testFile(): string {
   ].join("\n");
 }
 
-function writingSteps(): FakeStep[] {
+function writingSteps(suiteDirectory = "front-desk-tests"): FakeStep[] {
   return [
     { kind: "say", text: "egma:plan greets-a-new-customer\n" },
     { kind: "say", text: "egma:writing greets-a-new-customer\n" },
     {
       kind: "write-file",
-      path: "egma/tests/front-desk-tests/greets-a-new-customer.md",
+      path: `egma/tests/${suiteDirectory}/greets-a-new-customer.md`,
       content: testFile(),
     },
     { kind: "say", text: "egma:wrote greets-a-new-customer\n" },
@@ -431,6 +529,7 @@ function connectionSetupStep(
     readonly dispatchName?: string;
     readonly integratedDispatchName?: string;
     readonly entrypoint?: string;
+    readonly dependencyManifest?: string;
     readonly fetchImpl?: typeof fetch;
   } = {},
 ) {
@@ -446,6 +545,7 @@ function connectionSetupStep(
     dispatchName: discovery.dispatchName ?? "front-desk-worker",
     integratedDispatchName: discovery.integratedDispatchName ?? "",
     entrypoint: discovery.entrypoint ?? "agent.py",
+    dependencyManifest: discovery.dependencyManifest ?? "requirements.txt",
     fetchImpl: discovery.fetchImpl ?? connectionFetch(),
   });
 }
@@ -745,6 +845,7 @@ describe("LiveKit in the wizard", () => {
     readonly entrypoint?: string;
     /** What discovery reports, which is `unknown` for a nameless worker. */
     readonly dispatchName?: string;
+    readonly suiteDirectory?: string;
   }) {
     const script = await workspace.script({
       steps: [{ kind: "stop", reason: "end_turn" }],
@@ -771,7 +872,10 @@ describe("LiveKit in the wizard", () => {
         },
         { contains: WORKER_INTEGRATION_TASK, steps: options.integration },
         { contains: MOCK_AUTHORING_TASK, steps: options.mocking ?? [] },
-        { contains: "Write 1 test", steps: writingSteps() },
+        {
+          contains: "Write 1 test",
+          steps: writingSteps(options.suiteDirectory),
+        },
       ],
     });
     const ui = new HeadlessUI({
@@ -833,7 +937,7 @@ describe("LiveKit in the wizard", () => {
       worker.indexOf("await session.start"),
     );
     expect(ui.record.statuses).toContain(
-      "◆ Egma's requested worker integration is in agent.py",
+      "◆ Codex completed the LiveKit worker integration in agent.py",
     );
     expect(ui.record.statuses).toEqual(
       expect.arrayContaining([
@@ -864,8 +968,76 @@ describe("LiveKit in the wizard", () => {
       { tool: "check_availability", says: "answers" },
     ]);
     // The worker and its Python dependency manifest are both named on the same
-    // screen: pressing enter runs only after Egma has verified both files.
+    // screen from the coding agent's completion receipt.
     expect(ui.record.gate?.changed).toEqual(["agent.py", "requirements.txt"]);
+  });
+
+  it("accepts the coding agent's complete edit of an inline-agent worker", async () => {
+    await writeFile(
+      path.join(workspace.dir, "agent.py"),
+      APPOINTMENT_WORKER_BEFORE,
+      "utf8",
+    );
+
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      dispatchName: "unknown",
+      integration: appointmentIntegrationSteps(),
+      mocking: noMockingSteps(),
+      suiteDirectory: "appointment-scheduling-tests",
+    });
+
+    if (report.kind === "failed") throw new Error(report.reason);
+    expect(report).toMatchObject({ kind: "run-started" });
+    expect(localWorkerRuns[0]).toMatchObject({
+      entrypoint: "agent.py",
+      dependencyManifest: "requirements.txt",
+      dispatchName: "appointment-scheduling",
+    });
+    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(
+      APPOINTMENT_WORKER_AFTER,
+    );
+  });
+
+  it("rejects an unsupported local manifest before remote setup or test writing", async () => {
+    const { report } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: unsupportedManifestIntegrationSteps(),
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        "supports only pyproject.toml or requirements.txt",
+      ),
+    });
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.suites.suites).toHaveLength(0);
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("rechecks local worker paths after all coding-agent work and before upload", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationSteps(),
+      mocking: mockingRemovesManifestSteps(),
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        "requirements.txt is not a readable file inside this repository",
+      ),
+    });
+    if (report.kind !== "failed") throw new Error("expected path recheck failure");
+    expect(report.reason).toContain(
+      "did not show the local test review or upload tests to Egma",
+    );
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
   });
 
   /**
@@ -893,11 +1065,9 @@ describe("LiveKit in the wizard", () => {
   });
 
   /**
-   * One dispatch, three changes: the mode's SDK entry, the chat setup, and the
-   * worker's name. The task is handed over before the modality is chosen, so
-   * it asks for all three every time rather than for a subset it cannot know.
+   * One testing dispatch carries the SDK entry, chat setup, and worker name.
    */
-  it("asks one worker owner for the SDK entry, the chat setup, and the name", async () => {
+  it("gives the coding agent the full integration without source restrictions", async () => {
     await liveKitLane({
       framework: "livekit-agents",
       integration: integrationSteps(),
@@ -924,6 +1094,13 @@ describe("LiveKit in the wizard", () => {
     );
     expect(task).toContain("## The worker's name");
     expect(task).toContain("egma:found dispatch-name front-desk");
+    expect(task).toContain("its lockfile");
+    expect(task).toContain(
+      "relevant local validation and package-manager commands",
+    );
+    expect(task).not.toContain("at most two files");
+    expect(task).not.toContain("manifest that already manages");
+    expect(task).not.toContain("Run no command that reaches the network");
   });
 
   it("runs with no mocked world when the agent has no external dependency tools", async () => {
@@ -995,7 +1172,7 @@ describe("LiveKit in the wizard", () => {
       "egma:found dependency-manifest pyproject.toml",
     );
     expect(integration).toContain(
-      "including an\nEgma entry that was already there before this task",
+      "Preserve unrelated\nworker behavior and every Egma capability that is already present",
     );
     expect(integration.replace(/\s+/gu, " ")).toContain(
       "When the worker relies on `AgentSession.start` to connect, do not add another connection call",
@@ -1005,21 +1182,15 @@ describe("LiveKit in the wizard", () => {
     );
   });
 
-  it("does not dispatch an edit when the pre-edit worker cannot be snapshotted", async () => {
-    const before = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
-    const { report, ui } = await liveKitLane({
+  it("uses the worker path the coding agent reports after stale discovery", async () => {
+    const { report } = await liveKitLane({
       framework: "livekit-agents",
       entrypoint: "missing.py",
       integration: integrationSteps(),
     });
 
-    expect(report.kind).toBe("failed");
-    expect(ui.record.statuses.join("\n")).toContain(
-      "could not snapshot missing.py inside this repository before integration",
-    );
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(
-      before,
-    );
+    expect(report.kind).toBe("run-started");
+    expect(localWorkerRuns[0]?.entrypoint).toBe("agent.py");
     const driven = JSON.parse(
       await readFile(
         path.join(workspace.dir, "fake-agent-report.json"),
@@ -1030,9 +1201,8 @@ describe("LiveKit in the wizard", () => {
       driven.instructions.some((task) =>
         task.includes(WORKER_INTEGRATION_TASK),
       ),
-    ).toBe(false);
-    expect(platform.running.runs).toHaveLength(0);
-    expect(localWorkerRuns).toHaveLength(0);
+    ).toBe(true);
+    expect(platform.running.runs).toHaveLength(1);
   });
 
   /**
@@ -1068,7 +1238,7 @@ describe("LiveKit in the wizard", () => {
     // No seam was claimed and none was made.
     expect(
       ui.record.statuses.some((line) =>
-        line.includes("requested worker integration is in"),
+        line.includes("completed the LiveKit worker integration in"),
       ),
     ).toBe(false);
     expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(

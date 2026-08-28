@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -249,6 +250,55 @@ async function readJsonLines(file: string): Promise<Record<string, unknown>[]> {
 }
 
 describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", () => {
+  it("refuses worker paths that escape through symlinks", async () => {
+    const { bin, repository, root } = await createFixture(
+      "egma-livekit-helper-path-",
+    );
+    const outsideWorker = path.join(root, "outside-agent.py");
+    await Promise.all([
+      writeFile(outsideWorker, "# outside\n", "utf8"),
+      writeFile(path.join(repository, "requirements.txt"), "egma>=0.2.0\n", "utf8"),
+    ]);
+    await symlink(outsideWorker, path.join(repository, "agent.py"));
+
+    const run = await runHelper({
+      bin,
+      repository,
+      entrypoint: "agent.py",
+      manifest: "requirements.txt",
+      dispatchName: "front-desk",
+      env: LIVEKIT_ENV,
+      stopWhenReady: false,
+    });
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain("--entrypoint must not point outside --cwd");
+  });
+
+  it("refuses dependency paths that resolve to environment files", async () => {
+    const { bin, repository } = await createFixture("egma-livekit-helper-env-");
+    await Promise.all([
+      writeFile(path.join(repository, "agent.py"), "# worker\n", "utf8"),
+      writeFile(path.join(repository, ".env.local"), "EGMA_API_KEY=secret\n", "utf8"),
+    ]);
+    await symlink(".env.local", path.join(repository, "requirements.txt"));
+
+    const run = await runHelper({
+      bin,
+      repository,
+      entrypoint: "agent.py",
+      manifest: "requirements.txt",
+      dispatchName: "front-desk",
+      env: LIVEKIT_ENV,
+      stopWhenReady: false,
+    });
+
+    expect(run.code).toBe(1);
+    expect(run.stderr).toContain(
+      "--dependency-manifest must not name an environment file",
+    );
+  });
+
   it("uses env credentials, waits for registration, redacts output, and stops cleanly", async () => {
     const { bin, repository, root } = await createFixture("egma-livekit-helper-");
     const observedWorker = path.join(root, "observed-worker.json");
@@ -329,7 +379,7 @@ describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", 
     const python = await readJsonLines(observedPython);
     expect(python.map((command) => command.args)).toEqual([
       expect.arrayContaining(["-c"]),
-      ["-m", "pip", "install", "-r", requirements],
+      ["-m", "pip", "install", "-r", await realpath(requirements)],
       expect.arrayContaining(["-c"]),
     ]);
     for (const command of python) {
