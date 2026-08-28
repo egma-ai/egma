@@ -976,13 +976,12 @@ export const CONNECTION_REGISTRY: Readonly<
     // comparison the model promises is between two histories of one identity
     // rather than between twins.
     reuseKey: "retellAgentId",
-    // No plug yet. The registry may not claim what no code can run, so this
-    // flips to `true` in the same commit as the simulator adapter that
-    // conducts a playground exchange — `retell_playground` in
-    // `egma_simulator.plugs`. Until then a connection of this kind can be
-    // registered, and a run over it is refused at creation rather than queued
-    // forever for a conductor that does not exist.
-    simulatorAdapter: false,
+    // The plug ships. `egma_simulator.plugs.retell_playground.RetellPlayground`
+    // is registered for this kind and conducts the exchange: the whole history
+    // out, the agent's new messages back, with egma's answers carried on each
+    // request. So a run over a playground connection is one egma can conduct,
+    // and this says so in the same change that brought the adapter.
+    simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
   retell_web_call: {

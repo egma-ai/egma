@@ -565,6 +565,7 @@ describe("what the shipped simulator can conduct", () => {
     );
     expect(conductableConnectionTypes()).toEqual([
       "retell_chat_api",
+      "retell_playground",
       "phone_number",
       "livekit_room",
     ]);

@@ -21,11 +21,17 @@
  * ## The wire names live in one place, deliberately
  *
  * `WIRE` below is the whole of what this module claims about Retell's field
- * names. Egma's agents test against fakes and never touch the developer's live
- * Retell account, so the names are settled by the developer's own live run (the
- * live suite of this effort's ticket 03) rather than by probing. Keeping them
- * in one frozen object means that settling is one edit, in one place, with
- * every test above it unchanged.
+ * names, and **every one of them is the simulator plug's**
+ * (`egma_simulator.plugs.retell_playground`). That plug is the code that
+ * actually conducts against Retell, so two modules in this repository
+ * describing one third-party API differently would be a defect waiting for a
+ * live run to expose: whichever of them the developer's run corrected, the
+ * other would stay wrong. The plug names the same guesses in the same words,
+ * and a correction is one edit here and one there.
+ *
+ * Egma's agents test against fakes and never touch the developer's live Retell
+ * account, so what is still a guess stays a guess until the live suite of this
+ * effort's ticket 03 runs.
  */
 
 import {
@@ -44,23 +50,37 @@ import {
  * written. See the note at the top of the file.
  */
 export const WIRE = {
-  /** Where one playground exchange is asked for. */
-  path: "/create-agent-playground-completion",
-  agentId: "agent_id",
+  /** Where one exchange is asked for. The agent's own id follows it. */
+  path: "/agent-playground-completion",
   agentVersion: "agent_version",
-  /** The history going out, and the new messages coming back. */
+  /** The history going out, and the agent's new messages coming back. */
   messages: "messages",
   /** Retell's house name for rendered variables, as the call lanes use it. */
   dynamicVariables: "retell_llm_dynamic_variables",
+  /**
+   * What a reply may call the variables as they now stand. Two names because
+   * the outbound one is well attested and the inbound one is not; the first
+   * present wins.
+   */
+  replyVariables: [
+    "retell_llm_dynamic_variables",
+    "dynamic_variables",
+  ] as readonly string[],
   /** The answers this exchange carries with it, in place of a draft. */
-  mockTools: "mock_tools",
+  mockTools: "tool_mocks",
   mockToolName: "tool_name",
-  mockToolResponse: "response",
+  /** How a native mock is matched: by name, whatever the arguments were. */
+  mockToolMatch: "input_match_rule",
+  matchAnything: "any",
+  /** The value the tool is given, JSON-encoded and untagged. */
+  mockToolOutput: "output",
+  /** Whether the call succeeded — how Retell is told to serve a failure. */
+  mockToolResult: "result",
   /** Where a conversation flow is, threaded turn by turn. */
   nodeId: "current_node_id",
   componentId: "current_component_id",
   /** Where a Retell LLM is, threaded the same way. */
-  stateName: "current_state_name",
+  stateName: "current_state",
   /** The agent saying the exchange is over. */
   agentEnded: "agent_ended",
 } as const;
@@ -98,11 +118,17 @@ export type PlaygroundTurn = {
  * The match-anything rule: one answer per tool, and the arguments the agent
  * sent are never read. A tool the run has no answer for is simply absent, and
  * Retell runs the customer's real implementation for it.
+ *
+ * The answer arrives in **the shape it was authored in** — `{ answer }` or
+ * `{ error }` — and is untagged on the way out, because Retell is the one
+ * serving it and says which branch happened in its own words. One shape all
+ * the way here means nothing in between re-tags it.
  */
 export type PlaygroundMockTool = {
   readonly toolName: string;
-  /** What the tool answers with. Any JSON value, including an error shape. */
-  readonly response: unknown;
+  readonly answer:
+    | { readonly answer: unknown }
+    | { readonly error: string };
 };
 
 /**
@@ -200,10 +226,26 @@ function resumeIn(document: Readonly<Record<string, unknown>>): PlaygroundResume
   };
 }
 
+/**
+ * One answer as the wire carries it: untagged, JSON-encoded, with a flag for
+ * which branch it is.
+ */
+function mockOnTheWire(mock: PlaygroundMockTool): Record<string, unknown> {
+  const fails = "error" in mock.answer;
+  const held = fails ? mock.answer.error : mock.answer.answer;
+  return {
+    [WIRE.mockToolName]: mock.toolName,
+    [WIRE.mockToolMatch]: WIRE.matchAnything,
+    // A string either way, because that is what the transport carries.
+    [WIRE.mockToolOutput]:
+      typeof held === "string" ? held : JSON.stringify(held ?? null),
+    [WIRE.mockToolResult]: !fails,
+  };
+}
+
 /** The body of one exchange, with nothing in it egma was not given. */
 function bodyOf(exchange: PlaygroundExchange): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    [WIRE.agentId]: exchange.agentId,
     // Always. Never conditional, never omitted, never `latest`.
     [WIRE.agentVersion]: exchange.agentVersion,
     [WIRE.messages]: exchange.messages.map((turn) => ({
@@ -221,12 +263,7 @@ function bodyOf(exchange: PlaygroundExchange): Record<string, unknown> {
   }
 
   const mocks = exchange.mockTools ?? [];
-  if (mocks.length > 0) {
-    body[WIRE.mockTools] = mocks.map((mock) => ({
-      [WIRE.mockToolName]: mock.toolName,
-      [WIRE.mockToolResponse]: mock.response,
-    }));
-  }
+  if (mocks.length > 0) body[WIRE.mockTools] = mocks.map(mockOnTheWire);
 
   const resume = exchange.resume ?? NO_RESUME;
   if (resume.nodeId !== "") body[WIRE.nodeId] = resume.nodeId;
@@ -253,7 +290,7 @@ export async function exchangeInPlayground(
   try {
     answer = await ask(key, reach, {
       method: "POST",
-      path: WIRE.path,
+      path: `${WIRE.path}/${encodeURIComponent(exchange.agentId)}`,
       body: bodyOf(exchange),
     });
   } catch (cause) {
@@ -278,11 +315,23 @@ export async function exchangeInPlayground(
     if (message !== null) messages.push(message);
   }
 
+  // **Laid over what was sent rather than replacing it.** Whether a reply
+  // names every variable or only the ones that changed is not settled, so a
+  // delta-shaped answer must not silently drop the rest: laying them over
+  // loses nothing under either shape, and behaves identically under the whole
+  // one. The first name present wins, because only the outbound spelling is
+  // well attested.
+  const named = WIRE.replyVariables.find((one) => one in document);
+  const dynamicVariables = {
+    ...(exchange.dynamicVariables ?? {}),
+    ...(named === undefined ? {} : variablesIn(document[named])),
+  };
+
   return {
     kind: "exchanged",
     reply: {
       messages,
-      dynamicVariables: variablesIn(document[WIRE.dynamicVariables]),
+      dynamicVariables,
       resume: resumeIn(document),
       agentEnded: document[WIRE.agentEnded] === true,
     },

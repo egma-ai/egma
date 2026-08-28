@@ -213,16 +213,16 @@ describe("the playground door's refusals", () => {
 });
 
 describe("what the shipped simulator can conduct over the playground", () => {
-  it("says exactly what the shipped plug registry says", () => {
-    // The registry may not claim what no code can run. This flips to `true` in
-    // the same commit as the `retell_playground` plug, and until then a run
-    // over such a connection is refused at creation rather than queued forever
-    // for a conductor that does not exist.
-    const shipped = descriptorOf(KIND).simulatorAdapter;
-    expect(
-      connectionIsConductable(KIND, VARIANT, "chat"),
-    ).toBe(shipped);
-    // Whatever the flag says, the modality check still stands on its own.
+  it("conducts it, because the plug ships", () => {
+    // The registry may not claim what no code can run, and it does not: the
+    // `retell_playground` plug is registered in `egma_simulator.plugs`, and
+    // this said so in the same change that brought it.
+    expect(descriptorOf(KIND).simulatorAdapter).toBe(true);
+    expect(connectionIsConductable(KIND, VARIANT, "chat")).toBe(true);
+  });
+
+  it("still checks the exact tuple, not just the kind", () => {
+    // A shipped adapter is not a licence to conduct anything wearing the name.
     expect(connectionIsConductable(KIND, VARIANT, "voice")).toBe(false);
     expect(
       connectionIsConductable(KIND, "retell_chat_api.api_key", "chat"),

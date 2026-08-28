@@ -108,9 +108,9 @@ describe("one playground exchange", () => {
 
     const sent = seen[0];
     expect(sent?.method).toBe("POST");
-    expect(sent?.url).toBe(`https://retell.invalid${WIRE.path}`);
+    // The agent is named in the path, exactly as the plug names it.
+    expect(sent?.url).toBe(`https://retell.invalid${WIRE.path}/${AGENT}`);
     expect(sent?.authorization).toBe(`Bearer ${KEY}`);
-    expect(sent?.body[WIRE.agentId]).toBe(AGENT);
     expect(sent?.body[WIRE.messages]).toEqual([
       { role: "user", content: "I need to move my appointment." },
     ]);
@@ -268,8 +268,11 @@ describe("one playground exchange", () => {
         agentVersion: 106,
         messages: [{ role: "user", content: "Any slots?" }],
         mockTools: [
-          { toolName: "check_availability", response: { slots: ["14:00"] } },
-          { toolName: "charge_card", response: { error: "card declined" } },
+          {
+            toolName: "check_availability",
+            answer: { answer: { slots: ["14:00"] } },
+          },
+          { toolName: "charge_card", answer: { error: "card declined" } },
         ],
       },
       REACH(fetchImpl),
@@ -279,14 +282,21 @@ describe("one playground exchange", () => {
     // One request, and it is the exchange itself. No draft is branched, no
     // engine is written, nothing is pinned — the answers ride along.
     expect(seen[0]?.method).toBe("POST");
+    // Untagged and JSON-encoded, with a flag for which branch it is: Retell
+    // serves the answer either way and says which one happened in its own
+    // words, so egma's own tag never travels.
     expect(seen[0]?.body[WIRE.mockTools]).toEqual([
       {
         [WIRE.mockToolName]: "check_availability",
-        [WIRE.mockToolResponse]: { slots: ["14:00"] },
+        [WIRE.mockToolMatch]: WIRE.matchAnything,
+        [WIRE.mockToolOutput]: JSON.stringify({ slots: ["14:00"] }),
+        [WIRE.mockToolResult]: true,
       },
       {
         [WIRE.mockToolName]: "charge_card",
-        [WIRE.mockToolResponse]: { error: "card declined" },
+        [WIRE.mockToolMatch]: WIRE.matchAnything,
+        [WIRE.mockToolOutput]: "card declined",
+        [WIRE.mockToolResult]: false,
       },
     ]);
   });
@@ -309,6 +319,46 @@ describe("one playground exchange", () => {
     const keys = Object.keys(seen[0]?.body ?? {});
     expect(keys).not.toContain(WIRE.mockTools);
     expect(keys).not.toContain(WIRE.dynamicVariables);
+  });
+
+  it("lays a reply's variables over what it sent, losing none to a delta", async () => {
+    // Whether a reply names every variable or only the ones that changed is
+    // not settled. Laying them over loses nothing under either shape, and
+    // behaves identically under the whole one — so a delta-shaped answer
+    // cannot quietly drop a variable this simulation was conducted with.
+    const { fetchImpl } = retell([
+      () =>
+        json({
+          [WIRE.messages]: [],
+          [WIRE.dynamicVariables]: { booked_day: "Thursday" },
+        }),
+      () =>
+        json({
+          [WIRE.messages]: [],
+          // The other spelling, which is the one that is only a guess.
+          dynamic_variables: { booked_day: "Friday" },
+        }),
+    ]);
+
+    const sent = { egma_simulation: "sim_1", caller_name: "Eleanor" };
+    for (const expected of ["Thursday", "Friday"]) {
+      const answered = await exchangeInPlayground(
+        key,
+        {
+          agentId: AGENT,
+          agentVersion: 106,
+          messages: [],
+          dynamicVariables: sent,
+        },
+        REACH(fetchImpl),
+      );
+      expect(answered.kind).toBe("exchanged");
+      if (answered.kind !== "exchanged") return;
+      expect(answered.reply.dynamicVariables).toEqual({
+        ...sent,
+        booked_day: expected,
+      });
+    }
   });
 
   it("keeps a message whose role Egma has never seen", async () => {

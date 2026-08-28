@@ -1,6 +1,5 @@
 import { newId } from "@egma/ids";
 import {
-  connectionOptionMetadata,
   createPersona,
   getSimulation,
   startRun,
@@ -36,18 +35,6 @@ let api: TestApi;
 afterEach(async () => {
   await api?.close();
 });
-
-/**
- * Whether the shipped simulator holds a playground plug.
- *
- * Read off the registry rather than written down, so that the day the plug
- * lands one boolean flips there and the assertions below start proving the
- * other half with nothing here to edit.
- */
-const ADAPTER_HAS_SHIPPED =
-  connectionOptionMetadata().find(
-    (option) => option.connectionType === "retell_playground",
-  )?.simulatorAdapter === true;
 
 /** Planted in every connection below, and scanned for everywhere after. */
 const SENTINEL_KEY = "retell-secret-SENTINEL-8QW3ZX7K2N";
@@ -250,7 +237,9 @@ describe("a Retell playground connection, through the API", () => {
     ).find((one) => one.connectionType === "retell_playground");
     expect(offered?.productLabel).toBe("Retell playground");
     expect(offered?.modality).toBe("chat");
-    expect(offered?.simulatorAdapter).toBe(ADAPTER_HAS_SHIPPED);
+    // The plug ships, so the catalog a form is drawn from says a run over
+    // this kind is one Egma can actually conduct.
+    expect(offered?.simulatorAdapter).toBe(true);
 
     const { rows } = await api.database.sql<{
       connection_type: string;
@@ -496,12 +485,7 @@ describe("a run over a Retell playground connection", () => {
     expect(rows[0]?.count).toBe("0");
   });
 
-  it("either stamps the version it resolved, or says no simulator can conduct it", async () => {
-    // One assertion that reads correctly on both sides of the plug landing.
-    // Today the registry says no adapter ships for this kind, so the door
-    // refuses at creation rather than queueing work forever; the day the
-    // playground plug lands, one boolean in the registry flips and this same
-    // test asserts the stamp instead, with nothing here to edit.
+  it("stamps the version it resolved, on the run and on every conversation", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "playground_run_stamp",
       PLAYGROUND,
@@ -513,13 +497,6 @@ describe("a run over a Retell playground connection", () => {
       connectionId,
       idempotencyKey: newId("run"),
     });
-
-    if (!ADAPTER_HAS_SHIPPED) {
-      expect(started.statusCode, JSON.stringify(started.body)).toBe(422);
-      expect(String(started.body.error)).toBe("no_adapter");
-      return;
-    }
-
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.conductedAgentVersion).toBe(SERVING_VERSION);
 
@@ -538,6 +515,21 @@ describe("a run over a Retell playground connection", () => {
         notInThisVersion: ["inventory"],
       },
     });
+
+    // And at the evidence grain, off the rows themselves.
+    const listed = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}/simulations`,
+      key,
+    );
+    const simulations = listed.body.simulations as {
+      conductedAgentVersion: number | null;
+    }[];
+    expect(simulations.length).toBeGreaterThan(0);
+    for (const one of simulations) {
+      expect(one.conductedAgentVersion).toBe(SERVING_VERSION);
+    }
   });
 });
 
@@ -772,8 +764,10 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
 
 describe("the work order a version-pinned run hands over", () => {
   it("carries the version, this simulation's variables, and only the answers it may serve", async () => {
-    const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_claim", RETELL_CHAT);
+    const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
+      "playground_claim",
+      PLAYGROUND,
+    );
 
     // One answer per class of tool the agent has. Only the first is a name
     // this lane may honestly stand in front of.
@@ -790,13 +784,16 @@ describe("the work order a version-pinned run hands over", () => {
       expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
     }
 
-    const started = await startRun(contextFor(ada, "member"), {
+    // Started over the door, so the version on the work order is the one the
+    // run-start read actually resolved from the platform rather than one this
+    // test handed in.
+    const started = await ask(api.app, "POST", "/v1/runs", key, {
       suiteId,
       agentId,
       connectionId,
       idempotencyKey: newId("run"),
-      conductedWorld: A_CONDUCTED_WORLD,
     });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
     const claimed = await api.app.inject({
       method: "POST",
@@ -808,6 +805,15 @@ describe("the work order a version-pinned run hands over", () => {
     const specs = (claimed.json() as { specs: Record<string, unknown>[] }).specs;
     expect(specs.length).toBeGreaterThan(0);
     const spec = specs[0] as Record<string, unknown>;
+
+    // The connection block the plug reads, exactly as it expects it.
+    expect(spec.connection).toEqual({
+      agent_platform: "retell",
+      connection_type: "retell_playground",
+      access_variant: "retell_playground.api_key",
+      config: { retellAgentId: PLATFORM_AGENT },
+      credentials: { apiKey: SENTINEL_KEY },
+    });
 
     // Always sent. The plug would conduct without it and the platform would
     // then choose its newest version, which a concurrent edit can move.
