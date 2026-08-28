@@ -2,7 +2,9 @@ import { newId } from "@egma/ids";
 import {
   createPersona,
   getSimulation,
+  resolveRunStartReach,
   startRun,
+  updateConnection,
   type ConductedWorld,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -691,6 +693,73 @@ describe("the version a run resolved, on the record", () => {
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
     expect(header.body.conductedAgentVersion).toBeNull();
     expect(header.body.conductedWorld).toBeNull();
+  });
+
+  it("refuses a run whose connection was edited between the read and the write", async () => {
+    // The race the run route cannot hold a lock across: the world is read from
+    // the connection over the network, before the run's transaction opens, so
+    // an edit can land in between — the agent moved, the address changed, the
+    // key rotated — and the version and tools frozen from the old target would
+    // be stamped onto a run whose record names the new one. Reproduced exactly:
+    // read the reach's stamp, land an edit, then start the run with the stamp
+    // the world was read at.
+    const { ada, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("playground_connection_raced", PLAYGROUND);
+    const who = contextFor(ada, "member");
+
+    const reach = await resolveRunStartReach(who, agentId, connectionId);
+    expect(reach).toBeDefined();
+    if (reach === undefined) return;
+
+    // The edit lands after the world was read. `updatedAt` moves.
+    await updateConnection(who, agentId, connectionId, {
+      config: {
+        retellAgentId: "agent_moved_elsewhere",
+        baseUrl: "https://acme-proxy.example",
+      },
+      credentials: { apiKey: "retell-secret-ROTATED-4321" },
+    });
+
+    await expect(
+      startRun(who, {
+        suiteId,
+        agentId,
+        connectionId,
+        idempotencyKey: newId("run"),
+        conductedWorld: A_CONDUCTED_WORLD,
+        conductedConnectionAt: reach.connectionUpdatedAt,
+      }),
+    ).rejects.toThrow(/was edited while Egma was reading the agent's platform/u);
+
+    // Nothing was written: a run stamped with a world from one target and a
+    // snapshot of another never reached the record.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
+  });
+
+  it("writes the run when the connection held still through the read", async () => {
+    // The same path with no edit: the stamp the world was read at still equals
+    // the connection under the lock, so the world and the target agree and the
+    // run is written.
+    const { ada, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("playground_connection_still", PLAYGROUND);
+    const who = contextFor(ada, "member");
+
+    const reach = await resolveRunStartReach(who, agentId, connectionId);
+    expect(reach).toBeDefined();
+    if (reach === undefined) return;
+
+    const started = await startRun(who, {
+      suiteId,
+      agentId,
+      connectionId,
+      idempotencyKey: newId("run"),
+      conductedWorld: A_CONDUCTED_WORLD,
+      conductedConnectionAt: reach.connectionUpdatedAt,
+    });
+    expect(started.conductedWorld).toEqual(A_CONDUCTED_WORLD);
   });
 });
 

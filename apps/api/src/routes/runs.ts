@@ -510,6 +510,7 @@ export async function runRoutes(
       // claim about tools nobody saw.
       const kind = await connectionTypeOf(acting.auth, connectionId);
       let conducted: ConductedWorld | undefined;
+      let conductedAt: Date | undefined;
       if (kind !== undefined && connectionTypeReadsPlatformAtRunStart(kind)) {
         const reach = await resolveRunStartReach(
           acting.auth,
@@ -541,11 +542,16 @@ export async function runRoutes(
           return sendRefusal(reply, "provider_unavailable", read.message);
         }
         conducted = read.world;
+        // The stamp of the connection the world was read from, carried into
+        // the write so it can refuse if the connection moved in between.
+        conductedAt = reach.connectionUpdatedAt;
       }
 
       const started = await startRun(acting.auth, {
         ...input,
-        ...(conducted === undefined ? {} : { conductedWorld: conducted }),
+        ...(conducted === undefined
+          ? {}
+          : { conductedWorld: conducted, conductedConnectionAt: conductedAt }),
       });
       const described = await headerOf(
         acting.auth,

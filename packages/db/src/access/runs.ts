@@ -125,6 +125,17 @@ export type NewRun = {
    * Absent on every other lane, where nothing pins a version.
    */
   readonly conductedWorld?: ConductedWorld | undefined;
+  /**
+   * The connection's edit stamp at the moment the world above was read.
+   *
+   * Travels with `conductedWorld` and only with it: the world was read from a
+   * target before this transaction opened, and this is how the transaction
+   * proves the target has not moved since. Under the lock `startRun` already
+   * holds on the connection, the stamp read now must equal this one, or the
+   * connection was edited mid-creation and the run is refused rather than
+   * written against a target its record would misname.
+   */
+  readonly conductedConnectionAt?: Date | undefined;
 };
 
 export type ConnectionSnapshot = {
@@ -660,6 +671,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
+          updatedAt: connection.updatedAt,
         })
         .from(connection)
         .innerJoin(agent, eq(connection.agentId, agent.id))
@@ -676,24 +688,48 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
       }
-      // **Never a silent conduct against an unread world**, and said here so
-      // it is a property of the write rather than a habit of one caller. A
-      // kind whose run start reads the agent's platform cannot begin without
-      // what that read produced: the version every request will name, and the
-      // tool classes its coverage stamp is built from. The caller does the
-      // reading — it is somebody else's API and this is one transaction
-      // holding a lock — but arriving here without it is a bug in the caller,
-      // not a run to write, and a run written without it would conduct
-      // against a world nobody looked at and stamp a claim nobody checked.
-      if (
-        connectionTypeReadsPlatformAtRunStart(reached.connectionType) &&
-        input.conductedWorld === undefined
-      ) {
-        throw new Error(
-          `a run over a ${reached.connectionType} connection is conducted ` +
-            `against a named version, so it cannot be started without the ` +
-            `run-start read of the agent's platform`,
-        );
+      // A kind whose run start reads the agent's platform carries two demands
+      // that a kind reading nothing does not, and both live here so they are
+      // properties of the write rather than habits of one caller.
+      if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
+        // **Never a silent conduct against an unread world.** The run cannot
+        // begin without what the read produced: the version every request
+        // will name, and the tool classes its coverage stamp is built from.
+        // The caller does the reading — it is somebody else's API and this is
+        // one transaction holding a lock — but arriving here without it is a
+        // bug in the caller, not a run to write, and a run written without it
+        // would conduct against a world nobody looked at and stamp a claim
+        // nobody checked.
+        if (input.conductedWorld === undefined) {
+          throw new Error(
+            `a run over a ${reached.connectionType} connection is conducted ` +
+              `against a named version, so it cannot be started without the ` +
+              `run-start read of the agent's platform`,
+          );
+        }
+        // **The world was read from this exact connection, and it still is.**
+        // The read happened before this transaction, so the connection could
+        // have been edited in between — its agent moved, its address changed,
+        // its key rotated — and the version and tools frozen from the old
+        // target would then be stamped onto a run whose snapshot names the new
+        // one. The `for("share")` above holds the row still for the rest of
+        // this transaction, so the stamp read now is the connection as it will
+        // be written; if it does not match the stamp the world was read at,
+        // the connection moved during creation. Refuse loudly and write
+        // nothing — the caller reads the connection again and retries.
+        if (
+          input.conductedConnectionAt === undefined ||
+          reached.updatedAt.getTime() !==
+            input.conductedConnectionAt.getTime()
+        ) {
+          refuseRun(
+            "not_admitted",
+            `connection ${input.connectionId} was edited while Egma was ` +
+              `reading the agent's platform for this run, so the version it ` +
+              `read may not be the one this connection now reaches. Nothing ` +
+              `was started; read the connection again and retry.`,
+          );
+        }
       }
 
       const graderCandidates = await applicableGraders(auth, tx, projectId);
@@ -895,6 +931,18 @@ export type RunStartReach = {
   readonly connectionType: ConnectionType;
   readonly config: Readonly<Record<string, string>>;
   readonly apiKey: string;
+  /**
+   * The connection's own edit stamp at the moment this reach was read.
+   *
+   * The world is read from this target *before* the run's transaction opens,
+   * because reading it is a network call and the transaction holds a lock. So
+   * the connection could be edited — its agent, its address, its key — between
+   * this read and the write that snapshots it, and the run would then store a
+   * world read from one target while its record named another. `startRun` is
+   * handed this stamp and refuses if the connection has moved under it, so the
+   * world it froze and the target it names are always the same one.
+   */
+  readonly connectionUpdatedAt: Date;
 };
 
 export async function resolveRunStartReach(
@@ -910,6 +958,7 @@ export async function resolveRunStartReach(
       connectionType: connection.connectionType,
       config: connection.config,
       credentials: connection.credentials,
+      updatedAt: connection.updatedAt,
     })
     .from(connection)
     .where(
@@ -946,6 +995,7 @@ export async function resolveRunStartReach(
         ),
     ),
     apiKey,
+    connectionUpdatedAt: row.updatedAt,
   };
 }
 

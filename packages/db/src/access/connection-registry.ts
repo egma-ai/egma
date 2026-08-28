@@ -1343,6 +1343,36 @@ export function connectionTypeReadsPlatformAtRunStart(
   return READS_PLATFORM_AT_RUN_START.has(connectionType);
 }
 
+/**
+ * The config key, if any, whose value decides **where a connection's sealed
+ * credential is sent** — and which therefore may not be changed on its own.
+ *
+ * A sealed credential is write-only: a read never gives it back, so a member
+ * who can edit a connection is trusted to *replace* the secret, never to *see*
+ * it. On most kinds that holds on its own, because nothing a member writes
+ * moves where the secret goes. On a kind whose run start sends that secret to
+ * an address the config names, it does not: changing the address alone, and
+ * leaving the sealed key in place, aims the key the member cannot read at a
+ * host the member chose. That is a read of the secret by another name.
+ *
+ * So the key that names the address is declared here, and an edit that changes
+ * it has to supply the credential to send with it — you may redirect the key
+ * only if you also put a key there. The absence of an entry is the ordinary
+ * case: a kind whose secret goes to one fixed provider has no such key, and its
+ * config is free to change without a credential.
+ */
+const CREDENTIAL_REDIRECTING_CONFIG_KEY: Readonly<Record<string, string>> = {
+  // Egma's own control plane sends the connection's Retell key to `baseUrl` at
+  // run start, so moving `baseUrl` moves the key.
+  retell_playground: "baseUrl",
+};
+
+export function credentialRedirectingConfigKey(
+  connectionType: string,
+): string | undefined {
+  return CREDENTIAL_REDIRECTING_CONFIG_KEY[connectionType];
+}
+
 /** Whether this kind needs the deployment carrier on its claimed work order. */
 export function connectionTypeUsesPlatformCarrier(
   connectionType: string,

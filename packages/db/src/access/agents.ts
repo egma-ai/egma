@@ -27,6 +27,7 @@ import {
 import { monitoringState } from "../schema/production.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
+  credentialRedirectingConfigKey,
   credentialRuleOf,
   descriptorOf,
   platformOfConnectionType,
@@ -1817,6 +1818,33 @@ export async function updateConnection(
     changes.config === undefined
       ? undefined
       : validConfig(connectionType, accessVariant, changes.config);
+
+  // **You may redirect the sealed key only if you also supply a key to send.**
+  //
+  // On a kind whose run start sends the connection's secret to an address the
+  // config names, moving that address is moving the key. An edit that omits the
+  // credential leaves the sealed one in place — and a sealed key is write-only,
+  // so this would aim the key the member cannot read at a host the member
+  // chose. Changing the address therefore demands the credential to send with
+  // it. Leaving the address as it was keeps preserving the sealed key exactly
+  // as before, and pointing the address back at its provider's default (an
+  // empty value) is not a redirect and needs nothing — the key goes home.
+  const redirectKey = credentialRedirectingConfigKey(connectionType);
+  if (redirectKey !== undefined && config !== undefined) {
+    const before = (current.config as Record<string, unknown> | null)?.[
+      redirectKey
+    ];
+    const after = config[redirectKey];
+    const redirected = after !== undefined && after !== before;
+    if (redirected && changes.credentials === undefined) {
+      throw new AgentWriteRefusedError(
+        "not_admitted",
+        `changing a ${connectionType} connection's ${redirectKey} moves where ` +
+          `Egma sends its sealed key, so the change must carry the key to send ` +
+          `there: include credentials.apiKey in the same update.`,
+      );
+    }
+  }
 
   // The stored access variant owns the credential rule. An edit can replace
   // the credential, but cannot turn this connection into another variant.
