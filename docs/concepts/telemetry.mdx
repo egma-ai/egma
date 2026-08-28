@@ -71,8 +71,13 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
 Install the Egma Python SDK:
 
 ```bash
-pip install egma
+pip install 'egma>=0.2.0'
 ```
+
+The helper reads the job's room name and keeps a simulation's spans out of
+Monitoring, so a test does not arrive here a second time as a production
+conversation. The `0.2.0` floor is what makes that hold on every LiveKit
+dispatch path. See [the Python SDK](/integrations/python-sdk#how-the-sdk-knows-it-is-in-a-simulation).
 
 Set the Egma API origin and an existing project API key:
 

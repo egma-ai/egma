@@ -13,9 +13,9 @@ for its token really asks, over a socket, of the endpoint in
 
 Everything else is the real driver's own code, and deliberately so. The
 requests recorded below are the very protobuf messages that would have
-gone on the wire, built by the driver: the room's name and the metadata
-the connection configured, the agent's name and the context egma
-dispatches with. So are the waits, the endings, the sentences a person
+gone on the wire, built by the driver: the room's name, the agent's name,
+and the metadata the connection configured on both channels that carry
+it. So are the waits, the endings, the sentences a person
 reads and the scrubbing of the key pair. What this suite proves about a
 refusal or an ending is therefore proved about the code a customer's
 server will run.
@@ -46,6 +46,10 @@ The script it is built with:
   exchange looks like from the plug's seat.
 - ``agent_joins`` — false for the worker that never comes: the room
   opens, the dispatch goes out, and nobody arrives.
+- ``agent_was_already_in_the_room`` — true for the worker that got there
+  first, which is what the three ways in that egma does not dispatch on
+  look like. It is in the room and publishing, and no arrival is ever
+  announced for it.
 - ``agent_publishes_audio`` — false for the worker that joins and
   publishes nothing, which is a worker that crashed rather than an agent
   under test.
@@ -56,6 +60,9 @@ The script it is built with:
   egma's seat.
 - ``refuses_rpc`` — a participant that will not take the mock-tool methods
   at all, which must cost the exchange and never the conversation.
+- ``refuses_the_offer_at_the_join`` — a participant that will not take them
+  at the join and will take them after it, which is the room the driver's
+  second offer exists for.
 """
 
 from __future__ import annotations
@@ -134,10 +141,28 @@ class StubRoom:
         self._activation: asyncio.Task[None] | None = None
         self._joined = False
         self._methods: dict[str, object] = {}
+        self._offer: object = None
+        self._offering_at_the_join = False
         self.arrivals = asyncio.Event()
         self.carrying_audio = asyncio.Event()
         self.ended = asyncio.Event()
         self.who_arrived: list[str] = []
+
+    def answer_when_joined(self, offer: object) -> None:
+        """Take the driver's offer to answer for the agent's tools."""
+        self._offer = offer
+
+    def note_anybody_already_here(self) -> None:
+        """Answer the driver's one question: is somebody in here already?
+
+        The real room asks its transport; this one knows. Both answer the
+        same question for the same reason — a participant that was in the
+        room before egma got into it is never announced as an arrival, so
+        an agent that was quicker would otherwise be waited out and
+        reported as a worker that never came.
+        """
+        if self.who_arrived:
+            self.arrivals.set()
 
     @property
     def transport(self) -> ScriptedTransport | None:
@@ -158,6 +183,17 @@ class StubRoom:
             ends_after_replies=stub.hangs_up_after_replies,
         )
         stub.transports.append(self._transport)
+        # Entering the room is the moment the driver offers to answer for
+        # the agent's tools, and it is offered here rather than later for
+        # one reason: the agent can already be in the room. Modelled in
+        # that order so nothing below can pass against an ordering the
+        # real room does not have.
+        self._offering_at_the_join = True
+        try:
+            if self._offer is not None:
+                self._offer()
+        finally:
+            self._offering_at_the_join = False
         # Where egma minted its own token, the worker is on its way because
         # egma asked for it. Where it did not, nobody asked and nobody
         # could: the endpoint that minted the token is what dispatches, so
@@ -165,7 +201,7 @@ class StubRoom:
         if self._backend.endpoint_dispatches:
             self._backend.agent_is_coming = stub.agent_joins
         if self._backend.agent_is_coming:
-            self.agent_arrives()
+            self.agent_arrives(announced=not stub.agent_was_already_in_the_room)
         return self._transport.media
 
     async def wait_connected(self) -> None:
@@ -210,6 +246,8 @@ class StubRoom:
         it.
         """
         refusal = self._backend.stub.refuses_rpc
+        if refusal is None and self._offering_at_the_join:
+            refusal = self._backend.stub.refuses_the_offer_at_the_join
         if refusal is not None:
             raise RuntimeError(refusal)
         self._methods[method] = answering(handler)
@@ -240,12 +278,22 @@ class StubRoom:
             )
         return answered
 
-    def agent_arrives(self) -> None:
-        """The worker turns up, and — unless it is broken — is heard."""
+    def agent_arrives(self, *, announced: bool = True) -> None:
+        """The worker turns up, and — unless it is broken — is heard.
+
+        ``announced`` is false for the worker that was in the room before
+        egma was. A room announces an arrival to whoever is already
+        watching; somebody who was there first is not an arrival to
+        anyone, and the transport says so once, in its other event. So
+        the participant is in the room and its audio is on the wire with
+        no arrival to wait for — which is exactly the case the driver has
+        to find by asking.
+        """
         if AGENT_IDENTITY in self.who_arrived:
             return
         self.who_arrived.append(AGENT_IDENTITY)
-        self.arrivals.set()
+        if announced:
+            self.arrivals.set()
         transport = self._transport
         stub = self._backend.stub
         if transport is None or not stub.agent_publishes_audio:
@@ -386,6 +434,15 @@ class RoomStub:
     hangs_up_after_replies: bool = False
     agent_joins: bool = True
     agent_publishes_audio: bool = True
+    agent_was_already_in_the_room: bool = False
+    """True for the worker that got in before egma did.
+
+    The ordinary case wherever egma is not the one dispatching: nothing
+    egma does decides when that worker is given the room, so it can be
+    sitting in it, publishing, before egma's transport connects. The room
+    then announces nobody — being there first is not an arrival — and a
+    driver that only waits for arrivals waits the whole budget out and
+    calls a present agent a worker that never came."""
     refuses_room: str | None = None
     refuses_dispatch: str | None = None
     refuses_join: str | None = None
@@ -394,6 +451,15 @@ class RoomStub:
     refuses_rpc: str | None = None
     """A participant that will not take the mock-tool methods at all — the
     one refusal that must cost the exchange and nothing else."""
+
+    refuses_the_offer_at_the_join: str | None = None
+    """A participant that will not take them at the join, and will after.
+
+    The driver offers at the join because the agent may already be in the
+    room, and again from ``dial`` for a room that has no such moment. This
+    is the room where the first of those two does not take: the second is
+    the only offer left, so what it costs to spend it on nothing is every
+    mocked tool in the simulation running its own implementation."""
 
     rooms: list[CreatedRoom] = field(default_factory=list)
     """Every room this LiveKit was asked to make, in order."""
@@ -423,9 +489,12 @@ class RoomStub:
     standing_ready: asyncio.Event = field(default_factory=asyncio.Event)
     """Set once egma has offered the exchange in the room.
 
-    What a session waits for before it says hello — the same thing that
-    really decides it on a live room, where an agent's side finds egma by
-    the identity in its dispatch metadata or finds nobody at all."""
+    What a session waits for before it says hello. On a live room the
+    agent's side has no such event: it finds egma by the persona identity
+    in a room whose name says a simulation is running, and a room with no
+    such participant answers nothing. Which is why the driver offers the
+    methods at the join and not a step later — the far side may already
+    be knocking."""
 
     def driver(self, **built: object) -> RoomStubBackend:
         """The factory a plug is handed, in place of the real driver."""

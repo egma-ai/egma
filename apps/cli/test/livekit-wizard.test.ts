@@ -139,7 +139,7 @@ const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 /** The one fragment that names the mock-authoring task and nothing else. */
 const MOCK_AUTHORING_TASK = "Write the mocked world for";
 const REQUIREMENTS_BEFORE = "livekit-agents\n";
-const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.1\n`;
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.2.0\n`;
 
 /** What the scripted agent does when it cannot identify one job entrypoint. */
 function cannotFindTheWorker(): FakeStep[] {
@@ -247,7 +247,7 @@ function catalog(): Record<string, unknown> {
         fields: [
           { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server.", afterCredentials: false },
           { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name.", afterCredentials: false },
-          { key: "metadata", label: "Room metadata", kind: "json", required: false, help: "Optional JSON metadata.", afterCredentials: true },
+          { key: "metadata", label: "Agent metadata", kind: "json", required: false, help: "Optional JSON metadata.", afterCredentials: true },
         ],
         credentialRule: "required",
         credentialHelp: "Egma stores this pair sealed.",

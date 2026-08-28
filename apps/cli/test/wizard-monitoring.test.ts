@@ -71,7 +71,7 @@ const WORKER_INTEGRATION_TASK = "Reconcile this LiveKit worker with Egma";
 const MOCK_AUTHORING_TASK = "Write the mocked world for";
 const GENERATE_TASK = "## The words the agent is running on";
 const REQUIREMENTS_BEFORE = "livekit-agents\n";
-const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.1.1\n`;
+const REQUIREMENTS_WITH_EGMA = `${REQUIREMENTS_BEFORE}egma>=0.2.0\n`;
 
 /**
  * The Retell account behind the wizard's own discovery, for the both lane.

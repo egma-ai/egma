@@ -1,6 +1,6 @@
 {
   "name": "@egma/sdk-python",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "pnpm's door into the Python package customers install: the real toolchain is uv. See README.md.",
   "scripts": {

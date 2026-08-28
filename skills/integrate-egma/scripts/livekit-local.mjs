@@ -7,7 +7,13 @@ import path from "node:path";
 import process from "node:process";
 
 const MINIMUM_VERSION = [2, 18, 2];
-const MINIMUM_EGMA_VERSION = [0, 1, 1];
+// 0.2.0 is the first Egma SDK release whose two entries decide from the job's
+// room name. Below it they read dispatch metadata, which reaches the worker on
+// one of the four LiveKit dispatch paths, so a lower version is inert on the
+// other three without saying so. A local worker that reports ready on such an
+// environment sends the developer into a run whose mock tools never answer.
+const MINIMUM_EGMA_VERSION = [0, 2, 0];
+const MINIMUM_EGMA_SHOWN = MINIMUM_EGMA_VERSION.join(".");
 const LIVEKIT_INSTALLER = "https://get.livekit.io/cli";
 const REQUIRED_ENV = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"];
 const WORKER_ONLY_ENV_PREFIX = "EGMA_";
@@ -417,7 +423,9 @@ async function prepareEgmaDependency(worker) {
   const runtime = await pythonEnvironment(worker);
   const probe = ["-c", egmaVersionProbe()];
   if (pythonSucceeds(runtime, probe)) {
-    process.stderr.write("livekit-local: Egma Python SDK 0.1.1 or newer is ready.\n");
+    process.stderr.write(
+      `livekit-local: Egma Python SDK ${MINIMUM_EGMA_SHOWN} or newer is ready.\n`,
+    );
     return;
   }
 
@@ -430,7 +438,7 @@ async function prepareEgmaDependency(worker) {
   });
   if (!pythonSucceeds(runtime, probe)) {
     throw new Error(
-      "the worker environment still cannot import Egma Python SDK 0.1.1 or newer after dependency installation",
+      `the worker environment still cannot import Egma Python SDK ${MINIMUM_EGMA_SHOWN} or newer after dependency installation`,
     );
   }
 }

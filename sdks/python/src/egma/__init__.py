@@ -13,9 +13,9 @@ the agent is built and before the session starts::
 
     await mockable(agent, ctx, session)
 
-In a room with no egma participant — every production room — it returns
-having touched nothing. Your tools are the same objects, called the same
-way, with no wrapper between them and the model. That is a test in this
+In a room egma did not name — every production room — it returns having
+touched nothing. Your tools are the same objects, called the same way,
+with no wrapper between them and the model. That is a test in this
 package, not a promise in this docstring.
 
 Production monitoring is a separate explicit call made before the session

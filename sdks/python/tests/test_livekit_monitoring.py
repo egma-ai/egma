@@ -20,7 +20,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from room_stub import egma_metadata
+from room_stub import PRODUCTION_ROOM, SIMULATION_ROOM, egma_metadata
 
 from egma import monitor_livekit
 from egma import monitoring as livekit_monitoring
@@ -29,7 +29,15 @@ PROJECT_KEY = f"egma_sk_{'a' * 43}"
 
 
 @dataclass
+class StubJobRoom:
+    name: str = PRODUCTION_ROOM
+
+
+@dataclass
 class StubJob:
+    """A job, down to the two things the monitoring guard reads of one."""
+
+    room: StubJobRoom = field(default_factory=StubJobRoom)
     metadata: str = ""
 
 
@@ -42,6 +50,11 @@ class StubJobContext:
 
     def add_shutdown_callback(self, callback: Any) -> None:
         self.shutdown_callbacks.append(callback)
+
+
+def in_the_room(name: str, metadata: str = "") -> StubJobContext:
+    """A job whose room is named that."""
+    return StubJobContext(job=StubJob(room=StubJobRoom(name=name), metadata=metadata))
 
 
 @pytest.fixture(autouse=True)
@@ -135,15 +148,106 @@ async def test_real_exporter_posts_protobuf_with_the_project_key(monkeypatch):
         provider.shutdown()
 
 
-def test_an_egma_simulation_does_not_create_a_production_exporter(monkeypatch):
+@pytest.mark.parametrize(
+    "context",
+    [
+        pytest.param(
+            in_the_room(SIMULATION_ROOM, egma_metadata()),
+            id="egma dispatched this worker by name",
+        ),
+        pytest.param(
+            in_the_room(SIMULATION_ROOM),
+            id="whichever worker was listening took the room",
+        ),
+        pytest.param(
+            in_the_room("egma-sim-a1b2c3d4"),
+            id="a room egma minted for itself",
+        ),
+        pytest.param(
+            in_the_room("egma-sim-sim-0002"),
+            id="a room a customer's own token endpoint opened",
+        ),
+    ],
+)
+def test_an_egma_simulation_does_not_create_a_production_exporter(
+    monkeypatch, caplog, context
+):
+    """All four dispatch paths into an egma room, not just the one.
+
+    A simulation's spans have their own trace, so exporting the agent's
+    side of the same room through the production door would put an
+    invented second conversation into Monitoring. The room's name is the
+    one signal that arrives on all four paths: only an explicit dispatch
+    carries metadata, and the other three would otherwise export.
+    """
     monkeypatch.delenv("EGMA_URL", raising=False)
     monkeypatch.delenv("EGMA_API_KEY", raising=False)
-    context = StubJobContext(job=StubJob(metadata=egma_metadata()))
 
-    monitor_livekit(context)
+    with caplog.at_level("WARNING", logger="egma"):
+        monitor_livekit(context)
 
     assert livekit_monitoring._state is None
     assert context.shutdown_callbacks == []
+    # Said out loud, because a room's name is chosen by whoever mints the
+    # join token: a production room named to look like a simulation would
+    # lose its Monitoring record, and a dropped trace is evidence the
+    # customer cannot get back.
+    assert "not exported" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param(
+            '{"tenant":"acme","shift":"nights"}', id="the customer's own keys"
+        ),
+        pytest.param(egma_metadata(), id="egma's own key names, in a real room"),
+    ],
+)
+def test_a_production_room_is_still_exported_whatever_its_metadata_says(
+    monkeypatch, metadata
+):
+    """Dispatch metadata is the customer's channel and says nothing here.
+
+    The second parameter is the one that has to hold. Dispatch metadata is
+    the customer's to fill, so a production room whose JSON happens to use
+    egma's key names is still a production room — and the cost of reading
+    it otherwise is not a stray span but a missing one: a real
+    conversation with no record in Monitoring at all, which is evidence
+    nobody can get back.
+    """
+    provider = TracerProvider()
+    install_provider(monkeypatch, provider)
+    monkeypatch.setattr(
+        livekit_monitoring,
+        "_build_exporter",
+        lambda _endpoint, _key: InMemorySpanExporter(),
+    )
+    context = in_the_room(PRODUCTION_ROOM, metadata)
+
+    monitor_livekit(
+        context, endpoint="https://api.egma.ai", api_key=PROJECT_KEY
+    )
+
+    assert livekit_monitoring._state is not None
+    assert len(context.shutdown_callbacks) == 1
+    provider.shutdown()
+
+
+def test_a_context_with_no_room_still_reaches_the_worded_complaint():
+    """The guard is read defensively so a wrong argument stays worded.
+
+    ``monitor_livekit`` names what it needs when it is handed something
+    that is not a LiveKit job context. A guard that reached straight
+    through the job for a room name would raise an attribute error from
+    inside the SDK instead, one step before that sentence.
+    """
+    with pytest.raises(ValueError) as refused:
+        monitor_livekit(
+            object(), endpoint="https://api.egma.ai", api_key=PROJECT_KEY
+        )
+
+    assert "JobContext" in str(refused.value)
 
 
 @pytest.mark.parametrize(

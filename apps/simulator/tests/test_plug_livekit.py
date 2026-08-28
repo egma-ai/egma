@@ -61,7 +61,7 @@ from egma_simulator.media.room import (
     room_token,
 )
 from egma_simulator.media.scripted_transport import FRAME_SECONDS
-from egma_simulator.mock_tools import PROTOCOL_VERSION
+from egma_simulator.mock_tools import PROTOCOL_VERSION, MockToolSeam
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
@@ -70,7 +70,7 @@ from egma_simulator.plugs import livekit as livekit_plug
 from egma_simulator.plugs.livekit import LiveKitRoom
 from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED
-from egma_simulator.spec import SimulationSpec
+from egma_simulator.spec import MockTool, SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
 from egma_simulator.walk import Conducted, WalkControls
 
@@ -940,13 +940,183 @@ async def test_an_unnamed_agent_takes_the_automatic_path(
     assert len(stub.rooms) == 1
 
 
-async def test_the_dispatch_carries_egmas_context_and_none_of_the_test(
+async def test_an_agent_that_got_into_the_room_first_is_still_somebody_who_came():
+    """A worker already in the room is not a worker that never came.
+
+    On three of the four ways into a room, nothing egma does decides when
+    the worker is given the room: automatic dispatch hands it over the
+    moment the room exists, and a customer's own dispatcher hands it over
+    whenever it likes. So the ordinary case is an agent sitting in the
+    room, publishing, before egma's transport connects — and a room
+    announces an arrival only to somebody who was already watching.
+    Waiting for an event that will never fire would end a live simulation
+    as ``agent_never_joined`` while the agent was in the room the whole
+    time, and blame the customer's worker for it.
+    """
+    stub = RoomStub(
+        greeting="Front desk.",
+        replies=["Noted."],
+        agent_was_already_in_the_room=True,
+    )
+    plug = room(stub)
+
+    await plug.prepare()
+    assert not stub.room.arrivals.is_set(), (
+        "the room announced an arrival for somebody who was there first, "
+        "which is not what a room does"
+    )
+    await plug.open()
+    try:
+        assert stub.room.arrivals.is_set()
+        assert stub.room.who_arrived == [AGENT_IDENTITY]
+    finally:
+        await plug.close()
+
+
+async def test_the_mock_tool_methods_are_offered_at_the_join():
+    """Live before anybody can ask, because somebody may already be asking.
+
+    The agent's side says hello as its session starts, and where egma is
+    not the one dispatching that session can be under way while egma is
+    still connecting. A method registered a step after the join is a race
+    with the first thing the agent says; losing it reads on the far side
+    as "no egma here", and every tool the simulation meant to answer for
+    runs its own implementation instead — inside a live simulation, with
+    nothing on the record to say so.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    plug = LiveKitRoom(
+        modality="voice",
+        access_variant="livekit_room.project_credentials",
+        config={"url": A_URL},
+        credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
+        simulation_id=A_SIMULATION,
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        driver=stub.driver,
+    )
+
+    await plug.prepare()
+    try:
+        assert stub.standing_ready.is_set(), (
+            "the exchange was not offered until after the join, which is a "
+            "race with the first thing the agent's session says"
+        )
+        assert await stub.says_hello("check_calendar") == {
+            "protocol_version": PROTOCOL_VERSION,
+            "mocked_tools": ["check_calendar"],
+        }
+    finally:
+        await plug.close()
+
+
+async def test_a_refusal_at_the_join_leaves_the_second_offer_its_chance():
+    """The fallback offer is spent on the room that needs it, not on air.
+
+    The driver offers twice: at the join, which is the only moment early
+    enough for an agent that was already in the room, and again from
+    ``dial`` for a room that had no such moment. A room can refuse the
+    first and take the second, and then the second is the only offer the
+    simulation has left. Counting the exchange as offered before the
+    participant has taken the methods throws that one away, and every
+    mocked tool in the run then reaches its own implementation while the
+    record says nothing about it.
+    """
+    stub = RoomStub(
+        greeting="Front desk.",
+        replies=["Noted."],
+        refuses_the_offer_at_the_join="the participant is not ready yet",
+    )
+    plug = LiveKitRoom(
+        modality="voice",
+        access_variant="livekit_room.project_credentials",
+        config={"url": A_URL},
+        credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
+        simulation_id=A_SIMULATION,
+        mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
+        driver=stub.driver,
+    )
+
+    await plug.prepare()
+    try:
+        assert not stub.standing_ready.is_set(), (
+            "the room took the methods at the join, so this is not the room "
+            "the second offer exists for"
+        )
+        await plug.open()
+        assert stub.standing_ready.is_set(), (
+            "the join was refused and the second offer was skipped, so every "
+            "mocked tool in this simulation runs for real"
+        )
+        assert await stub.says_hello("check_calendar") == {
+            "protocol_version": PROTOCOL_VERSION,
+            "mocked_tools": ["check_calendar"],
+        }
+    finally:
+        await plug.close()
+
+
+async def test_the_dispatch_carries_the_customers_own_keys_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """What an agent is told when it is asked for: which simulation this
-    is and that it is a voice one — and nothing whatever about what it is
-    going to be asked, because an agent that reads its script stops being
-    under test."""
+    """The whole point of the channel: an agent reading its per-session
+    context out of the dispatch finds its own object there.
+
+    LiveKit's own documentation sends agents to this channel for exactly
+    that, so an agent doing ``json.loads(ctx.job.metadata)["clinic"]``
+    reads what its own deployment configured rather than breaking the
+    moment somebody puts it under test.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    await room_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        agent_name="front-desk",
+        metadata='{"clinic":"lakeside","locale":"en-GB"}',
+        scenario="One point.",
+    )
+
+    carried = json.loads(stub.dispatches[0].metadata)
+    assert carried["clinic"] == "lakeside"
+    assert carried["locale"] == "en-GB"
+
+
+async def test_the_dispatch_survives_a_value_with_no_utf_8_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A lone surrogate is legal JSON, so the door admits it and the room
+    carries it. The dispatch has to survive it too.
+
+    ``{"label":"\\ud800"}`` is a valid JSON object whose parsed value is a
+    character that has no UTF-8 encoding at all. The room's copy never meets
+    that problem, because it rides as the ASCII the customer wrote. egma's
+    copy is written out again, and written out raw it would be a string that
+    cannot go on the wire — a simulation dead at dispatch over a value the
+    other channel carried without complaint.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    await room_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        agent_name="front-desk",
+        metadata='{"label":"\\ud800"}',
+        scenario="One point.",
+    )
+
+    carried = stub.dispatches[0].metadata
+    # The whole of the claim: it goes on the wire, and it still reads back
+    # as the value the customer configured.
+    carried.encode("utf-8")
+    assert json.loads(carried)["label"] == "\ud800"
+    assert json.loads(carried)["simulationId"]
+
+
+async def test_the_dispatch_carries_none_of_the_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Nothing whatever about what the agent is going to be asked,
+    because an agent that reads its script stops being under test."""
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -954,23 +1124,32 @@ async def test_the_dispatch_carries_egmas_context_and_none_of_the_test(
         stub,
         monkeypatch,
         agent_name="front-desk",
+        metadata='{"clinic":"lakeside"}',
         scenario=scenario,
     )
 
-    carried = json.loads(stub.dispatches[0].metadata)
-    assert carried == {
-        "simulationId": A_SIMULATION,
-        "modality": "voice",
-        "egmaIdentity": PERSONA_IDENTITY,
-        "protocolVersion": PROTOCOL_VERSION,
-    }
     for word in ("Tuesday", "Thursday", "Margaret", "cleaning", A_PERSONALITY):
         assert word not in stub.dispatches[0].metadata
 
 
-def test_egmas_context_is_the_same_string_wherever_it_is_built():
-    """Written out once, so the sentence a worker parses cannot drift."""
-    assert json.loads(dispatch_metadata("sim_01ABC", egma_identity="egma-persona")) == {
+def test_the_retiring_context_rides_under_the_customers_json():
+    """Both, where they fit: the customer's object with egma's four facts
+    added beneath it.
+
+    egma's own signal is the room's name and the persona's identity, on
+    all four ways into a room. These four keys are here for one reason —
+    an SDK older than room-name detection reads them and nothing else —
+    and the customer's keys are what the message is actually for, so they
+    arrive with their values intact.
+    """
+    carried = json.loads(
+        dispatch_metadata(
+            '{"clinic":"lakeside"}', "sim_01ABC", egma_identity="egma-persona"
+        )
+    )
+
+    assert carried == {
+        "clinic": "lakeside",
         "simulationId": "sim_01ABC",
         "modality": "voice",
         "egmaIdentity": "egma-persona",
@@ -978,15 +1157,93 @@ def test_egmas_context_is_the_same_string_wherever_it_is_built():
     }
 
 
+def test_a_connection_that_configured_nothing_carries_the_retiring_context_alone():
+    """Nothing of the customer's to carry, so nothing of theirs is at
+    risk — which is the one case where egma's own block is the whole
+    message rather than a few keys under somebody else's."""
+    assert json.loads(
+        dispatch_metadata(None, "sim_01ABC", egma_identity="egma-persona")
+    ) == {
+        "simulationId": "sim_01ABC",
+        "modality": "voice",
+        "egmaIdentity": "egma-persona",
+        "protocolVersion": PROTOCOL_VERSION,
+    }
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [
+        '{"egmaIdentity":"theirs"}',
+        '{"clinic":"lakeside","protocolVersion":9}',
+        '{"modality":"chat"}',
+        '{"simulationId":"their-own-id"}',
+    ],
+)
+def test_a_customers_own_key_wins_over_the_retiring_context(configured: str):
+    """Their value, byte for byte, and egma's block dropped whole.
+
+    Overwriting a key an agent reads breaks the agent's own deployment
+    inside the run that was meant to test it, so it is not traded for
+    anything — not even for an older SDK's one way of finding a
+    simulation, which the room's own name gives it back.
+    """
+    assert (
+        dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
+        == configured
+    )
+
+
+def test_the_two_channels_carry_the_same_value():
+    """One value, two channels, and the same thing read out of both.
+
+    The room carries the configured string untouched and the dispatch
+    carries egma's own writing of it, so the promise the two share is the
+    value rather than the bytes: an agent reading ``ctx.room.metadata`` and
+    one reading ``ctx.job.metadata`` parse their way to the same object.
+
+    egma's copy is escaped on the way out, and it has to be. A configured
+    value may hold a character with no UTF-8 form, and the room never meets
+    that because it rides as the ASCII the customer wrote; written out raw,
+    egma's copy would be a string that cannot go on the wire at all. So the
+    spelling may differ and the value may not, and what is pinned here is
+    the second of those.
+    """
+    configured = '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}'
+    carried = dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
+
+    assert json.loads(carried)["tenant"] == json.loads(configured)["tenant"]
+    assert json.loads(carried)["city"] == json.loads(configured)["city"]
+    # The property the spelling buys, and the reason it is not the room's.
+    carried.encode("utf-8")
+
+
+def test_metadata_that_is_not_an_object_rides_exactly_as_configured():
+    """Nowhere to add anything, so nothing is added and nothing is lost.
+
+    The door stores this as a JSON object in a string and the driver
+    refuses anything else on the way in, so this is unreachable through
+    the product. It is pinned anyway, because the alternative to passing
+    an unparsable string through is corrupting it.
+    """
+    assert (
+        dispatch_metadata("not json at all", "sim_01ABC", egma_identity="p")
+        == "not json at all"
+    )
+
+
 async def test_the_dispatch_names_the_participant_the_token_really_opens(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The identity in the metadata is the address a mock-tool call goes to.
+    """The retiring block's identity is the one the token really grants.
 
-    An agent's side sends its calls to whoever the metadata names, so a
-    name invented for the message rather than taken from the token would
-    address a participant that is not in the room — and every mocked tool
-    would quietly run for real.
+    An SDK older than room-name detection sends its mock-tool calls to
+    whoever that block names, so a name invented for the message rather
+    than taken from the token would address a participant that is not in
+    the room — and every mocked tool would quietly run for real, in a
+    live simulation, with nothing on the record to say so. Newer SDKs
+    read the persona identity off the room instead; this is what holds
+    the older ones up until the block goes.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
@@ -1002,8 +1259,8 @@ def jwt_identity(token: str) -> str:
     """Whose token this is, read out of the token itself.
 
     Decoded rather than asserted against a constant, because the question
-    is whether the two really agree — the metadata is only right if it
-    names the identity the signed token actually grants.
+    is whether the two really agree — the block is only right if it names
+    the identity the signed token actually grants.
     """
     import base64
 

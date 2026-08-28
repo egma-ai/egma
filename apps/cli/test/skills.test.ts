@@ -298,10 +298,11 @@ describe("Egma's instruction content", () => {
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
   });
 
-  it("requires the first Python SDK release that follows LiveKit handoffs", () => {
+  it("requires the first Python SDK release that reads the room name", () => {
     const sdk = integrateEgmaReference("integrate-egma-sdk");
 
-    expect(sdk).toContain("`egma>=0.1.1`");
+    expect(sdk).toContain("`egma>=0.2.0`");
+    expect(sdk).not.toContain("0.1.1");
   });
 
   /** The mock-world task owns no worker file or SDK instructions. */

@@ -102,10 +102,31 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 """Which version of this exchange egma's participant speaks.
 
-It rides the dispatch metadata so the other side knows before it says
-anything, and it rides every hello in both directions so a mismatch is
-refused at the first message rather than discovered halfway through a
-simulation.
+It rides every hello in both directions, so a mismatch is refused at the
+first message rather than discovered halfway through a simulation. It
+also rides the retiring context block on a named dispatch — see
+:func:`egma_simulator.media.livekit_room.dispatch_metadata` — which is
+the one channel an SDK older than room-name detection reads.
+
+**Which channel announces this number is not part of it.** The version
+names the shape of a hello and of its reply, and nothing about where the
+other side first read it. An SDK speaking 1 and a simulator speaking 1
+therefore understand each other whichever way round they were upgraded,
+and a bump made over a channel would refuse both of those pairings with
+904 and buy nothing — the SDK that would need warning off is the one that
+sends no hello at all, so it would never see the number.
+
+Two facts constrain a future bump, and both are load-bearing. This file
+and the SDK's own copy are deliberately duplicated and must stay equal,
+and
+``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``
+pins the number into the canonical bytes both suites read. So a real
+shape change ships in this order: the simulator first accepts both
+versions in :func:`_speaks_this_version`, a second fixture is added
+beside the first rather than edited into it, and only once that release
+has drained may the SDK start sending the new number. Self-hosting makes
+"old simulator, new SDK" a lasting pairing rather than a rollout window,
+which is why the order is that way round.
 """
 
 HELLO_METHOD = "egma.hello"

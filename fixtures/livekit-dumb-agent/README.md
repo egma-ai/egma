@@ -58,11 +58,13 @@ await mockable(agent, ctx, session)
 ```
 
 It sits in `entrypoint`, after the agent and the session exist and before
-`session.start`. In a room Egma dispatched, it reports both tools by name
-and stands Egma in front of whichever ones the simulation has answers for.
-**In every other room it does nothing at all** — that is the SDK's whole
-safety story, and `tests/test_outside_egma.py` holds this agent to it
-rather than taking the SDK's word for it.
+`session.start`. In a room Egma named for a simulation — every one of them
+begins `egma-sim-` — it reports both tools by name and stands Egma in
+front of whichever ones the simulation has answers for. That holds on both
+dispatch styles, including the unnamed one where this worker is in the
+room before Egma is. **In every other room it does nothing at all** — that
+is the SDK's whole safety story, and `tests/test_outside_egma.py` holds
+this agent to it rather than taking the SDK's word for it.
 
 The `egma` dependency here is the copy in `sdks/python`, not the published
 package, so this fixture always exercises the seam as it stands on this

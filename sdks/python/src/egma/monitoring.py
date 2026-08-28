@@ -2,7 +2,14 @@
 
 ``monitor_livekit`` is separate from :func:`egma.mockable`. Monitoring is
 enabled explicitly in a production worker. Mock tools remain active only in
-simulations that Egma dispatches.
+the rooms Egma conducts a simulation in.
+
+Both halves read the same one fact to tell those apart, and only that
+fact: the name of the room this job was given. For ``monitor_livekit``
+that name is also all there is to read — it is synchronous and runs
+before the room is connected, so there is nobody in the room to ask — and
+it is all there is to need, because a room Egma named is a simulation
+whether or not anybody has joined it yet.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 
-from .mockable import _egma_context
+from .mockable import _simulation_in
 
 logger = logging.getLogger("egma")
 
@@ -68,7 +75,28 @@ def monitor_livekit(
     # A simulation already has its own trace path. Exporting the agent side of
     # the same room through the production door would make one simulation look
     # like a second production conversation in Monitoring.
-    if _egma_context(ctx) is not None:
+    #
+    # The room's name is the whole of the question, here and in `mockable`,
+    # read straight off the job with no network and nothing connected. What
+    # `mockable` goes on to do — connect, and find Egma's participant among
+    # the people in the room — is how it reaches Egma, not how it decides.
+    # This function needs neither: a room Egma named is a simulation whether
+    # or not anybody has joined it yet.
+    #
+    # Suppression is said out loud. A room name is chosen by whoever mints the
+    # join token, so this guard can in principle be tripped by a production
+    # room named to look like a simulation — and the cost of that would be a
+    # conversation with no record in Monitoring at all. A dropped trace is
+    # evidence the customer cannot get back, so the one thing this side can do
+    # for it is make it visible in the worker's own log.
+    simulation = _simulation_in(ctx)
+    if simulation is not None:
+        logger.warning(
+            "this job runs in the Egma simulation room %r, so its spans are "
+            "not exported to production Monitoring: the simulation keeps its "
+            "own trace and would otherwise appear a second time",
+            simulation.named,
+        )
         return
 
     trace_endpoint = _trace_endpoint(_setting(endpoint, "EGMA_URL"))
