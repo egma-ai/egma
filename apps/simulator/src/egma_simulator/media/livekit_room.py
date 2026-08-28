@@ -689,10 +689,11 @@ class RoomLifecycle:
     MODALITY: str
     """Which kind of simulation this driver conducts.
 
-    It is not decoration: it rides the dispatch metadata, and it is the
+    It is not decoration: it names the room. A chat driver's rooms carry
+    the modality mark the customer's worker reads, and that mark is the
     only thing that tells an agent whether to answer in speech or in
     text. A subclass that conducts something else says so here, and the
-    dispatch tells the truth by construction rather than by a caller
+    name tells the truth by construction rather than by a caller
     remembering to pass the right word.
     """
 
@@ -705,7 +706,6 @@ class RoomLifecycle:
         endpoint_resolver: Any = None,
     ) -> None:
         self._settings = settings
-        self._simulation_id = simulation_id
         self._mock_tools = mock_tools
         self._endpoint_resolver = endpoint_resolver
         # One registry per driver, so what this driver quotes from the
