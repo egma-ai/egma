@@ -1,16 +1,8 @@
 /**
- * The single owner of Egma's code changes in a LiveKit worker.
+ * Give the developer's coding agent the complete LiveKit integration task.
  *
- * The wizard chooses one final mode before this step runs. This step gives the
- * developer's coding agent the public integration router, the exact LiveKit
- * reference selected by that router, and one task that owns both the worker and
- * its dependency manifest. Later steps may write tests and mock-tool answers,
- * but they never receive authority to edit the worker again.
- *
- * Three changes ride that one dispatch: the Egma SDK entry the mode asks for,
- * the chat setup, and the worker's registered name. They travel together
- * because they are one visit to one file, and a second visit would need a
- * second authority this walk deliberately never grants.
+ * The coding agent owns the intelligent repository work. The wizard consumes
+ * its reported paths and names, but does not parse or approve customer source.
  */
 
 import type { DrivenAgent } from "../acp/driven-agent.ts";
@@ -25,16 +17,11 @@ import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { FACTS, LABEL_WIDTH } from "./facts.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
+import { acceptRepositoryFileClaim } from "./repository-file-claim.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReport } from "./stop.ts";
-import {
-  snapshotWorkerIntegration,
-  verifyWorkerIntegrationClaim,
-  type WorkerIntegrationContract,
-  type WorkerIntegrationMode,
-} from "./worker-integration-verifier.ts";
 
-export type { WorkerIntegrationMode } from "./worker-integration-verifier.ts";
+export type WorkerIntegrationMode = "monitoring" | "testing" | "both";
 
 const WORKER_ENTRY_FACT = "worker-entry";
 const DEPENDENCY_MANIFEST_FACT = "dependency-manifest";
@@ -90,28 +77,31 @@ function workerIntegrationTask(
     "## Final mode",
     "",
     ...modeInstructions(mode),
-    "These are the additions this wizard choice authorizes. Preserve every",
-    "other existing import, statement, and behavior in the worker, including an",
-    "Egma entry that was already there before this task.",
+    "Make the repository changes needed for this integration. Preserve unrelated",
+    "worker behavior and every Egma capability that is already present.",
     "",
-    "## Chat setup",
-    "",
-    "Add the chat setup from the reference to the same worker. It is part of",
-    "what this run authorizes. It needs no Egma package and no Egma import, so",
-    "add it whether or not this worker takes an Egma SDK entry.",
-    "",
-    "## The worker's name",
-    "",
-    "Every Egma dispatch is explicit, so the worker must register a name. Give",
-    "it one in its worker options when it has none, and keep the name it",
-    "already registers under when it has one.",
-    "",
+    ...(mode === "monitoring"
+      ? []
+      : [
+          "## Chat setup",
+          "",
+          "Add the chat setup from the reference to the same worker. It is part of",
+          "what this run authorizes. It needs no Egma package and no Egma import.",
+          "",
+          "## The worker's name",
+          "",
+          "Every Egma dispatch is explicit, so the worker must register a name. Give",
+          "it one in its worker options when it has none, and keep the name it",
+          "already registers under when it has one.",
+          "",
+        ]),
     "## Where you may write",
     "",
-    `Work in ${cwd}. You may write at most two files: the worker file where the`,
-    "LiveKit job entrypoint is and the dependency manifest that already manages",
-    "the worker's Python packages. Read whatever committed source you need.",
-    "Run no command that reaches the network and install nothing.",
+    `Work in ${cwd}. Change the worker, its Python dependency files, its lockfile,`,
+    "and any directly related local test or configuration needed to complete the",
+    "integration. Use the dependency system this repository already uses. Run",
+    "relevant local validation and package-manager commands when needed. Do not",
+    "deploy the worker or create or change remote resources.",
     "",
     "**Never open, write, or mention a `.env` file, or any other environment",
     "file.** Keep environment files unread and unchanged. Egma's own command",
@@ -140,15 +130,15 @@ function workerIntegrationTask(
     "",
     "## Report the dependency manifest",
     "",
-    "After you have confirmed that the registry dependency `egma>=0.2.0` is declared,",
-    "report the existing manifest you verified on one line:",
+    "After you have confirmed that the worker environment installs Egma Python",
+    "SDK 0.2.0 or newer, report the dependency manifest on one line:",
     "",
     "```text",
     `egma:found ${DEPENDENCY_MANIFEST_FACT} pyproject.toml`,
     "```",
     "",
-    "Report the manifest that directly declares `egma`. Use `pyproject.toml` or",
-    "a requirements-style manifest. Do not report a JavaScript package manifest.",
+    "Report the Python manifest that the worker uses. For a local worker, Egma's",
+    "launcher currently supports `pyproject.toml` and `requirements.txt`.",
     "",
     "## Report the agent name",
     "",
@@ -159,15 +149,19 @@ function workerIntegrationTask(
     `egma:found ${AGENT_NAME_FACT} front-desk`,
     "```",
     "",
-    "## Report the registered worker name",
-    "",
-    "Report the name this worker registers with LiveKit, after your change, on",
-    "one line:",
-    "",
-    "```text",
-    `egma:found ${DISPATCH_NAME_FACT} front-desk`,
-    "```",
-    "",
+    ...(mode === "monitoring"
+      ? []
+      : [
+          "## Report the registered worker name",
+          "",
+          "Report the name this worker registers with LiveKit, after your change, on",
+          "one line:",
+          "",
+          "```text",
+          `egma:found ${DISPATCH_NAME_FACT} front-desk`,
+          "```",
+          "",
+        ]),
     "## Show progress",
     "",
     "Write one `egma:note <what you did>` line for the integration. Write",
@@ -177,28 +171,16 @@ function workerIntegrationTask(
     "## Completion",
     "",
     "Stop when the requested entries are present in the correct order, existing",
-    "worker behavior is preserved, the dependency is present, and all four facts are",
+    `worker behavior is preserved, the dependency is present, and all ${mode === "monitoring" ? "three" : "four"} facts are`,
     "reported. Report nothing else.",
   ].join("\n");
 }
 
 /*
- * The chat setup rides this dispatch whatever the developer answers later, and
- * nothing reads it back.
- *
- * The walk hands this task over before it asks chat or voice, so a conditional
- * block would wait on an answer this step never sees. Adding it unconditionally
- * costs a voice worker nothing: the six lines read Egma's own dispatch
- * metadata, a production room carries none, and a voice simulation sends none —
- * so the room options outside a chat simulation are the ones the worker always
- * had.
- *
- * `worker-integration-verifier.ts` is deliberately left alone. Its contract is
- * the files that make a Python LiveKit worker use Egma, and the chat setup
- * imports no Egma to find. A worker that never took it is caught at the agent's
- * first utterance, where the wire itself separates a speaking agent from a
- * typing one; the spec ruled out a probe before the run for exactly that
- * reason. A check added here would report on prose rather than on behavior.
+ * The chat setup rides this dispatch whatever modality the developer chooses
+ * later. A production or voice room has no chat mark, so its room options stay
+ * unchanged. Chat correctness is proved by the wire when the agent first
+ * answers, not by a second parser of the worker's source.
  */
 export function workerIntegrationInstructions(
   cwd: string,
@@ -217,7 +199,7 @@ export function workerEntryInstructions(
   const monitoring = mode === "monitoring" || mode === "both";
   const testing = mode === "testing" || mode === "both";
   return [
-    "Egma could not verify the requested entries in your LiveKit worker.",
+    "The coding agent did not report a completed LiveKit worker integration.",
     "Add the following to the worker before starting a run:",
     "",
     '  1. Add the registry dependency "egma>=0.2.0" to your Python dependencies.',
@@ -239,12 +221,12 @@ export function workerEntryInstructions(
           "         await mockable(agent, ctx, session)",
         ]
       : []),
-    // The name is not one of the entries this block could not verify. It is
-    // the one thing a run still needs from the worker afterwards, and a
-    // developer typing the lines above by hand is the developer who has to
-    // add it too.
-    `  ${monitoring && testing ? "4" : "3"}. Register the worker under a name, with agent_name in its WorkerOptions.`,
-    "     A worker with a registered name no longer joins rooms automatically.",
+    ...(testing
+      ? [
+          `  ${monitoring ? "4" : "3"}. Register the worker under a name, with agent_name in its WorkerOptions.`,
+          "     A worker with a registered name no longer joins rooms automatically.",
+        ]
+      : []),
   ];
 }
 
@@ -260,9 +242,11 @@ export type WorkerIntegrationOptions = {
 
 export type WorkerIntegration = {
   readonly halted: ExitReport | null;
-  readonly entry: string | null;
-  readonly contract: WorkerIntegrationContract | null;
-  readonly unverifiedReason: string | null;
+  readonly files: {
+    readonly worker: string;
+    readonly dependencyManifest: string;
+  } | null;
+  readonly reason: string | null;
   readonly agentName: string | null;
   /**
    * The name the worker registers with LiveKit, as this task left it.
@@ -276,7 +260,7 @@ export type WorkerIntegration = {
   readonly supportsSdk: boolean;
 };
 
-/** Dispatch the one integration task, then verify its claim from disk. */
+/** Dispatch the integration task, then accept its repository-local receipt. */
 export async function workerIntegrationStep(
   options: WorkerIntegrationOptions,
 ): Promise<WorkerIntegration> {
@@ -288,9 +272,8 @@ export async function workerIntegrationStep(
     );
     return {
       halted: null,
-      entry: null,
-      contract: null,
-      unverifiedReason:
+      files: null,
+      reason:
         "The Egma SDK is Python only today, so this Node LiveKit worker cannot be integrated.",
       agentName: options.facts.get("agent-name") ?? null,
       dispatchName: null,
@@ -298,26 +281,6 @@ export async function workerIntegrationStep(
     };
   }
 
-  // Discovery names the worker before the coding agent can edit it. Keeping
-  // this snapshot lets the verifier require the user's requested additions
-  // without allowing an older Egma hook to disappear as collateral damage.
-  const before = await snapshotWorkerIntegration(
-    options.cwd,
-    options.facts.get("entrypoint") ?? "",
-  );
-  if (before.kind === "unverified") {
-    ui.pushStatus(`${DETAIL_MARK} ${before.reason}`);
-    for (const line of workerEntryInstructions(options.mode)) ui.pushStatus(line);
-    return {
-      halted: null,
-      entry: null,
-      contract: null,
-      unverifiedReason: before.reason,
-      agentName: options.facts.get("agent-name") ?? null,
-      dispatchName: null,
-      supportsSdk: true,
-    };
-  }
   const markers = new MarkerStream();
   const claimed: {
     entry: string | null;
@@ -325,14 +288,17 @@ export async function workerIntegrationStep(
     name: string | null;
     dispatchName: string | null;
     none: string;
+    abort: string | null;
   } = {
     entry: null,
     dependency: null,
     name: null,
     dispatchName: null,
     none: "",
+    abort: null,
   };
-  const take = (lines: readonly ParsedLine[]): null => {
+  const take = (lines: readonly ParsedLine[]): string | null => {
+    let abort: string | null = null;
     for (const line of lines) {
       if (line.kind === "prose") {
         log.write(`${line.text}\n`);
@@ -358,6 +324,8 @@ export async function workerIntegrationStep(
           claimed.none = marker.reason;
           break;
         case "abort":
+          claimed.abort = marker.reason;
+          abort = marker.reason;
           ui.pushStatus(
             `${FAILURE_MARK} ${marker.reason === "" ? `${drivenAgent.name} stopped, and did not say why.` : marker.reason}`,
           );
@@ -368,7 +336,7 @@ export async function workerIntegrationStep(
           break;
       }
     }
-    return null;
+    return abort;
   };
 
   ui.taskStarted();
@@ -402,44 +370,75 @@ export async function workerIntegrationStep(
         ui.pushStatus(`What ${drivenAgent.name} printed is in ${log.file}`);
         return { kind: "failed", reason: result.reason };
       case "done":
+        return claimed.abort === null
+          ? null
+          : {
+              kind: "failed",
+              reason:
+                claimed.abort === ""
+                  ? `${drivenAgent.name} stopped the LiveKit integration and did not say why.`
+                  : claimed.abort,
+            };
       case "aborted":
-        return null;
+        return {
+          kind: "failed",
+          reason:
+            claimed.abort ??
+            (result.reason === ""
+              ? `${drivenAgent.name} stopped the LiveKit integration and did not say why.`
+              : result.reason),
+        };
     }
   })();
 
-  const verified =
-    claimed.entry === null
-      ? null
-      : await verifyWorkerIntegrationClaim(
+  const worker =
+    halted === null
+      ? await acceptRepositoryFileClaim(
           options.cwd,
-          before.snapshot,
-          claimed.entry,
+          claimed.entry ?? "",
+          "the LiveKit worker",
+        )
+      : null;
+  const dependency =
+    halted === null
+      ? await acceptRepositoryFileClaim(
+          options.cwd,
           claimed.dependency ?? "",
-          options.mode,
-        );
-  const entry = verified?.kind === "verified" ? verified.file : null;
+          "the Python dependency manifest",
+        )
+      : null;
+  const named = claimed.name?.trim() ?? "";
+  const dispatched = claimed.dispatchName?.trim() ?? "";
+  const reason = (() => {
+    if (halted !== null) return null;
+    if (claimed.none.trim() !== "") return claimed.none.trim();
+    if (worker?.kind === "refused") return worker.reason;
+    if (dependency?.kind === "refused") return dependency.reason;
+    if (named === "") return "The coding agent did not report the agent name.";
+    if (options.mode !== "monitoring" && dispatched === "") {
+      return "The coding agent did not report the registered LiveKit worker name.";
+    }
+    return null;
+  })();
+  const files =
+    reason === null && worker?.kind === "accepted" && dependency?.kind === "accepted"
+      ? { worker: worker.file, dependencyManifest: dependency.file }
+      : null;
   if (halted === null) {
-    if (entry === null) {
-      const why = verified?.kind === "unverified" ? verified.reason : claimed.none;
-      if (why.trim() !== "") ui.pushStatus(`${DETAIL_MARK} ${why}`);
+    if (files === null) {
+      if (reason !== null) ui.pushStatus(`${DETAIL_MARK} ${reason}`);
       for (const line of workerEntryInstructions(options.mode)) ui.pushStatus(line);
     } else {
-      ui.pushStatus(`${ACTION_MARK} Egma's requested worker integration is in ${entry}`);
+      ui.pushStatus(
+        `${ACTION_MARK} ${drivenAgent.name} completed the LiveKit worker integration in ${files.worker}`,
+      );
     }
   }
 
-  const named = claimed.name?.trim() ?? "";
-  const dispatched = claimed.dispatchName?.trim() ?? "";
   return {
     halted,
-    entry,
-    contract: verified?.kind === "verified" ? verified.contract : null,
-    unverifiedReason:
-      verified?.kind === "unverified"
-        ? verified.reason
-        : entry === null && claimed.none.trim() !== ""
-          ? claimed.none
-          : null,
+    files,
+    reason,
     agentName: named === "" ? null : named,
     dispatchName: dispatched === "" ? null : dispatched,
     supportsSdk: true,

@@ -208,7 +208,7 @@ export async function mockAuthoringStep(
   const { ui, drivenAgent, signal, log } = options;
 
   // A Node worker cannot serve these answers with the Python-only SDK. The
-  // integration owner already said that once, so this step stays silent.
+  // integration task already said that once, so this step stays silent.
   if (!supportsLiveKitSdk(options.context.facts)) {
     return { halted: null };
   }

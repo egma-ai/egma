@@ -393,8 +393,8 @@ export async function liveKitConnectionSetupStep(
   const discoveredName = options.suggestedName.trim() || "voice-agent";
   const suggestedName = options.existingAgent?.name ?? discoveredName;
   const dispatchName =
-    discoveredValue(options.dispatchName) ??
-    discoveredValue(options.integratedDispatchName ?? "");
+    discoveredValue(options.integratedDispatchName ?? "") ??
+    discoveredValue(options.dispatchName);
   if (dispatchName === null) {
     return ending(
       "Egma could not find the LiveKit dispatch name in this repository, so it did not create a connection. Set the worker's agent name in code and run Egma again.",

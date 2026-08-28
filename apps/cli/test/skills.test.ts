@@ -487,7 +487,7 @@ describe("Egma's instruction content", () => {
     expect(integration.split(sdk)).toHaveLength(2);
     expect(integration).toContain("final mode is **both**");
     expect(integration).toContain("egma:found worker-entry");
-    expect(integration).toContain("worker file where");
+    expect(integration).toContain("Change the worker, its Python dependency files");
     expect(integration).toContain("dependency manifest");
   });
 

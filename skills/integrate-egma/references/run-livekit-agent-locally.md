@@ -6,11 +6,11 @@ does not create, update, or deploy a LiveKit Cloud agent.
 
 ## Start the foreground worker
 
-Use the entrypoint and dispatch name proved during discovery. From this skill
-directory, run:
+Use the entrypoint, dependency manifest, and registered worker name reported by
+the coding agent after integration. From this skill directory, run:
 
 ```text
-node scripts/livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-entrypoint> --dependency-manifest <verified-python-manifest> --dispatch-name <discovered-dispatch-name>
+node scripts/livekit-local.mjs --cwd <repository-root> --entrypoint <repository-relative-entrypoint> --dependency-manifest <reported-python-manifest> --dispatch-name <reported-worker-name>
 ```
 
 The process requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
@@ -19,7 +19,7 @@ arguments and output.
 
 Before the worker starts, the helper checks the same Python environment that
 LiveKit will use for Egma SDK 0.2.0 or newer. When it is missing, the helper
-installs the dependency through the verified project manifest without changing
+installs the dependency through the reported project manifest without changing
 the manifest or its lock file, then checks the import again. The helper runs
 from that manifest's project directory, which must also contain the worker.
 A worker never starts with only an uninstalled declaration.
@@ -52,5 +52,5 @@ helper must not run `lk dispatch create`, `lk agent create`, or
 `lk agent deploy`.
 
 Treat the worker as ready only after LiveKit reports that it registered with
-the exact discovered dispatch name and the process remains alive. Keep it
+the exact reported worker name and the process remains alive. Keep it
 running until Egma completes or stops the run.
