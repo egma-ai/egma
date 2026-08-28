@@ -675,6 +675,75 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
     await plug.close()
 
 
+async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_record(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A stream that opens promptly and closes late is still its turn's.
+
+    That is this plug's own rule, written down in its module docstring: an
+    utterance belongs to the turn that was outstanding when its stream
+    **opened**, "so one that opens promptly and finishes late still
+    belongs to the question it began answering". The stamp is taken for
+    exactly that reason — and then used only to *refuse* a late utterance,
+    never to wait for one, so the rule it was taken for is not kept.
+
+    The agent here opens its greeting in two streams and the first one
+    closes last. Both opened while the greeting was outstanding, so both
+    are the greeting. The quiet period expires while the first is still
+    open, the greeting turn ends without it, and the turn after refuses it
+    for being older — so the record's first agent turn begins part-way
+    through the sentence the agent started with.
+
+    Which is what a customer sees: an agent turn that reads as if the
+    agent began mid-sentence, with nothing on the record to say a word of
+    it was ever dropped.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=[])
+    plug = chat_room(stub)
+
+    opening = asyncio.ensure_future(plug.open())
+    await asyncio.sleep(0)
+    room = stub.room
+
+    # Both streams open while the greeting is outstanding, which is where
+    # an agent's opening opens. The first is still being written when the
+    # second has closed; the quiet period is measured from that close.
+    still_open = asyncio.Event()
+    room._agent_said(_Echo("Hi! I", closes_when=still_open), AGENT_IDENTITY)
+    room._agent_said(
+        _Echo("can help you book an appointment."), AGENT_IDENTITY
+    )
+
+    # The record, written exactly as `walk.conduct` writes it: the opening
+    # if there was one, the persona's turn, then the answer's words.
+    record: list[tuple[str, str]] = []
+    greeting = await opening
+    if greeting is not None:
+        record.append(("agent", greeting))
+    record.append(("human", "Hi, my name is Starter."))
+
+    # The held stream closes now — after the turn it opened in is over.
+    still_open.set()
+    await asyncio.sleep(0)
+
+    delivering = asyncio.ensure_future(plug.deliver("Hi, my name is Starter."))
+    await asyncio.sleep(0)
+    room._agent_said(_Echo("That sounds good, Starter."), AGENT_IDENTITY)
+    answered = await delivering
+    if answered.text is not None:
+        record.append(("agent", answered.text))
+    await plug.close()
+
+    said = [text for speaker, text in record if speaker == "agent"]
+    assert said[0].startswith("Hi! I"), (
+        "the record's first agent turn begins part-way through what the "
+        f"agent said: {said[0]!r}. The stream carrying its opening words was "
+        "stamped with the greeting, the greeting ended without waiting for "
+        "it, and the turn after refused it for being older"
+    )
+
+
 async def test_a_turn_the_agent_never_answers_stops_the_exchange(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1040,15 +1109,29 @@ async def test_egmas_own_words_are_never_read_back_as_the_agents(
 
 
 class _Echo:
-    """One transcription stream, read to its close without a LiveKit."""
+    """One transcription stream, read to its close without a LiveKit.
 
-    def __init__(self, said: str, *, spoken: bool = False) -> None:
+    ``closes_when`` holds the stream open until the test says otherwise,
+    which is the one thing a stream really does that a queued utterance
+    cannot show: the header is here and stamped, and the words are not.
+    """
+
+    def __init__(
+        self,
+        said: str,
+        *,
+        spoken: bool = False,
+        closes_when: asyncio.Event | None = None,
+    ) -> None:
         self.info = _StreamInfo(
             {SPOKEN_TRACK_ATTRIBUTE: "TR_0001"} if spoken else {}
         )
         self._said = said
+        self._closes_when = closes_when
 
     async def read_all(self) -> str:
+        if self._closes_when is not None:
+            await self._closes_when.wait()
         return self._said
 
 
