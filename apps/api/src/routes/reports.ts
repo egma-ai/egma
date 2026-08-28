@@ -492,7 +492,7 @@ async function applyLanding(
   // Read here rather than once per document: a landing is the only event that
   // writes a stamp, and a `running` event must not pay for a read it has no
   // use for.
-  const mocked = await simulationMockedWorld(standing.id);
+  const mocked = await simulationMockedWorld(standing.auth, standing.id);
   const facts = summaryFactsOf(event, mocked);
 
   if (event.status === "completed") {

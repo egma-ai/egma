@@ -1677,9 +1677,8 @@ function openedApiKey(envelope: string): string | null {
  * The mocked world one simulation ran in, and which of its tools egma had an
  * answer for.
  *
- * One query, on the report door's terms — no `AuthContext`, because the caller
- * is egma's own service and the row is the whole of the authority, exactly as
- * `resolveSimulationStanding` beside it works.
+ * One query, under the context the row's own standing produced — the report
+ * door already holds it, so this read is scoped rather than exempt.
  *
  * `answeredFor` is the run's frozen world resolved for **this** simulation's
  * pinned test version, so a per-test override that answers for a tool the
@@ -1692,8 +1691,10 @@ export type SimulationMockedWorld = {
 };
 
 export async function simulationMockedWorld(
+  auth: AuthContext,
   simulationId: string,
 ): Promise<SimulationMockedWorld | undefined> {
+  authorize(auth, "read", here(auth));
   const [row] = await db()
     .select({
       mockedWorld: run.mockedWorld,
@@ -1703,7 +1704,7 @@ export async function simulationMockedWorld(
     })
     .from(simulation)
     .innerJoin(run, eq(simulation.runId, run.id))
-    .where(eq(simulation.id, simulationId))
+    .where(within(auth, simulation, eq(simulation.id, simulationId)))
     .limit(1);
 
   if (row === undefined) return undefined;

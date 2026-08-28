@@ -479,7 +479,7 @@ describe("the three-class coverage stamp", () => {
       [runId],
     );
 
-    const mocked = await simulationMockedWorld(simulationId);
+    const mocked = await simulationMockedWorld(acting(), simulationId);
     expect(mocked?.world).toEqual(WORLD);
     // The run's frozen answers, resolved for this simulation's test version.
     expect(mocked?.answeredFor).toEqual(["get_availability"]);

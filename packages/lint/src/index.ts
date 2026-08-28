@@ -169,6 +169,22 @@ const WORK_DISPATCHING = [
   // narrower claim that would be honest. It takes nothing and answers a lock,
   // reaching no table at all.
   "openDrainOwnership",
+  // The mock endpoint's own resolver, added on 2026-08-28 with that endpoint
+  // and after the rule stopped the build. It is the standing resolver's shape
+  // turned one step further out again: the caller is the **customer's agent
+  // platform**, which holds no credential of egma's at all and could not be
+  // given one — the tool calls arrive from Retell's infrastructure. So the row
+  // is looked up by the two unguessable identifiers egma itself wrote into the
+  // tool URL, and the answer carries the same narrowed `AuthContext` a claim
+  // builds, which is what the record write then goes through.
+  //
+  // It names no customer and cannot be made to: a run id and a simulation id
+  // say which piece of egma's own bookkeeping is meant, and the rule below
+  // still refuses this name the day somebody gives it an organization or a
+  // project. What it may answer is bounded on purpose — whether that run is
+  // live, whether the simulation is its, and the answers that simulation was
+  // already frozen with.
+  "resolveMockToolCall",
 ];
 
 /**
