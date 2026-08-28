@@ -49,6 +49,16 @@ three streams for one turn. So the turn ends after
 a tool call to come back, and the number is written down with its
 reasoning below rather than tuned in silence.
 
+Which turn an utterance belongs to is the same question asked backwards,
+and the wire answers it once: a stream is stamped with the turn that was
+outstanding when it **opened**, so one that opens promptly and finishes
+late still belongs to the question it began answering. What the wire
+cannot answer is a stream that has not opened at all by the time the next
+question goes out — nothing distinguishes a late answer to this question
+from a prompt answer to the next. So a delivered turn that hears nothing
+inside :data:`REPLY_SECONDS` ends the exchange rather than asking again.
+The greeting is exempt, because nothing has been asked yet.
+
 ## Answering for the agent's tools
 
 Exactly as the room does for voice, and by construction rather than by a
@@ -110,10 +120,12 @@ either side of it. It matches the join wait for the same reason that one
 is what it is — long enough that reaching it means something is wrong,
 rather than something is slow.
 
-The cost of it being too long is a stalled turn on an agent that has
-stopped answering, which a simulation's own duration limit still ends. The
-cost of it being too short is a transcript that reads as though the agent
-answered the wrong question. The second is worse, so this errs long.
+Reaching it ends the exchange rather than asking again, so the number is
+also how long egma waits before calling an agent unanswering. Both costs
+are real and they are not equal: too long makes a customer wait to be told
+their agent never replied, and too short ends a simulation the agent was
+about to answer. This errs long, because the first wastes seconds and the
+second wastes the run.
 """
 
 TURN_QUIET_SECONDS = 5.0

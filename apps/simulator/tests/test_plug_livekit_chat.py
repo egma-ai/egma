@@ -297,7 +297,7 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
     script stops being under test.
     """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
-    stub = ChatStub(greeting="Front desk.", replies=["Noted."])
+    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
     await chat_walk(tmp_path, stub, monkeypatch, scenario=scenario)
 
     assert len(stub.dispatches) == 1
@@ -588,52 +588,33 @@ async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
     await plug.close()
 
 
-async def test_an_answer_slower_than_its_budget_never_lands_on_the_next_turn(
+async def test_a_turn_the_agent_never_answers_stops_the_exchange(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """The whole of it, walked: a slow agent misfiles nothing.
+    """Quiet where an answer belongs ends it, rather than asking again.
 
-    Every reply here opens its stream promptly and then takes longer to
-    finish than the budget allows, which is the shape that used to put the
-    first question's answer under the second. Each is stamped with the turn
-    it opened in, so each is left off rather than misfiled, and the
-    transcript carries no agent turn at all — an honest empty record
-    instead of a plausible wrong one.
-    """
-    stub = ChatStub(
-        greeting=None,
-        replies=["The first answer.", "The second answer."],
-        answer_delay_seconds=QUIET_SECONDS * 3,
-    )
-    _conducted, turns, _calls, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, scenario="One point. Another point."
-    )
+    A stream is stamped when it opens, so one that opens before the next
+    question goes out can always be told from that question's answer. One
+    that has not opened at all by then cannot: nothing on the wire
+    separates a late answer to this question from a prompt answer to the
+    next, and no rule could invent the difference.
 
-    assert not [text for speaker, text in turns if speaker == "agent"]
-    assert "The first answer." not in [text for _speaker, text in turns]
-
-
-async def test_a_turn_that_produced_nothing_is_an_answer_without_words(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A spent script answers with quiet, and quiet is not a fault.
-
-    The honest record of a turn where the agent only called a tool, and
-    the walk carries it: no agent turn goes on the transcript, and the
-    exchange goes on.
+    So the exchange stops where the ambiguity would begin. A transcript
+    with a silent gap is a record a customer can read; one where the agent
+    appears to answer a question it was never asked is one they cannot,
+    and they would have no way of knowing.
     """
     stub = ChatStub(greeting="Front desk.", replies=[])
-    conducted, turns, _calls, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, scenario="One point. Another point."
-    )
 
-    assert [speaker for speaker, _text in turns] == [
-        "agent",
-        "human",
-        "human",
-        "human",
-    ]
-    assert conducted.ending == "persona_concluded"
+    with pytest.raises(PlugError) as unanswered:
+        await chat_walk(
+            tmp_path, stub, monkeypatch, scenario="One point. Another point."
+        )
+
+    assert failed_ending(unanswered.value) == ERROR
+    told = str(unanswered.value)
+    assert "said nothing at all" in told
+    assert "never asked" in told, "the reason says what going on would risk"
 
 
 async def test_a_greeting_that_never_comes_lets_the_persona_open(

@@ -1602,11 +1602,19 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         turn = room.begin_turn()
         await room.send(text)
         return await self._assembled(
-            first_within=reply_seconds, quiet=quiet_seconds, turn=turn
+            first_within=reply_seconds,
+            quiet=quiet_seconds,
+            turn=turn,
+            silence_ends_it=True,
         )
 
     async def _assembled(
-        self, *, first_within: float, quiet: float, turn: int
+        self,
+        *,
+        first_within: float,
+        quiet: float,
+        turn: int,
+        silence_ends_it: bool = False,
     ) -> AgentTurn:
         """One agent turn, out of however many utterances it took.
 
@@ -1616,11 +1624,22 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         that says a filler, calls a tool and then answers is one turn that
         arrived in pieces, and a rule that stopped at the first close
         would put the filler on the record and the answer nowhere.
+
+        ``silence_ends_it`` is what keeps a delivered turn from running on
+        into a question egma can no longer answer honestly. A stream is
+        stamped when it opens, so one that opens *before* the next question
+        goes out can always be told from that question's answer — but one
+        that has not opened at all by then cannot. There is no marker for
+        it and no rule that could invent one, so the exchange stops where
+        the ambiguity would begin rather than filing a guess. The greeting
+        never passes it: nothing has been asked yet, so quiet there is an
+        agent waiting to be spoken to.
         """
         room = self._room
         if room is None:
             raise MediaBackendError("an answer was read before a room")
         said: list[str] = []
+        heard = False
         speaking = room.audio_published.is_set()
         budget = first_within
         while not speaking:
@@ -1640,6 +1659,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
                     self._room_name,
                 )
                 continue
+            heard = True
             if utterance.text:
                 said.append(utterance.text)
             speaking = utterance.spoken or room.audio_published.is_set()
@@ -1648,6 +1668,17 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             raise MediaBackendError(
                 f"the livekit server at {self._settings.url} closed "
                 f"{self._room_name} while the exchange was under way",
+                ending=ERROR,
+            )
+        if silence_ends_it and not heard and not speaking and not room.ended.is_set():
+            raise MediaBackendError(
+                f"the agent said nothing at all for {first_within:.0f} seconds "
+                f"after the persona's turn in {self._room_name}. Egma stops "
+                "here rather than ask again: an answer to this turn could "
+                "still open its stream after the next question went out, and "
+                "nothing on the wire would tell it from an answer to that "
+                "one — so going on risks a transcript where the agent "
+                "appears to answer a question it was never asked",
                 ending=ERROR,
             )
         return AgentTurn(
