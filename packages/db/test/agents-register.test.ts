@@ -280,8 +280,8 @@ describe("a credential rotated by a reused registration", () => {
  * Retell's rule is one config value compared as it was stored, and Postgres
  * can decide it on its own. LiveKit's cannot be decided in SQL at all: the
  * identity is a normalized server origin and a worker name, and
- * `wss://acme.livekit.cloud` and `https://acme.livekit.cloud:443` are one
- * server that no `=` will ever match. So the query narrows on the name and the
+ * `wss://acme.livekit.cloud`, `https://acme.livekit.cloud:443` and
+ * `ws://acme.livekit.cloud` are one server that no `=` will ever match. So the query narrows on the name and the
  * rule settles the rest, and these are the cases that tell the two apart.
  */
 describe("one LiveKit worker registered twice", () => {
@@ -348,6 +348,10 @@ describe("one LiveKit worker registered twice", () => {
       "https://acme.livekit.cloud",
       "wss://acme.livekit.cloud:443",
       "https://ACME.livekit.cloud:443/",
+      // The other scheme pair too: one host reached over ws is the same
+      // server as one reached over wss, and must not become a second agent.
+      "ws://acme.livekit.cloud",
+      "http://acme.livekit.cloud:80",
     ]) {
       const again = await registerAgent(
         actingIn(acme.project),

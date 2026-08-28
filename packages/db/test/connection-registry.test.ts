@@ -260,19 +260,18 @@ describe("what a livekit connection is made of", () => {
     expect(reuse?.matchedKeys).toEqual(["agentName"]);
 
     const one = reuse?.identityOf({ url: A_URL, agentName: A_NAME });
-    expect(one).toBe("acme.livekit.cloud:443|front-desk");
+    expect(one).toBe("acme.livekit.cloud|front-desk");
 
-    // Two spellings of one server, one identity — and the port a customer's
-    // dashboard prints is not a second server either.
-    expect(
-      reuse?.identityOf({ url: "https://acme.livekit.cloud", agentName: A_NAME }),
-    ).toBe(one);
-    expect(
-      reuse?.identityOf({
-        url: "wss://acme.livekit.cloud:443",
-        agentName: A_NAME,
-      }),
-    ).toBe(one);
+    // Every spelling of one server is one identity — the other scheme pair,
+    // and the port a customer's dashboard prints, are not second servers.
+    for (const url of [
+      "https://acme.livekit.cloud",
+      "wss://acme.livekit.cloud:443",
+      "ws://acme.livekit.cloud",
+      "http://acme.livekit.cloud:80",
+    ]) {
+      expect(reuse?.identityOf({ url, agentName: A_NAME })).toBe(one);
+    }
 
     // Two servers, and one name on each of them, stay two agents.
     expect(
@@ -303,24 +302,22 @@ describe("what a livekit connection is made of", () => {
  */
 describe("a LiveKit server url read as an origin", () => {
   it.each([
-    { written: "wss://acme.livekit.cloud", origin: "acme.livekit.cloud:443" },
-    { written: "https://acme.livekit.cloud", origin: "acme.livekit.cloud:443" },
-    {
-      written: "wss://acme.livekit.cloud:443",
-      origin: "acme.livekit.cloud:443",
-    },
-    {
-      written: "https://acme.livekit.cloud:443/",
-      origin: "acme.livekit.cloud:443",
-    },
-    { written: "ws://livekit.internal", origin: "livekit.internal:80" },
-    { written: "http://livekit.internal:80", origin: "livekit.internal:80" },
+    { written: "wss://acme.livekit.cloud", origin: "acme.livekit.cloud" },
+    { written: "https://acme.livekit.cloud", origin: "acme.livekit.cloud" },
+    { written: "wss://acme.livekit.cloud:443", origin: "acme.livekit.cloud" },
+    { written: "https://acme.livekit.cloud:443/", origin: "acme.livekit.cloud" },
+    // All four schemes fold together, which is the whole point of dropping
+    // them: one host reached two ways is one server, not two agents.
+    { written: "ws://acme.livekit.cloud", origin: "acme.livekit.cloud" },
+    { written: "http://acme.livekit.cloud:80", origin: "acme.livekit.cloud" },
+    { written: "ws://livekit.internal", origin: "livekit.internal" },
+    { written: "http://livekit.internal:80", origin: "livekit.internal" },
     // A real port is a real difference: a self-hosted LiveKit on 7880 is not
     // whatever else answers on that host.
     { written: "ws://127.0.0.1:7880", origin: "127.0.0.1:7880" },
-    { written: "wss://ACME.LiveKit.Cloud", origin: "acme.livekit.cloud:443" },
-    { written: "wss://acme.livekit.cloud.", origin: "acme.livekit.cloud:443" },
-    { written: "  wss://acme.livekit.cloud  ", origin: "acme.livekit.cloud:443" },
+    { written: "wss://ACME.LiveKit.Cloud", origin: "acme.livekit.cloud" },
+    { written: "wss://acme.livekit.cloud.", origin: "acme.livekit.cloud" },
+    { written: "  wss://acme.livekit.cloud  ", origin: "acme.livekit.cloud" },
     { written: "ws://[::1]:7880", origin: "[::1]:7880" },
   ])("reads $written as $origin", ({ written, origin }) => {
     expect(livekitServerOrigin(written)).toBe(origin);

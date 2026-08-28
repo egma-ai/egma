@@ -202,22 +202,11 @@ function credentialString(what: string, field: string, value: unknown): string {
 }
 
 /**
- * The port each LiveKit scheme means when a url leaves it out. `URL` drops a
- * port that is already its scheme's default, so `wss://a:443` and `wss://a`
- * both arrive with none — and putting one back is what makes them one server.
- * `ws://a:7880` keeps its port, because that one really is a different server.
- */
-const LIVEKIT_DEFAULT_PORTS: Readonly<Record<string, string>> = {
-  "ws:": "80",
-  "http:": "80",
-  "wss:": "443",
-  "https:": "443",
-};
-
-/**
  * Which LiveKit server a url names, as one comparable string. The scheme is
  * dropped because the SDKs normalise between the websocket pair and the HTTP
- * pair themselves, so two spellings reach one server.
+ * pair themselves, so two spellings reach one server. `URL` already reports an
+ * empty port for one that is its scheme's default, so `wss://a`, `wss://a:443`
+ * and `ws://a:80` compare equal, while a self-hosted `:7880` is kept.
  *
  * Copied from the registry rather than imported, like every other gate here:
  * this fixture re-implements the rules on purpose, so it can never be kinder
@@ -234,11 +223,7 @@ function livekitServerOrigin(url: string): string {
   if (parsed === undefined) return written.toLowerCase();
 
   const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
-  const port =
-    parsed.port === ""
-      ? (LIVEKIT_DEFAULT_PORTS[parsed.protocol] ?? "")
-      : parsed.port;
-  return port === "" ? host : `${host}:${port}`;
+  return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
 /** The last four of one field — only ever a credential's public half. */

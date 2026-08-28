@@ -741,32 +741,21 @@ function livekitServerUrl(key: string, value: unknown): string {
 }
 
 /**
- * The port each of those four schemes means when a url leaves it out.
- *
- * `URL` drops a port that is already its scheme's default, so `wss://a:443`
- * and `wss://a` both arrive with no port at all — and putting one back is what
- * makes them one server rather than two. It has to be substituted rather than
- * simply ignored, because `ws://a:7880` really is a different server from
- * `wss://a`, and a rule that dropped every port would fold a self-hosted
- * LiveKit onto whatever else runs on that host.
- */
-const LIVEKIT_DEFAULT_PORTS: Readonly<Record<string, string>> = {
-  "ws:": "80",
-  "http:": "80",
-  "wss:": "443",
-  "https:": "443",
-};
-
-/**
  * Which LiveKit server a url names, as one comparable string.
  *
- * The scheme is deliberately dropped. The SDKs normalise between the websocket
- * pair and the HTTP pair themselves, so `wss://acme.livekit.cloud` and
- * `https://acme.livekit.cloud` reach one server, and a customer who typed one
- * in the browser and the other in the terminal must not end up with two egma
- * agents for one worker. Host case and a trailing root dot go the same way and
- * for the same reason. What is left — host and port — is exactly what tells a
- * team's staging project from their production one.
+ * The scheme is deliberately dropped, all four of them. The SDKs normalise
+ * between the websocket pair and the HTTP pair themselves, so
+ * `wss://acme.livekit.cloud` and `https://acme.livekit.cloud` reach one
+ * server, and a customer who typed one in the browser and the other in the
+ * terminal must not end up with two egma agents for one worker. Host case and
+ * a trailing root dot go the same way and for the same reason.
+ *
+ * What is left is host and port, which is exactly what tells a team's staging
+ * project from their production one. The port needs no arithmetic here:
+ * `URL` already reports an empty port for one that is its scheme's default,
+ * so `wss://a`, `wss://a:443` and `ws://a:80` all arrive bare and compare
+ * equal, while the `:7880` a self-hosted LiveKit runs on is kept and keeps it
+ * apart from whatever else answers on that host.
  *
  * This is a comparison key and never a value anybody dials: the url is stored
  * as it was written, because what goes to the SDK should be what the customer
@@ -787,11 +776,7 @@ export function livekitServerOrigin(url: string): string {
   if (parsed === undefined) return written.toLowerCase();
 
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
-  const port =
-    parsed.port === ""
-      ? (LIVEKIT_DEFAULT_PORTS[parsed.protocol] ?? "")
-      : parsed.port;
-  return port === "" ? host : `${host}:${port}`;
+  return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
 /**
