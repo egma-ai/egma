@@ -1169,12 +1169,13 @@ describe("one run after suites", () => {
     expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
     const conversation = screen.getByRole("list", { name: "Transcript messages" });
     const events = within(conversation).getAllByRole("listitem");
-    expect(events).toHaveLength(3);
+    expect(events).toHaveLength(2);
     expect(events[0]?.getAttribute("aria-label")).toBe("Turn 1, User");
     expect(events[1]?.getAttribute("aria-label")).toBe("Turn 2, Agent");
-    expect(events[2]?.getAttribute("aria-label")).toBe(
+    const toolCall = within(conversation).getByLabelText(
       "Tool call, lookup_appointment",
     );
+    expect(events[1]?.contains(toolCall)).toBe(true);
     const toolName = within(conversation).getByText("lookup_appointment");
     const details = toolName.closest("details");
     expect(details).not.toBeNull();

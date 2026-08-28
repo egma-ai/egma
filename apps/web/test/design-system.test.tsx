@@ -174,6 +174,15 @@ describe("the development design proof", () => {
       expect(chip.className).not.toContain("brand");
       expect(chip.className).not.toContain("primary");
     }
+
+    const gradingError = screen.getByText("Grading error");
+    const gradingErrorBadge = gradingError.closest('[data-slot="badge"]');
+    const gradingErrorMark = gradingErrorBadge?.querySelector(
+      '[data-slot="state-mark"]',
+    );
+    expect(gradingErrorBadge?.classList.contains("text-failure")).toBe(true);
+    expect(gradingErrorMark?.classList.contains("bg-failure")).toBe(true);
+    expect(gradingErrorMark?.classList.contains("bg-transparent")).toBe(false);
   });
 
   /**

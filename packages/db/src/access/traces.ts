@@ -13,6 +13,10 @@ import type { AuthContext } from "./context.ts";
 import { UnreadableTraceQueryError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import type { SpanSource } from "./spans.ts";
+import {
+  withRetellToolTimeline,
+  type RetellToolTimelineSlice,
+} from "./retell-tool-timeline.ts";
 
 /**
  * Reading traces, and the only way anything ever does.
@@ -932,6 +936,7 @@ function measureSpanRowAsSpanRow(row: PageMeasureSpanRow): SpanRow {
     tool_name: "",
     tool_arguments: "",
     tool_result: "",
+    provider_tool_id: "",
   };
 }
 
@@ -1023,6 +1028,8 @@ type SpanRow = {
   readonly tool_name: string;
   readonly tool_arguments: string;
   readonly tool_result: string;
+  /** Retell's structural correlation id, extracted without the tool payload. */
+  readonly provider_tool_id: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -1049,16 +1056,14 @@ function isTurn(kind: string): boolean {
  * not build, because nothing consumes it yet and an endpoint with no caller is a
  * contract nobody has checked.
  *
- * **One key of one row is the exception, and it is the narrow consumer that
- * paragraph said did not exist yet.** The reported-measurements block rides the
- * root span's payload, so the third query below reads
- * `JSONExtractRaw(payload, 'egma_normalised')` off the earliest root and
- * nothing beside it: one row, and only the corner of it egma itself wrote. The
- * extraction happens in ClickHouse rather than here, so the vendor's own
- * document never crosses the wire at all — which is what keeps the paragraph
- * above true in the shape that mattered, rather than merely in its letter. A
- * trace whose platform reported nothing pays one cheap lookup for an empty
- * string.
+ * **Two narrow projections are the exception.** The reported-measurements block
+ * rides the root, so the third query reads only its `egma_normalised` corner.
+ * Retell rows written before tool timing was understood also need a compatible
+ * read, so ClickHouse projects only tool ids, event roles and order, event
+ * times, and summary latency. It does not select transcript content, arguments,
+ * results, or the provider document. The tool row contributes only its matching
+ * id. Both extractions happen in ClickHouse, so vendor evidence the reader does
+ * not need never crosses the wire.
  *
  * Absent when the window holds no span of that trace for this customer — which is
  * also the answer another customer gets for a trace id they guessed correctly,
@@ -1086,11 +1091,11 @@ export async function readTrace(
   // trace, so that a transcript which had to stop somewhere still reports what
   // it stopped short of. It is the list's own aggregate, scoped to one trace,
   // over a window the sort key has already pruned to this organization, this
-  // project and these minutes — one cheap pass. The third reads the block the
-  // platform reported, off one row and one key of it. All three are asked in
-  // parallel because no answer is another's input, and all three carry the same
-  // tenancy and the same window, so the third can no more reach another
-  // customer's row than the first two can.
+  // project and these minutes — one cheap pass. The third reads the reported
+  // block and the bounded Retell compatibility fields from the root. All three
+  // are asked in parallel because no answer is another's input, and all three
+  // carry the same tenancy and the same window, so the third can no more reach
+  // another customer's row than the first two can.
   //
   // The tree is ordered by when a span started and then by its id, and there is
   // nothing after that. There used to be: a long tail of tie-breakers ending at
@@ -1121,7 +1126,12 @@ export async function readTrace(
        audio_url,
        tool_name,
        tool_arguments,
-       tool_result
+       tool_result,
+       if(
+         agent_platform = 'retell' and kind = 'tool',
+         JSONExtractString(payload, 'id'),
+         ''
+       ) as provider_tool_id
      from ${SPANS_TABLE} final
      where ${where}
      order by started_at asc, span_id asc
@@ -1129,10 +1139,11 @@ export async function readTrace(
       parameters,
     ),
     rowsOf<RootSliceRow>(
-      // **The egma-owned slice of one parentless row's payload, and never the
-      // payload.** Every normalizer writes its root naming no parent, and the
-      // block is written on that row — so what this selects is the parentless
-      // rows, earliest first, and keeps one. Selected by the parent and
+      // **The egma-owned slice and exact structural compatibility fields of one
+      // parentless row, and never the payload.** Every normalizer writes its
+      // root naming no parent, and the block is written on that row — so what
+      // this selects is the parentless rows, earliest first, and keeps one.
+      // Selected by the parent and
       // deliberately not by a kind: a root wears whatever word its platform
       // uses, `root` on egma's own traces and `conversation` on a Retell one,
       // and a reader that named kinds would have to learn a new one per
@@ -1152,7 +1163,24 @@ export async function readTrace(
       // rather than with whichever row came back first.
       `select
        span_id,
-       JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised
+       span_id as root_span_id,
+       JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised,
+       toJSONString(arrayMap(
+         event -> tuple(
+           JSONExtractString(event, 'role'),
+           JSONExtractString(event, 'tool_call_id'),
+           JSONExtractRaw(event, 'time_sec')
+         ),
+         JSONExtractArrayRaw(payload, 'transcript_with_tool_calls')
+       )) as retell_woven,
+       toJSONString(arrayMap(
+         summary -> tuple(
+           JSONExtractString(summary, 'tool_call_id'),
+           JSONExtractRaw(summary, 'start_time_sec'),
+           JSONExtractRaw(summary, 'latency_ms')
+         ),
+         JSONExtractArrayRaw(payload, 'tool_calls')
+       )) as retell_tool_summaries
      from ${SPANS_TABLE} final
      where ${where}
        and parent_span_id = ''
@@ -1165,8 +1193,11 @@ export async function readTrace(
   const facts = summaries[0];
   if (facts === undefined || rows.length === 0) return undefined;
 
-  const truncated = rows.length > MAXIMUM_SPANS_PER_TRACE;
-  const kept = truncated ? rows.slice(0, MAXIMUM_SPANS_PER_TRACE) : rows;
+  const projected = withRetellToolTimeline(traceId, rows, roots[0]);
+  const truncated = projected.length > MAXIMUM_SPANS_PER_TRACE;
+  const kept = truncated
+    ? projected.slice(0, MAXIMUM_SPANS_PER_TRACE)
+    : projected;
 
   return {
     ...factsOf(traceId, facts),
@@ -1176,8 +1207,8 @@ export async function readTrace(
   };
 }
 
-/** The root span's id, and the egma-owned slice of its payload as raw JSON. */
-type RootSliceRow = {
+/** The root id, egma-owned block, and bounded Retell structural projections. */
+type RootSliceRow = RetellToolTimelineSlice & {
   readonly span_id: string;
   readonly normalised: string;
 };

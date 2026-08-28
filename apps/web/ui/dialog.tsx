@@ -11,6 +11,9 @@ import {
 import { cn } from "@/lib/utils";
 
 export type DialogDismiss = (event?: { readonly detail?: number }) => void;
+export type OutsidePointerDismiss =
+  | boolean
+  | ((target: EventTarget | null) => boolean);
 
 /**
  * A layer that is answered or dismissed before the page goes on.
@@ -66,16 +69,17 @@ const PANEL_SHAPE = {
     "overflow-y-auto border-y-0 border-l-0",
   ],
   /*
-   * **One side sheet look, in two sizes.** This is the same panel
-   * `components/ui/sheet.tsx` draws — right-anchored, Pure Paper behind a
-   * hairline on its left edge, no corner, the same travel — and both widths
-   * are the theme's rather than numbers written here.
+   * **One side sheet look, with reading widths chosen by content.** This is the
+   * same panel `components/ui/sheet.tsx` draws — right-anchored, Pure Paper
+   * behind a hairline on its left edge, no corner, the same travel — and every
+   * width is the theme's rather than a number written here.
    *
    * The two components are still two, and the difference is behaviour: this
    * one is a *reading* surface that deliberately leaves the page beside it
    * usable, and that one is a modal form portaled inside `<main>`.
-   * `size="wide"` is for the reading surface, where the content is a
-   * transcript rather than a form and 440px is not enough of a page.
+   * `size="wide"` and `size="extra-wide"` are for reading surfaces, where the
+   * content is a transcript rather than a form and 440px is not enough of a
+   * page.
    */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
@@ -95,6 +99,13 @@ const PANEL_WIDE = {
   dialog: "",
   drawer: "",
   sheet: "w-[min(var(--sheet-width-wide),100vw)]",
+} as const;
+
+/** More room for the production trace rail without changing other readers. */
+const PANEL_EXTRA_WIDE = {
+  dialog: "",
+  drawer: "",
+  sheet: "w-[min(var(--sheet-width-extra-wide),100vw)]",
 } as const;
 
 /**
@@ -167,24 +178,34 @@ export function Dialog({
   title,
   onClose,
   returnFocusTo,
+  dismissOnOutsidePointer = false,
   children,
 }: {
   readonly kind?: "dialog" | "drawer" | "sheet";
   /**
-   * How much room the surface needs. `wide` is the reading sheet — evidence
-   * beside a page — and does nothing to the other two kinds.
+   * How much room the surface needs. `wide` and `extra-wide` are reading-sheet
+   * sizes — evidence beside a page — and do nothing to the other two kinds.
    */
-  readonly size?: "default" | "wide";
+  readonly size?: "default" | "wide" | "extra-wide";
   /** Text for ordinary dialogs, or structured title content for evidence sheets. */
   readonly title: ReactNode;
   readonly onClose: () => void;
   /** A known trigger to restore when the surface closes. */
   readonly returnFocusTo?: HTMLElement | null;
+  /**
+   * Let a primary pointer press on the usable page beside a reading sheet
+   * dismiss it. A predicate may preserve an outside control that replaces the
+   * sheet's record. Keyboard focus moving outside never dismisses the sheet.
+   */
+  readonly dismissOnOutsidePointer?: OutsidePointerDismiss;
   readonly children: ReactNode | ((dismiss: DialogDismiss) => ReactNode);
 }) {
   const [open, setOpen] = useState(true);
   const closeRef = useRef(onClose);
   const dismissedRef = useRef(false);
+  const outsidePointerRef = useRef(false);
+  const outsideFocusTargetRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   closeRef.current = onClose;
 
   /**
@@ -236,7 +257,20 @@ export function Dialog({
    */
   useEffect(() => {
     if (open) return undefined;
-    restoreFocus();
+    const outsideTarget = outsideFocusTargetRef.current;
+    const active = document.activeElement;
+    const focusAlreadyMovedOutside =
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active.isConnected &&
+      !panelRef.current?.contains(active);
+    if (!focusAlreadyMovedOutside) {
+      if (outsidePointerRef.current && outsideTarget?.isConnected) {
+        outsideTarget.focus();
+      } else {
+        restoreFocus();
+      }
+    }
     const forced = window.setTimeout(() => {
       if (!dismissedRef.current) return;
       dismissedRef.current = false;
@@ -256,7 +290,12 @@ export function Dialog({
       }}
     >
       <DialogContent
-        className={cn(PANEL_SHAPE[kind], size === "wide" && PANEL_WIDE[kind])}
+        className={cn(
+          PANEL_SHAPE[kind],
+          size === "wide" && PANEL_WIDE[kind],
+          size === "extra-wide" && PANEL_EXTRA_WIDE[kind],
+        )}
+        ref={panelRef}
         showOverlay={TAKES_THE_SCREEN[kind]}
         data-kind={kind}
         /*
@@ -277,15 +316,48 @@ export function Dialog({
            * same rudeness in the other direction.
            */
           event.preventDefault();
-          if (document.activeElement === document.body) restoreFocus();
+          if (
+            !outsidePointerRef.current &&
+            document.activeElement === document.body
+          ) {
+            restoreFocus();
+          }
         }}
         /*
-         * A sheet stays open while the page beside it is used. Without this a
-         * press on the grader results would close the transcript being read
-         * against them, which is the one thing that page is for.
+         * A reading sheet keeps the page beside it usable. Most callers also
+         * keep the sheet open while that page is used, because the simulation
+         * results are read against their evidence. A production transcript
+         * opts into pointer dismissal: only a primary press closes it. Moving
+         * keyboard focus outside does not.
          */
         onInteractOutside={(event) => {
-          if (!TAKES_THE_SCREEN[kind]) event.preventDefault();
+          if (TAKES_THE_SCREEN[kind]) return;
+          const original = event.detail.originalEvent;
+          const primaryPointer =
+            original.type === "pointerdown" &&
+            (!("button" in original) || original.button === 0);
+          if (!primaryPointer) {
+            event.preventDefault();
+            return;
+          }
+          const shouldDismiss =
+            typeof dismissOnOutsidePointer === "function"
+              ? dismissOnOutsidePointer(original.target)
+              : dismissOnOutsidePointer;
+          if (!shouldDismiss) {
+            event.preventDefault();
+            return;
+          }
+
+          outsidePointerRef.current = true;
+          const target = original.target;
+          const focusTarget =
+            target instanceof Element
+              ? target.closest<HTMLElement>(
+                  "button,a[href],input,select,textarea,[tabindex]:not([tabindex='-1'])",
+                )
+              : null;
+          outsideFocusTargetRef.current = focusTarget;
         }}
       >
         <DialogHeader className={cn(HEAD_SHAPE[kind])}>
