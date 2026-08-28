@@ -1525,7 +1525,9 @@ function conversationGroups(
   events: readonly TimedConversationEvent[],
 ): readonly ConversationGroup[] {
   const ownerByTool = toolOwners(transcript, toolCalls);
-  const orderedKeys: string[] = [];
+  const orderBySpanId = new Map(
+    events.map((event, at) => [event.step.spanId, at] as const),
+  );
   const eventsByGroup = new Map<string, TimedConversationEvent[]>();
   for (const event of events) {
     const ownerId = event.kind === "tool"
@@ -1536,27 +1538,41 @@ function conversationGroups(
       : `turn:${ownerId}`;
     const grouped = eventsByGroup.get(key);
     if (grouped === undefined) {
-      orderedKeys.push(key);
       eventsByGroup.set(key, [event]);
     } else {
       grouped.push(event);
     }
   }
 
-  const groups: ConversationGroup[] = [];
-  for (const key of orderedKeys) {
-    const grouped = eventsByGroup.get(key) ?? [];
+  const positioned: {
+    readonly at: number;
+    readonly group: ConversationGroup;
+  }[] = [];
+  for (const grouped of eventsByGroup.values()) {
     const turn = grouped.find(
       (event): event is TimedTurnConversationEvent => event.kind === "turn",
     );
     if (turn !== undefined) {
-      groups.push({ kind: "turn", turn, events: grouped });
+      /* The spoken turn anchors its group on the main rail. A provider may
+       * report an owned tool before that turn starts; the tool stays first
+       * inside the Agent turn without pulling the whole group ahead of speech
+       * that happened between those two events. */
+      positioned.push({
+        at: orderBySpanId.get(turn.step.spanId) ?? Number.MAX_SAFE_INTEGER,
+        group: { kind: "turn", turn, events: grouped },
+      });
       continue;
     }
     const tool = grouped[0];
-    if (tool?.kind === "tool") groups.push({ kind: "tool", tool });
+    if (tool?.kind === "tool") {
+      positioned.push({
+        at: orderBySpanId.get(tool.step.spanId) ?? Number.MAX_SAFE_INTEGER,
+        group: { kind: "tool", tool },
+      });
+    }
   }
-  return groups;
+  return positioned.toSorted((left, right) => left.at - right.at)
+    .map(({ group }) => group);
 }
 
 function conversationEventIsActive(

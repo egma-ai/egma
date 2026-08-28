@@ -774,6 +774,72 @@ describe("the transcript time rail", () => {
     },
   );
 
+  it("keeps intervening speech ahead of an Agent group whose tool started early", () => {
+    const read = evidence();
+    const original = read.transcript as NonNullable<typeof read.transcript>;
+    const tool = {
+      spanId: "span_tool_early",
+      parentSpanId: "span_agent_after_interruption",
+      name: "get_availability",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:37.362000Z",
+      durationNs: "531000000",
+      text: "",
+      audioUrl: "",
+      toolName: "get_availability",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const agent = {
+      ...turn(
+        "span_agent_after_interruption",
+        "turn:agent",
+        "I found an opening.",
+        39,
+      ),
+      startedAt: "2026-08-15T10:00:39.606000Z",
+      spans: [tool],
+    };
+    const transcript = {
+      ...original,
+      endedAt: "2026-08-15T10:01:00.000000Z",
+      durationNs: "60000000000",
+      spanCount: 5,
+      toolSpanCount: 1,
+      turns: [
+        turn("span_human_first", "turn:human", "Find an appointment.", 1),
+        turn("span_human_between", "turn:human", "Any provider is fine.", 38),
+        agent,
+      ],
+    };
+
+    render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={transcriptToolCalls(transcript as never)}
+      />,
+    );
+
+    const turns = screen.getAllByLabelText(/^Turn \d+,/u);
+    expect(turns.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Turn 1, User",
+      "Turn 2, User",
+      "Turn 3, Agent",
+    ]);
+    const agentTurn = turns[2];
+    const toolRow = screen.getByLabelText("Tool call, get_availability");
+    expect(agentTurn?.contains(toolRow)).toBe(true);
+    expect(
+      Boolean(
+        toolRow.compareDocumentPosition(
+          within(agentTurn!).getByText("I found an opening."),
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+  });
+
   it("keeps a tool without an owning Agent turn visible on the time rail", () => {
     const read = evidence();
     const orphan = {
