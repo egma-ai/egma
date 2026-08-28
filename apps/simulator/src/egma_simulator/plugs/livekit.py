@@ -31,8 +31,12 @@ creates the room, dispatches the worker and deletes the room at the end:
 - ``agentName`` (string, optional) — which agent to dispatch. Absent or
   blank: automatic dispatch, which is what a worker registered without a
   name already gets.
-- ``metadata`` (a JSON object in a string, optional) — carried on the
-  room, verbatim, for the agent to read.
+- ``metadata`` (a JSON object in a string, optional) — the customer's
+  own, for the agent to read. It is carried on the room verbatim, and
+  where this connection names an agent it is carried on that agent's
+  dispatch too, which is where LiveKit's own documentation teaches an
+  agent to look for its per-session context. Automatic dispatch has no
+  dispatch of egma's to put it on, so there it rides the room alone.
 
 Its credentials are the customer's LiveKit ``apiKey`` and ``apiSecret``.
 Unlike a phone connection, a room connection carries its own: the room is
@@ -63,11 +67,16 @@ conversion, and pacing. Egma does not select or expose a processing rate.
 
 A room is the one connection where egma can stand in the agent's tool
 path, because it is the one where egma is already in the room with it. The
-mock-tool exchange is offered on egma's own participant and the agent's
-side is told where to find it in the dispatch metadata; what answers it is
-:mod:`egma_simulator.mock_tools`, handed to this plug already holding the
-answers the run resolved. Nothing about it is this file's: the plug passes
-it to the driver that joins the room, and the driver offers it there.
+mock-tool exchange is offered on egma's own participant, and how the
+agent's side finds it is the room itself: the name every simulation room
+carries says a simulation is running, and the persona's participant
+identity is the address — both published, both the same on all four ways
+into a room, and neither of them a metadata channel the customer writes.
+What answers it is :mod:`egma_simulator.mock_tools`, handed to this plug
+already holding the answers the run resolved. Nothing about it is this
+file's: the plug passes it to the driver that joins the room, and the
+driver offers it there, at the join, before an agent that was quicker
+into the room can ask.
 
 ## Where a turn begins and ends
 

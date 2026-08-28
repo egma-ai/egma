@@ -19,7 +19,50 @@ logger = logging.getLogger(__name__)
 RpcMethod = Callable[[str], Awaitable[str]]
 
 ROOM_PREFIX = "egma-sim"
+"""The stem of the name every room egma conducts a simulation in.
+
+**The published contract is the hyphenated ``egma-sim-``** — this stem
+and the separator that :func:`fresh_room_name` and :func:`room_name_for`
+below put after it. That hyphenated form is what a customer's own token
+endpoint allowlists, what the hardening recipe names its empty timeout
+against, and what the egma SDK inside the customer's worker reads to
+answer "am I in a simulation?"
+before it connects to anything — the one question that decides whether
+mock tools are served and whether the agent's spans go out the
+production door. Every room name built below begins with it on all four
+ways into a room, which is what makes that answer the same answer
+everywhere.
+
+Move the value and every installed SDK goes inert inside a real
+simulation: real tools run, and the simulation's spans arrive in
+Monitoring as a production conversation. One test in this package holds
+the line — ``apps/simulator/tests/test_plug_phone.py`` asserts a
+conducted room name begins ``egma-sim-``, written out by hand rather than
+built from this constant, so a rename here goes red rather than quiet.
+Read that red as the contract refusing to move, not as a fixture to
+update.
+
+Nothing links this constant to the far side of the contract, and nothing
+can: the SDK holds its own copy in
+``sdks/python/src/egma/mockable.py``, pinned again by
+``sdks/python/tests/room_stub.py`` and
+``fixtures/livekit-dumb-agent/tests/conftest.py``, and a customer runs
+whichever release of it they installed. A version already deployed cannot
+be edited to follow a rename. That is what makes the value frozen rather
+than merely stable.
+"""
+
 PERSONA_IDENTITY = "egma-persona"
+"""Who egma is in the room, as the far side addresses it.
+
+Published with the prefix above and frozen for the same reason: it is the
+destination the agent's side sends a mock-tool call to, and room
+membership under this identity is the whole of the authorisation. It
+appears in two forms — exactly this string where egma mints its own
+token, and :func:`persona_name_for` where a customer's endpoint mints
+one — so both begin here.
+"""
+
 CONNECT_SECONDS = 30.0
 AUDIO_STREAM_CLOSE_SECONDS = 2.0
 PIPECAT_VERSION = "1.7.0"
@@ -327,10 +370,26 @@ class JoinedRoom:
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
         self._leaving = False
+        self._offer: Callable[[], None] | None = None
 
     @property
     def joined(self) -> bool:
         return self._transport is not None
+
+    def answer_when_joined(self, offer: Callable[[], None]) -> None:
+        """Run ``offer`` the instant this room is entered, before anything
+        else learns the room is up.
+
+        The agent can already be in the room when egma arrives — on three
+        of the four ways in nothing egma does puts it there, so it joins
+        whenever its own dispatcher says. Whatever offers to answer for
+        the agent's tools therefore has to be live at the earliest moment
+        it *can* be live, which is the connect itself: a method registered
+        one step later is a race against the first thing the agent's
+        session says, and losing that race reads on the far side as "no
+        egma here" and runs every real tool inside a live simulation.
+        """
+        self._offer = offer
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
@@ -355,6 +414,9 @@ class JoinedRoom:
 
         @transport.event_handler("on_connected")
         async def _connected(_transport: object) -> None:
+            offer = self._offer
+            if offer is not None:
+                offer()
             self._connected.set()
 
         @transport.event_handler("on_before_disconnect")
@@ -372,6 +434,22 @@ class JoinedRoom:
 
         @transport.event_handler("on_participant_connected")
         async def _arrived(_transport: object, _participant: str) -> None:
+            self.arrivals.set()
+
+        @transport.event_handler("on_first_participant_joined")
+        async def _already_here(_transport: object, _participant: str) -> None:
+            # The other half of "somebody is in the room". The transport
+            # raises this for the first participant it ever sees, by
+            # either of the two routes it can see one: a participant that
+            # connects while egma is watching raises the arrival above
+            # *and* this one, while a participant already in the room when
+            # egma walked in raises only this one. So the two handlers
+            # overlap rather than divide, and the overlap is free — both
+            # set the same event, which is set once and read as a state.
+            # This handler earns its place on the second route alone: an
+            # agent that got into the room first would otherwise be waited
+            # out and reported as a worker that never came, while it sat
+            # there publishing audio.
             self.arrivals.set()
 
         @transport.event_handler("on_participant_disconnected")
@@ -421,6 +499,34 @@ class JoinedRoom:
                 "simulator was joining",
                 ending=ERROR,
             )
+
+    def note_anybody_already_here(self) -> None:
+        """Count whoever was in the room before egma got into it.
+
+        The events above are the room telling egma who arrives. This is
+        egma asking, once, immediately after the join — because the two
+        can disagree by exactly one participant: the transport announces
+        an already-present participant as the first joiner while the
+        connect is still returning, and nothing guarantees that handler
+        has run by the time the join is awaited here. Asking costs one
+        local read and closes that gap, so an agent that was quicker into
+        the room than egma is somebody who came rather than nobody.
+
+        The read is of the room's *remote* participants, so egma cannot
+        count itself and turn an empty room into somebody who came.
+
+        It never raises. A transport that stops offering this read leaves
+        the wait exactly where the events put it, which is the behaviour
+        without it, rather than failing a simulation over a check.
+        """
+        if self.arrivals.is_set() or self._transport is None:
+            return
+        try:
+            present = self._transport.get_participants()
+        except Exception:
+            return
+        if present:
+            self.arrivals.set()
 
     def register_rpc(self, method: str, handler: RpcMethod) -> None:
         if self._transport is None:

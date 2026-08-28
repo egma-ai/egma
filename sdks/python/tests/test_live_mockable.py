@@ -192,11 +192,20 @@ class EgmaInTheRoom:
 
 
 class LiveContext:
-    """A job context, down to the two things the SDK reads of one."""
+    """A job context, down to the two things the SDK reads of one.
 
-    def __init__(self, room: rtc.Room, metadata: str) -> None:
+    The room's name is carried on the job rather than read off the room
+    this process connected, because the job's copy is the one a LiveKit
+    server hands a worker and that is the one the SDK reads.
+    """
+
+    def __init__(self, room: rtc.Room, room_name: str) -> None:
         self.room = room
-        self.job = type("Job", (), {"metadata": metadata})()
+        self.job = type(
+            "Job",
+            (),
+            {"room": type("JobRoom", (), {"name": room_name})(), "metadata": ""},
+        )()
 
 
 def _token(room_name: str, identity: str) -> str:
@@ -222,25 +231,15 @@ async def _each(*teardowns: Coroutine) -> None:
             print(f"teardown step did not finish: {failed}")
 
 
-def _metadata() -> str:
-    """The dispatch metadata egma really sends, byte for byte in shape."""
-    return json.dumps(
-        {
-            "simulationId": A_SIMULATION,
-            "modality": "voice",
-            "egmaIdentity": EGMA_IDENTITY,
-            "protocolVersion": seam.PROTOCOL_VERSION,
-        },
-        separators=(",", ":"),
-    )
-
-
 @pytest.mark.timeout(WITHIN_SECONDS + 30)
 async def test_livekit_still_honours_the_couriers_this_sdk_registers():
     global really_ran
     really_ran = False
 
-    room_name = f"egma-sdk-live-{uuid.uuid4().hex}"
+    # Named the way egma names one, because the name is what tells the SDK
+    # this is a simulation at all — on a real server, with a real room
+    # object, and with egma really in it under the name it really joins as.
+    room_name = f"egma-sim-{A_SIMULATION}-{uuid.uuid4().hex}"
     lkapi = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
     egma = EgmaInTheRoom()
     agent_room = rtc.Room()
@@ -264,7 +263,7 @@ async def test_livekit_still_honours_the_couriers_this_sdk_registers():
         await agent_room.connect(LIVEKIT_URL, _token(room_name, AGENT_IDENTITY))
 
         agent = ReceptionAgent()
-        await mockable(agent, LiveContext(agent_room, _metadata()), session)
+        await mockable(agent, LiveContext(agent_room, room_name), session)
 
         # The census really travelled a wire and really came back.
         census = egma.asked_for(seam.HELLO_METHOD)

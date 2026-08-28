@@ -303,7 +303,7 @@ const TYPES = {
         },
         {
           key: "metadata",
-          label: "Room metadata",
+          label: "Agent metadata",
           kind: "json",
           required: false,
           help: "JSON handed to the agent.",
