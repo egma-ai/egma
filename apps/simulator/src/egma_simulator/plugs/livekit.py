@@ -69,8 +69,9 @@ path, because it is the one where egma is already in the room with it. The
 mock-tool exchange is offered on egma's own participant, and how the
 agent's side finds it is the room itself: the name every simulation room
 carries says a simulation is running, and the persona's participant
-identity is the address — both published, both the same on all four ways
-into a room, and neither of them a metadata channel the customer writes.
+identity is the address — both published, both the same on all three
+ways into a room, and neither of them a metadata channel the customer
+writes.
 What answers it is :mod:`egma_simulator.mock_tools`, handed to this plug
 already holding the answers the run resolved. Nothing about it is this
 file's: the plug passes it to the driver that joins the room, and the

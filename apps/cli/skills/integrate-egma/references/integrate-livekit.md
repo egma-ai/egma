@@ -71,7 +71,7 @@ for that removal explicitly.
 The Python package is named `egma`. Require `egma>=0.2.0` and add it through the
 dependency file the repository already uses. `0.2.0` is the first release in
 which both entries read the job's room name, which is the only signal that
-reaches the worker on all four LiveKit dispatch paths. The Egma SDK does not yet support
+reaches the worker on all three LiveKit dispatch paths. The Egma SDK does not yet support
 a worker built with `@livekit/agents`; report that boundary and leave a Node
 worker unchanged.
 

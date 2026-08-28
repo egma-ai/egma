@@ -328,12 +328,14 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
 ):
     """What an agent is told when it is asked for a typed simulation.
 
-    The signal that lets it go text-only is the room's name; this block is
-    the retiring one an SDK older than room-name detection still reads,
-    and while it lives it tells the truth — ``chat`` for a typed room,
-    never an assumed ``voice``. Nothing whatever about what the agent will
-    be asked joins it, because an agent that reads its script stops being
-    under test.
+    Nothing, on this channel. The signal that lets it go text-only is the
+    room's name, and dispatch metadata is the customer's: a connection
+    that configured none sends none, so an agent reads here in a chat
+    simulation exactly what it reads in its own production rooms.
+
+    Which makes the second half of this test the one that matters: not a
+    word about what the agent will be asked, because an agent that reads
+    its script stops being under test.
     """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
@@ -341,12 +343,7 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
 
     assert len(stub.dispatches) == 1
     assert stub.dispatches[0].agent_name == AN_AGENT
-    assert json.loads(stub.dispatches[0].metadata) == {
-        "simulationId": A_SIMULATION,
-        "modality": "chat",
-        "egmaIdentity": PERSONA_IDENTITY,
-        "protocolVersion": PROTOCOL_VERSION,
-    }
+    assert stub.dispatches[0].metadata == ""
     for word in ("Tuesday", "Thursday", "Margaret", "cleaning", A_PERSONALITY):
         assert word not in stub.dispatches[0].metadata
 

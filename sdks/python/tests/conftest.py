@@ -24,6 +24,15 @@ which is exactly where it should fire.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -111,3 +120,284 @@ async def called(courier: Any, *args: Any, **kwargs: Any) -> Any:
     directly would pass whatever it liked and prove nothing about it.
     """
     return await _run_mock(courier, *args, **kwargs)
+
+
+# -- A real LiveKit, for the suites that will not take a stub ----------------
+#
+# Everything above proves the SDK against a room-shaped fake, which is the
+# right default: it needs no server, no account and no network, so it runs
+# on every machine and in CI. What it cannot say is whether egma is really
+# found in a real room's participant table, or whether the wait that makes
+# two of the three dispatch paths work really ends when a real participant
+# really arrives. Those are the two claims the room-name contract rests on,
+# and a fake that answers them is answering for itself.
+#
+# So there is a second lane, and its point is that it costs no account: the
+# server is the one this repository already deploys, started in its own dev
+# mode, and the conversation is never held — no speech, no model, no keys.
+# What it exercises is detection, addressing and the exchange, which is all
+# of the SDK that a real LiveKit can contradict.
+
+
+LIVEKIT_START_SECONDS = 300.0
+"""How long ``docker run`` has to have the image and a container running.
+
+Generous because this is the call that fetches the image where the machine
+has not got it yet, and mean about it only in that it is bounded at all: an
+unbounded start is a whole test session hanging on a slow registry.
+"""
+
+LIVEKIT_STOP_SECONDS = 10.0
+"""How long the teardown gives the container to go down politely before
+docker kills it. Deliberately well under ``LIVEKIT_DOCKER_SECONDS``, which
+bounds the call itself: the inner grace period has to expire first, or the
+outer bound fires on a stop that was working and the container is left
+behind for the ``rm -f`` to catch. A container that will not stop is a
+line in a log, never a failed run — the tests are over by then and the
+exit code is theirs, not docker's."""
+
+LIVEKIT_HEALTH_SECONDS = 30.0
+"""How long a freshly started server has to answer before it counts as
+one that will not start."""
+
+LIVEKIT_DEV_KEY = "devkey"
+LIVEKIT_DEV_SECRET = "secret"
+"""The pair ``livekit-server --dev`` prints and uses. Publicly known, and
+correctly so: it opens a server bound to this machine for the length of one
+test run, and nothing else. A deployment that used it would be a mistake
+this fixture cannot make, because it starts its own server rather than
+reaching one."""
+
+
+def _first_set(*names: str) -> str:
+    """The first of these environment variables that carries a value.
+
+    A ``TEST_``-prefixed name is read before the provider's own plain one,
+    so a machine can keep the coordinates it tests against apart from the
+    ones it works with. The simulator's suite reads its credentials the
+    same way, and the two are deliberately separate: these packages ship
+    as separate wheels and share no test code.
+    """
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+@dataclass(frozen=True)
+class LiveKit:
+    """Where a real LiveKit is, and what opens it."""
+
+    url: str
+    api_key: str
+    api_secret: str
+
+    def token(self, room: str, identity: str) -> str:
+        """A join token for one room and one identity, and nothing else."""
+        from livekit import api
+
+        return (
+            api.AccessToken(self.api_key, self.api_secret)
+            .with_identity(identity)
+            .with_name(identity)
+            .with_grants(
+                api.VideoGrants(
+                    room_join=True,
+                    room=room,
+                    can_publish=True,
+                    can_subscribe=True,
+                )
+            )
+            .to_jwt()
+        )
+
+
+def _pinned_livekit_image() -> str:
+    """The server tag this repository deploys, read off the compose file.
+
+    Read rather than repeated, for the reason CI reads its own object-store
+    tag the same way: a second copy of a version is a second thing to
+    forget, and the one that rots is always the one nobody runs.
+    """
+    compose = Path(__file__).resolve().parents[3] / "docker-compose.yml"
+    try:
+        lines = compose.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    inside = False
+    for line in lines:
+        if line.startswith("  livekit:"):
+            inside = True
+        elif inside and line.strip().startswith("image:"):
+            return line.split("image:", 1)[1].strip()
+        elif inside and line and not line.startswith("    "):
+            break
+    return ""
+
+
+def _answering(url: str) -> bool:
+    """Whether something is already serving on that address."""
+    probe = url.replace("ws://", "http://").replace("wss://", "https://")
+    try:
+        with urllib.request.urlopen(probe, timeout=1):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except OSError:
+        return False
+
+
+LIVEKIT_DOCKER_SECONDS = 30.0
+"""How long any one docker call about the container may take.
+
+Every call below is bounded, and the bound has to be the *outer* one: a
+docker daemon that has stopped answering hangs `rm` and `logs` exactly as
+readily as it hangs `run`, and a fixture that recovers from one hang by
+making an unbounded call has not recovered. Thirty seconds is far more
+than a local daemon needs to answer about one container, and it turns a
+sick daemon into a named skip rather than a session that never returns.
+"""
+
+
+def _docker(*argv: str) -> subprocess.CompletedProcess[str] | None:
+    """One bounded docker call that never raises.
+
+    Used for every call that runs while something has already gone wrong —
+    tearing the container down, or reading its logs to say why it never
+    answered. A failure here is not the finding; letting it raise would
+    replace a real test result with a teardown error, and letting it hang
+    would replace the whole session with nothing. `None` says the call did
+    not complete, which every caller treats as "nothing more to learn".
+    """
+    try:
+        return subprocess.run(
+            ["docker", *argv],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=LIVEKIT_DOCKER_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+@pytest.fixture(scope="session")
+def live_livekit() -> Iterator[LiveKit]:
+    """A real LiveKit for one test session: the one named, or one started.
+
+    Two ways in, and a test cannot tell them apart. A machine that already
+    has a project says so through the environment and this reaches it. A
+    machine that says nothing gets the server this repository deploys,
+    started in dev mode on loopback and stopped again at the end.
+
+    It skips rather than fails where neither is possible, because a
+    developer without Docker is not a developer with a broken SDK.
+    """
+    named = _first_set("TEST_LIVEKIT_URL", "LIVEKIT_URL")
+    if named:
+        key = _first_set("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
+        secret = _first_set("TEST_LIVEKIT_API_SECRET", "LIVEKIT_API_SECRET")
+        if not key or not secret:
+            pytest.skip(
+                "TEST_LIVEKIT_URL names a server but its key pair is not set: "
+                "set TEST_LIVEKIT_API_KEY and TEST_LIVEKIT_API_SECRET too"
+            )
+        yield LiveKit(named, key, secret)
+        return
+
+    image = _pinned_livekit_image()
+    if not image:
+        pytest.skip("no livekit image pinned in docker-compose.yml to start")
+    if shutil.which("docker") is None:
+        pytest.skip(
+            "no LiveKit project named and no docker to start one: set "
+            "TEST_LIVEKIT_URL with its key pair, or install docker"
+        )
+    url = "ws://127.0.0.1:7880"
+    if _answering(url):
+        pytest.skip(
+            "something already answers on 127.0.0.1:7880, so this cannot "
+            "start its own server there and will not talk to one it did "
+            "not start; stop it, or name a server with TEST_LIVEKIT_URL"
+        )
+
+    name = f"egma-livekit-tests-{os.getpid()}"
+    try:
+        started = subprocess.run(
+            # Host networking because a room's media negotiates addresses of
+            # its own, and a published port would advertise one the container
+            # cannot reach from inside its own view of this machine.
+            #
+            # Bound to loopback, and that is the security boundary rather than
+            # a preference. Host networking puts this server in this machine's
+            # own network namespace, so a bind of 0.0.0.0 would offer it on
+            # every interface the machine has — under the key pair `--dev`
+            # prints, which everybody knows. Anybody who could reach the host
+            # could then mint a token, join a room whose name is predictable,
+            # and answer to egma's name in it. Loopback is the whole of what
+            # these tests need.
+            [
+                "docker",
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                name,
+                "--network",
+                "host",
+                image,
+                "--dev",
+                "--bind",
+                "127.0.0.1",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            # Bounded because this call fetches the image where the machine
+            # does not have it, and an unbounded fetch is a test session that
+            # hangs rather than one that skips or says what went wrong.
+            timeout=LIVEKIT_START_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        _docker("rm", "-f", name)
+        pytest.skip(
+            f"docker did not start {image} within {LIVEKIT_START_SECONDS:.0f}s, "
+            "which is usually an image still being fetched on a slow link; "
+            "pull it once by hand and run again"
+        )
+    if started.returncode != 0:
+        pytest.skip(f"docker could not start {image}: {started.stderr.strip()[:200]}")
+
+    try:
+        deadline = time.monotonic() + LIVEKIT_HEALTH_SECONDS
+        while not _answering(url):
+            if time.monotonic() > deadline:
+                logs = _docker("logs", "--tail", "20", name)
+                said = (
+                    logs.stderr.strip()[:400]
+                    if logs
+                    else ("docker itself stopped answering too")
+                )
+                _docker("rm", "-f", name)
+                pytest.fail(
+                    f"{image} did not answer on {url} within "
+                    f"{LIVEKIT_HEALTH_SECONDS:.0f}s: {said}"
+                )
+            time.sleep(0.2)
+        yield LiveKit(url, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
+    finally:
+        # Never raises, whatever docker does: a teardown exception here
+        # would replace every result this session earned with an error
+        # about the cleanup of a container that is thrown away regardless.
+        #
+        # A stop that did not succeed is followed by `rm -f`, and the test
+        # is on the exit status rather than on whether the call returned.
+        # A `docker stop` that answers non-zero has left the container
+        # running just as surely as one that never answered at all — and
+        # this container holds the host's own port 7880, so surviving this
+        # teardown means every later session finds the port taken and
+        # skips. Two ways to fail, one cleanup.
+        stopped = _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name)
+        if stopped is None or stopped.returncode != 0:
+            _docker("rm", "-f", name)

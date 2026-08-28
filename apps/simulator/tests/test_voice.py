@@ -1378,3 +1378,69 @@ def test_assembling_a_spec_with_no_plug_refuses_before_anything_happens(
             blobs=FilesystemBlobStore(tmp_path),
             speech=SCRIPTED_PAIR,
         )
+
+
+async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A slow machine is not a silence, and the recorder must not treat it
+    as one.
+
+    Pipecat's recorder resamples the agent's audio, and this recorder maps
+    each turn onto that recording by reading the resampler's own
+    ``delay()`` — the samples it has consumed and not yet emitted. The map
+    is only true while every consumed sample is still accounted for.
+
+    Pipecat clears that held state after 0.2 seconds of **wall-clock**
+    quiet, which is the right default for audio that really did pause. It
+    is the wrong one here, and the trigger is not the conversation: a
+    loaded machine can be descheduled for longer than that between two
+    frames of one continuous utterance. Nothing paused; only the CPU did.
+    The clear then discards samples ``delay()`` had counted, the map grows
+    a hole where they were, and a turn boundary landing inside it cannot
+    be placed on the recording at all — a ``SpeechFault``, and a whole
+    simulation failed over audio the recording actually holds.
+
+    So this feeds one unbroken utterance across a clock jump far past that
+    window and counts the samples out the other side. Sixteen kilohertz in
+    and twenty-four out is the real ratio: three samples for every two.
+    """
+    from pipecat.audio.resamplers import soxr_stream_resampler
+
+    clock = [1000.0]
+
+    class Descheduled:
+        @staticmethod
+        def time() -> float:
+            return clock[0]
+
+        @staticmethod
+        def monotonic() -> float:
+            return clock[0]
+
+    monkeypatch.setattr(soxr_stream_resampler, "time", Descheduled)
+
+    recorder = conductor_module._EvidenceRecorder(sample_rate=24_000)
+    frame = b"\x00\x01" * 320  # 20 ms at 16 kHz
+
+    # Both channels, because the two fail differently and only one of them
+    # says so. A clear on the agent's side breaks the map and raises; a
+    # clear on the persona's side raises nothing, because `bot_position`
+    # counts the buffer rather than reading a delay — it just drops the
+    # tail of an utterance out of the recording and stays quiet about it.
+    for channel, resampler in (
+        ("agent", recorder._input_resampler),
+        ("persona", recorder._output_resampler),
+    ):
+        clock[0] = 1000.0
+        emitted = len(await resampler.resample(frame, 16_000, 24_000)) // 2
+        # Long enough that Pipecat's own default would have cleared, and far
+        # longer than any real machine takes for one frame.
+        clock[0] += 5.0
+        emitted += len(await resampler.resample(frame, 16_000, 24_000)) // 2
+        held = float(resampler._soxr_stream.delay())
+
+        fed = 2 * 320
+        assert emitted + held == pytest.approx(
+            fed * 24_000 / 16_000, abs=1.0
+        ), channel

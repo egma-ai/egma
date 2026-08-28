@@ -881,7 +881,19 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
     recordings: dict[str, bytes] = {}
     references: dict[str, str] = {}
     for simulation_id in ids:
-        facts = terminal_event_for(records, simulation_id)["facts"]
+        terminal = terminal_event_for(records, simulation_id)
+        # Read before the audio, because everything below compares the
+        # recording against the transcript and that comparison is only
+        # meaningful for a simulation that finished. A failed one has a
+        # complete recording and a transcript that stops where the failure
+        # did, so without this line the failure arrives as a speaker
+        # missing from a channel — which is how one real fault in the
+        # recorder's resampler was read as an audio-mixing bug twice.
+        assert terminal["status"] == "completed", (
+            simulation_id,
+            terminal.get("reason"),
+        )
+        facts = terminal["facts"]
         assert facts["audio"] is not None, simulation_id
         assert set(facts["audio"]) == {"recording"}
         references[simulation_id] = facts["audio"]["recording"]
@@ -936,6 +948,14 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
 
     # And the record still tells them apart where it should: only one of
     # them has audio to account for.
+    for simulation_id in ("sim-same-chat", "sim-same-voice"):
+        # The transcripts below are only comparable between two simulations
+        # that both finished; a failed one stops where its failure did.
+        terminal = terminal_event_for(records, simulation_id)
+        assert terminal["status"] == "completed", (
+            simulation_id,
+            terminal.get("reason"),
+        )
     chat = terminal_event_for(records, "sim-same-chat")["facts"]
     voice = terminal_event_for(records, "sim-same-voice")["facts"]
     assert chat["audio"] is None

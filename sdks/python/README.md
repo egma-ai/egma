@@ -19,9 +19,9 @@ pip install 'egma>=0.2.0'
 
 `0.2.0` is the floor because it is the first release that knows a
 simulation by the room's name, and so the first that holds on every one of
-the four dispatch paths. An unpinned install can resolve to a release that
-reads the dispatch metadata instead, which is inert inside a real
-simulation on three of them.
+the three dispatch paths. An unpinned install can resolve to a release
+that looks in the dispatch metadata instead, where Egma no longer writes
+anything — inert inside a real simulation on all three.
 
 For a LiveKit agent on Python 3.11 or newer.
 
@@ -169,7 +169,7 @@ those.
 In a simulation room, `mockable` connects the job with LiveKit's own
 `JobContext.connect()` if your startup has not already done so, then finds
 Egma among the room's participants: Egma joins as `egma-persona` or
-`egma-persona-<simulation>`. On three of the four dispatch paths your
+`egma-persona-<simulation>`. On two of the three dispatch paths your
 agent is in the room **before** Egma, so it waits for that participant,
 for up to 45 seconds and without polling anything outside the room. That
 is a long time to hold an agent before it greets anybody, and it is the
@@ -201,16 +201,10 @@ not a promise in this file.
 
 Your job's **dispatch metadata is yours**. This SDK writes nothing into it
 and reads nothing out of it — not one key, in any room, for any purpose.
-
-Egma itself does still add to it, on one of the four dispatch paths. Where
-Egma dispatches your worker by name, it merges four keys *underneath your
-own* configured JSON — `simulationId`, `modality`, `egmaIdentity` and
-`protocolVersion` — for the benefit of SDK releases below `0.2.0`, which
-read them. **Your own keys always win**: if your configured metadata
-already uses any of those four names, or is not a JSON object, your string
-rides alone byte for byte and the block is dropped whole. On the other
-three dispatch paths there is no dispatch to carry it, so nothing of
-Egma's is added at all.
+Neither does Egma: on every dispatch path, both the room's metadata and
+the dispatch's carry the string configured on the connection, byte for
+byte. `json.loads(ctx.job.metadata)["your_key"]` reads the same thing in a
+simulation that it reads in production.
 
 ### Where to call it
 
@@ -293,14 +287,10 @@ production tokens, or a production room named to look like a simulation
 runs your canned answers against a live caller.
 
 **Write the guard on the room name, and not on `egmaIdentity` in
-`ctx.job.metadata`.** That key is present in only some simulation rooms.
-Egma puts it into your dispatch metadata on the one dispatch path where it
-dispatches your worker by name, and it drops that whole block even there
-whenever your own configured metadata already uses one of its four key
-names or is not a JSON object; on the other three dispatch paths there is
-no dispatch to carry it. A guard on it does not raise — it quietly fails
-to fire, and every real tool it was meant to hold back runs inside a
-simulation.
+`ctx.job.metadata`.** That key is in no simulation room at all: your
+dispatch metadata is yours, and Egma writes nothing into it on any
+dispatch path. A guard on it does not raise — it quietly fails to fire,
+and every real tool it was meant to hold back runs inside a simulation.
 
 What it cannot do is the rest of the job. One canned world for every
 test, so you cannot write "the calendar is full" as a *test* — you would
@@ -329,10 +319,8 @@ off it.
 
 Every Egma deployment names its rooms that way, so this package works
 against a self-hosted Egma on whatever schedule its owner upgrades it.
-Nothing else is consulted — in particular, it never reads the context
-block Egma still merges into named-dispatch metadata for SDK releases
-below `0.2.0`. One of those key names in *your* metadata is your key, and
-it changes nothing here.
+Nothing else is consulted — in particular, neither metadata channel,
+which carries your own configured JSON and nothing of Egma's.
 
 This package pins `livekit-agents` to one minor version
 (`>=1.6.7,<1.7`), and that is deliberate. Interception uses LiveKit's
