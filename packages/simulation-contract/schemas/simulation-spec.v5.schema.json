@@ -124,6 +124,19 @@
         }
       }
     },
+    "agent_version": {
+      "description": "Which version of the agent under test this simulation is conducted against, exactly as the platform names its versions: a number where a platform numbers them, a name where it names them. Absent is the ordinary case and means the platform's own default. The simulator never invents a version and never reinterprets one — what is written here is what the platform is asked for — and a connection that cannot be conducted over a named version takes it and drops it. A name has only to say something, so surrounding space is accepted here and dropped on the way to the platform: it is spacing, never part of a version.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1, "pattern": "\\S" }
+      ]
+    },
+    "dynamic_variables": {
+      "description": "The variables this one simulation is conducted with, resolved by the control plane and rendered by the agent's own platform. Values are strings because a rendered variable is a string; a name carrying an empty one is a variable set to nothing, which is not the same as a variable nobody set. Absent is the ordinary case. The simulator passes them through byte for byte and reads none of them — Egma's own attribution variable included, which is how a tool call the platform makes finds its way back to this simulation.",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "propertyNames": { "minLength": 1, "pattern": "\\S" }
+    },
     "mock_tools": {
       "description": "Resolved mock-tool answers for this simulation.",
       "type": "array",

@@ -76,14 +76,18 @@ class PhoneCall:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
+        agent_version: object = None,
+        dynamic_variables: object = None,
         mock_tools: object = None,
         media: MediaSettings | None = None,
     ) -> None:
         # A phone call is reached over the public telephone network, which
         # has never carried anything but a number, so this plug has
         # nothing to tell the far end about the simulation and no way to
-        # stand in front of its tools.
-        del simulation_id, mock_tools
+        # stand in front of its tools. It cannot name a version or set a
+        # variable either: egma is the caller, and the call is made by
+        # whoever answers the number.
+        del simulation_id, mock_tools, agent_version, dynamic_variables
 
         if access_variant != "phone_number.public_e164":
             raise PlugError(
