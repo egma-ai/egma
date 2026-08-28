@@ -869,12 +869,24 @@ export type OutstandingMockedWorld = {
 };
 
 /**
- * Every world this agent's runs still owe the account.
+ * Every world this agent's runs still owe the account, and every run of its
+ * that might be stuck mid-build.
  *
- * The sweep's whole input. A world is outstanding while it names a temporary
- * version that has not been deleted, or a number whose binding has not been put
- * back — the two things a crashed run leaves behind. Teardown clears each as it
- * lands, so a run that finished cleanly answers nothing here.
+ * The sweep's whole input, and it answers two questions at once:
+ *
+ * - **A world that owes the account** — one naming a temporary version that has
+ *   not been deleted, or a number whose binding has not been put back. Teardown
+ *   clears each as it lands, so a run that finished cleanly answers nothing on
+ *   this count.
+ * - **A run still pending** — which owes nothing yet but might have lost the
+ *   process that was building its world. Its simulations are unclaimable until
+ *   a draft exists, so a run whose build died would sit queued forever; the
+ *   sweep needs to see it to cancel it. The caller decides whether it is truly
+ *   stuck (its clock is past the build window and it still has no draft) or just
+ *   waiting for a free simulator.
+ *
+ * A run that both finished and settled its world — the ordinary end — matches
+ * neither, so the common case is not re-read on every landing.
  *
  * Ordered oldest first, because the oldest litter is the litter most likely to
  * be a crash rather than a run still in flight.
@@ -911,6 +923,7 @@ export async function outstandingMockedWorlds(
               from jsonb_array_elements(${run.mockedWorld}->'numbers') as one
               where one->>'pinned' = 'true'
             )
+            or ${run.status} = 'pending'
           )`,
         ),
       ),

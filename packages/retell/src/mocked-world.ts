@@ -120,7 +120,19 @@ export type BindingDecision = {
   readonly verdicts: readonly BindingVerdict[];
   /** Whether egma must pin this number for the run and restore it after. */
   readonly pin: boolean;
-  /** Every binding the number carries, verbatim — other agents' included. */
+  /**
+   * **This agent's** entries on the number, in order — the ones the verdicts
+   * were read from. What runs against the number is decided from these, and
+   * never from a sibling agent's binding: a number two agents share carries the
+   * other agent's version too, and a version resolved out of it would be a
+   * version nobody's traffic to this agent ever reaches.
+   */
+  readonly ownBindings: readonly NumberBinding[];
+  /**
+   * Every binding the number carries, verbatim — **other agents' included**.
+   * This is the whole array a restore writes back, so it must never lose an
+   * entry; the reading of *this* agent's version is `ownBindings` above.
+   */
   readonly bindings: readonly NumberBinding[];
 };
 
@@ -143,6 +155,7 @@ export function bindingDecisionsFor(
       label: number.label,
       verdicts,
       pin: verdicts.includes("hijackable"),
+      ownBindings: mine,
       bindings: number.bindings,
     };
   });
@@ -184,10 +197,16 @@ export type RecordMockedWorld = (world: MockedWorldRecord) => Promise<void>;
 /**
  * Which version a run over this agent should be testing.
  *
- * The one a real caller reaches: the first binding on a routed number that
- * names a version — a number or a tag. A number riding `latest` names none, so
- * it is passed over here and answered by `latest` below, which is the same
- * thing it resolves to.
+ * The one a real caller reaches: the first of **this agent's own** bindings on
+ * a routed number that names a version — a number or a tag. A number riding
+ * `latest` names none, so it is passed over here and answered by `latest`
+ * below, which is the same thing it resolves to.
+ *
+ * **Only this agent's entries are read**, never the whole array. A number two
+ * agents share carries the other agent's version too, and resolving out of it
+ * would branch, capture, verify and report a version nobody's traffic to this
+ * agent reaches — while the tick, which resolves the same way, would read the
+ * wrong version's tools.
  *
  * `latest` where the agent has no number at all, which is the ordinary case for
  * a chat agent and the right answer for it: a conversation created against no
@@ -198,7 +217,7 @@ export function versionReferenceIn(
   decisions: readonly BindingDecision[],
 ): VersionReference {
   for (const decision of decisions) {
-    for (const binding of decision.bindings) {
+    for (const binding of decision.ownBindings) {
       if (typeof binding.agentVersion === "number") return binding.agentVersion;
       if (
         typeof binding.agentVersion === "string" &&
@@ -268,7 +287,15 @@ function sentenceOf(failure: RetellFailure, doing: string): string {
  * serialize an object's keys in is the serializer's business. A run that failed
  * because a provider reordered two keys would be a loud failure about nothing,
  * every time.
+ *
+ * Exported so a proof that reads the account can compare two readings the same
+ * way the builder does — a live suite that used `JSON.stringify` instead would
+ * cry "changed" the first time Retell reordered a key.
  */
+export function canonicalJson(value: unknown): string {
+  return canonical(value);
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonical).join(",")}]`;
@@ -356,6 +383,33 @@ export async function buildMockedWorld(
   const servingVersion = serving.agentVersion.version;
   const servingEngine = serving.agentVersion.engine;
 
+  // The serving engine must name a version, and this is refused **before the
+  // capture read**, because everything downstream turns on a null one going
+  // wrong. `readEngineConfiguration` sends no `?version=` for a null version,
+  // which means "Retell's newest" — so the capture would read the newest engine
+  // rather than the one this version serves, the verify re-read would land on
+  // the draft egma just mocked (a false hijack alarm), and the repair would
+  // PATCH the capture onto `servingVersion` used as an engine version, writing
+  // real tools onto a version egma never read. One guard here forecloses all
+  // three. The draft side already refuses its own null version below; this is
+  // the serving side's matching guard.
+  //
+  // A custom LLM is exempt and falls through to the capture read below, which
+  // answers `not-held` with its own reason: it carries no engine version by
+  // nature — its brain and tools live in the customer's own service — and a
+  // "name a version" refusal would be the wrong sentence for it.
+  if (servingEngine.type !== "custom-llm" && servingEngine.version === null) {
+    return {
+      kind: "refused",
+      reason:
+        `The version this agent serves (${servingVersion}) names no response ` +
+        "engine version, and Egma never reads or writes an unnamed one: the " +
+        "default is Retell's newest, which is not necessarily the one this " +
+        "agent serves. Egma stopped before reading or changing anything.",
+      world: null,
+    };
+  }
+
   // 3b. The serving engine configuration, verbatim. This is both what the
   // draft is built from and what the verification compares against, and it is
   // read once so those two can never be readings of different things.
@@ -369,6 +423,17 @@ export async function buildMockedWorld(
       reason: sentenceOf(captured, "reading this agent's tools"),
       world: null,
     };
+  }
+  // The capture read succeeded, so this is a hosted engine, and the guard above
+  // refused a hosted engine with a null version. So the version is present, and
+  // the repair below can name it without the agent-version fallback that once
+  // corrupted a version egma never read.
+  const servingEngineVersion = servingEngine.version;
+  if (servingEngineVersion === null) {
+    throw new Error(
+      "a readable Retell engine configuration reported no version, which the " +
+        "serving-version guard should already have refused",
+    );
   }
   const before = toolPrint(captured.engine);
   // The transform runs once, here, and both halves of its answer are used: the
@@ -543,8 +608,12 @@ export async function buildMockedWorld(
     const repaired = await writeEngineTools(
       key,
       {
+        // The serving engine version, never the agent version standing in for
+        // it: the two are different numbers, and the guard above has already
+        // refused a null one, so this is always the version the capture was
+        // read at.
         reference: servingEngine,
-        version: servingEngine.version ?? servingVersion,
+        version: servingEngineVersion,
         tools: toolsWriteOf(captured.engine),
       },
       reach,

@@ -72,6 +72,24 @@ export type MockedWorldReach = {
  */
 const STALE_BUILD_MILLISECONDS = 15 * 60 * 1000;
 
+/**
+ * The world a run wears while it is still building one.
+ *
+ * Written before the first read so a run that dies mid-build is visible to the
+ * sweep. `servingVersion` is not known yet — the build reads it — and the build's
+ * own first record replaces this whole marker within a moment. Its null draft
+ * keeps the claim gate shut and marks it "nothing branched, nothing pinned", so
+ * a sweep of a crashed one has nothing to tear down and only a stuck run to
+ * cancel.
+ */
+const BUILDING_MARKER: MockedWorld = {
+  servingVersion: 0,
+  draftVersion: null,
+  engine: { type: "", engineId: "", version: null },
+  numbers: [],
+  coverage: { mocked: [], notInterceptable: [], notInThisVersion: [] },
+};
+
 export type MockedWorldOutcome =
   | { readonly kind: "built" }
   /** This run mocks nothing, which is what most runs do. */
@@ -155,6 +173,17 @@ export async function buildRunMockedWorld(
     );
   }
   const key = credential(apiKey);
+
+  // A marker, written before the first read.
+  //
+  // A run that dies here — between being created and the build's first record —
+  // would otherwise leave a null `mockedWorld` that the sweep never sees, so its
+  // simulations, which are unclaimable until a draft exists, would sit queued
+  // forever. The marker makes the run visible: the next sweep finds it pending
+  // with no draft and cancels it. It keeps the claim gate shut (its
+  // `draftVersion` is null), and the build's own first record overwrites it a
+  // moment later.
+  await recordMockedWorld(auth, run.id, BUILDING_MARKER);
 
   // The sweep, before anything new is made. Litter from a crashed run is
   // cleared while it is still only litter.
@@ -241,15 +270,23 @@ export async function settleMockedWorlds(
 
   for (const held of outstanding) {
     const finished = held.finishedAt !== null;
+    // Staleness is measured **only while the world is still unbuilt**. A run
+    // whose world is fully built (its draft exists) and which is merely pending
+    // because no simulator has claimed it yet is not stuck — its clock is queue
+    // wait, and cancelling it for that would be a fate no other run in the
+    // product suffers. Only a run still without a draft after the window has
+    // genuinely lost its build process.
+    const worldBuilt = held.world.draftVersion !== null;
     const stale =
       held.status === "pending" &&
+      !worldBuilt &&
       now - held.createdAt.getTime() > STALE_BUILD_MILLISECONDS;
     if (!finished && !stale) continue;
 
     if (stale) {
-      // Its process died between minting a version and making its simulations
-      // claimable, so nothing will ever finish it. Cancel it, so the record
-      // says what happened rather than showing a queue that never moves.
+      // Its process died before it could make its simulations claimable, so
+      // nothing will ever finish it. Cancel it, so the record says what
+      // happened rather than showing a queue that never moves.
       await cancelRun(auth, held.runId).catch(() => undefined);
     }
 

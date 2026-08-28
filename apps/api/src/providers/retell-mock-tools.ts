@@ -1,3 +1,4 @@
+import { connectionTypeTakesMockedWorld } from "@egma/db";
 import {
   bindingDecisionsFor,
   discoverTools,
@@ -13,7 +14,7 @@ import {
 } from "@egma/retell";
 
 /**
- * What ticking the mock-tools box would find, and the four reasons it is
+ * What ticking the mock-tools box would find, and the five reasons it is
  * refused.
  *
  * The refusals are here, together, on purpose. Each one is a different fact
@@ -23,7 +24,7 @@ import {
  * carries the same sentence; and both come from this one function, so they
  * cannot say different things.
  *
- * The four:
+ * The five:
  *
  * 1. **A custom-LLM engine.** The brain and the tools live on the customer's
  *    own socket server; Retell stores no tool configuration this seam could
@@ -44,6 +45,10 @@ import {
  *    accounts or different platform agents, one account would build the draft
  *    while another tried to call it — a failure that would otherwise surface
  *    only after the world was built.
+ * 5. **The platform would not answer.** Not a fact about the agent but about
+ *    the moment: Retell was unreachable while Egma read the account. Nothing is
+ *    changed, and the person is told to try again — a fair fifth, kept apart
+ *    from the four because its next move is "wait", not "reconfigure".
  */
 
 export const MOCK_TOOLS_REFUSALS = [
@@ -135,12 +140,6 @@ const PLATFORM_AWAY =
   "Retell did not answer while Egma read this agent. Nothing was changed. Try " +
   "again.";
 
-/** The connection types a mocked run can be conducted over. */
-const MOCKABLE_LANES: ReadonlySet<string> = new Set([
-  "retell_web_call",
-  "retell_chat_api",
-]);
-
 function refused(
   reason: MockToolsRefusalReason,
   message: string,
@@ -168,9 +167,11 @@ function refused(
 export async function discoverMockTools(
   input: MockToolsDiscoveryInput,
 ): Promise<MockToolsDiscovery> {
-  // Refusal three, answered from what Egma already holds.
+  // Refusal three, answered from what Egma already holds. The lane list is the
+  // registry's own, read through @egma/db, so a third mockable lane added there
+  // is a lane the tick offers rather than refuses — the two cannot drift.
   const lanes = input.lanes.filter((lane) =>
-    MOCKABLE_LANES.has(lane.connectionType),
+    connectionTypeTakesMockedWorld(lane.connectionType),
   );
   if (lanes.length === 0) return refused("phone_only_agent", PHONE_ONLY);
 

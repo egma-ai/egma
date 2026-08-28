@@ -8,6 +8,7 @@ import {
   mockedWorldIsSettled,
   mockToolUrl,
   SIMULATION_VARIABLE,
+  versionReferenceIn,
   type MockedWorldRecord,
   type RetellCredential,
 } from "../src/index.ts";
@@ -62,6 +63,12 @@ type AccountOptions = {
    * exists for and is what an engine Retell does not version would look like.
    */
   readonly branching?: "fork" | "share" | "unversioned";
+  /**
+   * When true, the serving version's `response_engine` carries no `version` at
+   * all — the case the serving-side guard exists for, where reading it back
+   * would mean "Retell's newest" rather than the version served.
+   */
+  readonly unversionedServingEngine?: boolean;
   /** Called after the capture is read, so a test can move the world underneath. */
   readonly whenCaptured?: (account: Account) => void;
   /** Requests that fail, by a substring of the path, with the status to answer. */
@@ -99,14 +106,23 @@ function account(options: AccountOptions = {}): Account {
 
   const engineKey = (id: string, version: number) => `${id}@${version}`;
   engines.set(engineKey(engineId, 105), structuredClone(source));
+  const servingEngineRef =
+    kind === "conversation-flow"
+      ? {
+          type: "conversation-flow",
+          conversation_flow_id: engineId,
+          ...(options.unversionedServingEngine ? {} : { version: 105 }),
+        }
+      : {
+          type: "retell-llm",
+          llm_id: engineId,
+          ...(options.unversionedServingEngine ? {} : { version: 105 }),
+        };
   versions.set(105, {
     agent_id: AGENT,
     version: 105,
     is_published: true,
-    response_engine:
-      kind === "conversation-flow"
-        ? { type: "conversation-flow", conversation_flow_id: engineId, version: 105 }
-        : { type: "retell-llm", llm_id: engineId, version: 105 },
+    response_engine: servingEngineRef,
   });
 
   for (const extra of options.alsoVersions ?? []) {
@@ -383,6 +399,38 @@ describe("the binding verdicts, for every number routing to the agent", () => {
     // that puts it back replaces the array, so a decision that dropped an entry
     // would delete somebody's routing.
     expect(decision?.bindings).toHaveLength(3);
+    // But the reading of what runs against the number is this agent's entries
+    // only.
+    expect(decision?.ownBindings).toHaveLength(2);
+  });
+
+  it("resolves the version from this agent's binding, never a sibling agent's", () => {
+    // A number two agents share: the other agent pins it to 7, this agent
+    // rides `latest`. The version this run tests must be this agent's `latest`,
+    // not the stranger's 7 — a version no traffic to this agent ever reaches.
+    const decisions = bindingDecisionsFor(
+      [
+        {
+          number: "+15550000008",
+          label: "shared",
+          bindings: [
+            {
+              agentId: OTHER_AGENT,
+              agentVersion: 7,
+              verbatim: { agent_id: OTHER_AGENT, agent_version: 7 },
+            },
+            {
+              agentId: AGENT,
+              agentVersion: "latest",
+              verbatim: { agent_id: AGENT, agent_version: "latest" },
+            },
+          ],
+        },
+      ],
+      AGENT,
+    );
+
+    expect(versionReferenceIn(decisions)).toBe("latest");
   });
 });
 
@@ -577,6 +625,46 @@ describe("the pin, and the routing it promises to put back", () => {
     expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
   });
 
+  it("pins only the hijackable entry, and leaves a numeric sibling alone", async () => {
+    // Weighted routing: this agent has both a numeric entry (105) and a
+    // hijackable one (latest) on one number. Pinning the whole array to
+    // `latest`'s resolved version would move the 105 sibling — the exact
+    // hijack this pin exists to stop, by Egma's own hand.
+    const mixed = [
+      { agent_id: AGENT, agent_version: 105, weight: 1 },
+      { agent_id: AGENT, agent_version: "latest", weight: 4 },
+      { agent_id: OTHER_AGENT, agent_version: 9 },
+    ];
+    const retell = account({
+      alsoVersions: [112],
+      numbers: { "+12567332874": mixed },
+    });
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+
+    // Only the hijackable entry moved to what `latest` reaches now; the numeric
+    // sibling kept its 105, and the other agent kept its 9.
+    expect(retell.bindingsOf("+12567332874")).toEqual([
+      { agent_id: AGENT, agent_version: 105, weight: 1 },
+      { agent_id: AGENT, agent_version: 112, weight: 4 },
+      { agent_id: OTHER_AGENT, agent_version: 9 },
+    ]);
+
+    await finishMockedWorld(
+      key,
+      { agentId: AGENT, world: built.world, record: async () => undefined },
+      REACH(retell.fetchImpl),
+    );
+    // And the whole array is restored, byte for byte.
+    expect(retell.bindingsOf("+12567332874")).toEqual(mixed);
+  });
+
   it("records the pin it is about to make before it makes it", async () => {
     const retell = account({ numbers: { "+12567332874": RIDES_LATEST } });
     const kept = recorder();
@@ -647,6 +735,40 @@ describe("the fork guard", () => {
     expect(
       retell.seen.filter((one) => one.method === "PATCH" && one.url.includes("conversation-flow")),
     ).toEqual([]);
+  });
+});
+
+describe("the serving-version guard", () => {
+  it("refuses a serving version with no engine version, before it reads or writes anything", async () => {
+    // The serving version names no engine version, so reading it back would
+    // mean "Retell's newest" — which after a branch is the draft Egma just
+    // mocked. Egma stops before the capture read rather than corrupt a version
+    // it never read.
+    const retell = account({ unversionedServingEngine: true });
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("names no response engine version");
+    expect(built.world).toBeNull();
+
+    // Nothing was read or written past the version resolve: no engine read, no
+    // branch, no engine write. The false hijack alarm and the corrupting repair
+    // both live downstream of a read this guard never lets happen.
+    expect(retell.seen.some((one) => one.url.includes("/get-conversation-flow/"))).toBe(
+      false,
+    );
+    expect(retell.seen.some((one) => one.method === "POST")).toBe(false);
+    expect(retell.seen.some((one) => one.method === "PATCH")).toBe(false);
+    // And the serving version's tools are exactly as they were.
+    expect(retell.toolsAt(105)[0]?.["url"]).toBe(
+      "https://backend.example.com/emrs/boulevard/tools/get_availability",
+    );
   });
 });
 

@@ -273,12 +273,20 @@ async function writeInboundAgents(
 }
 
 /**
- * Pin one number's binding for this agent to a version that exists.
+ * Pin one number's **hijackable** bindings for this agent to a version that
+ * exists.
  *
- * Only the one field moves. Every other field of the entry — weight, and
- * whatever Retell adds next — is carried across from what was read, and every
- * other agent's entry on the number is carried across whole, because a pin is
- * a pause on one deploy habit and never an edit of the customer's routing.
+ * Only the one field moves, and it moves on **only the entries that need it**:
+ * an entry whose verdict is `hijackable` — `latest` or unset. An entry this
+ * agent already pinned to a numeric version, or one riding an environment tag
+ * or the published pointer, is carried across whole. Under weighted routing an
+ * agent can have both a hijackable entry and a numeric sibling on one number,
+ * and moving the sibling to `latest` for the run would be the exact hijack this
+ * pin exists to prevent, done by egma's own hand.
+ *
+ * Every other agent's entry on the number is carried across whole for the same
+ * reason: a pin is a pause on one deploy habit and never an edit of the
+ * customer's routing.
  */
 export async function pinNumberBinding(
   key: RetellCredential,
@@ -293,7 +301,8 @@ export async function pinNumberBinding(
   reach: RetellReach = {},
 ): Promise<WroteNumberBindings> {
   const written = pin.bindings.map((binding) =>
-    binding.agentId === pin.agentId
+    binding.agentId === pin.agentId &&
+    bindingVerdictOf(binding) === "hijackable"
       ? { ...binding.verbatim, agent_version: pin.version }
       : binding.verbatim,
   );
