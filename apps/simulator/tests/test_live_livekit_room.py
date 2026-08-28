@@ -18,17 +18,33 @@ recording resolved with both speakers audible.
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
 
-    TEST_LIVEKIT_URL=wss://... \\
-    TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_livekit_room.py -v
 
+**The LiveKit is not among them, and does not have to be.** Name one with
+``TEST_LIVEKIT_URL`` and its key pair to conduct against a project you
+already have; name none and the ``live_livekit`` fixture starts the server
+this repository deploys, on ``ws://127.0.0.1:7880`` with LiveKit's own
+``devkey``/``secret``, and stops it afterwards. A server is not an account,
+so it should not cost one.
+
+Start the counterpart worker against whichever of the two you are using.
+For the started one that is::
+
+    cd fixtures/livekit-dumb-agent
+    LIVEKIT_URL=ws://127.0.0.1:7880 \\
+    LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret \\
+    OPENAI_API_KEY=... uv run agent.py dev
+
+The address is fixed rather than free-chosen for exactly that reason: the
+worker registers before the test runs, so where it registers has to be
+knowable in advance.
+
 Each name falls back to the plain one LiveKit's own tooling reads —
-``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, ``LIVEKIT_API_SECRET``, and
 ``OPENAI_API_KEY`` for the persona's brain — so the one environment that
 starts the counterpart worker also runs this, and nobody keeps two copies
-of the same project's coordinates.
+of the same coordinates.
 
 The brain is required, not optional. Conducted with the scripted default
 a live run proves the room and the wire and nothing about speech, because
@@ -103,9 +119,6 @@ from egma_simulator.media.room import ROOM_PREFIX
 from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
 from egma_simulator.recording import channels_of
 
-LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
-LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
-LIVEKIT_API_SECRET = credential("TEST_LIVEKIT_API_SECRET", "LIVEKIT_API_SECRET")
 AGENT_NAME = credential("TEST_LIVEKIT_AGENT_NAME", "EGMA_DUMB_AGENT_NAME")
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
 CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
@@ -116,10 +129,12 @@ CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 # corpus the speaking leg genuinely needed stayed missing for three days.
 MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
 
+# The LiveKit coordinates are deliberately not here. A server is not an
+# account: where none is named, the `live_livekit` fixture starts the one
+# this repository deploys, so what stands between a developer and this test
+# is the speech and model providers alone — the three that genuinely cannot
+# be started on a laptop.
 REQUIRED = {
-    "TEST_LIVEKIT_URL": LIVEKIT_URL,
-    "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
-    "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
@@ -147,10 +162,11 @@ pytestmark = [
     pytest.mark.skipif(
         bool(MISSING),
         reason=(
-            "no live LiveKit project: set "
+            "no speech or model provider for the persona: set "
             + ", ".join(MISSING)
             + " to conduct a real simulation against a real agent worker in a "
-            "real room"
+            "real room. The LiveKit itself needs no account — one is started "
+            "where none is named"
         ),
     ),
     pytest.mark.skipif(
@@ -163,16 +179,24 @@ pytestmark = [
     ),
 ]
 
-SECRETS = tuple(
-    secret
-    for secret in (
-        LIVEKIT_API_SECRET,
-        DEEPGRAM_API_KEY,
-        CARTESIA_API_KEY,
-        MODEL_API_KEY,
+def secrets_for(live) -> tuple[str, ...]:
+    """Every value that must appear in no output of this run.
+
+    The LiveKit half is whichever server this conducted against, because a
+    started server's pair is as much a credential to keep out of a log as a
+    project's is — and a scan that only knew about the named one would go
+    quiet on the very path a developer runs most.
+    """
+    return tuple(
+        secret
+        for secret in (
+            live.api_secret,
+            DEEPGRAM_API_KEY,
+            CARTESIA_API_KEY,
+            MODEL_API_KEY,
+        )
+        if secret
     )
-    if secret
-)
 
 SIMULATION = "sim-livekit-room-live-001"
 
@@ -189,7 +213,7 @@ MAX_DURATION_SECONDS = 90
 WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
 
 
-def room_spec() -> dict:
+def room_spec(live) -> dict:
     """One spec whose connection names a real room in a real project.
 
     Exactly the block the control plane stores for a ``livekit``
@@ -197,7 +221,7 @@ def room_spec() -> dict:
     agent's name in the config; the key pair in the credentials — and
     nothing this test invented for itself.
     """
-    config: dict = {"url": LIVEKIT_URL}
+    config: dict = {"url": live.url}
     if AGENT_NAME:
         config["agentName"] = AGENT_NAME
     return a_spec(
@@ -209,8 +233,8 @@ def room_spec() -> dict:
             "access_variant": "livekit_room.project_credentials",
             "config": config,
             "credentials": {
-                "apiKey": LIVEKIT_API_KEY,
-                "apiSecret": LIVEKIT_API_SECRET,
+                "apiKey": live.api_key,
+                "apiSecret": live.api_secret,
             },
         },
         scenario=(
@@ -282,9 +306,9 @@ def says_more_than_one_sentence(text: str) -> bool:
 # behaving correctly.
 @pytest.mark.timeout(WITHIN_SECONDS + 30)
 async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
-    workbench, start_simulator
+    workbench, start_simulator, live_livekit
 ):
-    await workbench.offer(room_spec())
+    await workbench.offer(room_spec(live_livekit))
     simulator = start_simulator(
         workbench,
         extra_env=deployment(),
@@ -305,7 +329,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # is exactly the path it went wrong on, and a scan written below the
     # status assertion would never run on it.
     simulator.stop()
-    for secret in SECRETS:
+    for secret in secrets_for(live_livekit):
         assert_kept_secret(secret, records=records, simulator=simulator)
 
     assert terminal["status"] == "completed", terminal["reason"]
@@ -366,7 +390,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     assert any(agent_audio), "the agent's channel is silent"
     # The fourth place a credential could be, and the one nothing else
     # scans: the bytes this simulation wrote itself.
-    for secret in SECRETS:
+    for secret in secrets_for(live_livekit):
         assert secret.encode() not in recording, "the recording carried a credential"
 
     # Per-turn timings, measured off the real exchange, and never

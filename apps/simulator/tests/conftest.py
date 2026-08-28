@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -1133,3 +1134,145 @@ def all_terminal(simulation_ids: list[str]) -> Callable[[list[dict]], bool]:
         )
 
     return check
+
+
+# -- A real LiveKit for the opt-in live suite -------------------------------
+#
+# The live room test used to need a LiveKit project before it would run at
+# all, which put a cloud account between a developer and the one test that
+# proves a real room. It does not need a *project*; it needs a server, and
+# this repository already deploys one.
+#
+# So the coordinates come from the environment where a machine names them,
+# and otherwise from the server below, started for the length of one
+# session. The address is fixed rather than free-chosen on purpose: the
+# counterpart worker is started by hand before the test runs, so the place
+# it is told to register has to be knowable in advance.
+#
+# Its twin lives in `sdks/python/tests/conftest.py`. The two packages ship
+# as separate wheels and share no test code, so this is duplicated
+# deliberately, the way the seam's own constants are.
+
+LIVEKIT_DEV_URL = "ws://127.0.0.1:7880"
+LIVEKIT_DEV_KEY = "devkey"
+LIVEKIT_DEV_SECRET = "secret"
+"""Where a started server listens, and the pair ``--dev`` uses.
+
+Published by LiveKit and correctly so: it opens a server bound to this
+machine for one test session. It is also what the counterpart worker must
+be started against, and naming it here is what lets a person do that
+before there is anything running to ask."""
+
+LIVEKIT_HEALTH_SECONDS = 30.0
+"""How long a started server has to answer before it counts as one that
+will not start."""
+
+
+@dataclass(frozen=True)
+class LiveKitServer:
+    """Where a real LiveKit is, and what opens it."""
+
+    url: str
+    api_key: str
+    api_secret: str
+
+
+def _pinned_livekit_image() -> str:
+    """The server tag this repository deploys, read off the compose file.
+
+    Read rather than repeated, for the reason CI reads its own object-store
+    tag the same way: a second copy of a version is a second thing to
+    forget, and the one that rots is always the one nobody runs.
+    """
+    compose = Path(__file__).resolve().parents[3] / "docker-compose.yml"
+    try:
+        lines = compose.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    inside = False
+    for line in lines:
+        if line.startswith("  livekit:"):
+            inside = True
+        elif inside and line.strip().startswith("image:"):
+            return line.split("image:", 1)[1].strip()
+        elif inside and line and not line.startswith("    "):
+            break
+    return ""
+
+
+def _livekit_answering(url: str) -> bool:
+    """Whether something is already serving on that address."""
+    probe = url.replace("ws://", "http://").replace("wss://", "https://")
+    try:
+        with urllib.request.urlopen(probe, timeout=1):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except OSError:
+        return False
+
+
+@pytest.fixture(scope="session")
+def live_livekit() -> Iterator[LiveKitServer]:
+    """A real LiveKit for one session: the one named, or one started here.
+
+    Skips rather than fails where neither is possible, because a developer
+    without Docker is not a developer with a broken simulator.
+    """
+    named = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
+    if named:
+        key = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
+        secret = credential("TEST_LIVEKIT_API_SECRET", "LIVEKIT_API_SECRET")
+        if not key or not secret:
+            pytest.skip(
+                "TEST_LIVEKIT_URL names a server but its key pair is not set: "
+                "set TEST_LIVEKIT_API_KEY and TEST_LIVEKIT_API_SECRET too"
+            )
+        yield LiveKitServer(named, key, secret)
+        return
+
+    image = _pinned_livekit_image()
+    if not image:
+        pytest.skip("no livekit image pinned in docker-compose.yml to start")
+    if shutil.which("docker") is None:
+        pytest.skip(
+            "no LiveKit named and no docker to start one: set TEST_LIVEKIT_URL "
+            "with its key pair, or install docker"
+        )
+    if _livekit_answering(LIVEKIT_DEV_URL):
+        pytest.skip(
+            f"something already answers on {LIVEKIT_DEV_URL}, so this cannot "
+            "start its own server there and will not conduct against one it "
+            "did not start; stop it, or name a server with TEST_LIVEKIT_URL"
+        )
+
+    name = f"egma-livekit-live-{os.getpid()}"
+    started = subprocess.run(
+        # Host networking because a room's media negotiates addresses of its
+        # own, and a published port would advertise one the container cannot
+        # reach from inside its own view of this machine.
+        ["docker", "run", "-d", "--rm", "--name", name, "--network", "host",
+         image, "--dev", "--bind", "0.0.0.0"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if started.returncode != 0:
+        pytest.skip(f"docker could not start {image}: {started.stderr.strip()[:200]}")
+
+    try:
+        deadline = time.monotonic() + LIVEKIT_HEALTH_SECONDS
+        while not _livekit_answering(LIVEKIT_DEV_URL):
+            if time.monotonic() > deadline:
+                logs = subprocess.run(
+                    ["docker", "logs", "--tail", "20", name],
+                    capture_output=True, text=True, check=False,
+                )
+                pytest.fail(
+                    f"{image} did not answer on {LIVEKIT_DEV_URL} within "
+                    f"{LIVEKIT_HEALTH_SECONDS:.0f}s: {logs.stderr.strip()[:400]}"
+                )
+            time.sleep(0.2)
+        yield LiveKitServer(LIVEKIT_DEV_URL, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
+    finally:
+        subprocess.run(["docker", "stop", name], capture_output=True, check=False)
