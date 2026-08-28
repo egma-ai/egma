@@ -11,13 +11,15 @@ one.
 
 Its first execution is on the record: 2026-08-08, against a LiveKit
 Cloud project and the dumb-agent fixture, three simulations conducted
-green — explicit dispatch by name twice (once against a cold worker) and
-automatic dispatch once, every room deleted at teardown, and every
-recording resolved with both speakers audible.
+green — every room deleted at teardown, and every recording resolved with
+both speakers audible. One of those three took LiveKit's automatic
+dispatch, which egma no longer uses at all: the name is required now, for
+the reason below.
 
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
 
+    TEST_LIVEKIT_AGENT_NAME=front-desk \\
     TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_livekit_room.py -v
@@ -69,15 +71,16 @@ apart, which is the point of a contract. The connection block below is
 byte for byte what the door stores for a ``livekit`` connection, so what
 this conducts against is what a registered connection would hand it.
 
-## Both dispatch styles, one test
+## One dispatch style, because there is only one
 
-Which style is exercised is the environment's to say, because it is the
-*worker's* to say: a worker registered without a name takes every new
-room in the project (automatic dispatch), and one registered with a name
-takes only rooms whose dispatch asks for it. ``TEST_LIVEKIT_AGENT_NAME``
-blank is the first; set is the second. The counterpart fixture reads
-``EGMA_DUMB_AGENT_NAME`` for the same choice and this falls back to it,
-so one variable moves both halves and the two cannot disagree.
+Egma dispatches by name, always, so the record names the agent it
+graded — where automatic dispatch would hand the room to whichever
+workers were listening. So
+``TEST_LIVEKIT_AGENT_NAME`` is required here rather than optional, and a
+blank one skips this test visibly instead of conducting a run the
+simulator would refuse. It falls back to ``EGMA_DUMB_AGENT_NAME``, which
+is the name the counterpart worker registers under, so one variable moves
+both halves and the two cannot disagree.
 
 ## What is asserted
 
@@ -135,6 +138,10 @@ MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
 # is the speech and model providers alone — the three that genuinely cannot
 # be started on a laptop.
 REQUIRED = {
+    # Not a credential: the name the counterpart worker registers under.
+    # Required because egma dispatches by name and only by name, so a blank
+    # one is a run the simulator would refuse rather than a run to conduct.
+    "TEST_LIVEKIT_AGENT_NAME": AGENT_NAME,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
@@ -162,11 +169,11 @@ pytestmark = [
     pytest.mark.skipif(
         bool(MISSING),
         reason=(
-            "no speech or model provider for the persona: set "
+            "not enough to conduct against a real worker: set "
             + ", ".join(MISSING)
-            + " to conduct a real simulation against a real agent worker in a "
-            "real room. The LiveKit itself needs no account — one is started "
-            "where none is named"
+            + ". The LiveKit itself needs no account — one is started where "
+            "none is named — so what is left is the speech and model "
+            "providers, and the name the worker registers under"
         ),
     ),
     pytest.mark.skipif(
@@ -217,13 +224,10 @@ def room_spec(live) -> dict:
     """One spec whose connection names a real room in a real project.
 
     Exactly the block the control plane stores for a ``livekit``
-    connection — the server and, where the worker registers one, the
-    agent's name in the config; the key pair in the credentials — and
-    nothing this test invented for itself.
+    connection — the server and the agent's name in the config, the key
+    pair in the credentials — and nothing this test invented for itself.
     """
-    config: dict = {"url": live.url}
-    if AGENT_NAME:
-        config["agentName"] = AGENT_NAME
+    config = {"url": live.url, "agentName": AGENT_NAME}
     return a_spec(
         SIMULATION,
         modality="voice",

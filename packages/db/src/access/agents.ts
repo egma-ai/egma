@@ -628,7 +628,11 @@ type AdmittedConnection = {
  */
 function admitConnection(input: NewConnection): AdmittedConnection {
   const descriptor = descriptorOf(input.connectionType);
-  const modality = validModality(input.connectionType, input.modality);
+  const modality = validModality(
+    input.connectionType,
+    input.accessVariant,
+    input.modality,
+  );
   // The payload's own tuple has to be one egma supports — this is what turns
   // away a combination nobody can reach, before any database work.
   //
@@ -966,8 +970,9 @@ export type Registration = {
  * failure. Minting a second identity for one vendor agent splits a team's
  * results history in half, which is the one thing that must not happen quietly.
  *
- * So the connection type's reuse key decides (`connection-registry.ts`), and a living
- * connection in the project naming the same vendor agent decides the outcome:
+ * So the connection type's reuse rule decides (`connection-registry.ts`), and a
+ * living connection in the project standing for the same vendor agent decides
+ * the outcome:
  *
  * - **same modality** → that agent and that connection answer, with the
  *   supplied credential replacing the stored one **whole**. Rotation never
@@ -976,8 +981,17 @@ export type Registration = {
  * - **a different modality** → the same agent gains a new connection, because
  *   a chat endpoint and a voice endpoint on one vendor agent are two ways to
  *   reach one thing. `connection_added`.
- * - **no match, or a kind with no reuse key at all** → both rows, exactly as
- *   `createAgent` writes them. `created`.
+ * - **no match, or a kind whose rule finds no identity in this config** → both
+ *   rows, exactly as `createAgent` writes them. `created`.
+ *
+ * **What "the same vendor agent" means is the rule's to say, and it is not
+ * always a value sitting in a column.** Retell's is one agent id, compared as
+ * it was stored. LiveKit's is the server the worker stands on and the name it
+ * answers to, and the server has to be normalized before it can be compared at
+ * all: `wss://acme.livekit.cloud` and `https://acme.livekit.cloud:443` are one
+ * server that no SQL equality will ever match. So the query narrows on the keys
+ * the rule can be narrowed by, and the rows that come back are then put through
+ * the rule itself. The second pass is load-bearing rather than tidy.
  *
  * The reused and extended paths answer the agent as it stands and leave its
  * name alone: the registration named an identity that already
@@ -988,7 +1002,9 @@ export type Registration = {
  * together would both find nothing, both insert, and one would lose to the
  * name index — an error where a retry-safe path must answer. The transaction
  * takes an advisory lock on the vendor agent first, so the second one reads
- * the first one's committed work and reuses it.
+ * the first one's committed work and reuses it. The lock is taken on the
+ * *normalized* identity, so two machines spelling one server differently queue
+ * behind each other rather than racing past.
  */
 export async function registerAgent(
   auth: AuthContext,
@@ -1006,9 +1022,8 @@ export async function registerAgent(
     };
   }
 
-  const reuseKey = descriptorOf(inline.connectionType).reuseKey;
-  const vendorAgent =
-    reuseKey === undefined ? undefined : inline.config[reuseKey];
+  const reuse = descriptorOf(inline.connectionType).reuse;
+  const vendorAgent = reuse?.identityOf(inline.config);
 
   const bothRows = async (tx: Queryable): Promise<Registration> => {
     const written = await insertAgentWithin(tx, auth, projectId, identity);
@@ -1027,14 +1042,17 @@ export async function registerAgent(
     };
   };
 
-  // A kind with no reuse key has nothing to match on, so this is `createAgent`
-  // with a word for what it did.
-  if (reuseKey === undefined || vendorAgent === undefined) {
+  // A kind with no reuse rule, or a config the rule finds no identity in — an
+  // access variant carrying none of its keys — has nothing to match on, so this
+  // is `createAgent` with a word for what it did.
+  if (reuse === undefined || vendorAgent === undefined) {
     return db().transaction(bothRows);
   }
 
   // What the lock is taken on: this one vendor agent, in this one project, of
-  // this one customer. Nothing else waits behind it.
+  // this one customer. Nothing else waits behind it. The identity is the
+  // normalized one, so two spellings of one LiveKit server take one lock
+  // rather than passing each other on the way to the same insert.
   const racing = `${auth.organizationId}:${projectId}:${inline.connectionType}:${vendorAgent}`;
 
   return db().transaction(async (tx): Promise<Registration> => {
@@ -1046,7 +1064,7 @@ export async function registerAgent(
       sql`select pg_advisory_xact_lock(hashtextextended(${racing}::text, 0))`,
     );
 
-    const living = await tx
+    const candidates = await tx
       .select({ identity: COLUMNS, reached: CONNECTION_COLUMNS })
       .from(connection)
       .innerJoin(agent, eq(connection.agentId, agent.id))
@@ -1058,13 +1076,27 @@ export async function registerAgent(
             eq(connection.projectId, projectId),
             eq(connection.connectionType, inline.connectionType),
             eq(connection.accessVariant, inline.accessVariant),
-            sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
+            // The keys the rule can be narrowed by, and only those: this is a
+            // filter that keeps the read small, never the decision.
+            ...reuse.matchedKeys.map(
+              (key) =>
+                sql`${connection.config}->>${key} = ${inline.config[key] ?? null}`,
+            ),
             connectionNotArchived,
             notArchived,
           ),
         ),
       )
       .orderBy(asc(connection.id));
+
+    // The decision, taken where the rule can be run whole. A LiveKit worker of
+    // one name on two servers narrows to two rows here and is two agents after
+    // this line, which is the case the SQL above cannot see.
+    const living = candidates.filter(
+      (row) =>
+        reuse.identityOf(configFromRow(row.reached.config, row.reached.id)) ===
+        vendorAgent,
+    );
 
     const sameModality = living.find(
       (row) => row.reached.modality === inline.modality,

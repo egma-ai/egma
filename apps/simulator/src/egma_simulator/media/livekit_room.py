@@ -9,11 +9,18 @@ verbs every media driver has (see :mod:`egma_simulator.media`):
 1. ``create_transport`` — come by a token and a room, then build
    Pipecat's stock transport. The simulator needs no inbound network
    surface: it opens the websocket and negotiates the media.
-2. ``dial`` — get the agent in. A connection that names an agent gets an
-   **explicit dispatch** by that name; one that names none relies on
-   **automatic dispatch**, which is LiveKit's own behavior for a worker
-   registered without a name: it is given every new room in the project,
-   so egma creating the room is the whole of the request.
+2. ``dial`` — get the agent in, by name, always explicitly. LiveKit
+   would hand a new room to a worker registered without a name on its
+   own, and egma deliberately does not lean on that: **a room filled
+   automatically is a room where the record cannot say which agent it
+   graded** — whichever workers were listening took it — and where the
+   customer's configured metadata has no dispatch of egma's to ride.
+   The simulation's own signals need no dispatch to travel: the room's
+   name carries them (``egma-sim-`` says simulation, ``egma-sim-chat-``
+   says which kind), and egma is found among the room's participants by
+   the identity it joined as. So the connection names the agent, and one
+   that names none is refused at the settings read, before anything is
+   reached.
 3. ``wait_answered`` — the agent's participant arrives and its audio
    flows, within a bounded wait. Both halves matter: a participant that
    joins and publishes nothing is a worker that crashed on its first
@@ -54,6 +61,25 @@ Two deliberate differences from the driver that places a phone call:
   environment variable.
 - **"Dial" means dispatch, not SIP.** Nothing is called; a worker is
   asked for.
+
+## Two currencies, one room
+
+A room can carry speech or it can carry typing, and everything *about
+the room* is the same either way: making it, signing a token for it,
+asking a customer's endpoint for one, dispatching a worker into it,
+offering the mock-tool seam in it, deleting it, and every sentence and
+every scrubbing above. Only the join differs — a voice join hands
+Pipecat a full-duplex transport, and a chat join is a bare
+``rtc.Room`` with text-stream handlers and no media at all.
+
+So that shared half is :class:`RoomLifecycle`, and the two drivers are
+subclasses of it that differ in what a join produces and in what they
+then wait for. :class:`LiveKitRoomBackend` is the voice one, with the
+four verbs above. :class:`LiveKitChatRoomBackend` is the chat one, and
+it waits for a participant and then for words rather than for audio.
+Neither is written beside the other: a second copy of the room
+lifecycle would drift from the first, and the first anybody would know
+is a customer's simulation.
 
 ## The two metadata channels are the customer's
 
@@ -125,6 +151,7 @@ import ipaddress
 import json
 import logging
 import socket
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -138,10 +165,14 @@ from ..mock_tools import (
 from ..redaction import SecretRegistry
 from . import MediaBackendError, VoiceMedia
 from .room import (
+    PERSONA_IDENTITY,
     QUOTED_REFUSAL_CHARS,
     JoinedRoom,
+    RpcMethod,
+    answering,
     delete_room,
     first_of,
+    fresh_chat_room_name,
     fresh_room_name,
     persona_name_for,
     room_name_for,
@@ -190,6 +221,41 @@ endpoint rather than as a worker that never came.
 
 TOKEN_RESPONSE_BYTES = 64 * 1024
 """The most token-endpoint data read into the simulator."""
+
+CHAT_TOPIC = "lk.chat"
+"""The text-stream topic a persona's turn is typed onto.
+
+LiveKit's own agent session watches this topic for its linked
+participant and treats whatever arrives as the person speaking, which is
+why a chat simulation needs nothing installed in the agent to be *heard*.
+"""
+
+TRANSCRIPTION_TOPIC = "lk.transcription"
+"""The text-stream topic the agent's own words come back on.
+
+One stream per utterance, and the stream **closing** is the only
+end-of-turn marker this wire has. An agent that says a filler, calls a
+tool and then answers sends three streams for one turn.
+"""
+
+SPOKEN_TRACK_ATTRIBUTE = "lk.transcribed_track_id"
+"""The stream attribute that means these words were spoken, not typed.
+
+LiveKit sets it only where the text is synchronised to a published audio
+track — so its presence is the wire itself saying the agent is talking.
+That is one of the two facts that catch an agent which has not taken the
+chat setup; the other is the track.
+"""
+
+STREAM_CLOSE_SECONDS = 1.0
+"""How long a stream the agent closed on its way out may take to arrive.
+
+A departing participant's last words and its departure reach egma through
+one event queue, and the words are read in a task the departure does not
+wait for. Without this the goodbye an agent leaves on would be dropped and
+the record would show an agent that left saying nothing. Short, because
+what is being waited for has already been sent.
+"""
 
 
 class _UnsafeEndpointAddress(OSError):
@@ -313,7 +379,13 @@ class RoomSettings:
     api_secret: str = field(default="", repr=False)
 
     agent_name: str = ""
-    """Which agent to dispatch. Empty means automatic dispatch."""
+    """Which agent to dispatch, by the name its worker registered under.
+
+    Empty only on the shape that asks an endpoint for its token: that
+    shape holds no key pair, so it could not dispatch anybody whatever it
+    were told, and it refuses the key outright. Every connection that
+    *can* dispatch must carry a name — see :meth:`from_connection`.
+    """
 
     metadata: str | None = None
     """The connection's configured JSON, as both metadata channels carry
@@ -393,11 +465,19 @@ class RoomSettings:
 
         url = _server_url(config)
 
-        agent_name = config.get("agentName", "")
-        if agent_name is None:
-            agent_name = ""
-        if not isinstance(agent_name, str):
-            raise MediaBackendError("livekit config: agentName must be a string")
+        # Demanded rather than defaulted, and demanded here so that a
+        # connection nobody can dispatch is a sentence before any request
+        # leaves egma. Every egma dispatch is explicit: a room filled by
+        # automatic dispatch goes to whichever workers are listening, so
+        # the record could never say which agent it graded, and the
+        # customer's configured metadata would have no dispatch to ride.
+        agent_name = config.get("agentName")
+        if not isinstance(agent_name, str) or not agent_name.strip():
+            raise MediaBackendError(
+                "livekit config: agentName must be a non-empty string — the "
+                "name the agent's worker registered under, because Egma "
+                "dispatches that worker by name for every simulation"
+            )
 
         if not isinstance(credentials, dict):
             raise MediaBackendError(
@@ -593,8 +673,28 @@ class WayIn:
     token: str = field(repr=False)
 
 
-class LiveKitRoomBackend:
-    """One exchange in one room, per instance."""
+class RoomLifecycle:
+    """One room, made and dispatched into and deleted — whatever it carries.
+
+    Everything about a LiveKit room that is the same whether the exchange
+    in it is spoken or typed: coming by a token, creating the room,
+    offering the mock-tool seam in it, asking for the worker, tearing it
+    down, and every refusal and every scrubbing on the way. What a join
+    *produces* is the one thing that differs, and that is what the two
+    subclasses below are for.
+
+    One instance per exchange, per simulation.
+    """
+
+    MODALITY: str
+    """Which kind of simulation this driver conducts.
+
+    It is not decoration: it rides the dispatch metadata, and it is the
+    only thing that tells an agent whether to answer in speech or in
+    text. A subclass that conducts something else says so here, and the
+    dispatch tells the truth by construction rather than by a caller
+    remembering to pass the right word.
+    """
 
     def __init__(
         self,
@@ -613,17 +713,19 @@ class LiveKitRoomBackend:
         # than through a second implementation of it.
         self._secrets = SecretRegistry()
         self._secrets.register(list(settings.secrets))
-        # A room egma opens itself is named after nothing, because nobody
-        # else has to recognise it. A room egma asks for a token into is
-        # named after the simulation, because the endpoint being asked has
-        # to be able to check the name against its own rules.
+        # A room egma opens itself is named by the driver conducting it,
+        # because the name is a channel: the chat driver's rooms carry the
+        # modality mark the customer's worker reads. A room egma asks for
+        # a token into is named after the simulation, because the endpoint
+        # being asked has to be able to check the name against its own
+        # rules.
         self._room_name = (
-            fresh_room_name()
+            self._fresh_room_name()
             if settings.mints_its_own
             else room_name_for(simulation_id)
         )
         self._participant_name = persona_name_for(simulation_id)
-        self._room: JoinedRoom | None = None
+        self._room: Any = None
         self._asked_for_a_room = False
         self._offered = False
 
@@ -634,12 +736,11 @@ class LiveKitRoomBackend:
         reference."""
         return self._room_name
 
-    async def create_transport(self) -> VoiceMedia:
-        """Get a way into the room and build its Pipecat transport."""
-        way_in = await self._way_in()
-        self._room = self._joined_room(way_in)
-        self._room.answer_when_joined(self._answer_for_mocked_tools)
-        return self._room.create_transport()
+    def _fresh_room_name(self) -> str:
+        """What a room egma mints itself is called. The chat driver
+        overrides this with the marked form, because the name is where a
+        worker reads the modality from."""
+        return fresh_room_name()
 
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
@@ -724,10 +825,12 @@ class LiveKitRoomBackend:
         """Get the agent in.
 
         There is nothing to dial: who to reach is the room's own
-        configuration. A named agent is dispatched explicitly; an unnamed
-        one is already on its way, because LiveKit gives every new room in
-        a project to workers registered without a name — so creating the
-        room *was* the request, and there is nothing more to ask for.
+        configuration, and asking for it is one explicit dispatch by the
+        name the connection carries. Nothing here falls back on LiveKit's
+        automatic dispatch: a room filled that way goes to whichever
+        workers are listening, so the record could not name the agent it
+        graded, and the customer's configured metadata would have no
+        dispatch to ride.
 
         A connection that asks an endpoint for its tokens asks for nothing
         here at all. Dispatching takes the key pair egma deliberately was
@@ -745,33 +848,14 @@ class LiveKitRoomBackend:
         self._room.note_anybody_already_here()
         if not self._settings.mints_its_own:
             return
-        if not self._settings.agent_name:
-            return
         await self._dispatch()
 
-    async def wait_answered(self, seconds: float) -> str:
-        """Wait for the agent to turn up and be heard, or say nobody did."""
+    async def _wait_arrivals(self, seconds: float) -> bool:
+        """Whether anybody joined the room inside the budget."""
         room = self._room
         if room is None:
             raise MediaBackendError("an agent was waited for before a room")
-
-        # One deadline for both halves, not one each: the budget is how
-        # long the room may stand empty, and two budgets end up waiting
-        # twice as long as anybody was told.
-        deadline = asyncio.get_running_loop().time() + seconds
-        if not await first_of(room.arrivals, within=seconds):
-            raise MediaBackendError(
-                self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
-            )
-        left = deadline - asyncio.get_running_loop().time()
-        if left <= 0 or not await first_of(room.carrying_audio, within=left):
-            raise MediaBackendError(
-                f"an agent joined the room but published no audio within "
-                f"{seconds:.0f}s; check that the worker publishes a track "
-                "rather than only subscribing",
-                ending=AGENT_NEVER_JOINED,
-            )
-        return self._room_name
+        return await first_of(room.arrivals, within=seconds)
 
     async def teardown(self) -> None:
         """Leave, and delete the room where egma has the power to.
@@ -1003,16 +1087,6 @@ class LiveKitRoomBackend:
             )
         return token.strip(), server_url
 
-    def _joined_room(self, way_in: WayIn) -> JoinedRoom:
-        """The way into the room, with a token that opens it and nothing
-        else: one room, one identity, for the length of one simulation."""
-        return JoinedRoom(
-            url=way_in.url,
-            token=way_in.token,
-            room_name=self._room_name,
-            quotable=self._quotable,
-        )
-
     async def _delete_room(self) -> None:
         """Delete the room. Never raises — see :func:`delete_room`."""
         await delete_room(
@@ -1075,21 +1149,596 @@ class LiveKitRoomBackend:
                 f"cannot dispatch: putting a worker in the room it was asked "
                 f"for a token into is the endpoint's own job"
             )
-        who = (
-            f"no agent named {self._settings.agent_name!r} joined"
-            if self._settings.agent_name
-            else "no agent joined"
+        # There is only one arm left here now that the name is demanded:
+        # every connection that mints its own token dispatches by name, so
+        # the name is always something a person can go and look for.
+        return (
+            f"no agent named {self._settings.agent_name!r} joined the room "
+            f"within {seconds:.0f}s — check that a worker registered under "
+            f"that name is running"
         )
-        where = (
-            "check that a worker registered under that name is running"
-            if self._settings.agent_name
-            else "check that a worker is running and registered for automatic "
-            "dispatch, or name the agent on the connection"
-        )
-        return f"{who} the room within {seconds:.0f}s — {where}"
 
     def _quotable(self, told: str) -> str:
         """Somebody else's words, minus this connection's secret, short
         enough to read. A server that echoed the api secret back must not
         get it repeated into a reason or into the traceback under one."""
         return self._secrets.redact(told)[:QUOTED_REFUSAL_CHARS]
+
+
+# -- The room carrying speech ------------------------------------------------
+
+
+class LiveKitRoomBackend(RoomLifecycle):
+    """The room with a Pipecat transport in it: one voice exchange.
+
+    The four verbs of the module docstring, minus the two the lifecycle
+    above already answers. What is left here is the join — which builds
+    the stock LiveKit transport the one running pipeline owns — and the
+    wait that follows it.
+    """
+
+    MODALITY = "voice"
+
+    async def create_transport(self) -> VoiceMedia:
+        """Get a way into the room and build its Pipecat transport."""
+        way_in = await self._way_in()
+        self._room = self._joined_room(way_in)
+        self._room.answer_when_joined(self._answer_for_mocked_tools)
+        return self._room.create_transport()
+
+    async def wait_answered(self, seconds: float) -> str:
+        """Wait for the agent to turn up and be heard, or say nobody did."""
+        # One deadline for both halves, not one each: the budget is how
+        # long the room may stand empty, and two budgets end up waiting
+        # twice as long as anybody was told.
+        deadline = asyncio.get_running_loop().time() + seconds
+        if not await self._wait_arrivals(seconds):
+            raise MediaBackendError(
+                self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
+            )
+        left = deadline - asyncio.get_running_loop().time()
+        if left <= 0 or not await first_of(self._room.carrying_audio, within=left):
+            raise MediaBackendError(
+                f"an agent joined the room but published no audio within "
+                f"{seconds:.0f}s; check that the worker publishes a track "
+                "rather than only subscribing",
+                ending=AGENT_NEVER_JOINED,
+            )
+        return self._room_name
+
+    def _joined_room(self, way_in: WayIn) -> JoinedRoom:
+        """The way into the room, with a token that opens it and nothing
+        else: one room, one identity, for the length of one simulation."""
+        return JoinedRoom(
+            url=way_in.url,
+            token=way_in.token,
+            room_name=self._room_name,
+            quotable=self._quotable,
+        )
+
+
+# -- The room carrying typing ------------------------------------------------
+#
+# No Pipecat, no transport, no audio, and no text-to-speech anywhere: a
+# chat simulation types onto one topic and reads the agent's own words
+# back off another. What makes that possible without touching the
+# customer's agent is that LiveKit's session already listens on the chat
+# topic; what makes it *fast* is the six lines the customer adds, which
+# read the modality off the name of the room this driver makes — the
+# ``egma-sim-chat-`` mark — and stop the agent synthesising speech nobody
+# hears.
+
+
+@dataclass(frozen=True)
+class Utterance:
+    """One thing the agent said, as one closed transcription stream."""
+
+    text: str
+    """The words, whole, because a stream is read to its close."""
+
+    spoken: bool
+    """Whether the stream carried :data:`SPOKEN_TRACK_ATTRIBUTE`.
+
+    True means these words were synchronised to audio the agent
+    published — the wire saying the agent is talking rather than typing,
+    which in a chat simulation means the chat setup is missing.
+    """
+
+    turn: int
+    """Which persona turn was outstanding when this stream *opened*.
+
+    Stamped at the stream's header rather than at its close, which is what
+    makes it an answer to the question that had been asked — a stream can
+    take longer to finish than egma waited for it, and finishing late does
+    not make it a reply to whatever was asked next. Reading it as one
+    would put the agent's words against a question it never answered.
+    """
+
+
+@dataclass(frozen=True)
+class AgentTurn:
+    """Everything the agent produced between two persona turns."""
+
+    text: str | None
+    """What it said, or ``None`` for a turn that carried no words — which
+    is the honest record of a turn that only called a tool."""
+
+    ended: bool
+    """Whether the agent left the room, which is the agent ending the
+    exchange. There is no other signal and no better one."""
+
+    speaking: bool
+    """Whether the wire says this agent is speaking rather than typing:
+    an audio track in the room, or text carrying the transcribed-track
+    mark. Either one means the agent never took the chat setup, and the
+    plug above ends the simulation rather than grading it."""
+
+
+class TextRoom:
+    """One LiveKit room joined for typing, with no media in it at all.
+
+    The chat counterpart of :class:`egma_simulator.media.room.JoinedRoom`,
+    and deliberately much smaller than it: there is no transport to build,
+    no conversion, no pacing and no recording. Egma connects, subscribes
+    to nothing, offers the mock-tool methods on its own participant, types
+    on one topic and reads closed streams off another.
+
+    What it exposes upward is four events and a queue, because that is the
+    whole of what the wire says: somebody arrived, somebody published
+    audio, the agent left, the room dropped egma — and, in order, every
+    utterance that finished arriving.
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str,
+        token: str,
+        room_name: str,
+        quotable: Callable[[str], str] = lambda told: told,
+    ) -> None:
+        self._url = url
+        self._token = token
+        self._room_name = room_name
+        self._quotable = quotable
+        self._room: Any = None
+        self._leaving = False
+        self._reading: set[asyncio.Task[None]] = set()
+        self.utterances: asyncio.Queue[Utterance] = asyncio.Queue()
+        self._turn = 0
+        """Which persona turn is outstanding. Nought is the greeting's, which
+        is the only turn the agent takes before it has been asked anything."""
+        self.arrivals = asyncio.Event()
+        self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
+        self.audio_published = asyncio.Event()
+
+    @property
+    def joined(self) -> bool:
+        return self._room is not None
+
+    async def join(self) -> None:
+        """Enter the room as a participant that publishes nothing."""
+        from livekit import rtc
+
+        room = rtc.Room()
+        # Registered before the connect rather than after it, for the
+        # reason the mock-tool methods are: a worker already in the room
+        # can speak the moment egma becomes visible to it, and a handler
+        # attached afterwards is a race with the agent's first word.
+        room.register_text_stream_handler(TRANSCRIPTION_TOPIC, self._agent_said)
+
+        @room.on("participant_connected")
+        def _arrived(_participant: Any) -> None:
+            self.arrivals.set()
+
+        @room.on("participant_disconnected")
+        def _left(_participant: Any) -> None:
+            if not self._leaving:
+                self.ended.set()
+
+        @room.on("track_published")
+        def _published(publication: Any, _participant: Any) -> None:
+            # Egma publishes nothing here, so a track in this room is the
+            # agent's — and an agent publishing audio in a chat simulation
+            # is an agent that never read the modality off its room's name.
+            if getattr(publication, "kind", None) == rtc.TrackKind.KIND_AUDIO:
+                self.audio_published.set()
+
+        @room.on("disconnected")
+        def _dropped(*_why: Any) -> None:
+            # Egma losing the room is a fault, and it is not the agent
+            # ending the exchange. Told apart here so the record cannot
+            # read one as the other.
+            if not self._leaving:
+                self.failed.set()
+
+        try:
+            await room.connect(
+                self._url,
+                self._token,
+                # Subscribed to nothing, because there is nothing here to
+                # hear: a chat simulation reads words, and a subscription
+                # would decode audio no part of this grades.
+                rtc.RoomOptions(auto_subscribe=False),
+            )
+        except Exception as unreachable:
+            raise MediaBackendError(
+                f"the livekit server at {self._url} did not let the simulator "
+                f"into a room: {self._quotable(repr(unreachable))}",
+                ending=ERROR,
+            ) from unreachable
+        self._room = room
+        # A worker already in the room when egma arrives fires no
+        # connection event, so the roster is read once rather than only
+        # waited on — otherwise a fast dispatch into a slow join would
+        # look exactly like a worker that never came.
+        for participant in room.remote_participants.values():
+            self.arrivals.set()
+            for publication in participant.track_publications.values():
+                if getattr(publication, "kind", None) == rtc.TrackKind.KIND_AUDIO:
+                    self.audio_published.set()
+
+    async def wait_connected(self) -> None:
+        """Joining is what connected it; this is where that is checked."""
+        if self._room is None:
+            raise MediaBackendError(
+                f"the livekit server at {self._url} was asked for an agent "
+                "before the simulator had joined a room",
+                ending=ERROR,
+            )
+
+    def note_anybody_already_here(self) -> None:
+        """Count whoever was in the room before egma got into it.
+
+        The join above already read the roster once, so this is ordinarily
+        nothing to do — it exists because the lifecycle asks every room
+        the same question at dial, and the answer must never depend on
+        which driver is underneath. One local read, never a raise.
+        """
+        room = self._room
+        if self.arrivals.is_set() or room is None:
+            return
+        try:
+            present = room.remote_participants
+        except Exception:
+            return
+        if present:
+            self.arrivals.set()
+
+    def register_rpc(self, method: str, handler: RpcMethod) -> None:
+        """Offer one mock-tool method on egma's own participant.
+
+        The same seam the voice room offers, through the same wrapper: the
+        exchange knows nothing about rooms, and nothing about whether the
+        conversation around it is spoken or typed.
+        """
+        if self._room is None:
+            raise MediaBackendError(
+                f"{method} was offered before the room was joined", ending=ERROR
+            )
+        self._room.local_participant.register_rpc_method(method, answering(handler))
+
+    async def send(self, text: str) -> None:
+        """Type one persona turn into the room."""
+        if self._room is None:
+            raise MediaBackendError(
+                "a persona turn was typed before the room was joined", ending=ERROR
+            )
+        try:
+            await self._room.local_participant.send_text(text, topic=CHAT_TOPIC)
+        except Exception as unsent:
+            raise MediaBackendError(
+                f"the persona's turn could not be sent into {self._room_name}: "
+                f"{self._quotable(repr(unsent))}",
+                ending=ERROR,
+            ) from unsent
+
+    def begin_turn(self) -> int:
+        """Say that a new persona turn is going out, and answer which.
+
+        Every stream that opens from here on belongs to this turn, and
+        every stream already open belongs to one before it — which is the
+        whole of the rule that keeps an answer under the question it
+        answers.
+        """
+        self._turn += 1
+        return self._turn
+
+    async def next_utterance(self, *, within: float) -> Utterance | None:
+        """The next finished utterance, or nothing inside the budget.
+
+        Three things end the wait early and each one means the turn is
+        over: the utterance arriving, the agent leaving, and an audio
+        track appearing. The last is not an answer at all — it is the
+        wire saying this agent is speaking, and there is no point waiting
+        out a quiet period for words that will arrive at speech pace.
+        """
+        if not self.utterances.empty():
+            return self.utterances.get_nowait()
+        taking = asyncio.ensure_future(self.utterances.get())
+        stopping = [
+            asyncio.ensure_future(event.wait())
+            for event in (self.ended, self.failed, self.audio_published)
+        ]
+        try:
+            done, _pending = await asyncio.wait(
+                [taking, *stopping],
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=within,
+            )
+        finally:
+            for unfinished in (taking, *stopping):
+                if not unfinished.done():
+                    unfinished.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await unfinished
+        if taking in done:
+            return taking.result()
+        if self.ended.is_set():
+            await self._settled()
+            if not self.utterances.empty():
+                return self.utterances.get_nowait()
+        return None
+
+    async def leave(self) -> None:
+        """Leave the room, and stop reading whatever was still arriving."""
+        room, self._room = self._room, None
+        self._leaving = True
+        self.ended.set()
+        for reader in self._reading:
+            if not reader.done():
+                reader.cancel()
+        self._reading.clear()
+        if room is None:
+            return
+        try:
+            await room.disconnect()
+        except Exception as unfinished:
+            logger.warning(
+                "the exchange's room was not left cleanly: %s",
+                self._quotable(repr(unfinished)),
+            )
+
+    # -- Reading what the agent said ------------------------------------------
+
+    def _agent_said(self, reader: Any, identity: str) -> None:
+        """One transcription stream opened; read it to its close.
+
+        Called the moment a stream's header arrives, before a word of it
+        exists, so the whole of the work is reading it to the end and
+        putting it down. Egma's own turns come back on this topic too
+        wherever the agent transcribes what it was told, so a stream sent
+        by egma's own participant is dropped rather than read as the agent
+        answering itself.
+        """
+        if identity == PERSONA_IDENTITY:
+            return
+        reading = asyncio.create_task(
+            self._read(reader, self._turn), name="livekit-agent-utterance"
+        )
+        self._reading.add(reading)
+        reading.add_done_callback(self._reading.discard)
+
+    async def _read(self, reader: Any, turn: int) -> None:
+        """One utterance, whole, or a line about why it was not.
+
+        ``turn`` is the one that was outstanding when this stream opened,
+        taken by the caller at the header. It travels with the words
+        because by the time they are all here the answer may be to a
+        question two turns old.
+        """
+        attributes = getattr(reader.info, "attributes", None) or {}
+        spoken = SPOKEN_TRACK_ATTRIBUTE in attributes
+        try:
+            said = await reader.read_all()
+        except asyncio.CancelledError:
+            raise
+        except Exception as unread:
+            logger.warning(
+                "an utterance in %s never reached its close: %s",
+                self._room_name,
+                self._quotable(repr(unread)),
+            )
+            return
+        said = said.strip()
+        # An empty stream is nothing the agent said, so nothing goes on
+        # the record for it — unless it carried the speaking mark, which
+        # is a fact about the agent rather than about the words.
+        if said or spoken:
+            self.utterances.put_nowait(
+                Utterance(text=said, spoken=spoken, turn=turn)
+            )
+
+    async def _settled(self) -> None:
+        """Let a stream the agent closed on its way out finish arriving."""
+        reading = [reader for reader in self._reading if not reader.done()]
+        if not reading:
+            return
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(STREAM_CLOSE_SECONDS):
+                await asyncio.gather(*reading, return_exceptions=True)
+
+
+class LiveKitChatRoomBackend(RoomLifecycle):
+    """The room with nobody speaking in it: one typed exchange.
+
+    Everything about the room is the lifecycle above; what is here is the
+    join that publishes nothing, the wait for the worker, and the one
+    thing chat has that voice does not — deciding where a turn ends.
+    """
+
+    MODALITY = "chat"
+
+    def _fresh_room_name(self) -> str:
+        """The marked form: ``egma-sim-chat-`` says which kind of
+        simulation this room conducts, to a worker deciding its room
+        options before it has connected to anything."""
+        return fresh_chat_room_name()
+
+    async def open_room(self) -> None:
+        """Get a way into the room and join it, publishing nothing."""
+        way_in = await self._way_in()
+        self._room = self._joined_room(way_in)
+        await self._room.join()
+        # The offer goes on at the join itself, exactly as the voice room
+        # makes it on its connect: egma is in the room from this line, and
+        # a worker can be typing its hello the moment egma is visible.
+        # The second ask in `dial` then returns having nothing to do.
+        self._answer_for_mocked_tools()
+
+    def _joined_room(self, way_in: WayIn) -> TextRoom:
+        """The way into the room, with a token that opens it and nothing
+        else: one room, one identity, for the length of one simulation."""
+        return TextRoom(
+            url=way_in.url,
+            token=way_in.token,
+            room_name=self._room_name,
+            quotable=self._quotable,
+        )
+
+    async def wait_arrived(self, seconds: float) -> str:
+        """Wait for the agent's participant, or say nobody came.
+
+        One half here where the voice driver waits for two. A chat agent
+        publishes no audio *by design*, so there is no second signal to
+        wait on — and waiting for one would refuse every correctly
+        integrated worker as a worker that crashed.
+        """
+        if not await self._wait_arrivals(seconds):
+            raise MediaBackendError(
+                self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
+            )
+        return self._room_name
+
+    async def wait_greeting(
+        self, seconds: float, *, quiet_seconds: float
+    ) -> AgentTurn:
+        """What the agent opens with, if it opens with anything.
+
+        A turn with no words in it is the ordinary answer here: plenty of
+        agents wait to be spoken to, and the walk then has the persona
+        open. The budget is separate from the quiet period because a
+        greeting is a whole model round trip after a session starts, where
+        a quiet period is the gap between two things already being said.
+        """
+        # Nought: the only turn the agent takes before it has been asked
+        # anything is the one it opens with.
+        return await self._assembled(
+            first_within=seconds, quiet=quiet_seconds, turn=0
+        )
+
+    async def deliver(
+        self, text: str, *, reply_seconds: float, quiet_seconds: float
+    ) -> AgentTurn:
+        """Type one persona turn in, and read the agent's answer back.
+
+        Two budgets, because they measure two different things. Waiting for
+        the answer to *start* is waiting on a whole model round trip, and
+        possibly a tool call inside it; waiting for the answer to *continue*
+        is the gap between two utterances of one turn that is already under
+        way. Giving the first the second's budget would call a thinking
+        agent silent.
+
+        Only what this turn opened counts as this turn's answer. A stream
+        that opened before the question went out is answering an earlier
+        prompt — a greeting that outran its wait included — however late
+        it finishes, and is left off the record instead of filed under a
+        question it was never asked. That is why the send comes first and
+        the turn begins the moment it returns: the two run in one step of
+        the event loop, with no await between them, so there is no moment
+        at which a stream could open after the question left and still be
+        stamped with the turn before it. A stream that opens while the
+        text is still leaving egma is stamped with the old turn, because
+        nothing that had not yet arrived can have prompted it.
+        """
+        room = self._room
+        if room is None:
+            raise MediaBackendError("a persona turn was delivered before a room")
+        await room.send(text)
+        turn = room.begin_turn()
+        return await self._assembled(
+            first_within=reply_seconds,
+            quiet=quiet_seconds,
+            turn=turn,
+            silence_ends_it=True,
+        )
+
+    async def _assembled(
+        self,
+        *,
+        first_within: float,
+        quiet: float,
+        turn: int,
+        silence_ends_it: bool = False,
+    ) -> AgentTurn:
+        """One agent turn, out of however many utterances it took.
+
+        An utterance ends when its stream closes. The *turn* ends when the
+        room has stayed quiet for the whole quiet period past that close,
+        because the wire carries no other end-of-turn marker: an agent
+        that says a filler, calls a tool and then answers is one turn that
+        arrived in pieces, and a rule that stopped at the first close
+        would put the filler on the record and the answer nowhere.
+
+        ``silence_ends_it`` is what keeps a delivered turn from running on
+        into a question egma can no longer answer honestly. A stream is
+        stamped when it opens, so one that opens *before* the next question
+        goes out can always be told from that question's answer — but one
+        that has not opened at all by then cannot. There is no marker for
+        it and no rule that could invent one, so the exchange stops where
+        the ambiguity would begin rather than filing a guess. The greeting
+        never passes it: nothing has been asked yet, so quiet there is an
+        agent waiting to be spoken to.
+        """
+        room = self._room
+        if room is None:
+            raise MediaBackendError("an answer was read before a room")
+        said: list[str] = []
+        heard = False
+        speaking = room.audio_published.is_set()
+        budget = first_within
+        while not speaking:
+            utterance = await room.next_utterance(within=budget)
+            if utterance is None:
+                break
+            if utterance.turn < turn:
+                # An answer to a question two turns ago, finishing now. The
+                # budget is what makes this rare; the stamp is what keeps it
+                # from being read as an answer to the question just asked.
+                logger.warning(
+                    "an utterance opened in turn %d arrived during turn %d and "
+                    "was left off the record: %d characters in room %s",
+                    utterance.turn,
+                    turn,
+                    len(utterance.text),
+                    self._room_name,
+                )
+                continue
+            heard = True
+            if utterance.text:
+                said.append(utterance.text)
+            speaking = utterance.spoken or room.audio_published.is_set()
+            budget = quiet
+        if room.failed.is_set():
+            raise MediaBackendError(
+                f"the livekit server at {self._settings.url} closed "
+                f"{self._room_name} while the exchange was under way",
+                ending=ERROR,
+            )
+        if silence_ends_it and not heard and not speaking and not room.ended.is_set():
+            raise MediaBackendError(
+                f"the agent said nothing at all for {first_within:.0f} seconds "
+                f"after the persona's turn in {self._room_name}. Egma stops "
+                "here rather than ask again: an answer to this turn could "
+                "still open its stream after the next question went out, and "
+                "nothing on the wire would tell it from an answer to that "
+                "one — so going on risks a transcript where the agent "
+                "appears to answer a question it was never asked",
+                ending=ERROR,
+            )
+        return AgentTurn(
+            text="\n".join(said) or None,
+            ended=room.ended.is_set(),
+            speaking=speaking,
+        )

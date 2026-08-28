@@ -657,7 +657,7 @@ describe("a livekit connection's two credential shapes, through the claim", () =
 
   it("hands back the key and the secret together, both whole", async () => {
     const simulationId = await queuedOverLiveKit({
-      config: { url: "wss://acme.livekit.cloud" },
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
       credentials: {
         apiKey: "livekit-key-A1B2C3D4WXYZ",
         apiSecret: "livekit-secret-E5F6G7H8QRST",
@@ -676,6 +676,8 @@ describe("a livekit connection's two credential shapes, through the claim", () =
   it("hands back the endpoint's auth headers, which are a credential like any other", async () => {
     const simulationId = await queuedOverLiveKit({
       accessVariant: "livekit_room.customer_token_endpoint",
+      // No agentName here: this variant holds no key pair, so it cannot
+      // dispatch, and the key it would dispatch by is not one of its own.
       config: {
         url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/livekit/token",

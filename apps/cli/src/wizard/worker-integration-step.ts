@@ -1,11 +1,16 @@
 /**
- * The single owner of Egma's code integration in a Python LiveKit worker.
+ * The single owner of Egma's code changes in a LiveKit worker.
  *
  * The wizard chooses one final mode before this step runs. This step gives the
- * developer's coding agent the public integration router, the exact SDK
+ * developer's coding agent the public integration router, the exact LiveKit
  * reference selected by that router, and one task that owns both the worker and
  * its dependency manifest. Later steps may write tests and mock-tool answers,
  * but they never receive authority to edit the worker again.
+ *
+ * Three changes ride that one dispatch: the Egma SDK entry the mode asks for,
+ * the chat setup, and the worker's registered name. They travel together
+ * because they are one visit to one file, and a second visit would need a
+ * second authority this walk deliberately never grants.
  */
 
 import type { DrivenAgent } from "../acp/driven-agent.ts";
@@ -34,6 +39,7 @@ export type { WorkerIntegrationMode } from "./worker-integration-verifier.ts";
 const WORKER_ENTRY_FACT = "worker-entry";
 const DEPENDENCY_MANIFEST_FACT = "dependency-manifest";
 const AGENT_NAME_FACT = "agent-name";
+const DISPATCH_NAME_FACT = "dispatch-name";
 
 const NODE_LIVEKIT = /@livekit\/agents/iu;
 
@@ -88,6 +94,18 @@ function workerIntegrationTask(
     "other existing import, statement, and behavior in the worker, including an",
     "Egma entry that was already there before this task.",
     "",
+    "## Chat setup",
+    "",
+    "Add the chat setup from the reference to the same worker. It is part of",
+    "what this run authorizes. It needs no Egma package and no Egma import, so",
+    "add it whether or not this worker takes an Egma SDK entry.",
+    "",
+    "## The worker's name",
+    "",
+    "Every Egma dispatch is explicit, so the worker must register a name. Give",
+    "it one in its worker options when it has none, and keep the name it",
+    "already registers under when it has one.",
+    "",
     "## Where you may write",
     "",
     `Work in ${cwd}. You may write at most two files: the worker file where the`,
@@ -101,7 +119,7 @@ function workerIntegrationTask(
     "",
     "## Source of truth",
     "",
-    "Use the complete SDK reference above. Read the changed files back and",
+    "Use the complete LiveKit reference above. Read the changed files back and",
     "confirm the dependency, requested entries, and their order before reporting",
     "completion.",
     "",
@@ -141,6 +159,15 @@ function workerIntegrationTask(
     `egma:found ${AGENT_NAME_FACT} front-desk`,
     "```",
     "",
+    "## Report the registered worker name",
+    "",
+    "Report the name this worker registers with LiveKit, after your change, on",
+    "one line:",
+    "",
+    "```text",
+    `egma:found ${DISPATCH_NAME_FACT} front-desk`,
+    "```",
+    "",
     "## Show progress",
     "",
     "Write one `egma:note <what you did>` line for the integration. Write",
@@ -150,18 +177,36 @@ function workerIntegrationTask(
     "## Completion",
     "",
     "Stop when the requested entries are present in the correct order, existing",
-    "worker behavior is preserved, the dependency is present, and all three facts are",
+    "worker behavior is preserved, the dependency is present, and all four facts are",
     "reported. Report nothing else.",
   ].join("\n");
 }
 
+/*
+ * The chat setup rides this dispatch whatever the developer answers later, and
+ * nothing reads it back.
+ *
+ * The walk hands this task over before it asks chat or voice, so a conditional
+ * block would wait on an answer this step never sees. Adding it unconditionally
+ * costs a voice worker nothing: the six lines read Egma's own dispatch
+ * metadata, a production room carries none, and a voice simulation sends none —
+ * so the room options outside a chat simulation are the ones the worker always
+ * had.
+ *
+ * `worker-integration-verifier.ts` is deliberately left alone. Its contract is
+ * the files that make a Python LiveKit worker use Egma, and the chat setup
+ * imports no Egma to find. A worker that never took it is caught at the agent's
+ * first utterance, where the wire itself separates a speaking agent from a
+ * typing one; the spec ruled out a probe before the run for exactly that
+ * reason. A check added here would report on prose rather than on behavior.
+ */
 export function workerIntegrationInstructions(
   cwd: string,
   facts: Facts,
   mode: WorkerIntegrationMode,
 ): string {
   return instructionsWith(
-    [publicSkill("integrate-egma"), integrateEgmaReference("integrate-egma-sdk")],
+    [publicSkill("integrate-egma"), integrateEgmaReference("integrate-livekit")],
     workerIntegrationTask(cwd, facts, mode),
   );
 }
@@ -194,6 +239,12 @@ export function workerEntryInstructions(
           "         await mockable(agent, ctx, session)",
         ]
       : []),
+    // The name is not one of the entries this block could not verify. It is
+    // the one thing a run still needs from the worker afterwards, and a
+    // developer typing the lines above by hand is the developer who has to
+    // add it too.
+    `  ${monitoring && testing ? "4" : "3"}. Register the worker under a name, with agent_name in its WorkerOptions.`,
+    "     A worker with a registered name no longer joins rooms automatically.",
   ];
 }
 
@@ -213,6 +264,15 @@ export type WorkerIntegration = {
   readonly contract: WorkerIntegrationContract | null;
   readonly unverifiedReason: string | null;
   readonly agentName: string | null;
+  /**
+   * The name the worker registers with LiveKit, as this task left it.
+   *
+   * Discovery reads a committed worker and answers `unknown` for a worker that
+   * registers no name. This task is the one place that can change that answer,
+   * because it is the visit that adds the name — so what it reports is what
+   * the connection step uses when discovery had nothing.
+   */
+  readonly dispatchName: string | null;
   readonly supportsSdk: boolean;
 };
 
@@ -233,6 +293,7 @@ export async function workerIntegrationStep(
       unverifiedReason:
         "The Egma SDK is Python only today, so this Node LiveKit worker cannot be integrated.",
       agentName: options.facts.get("agent-name") ?? null,
+      dispatchName: null,
       supportsSdk: false,
     };
   }
@@ -253,6 +314,7 @@ export async function workerIntegrationStep(
       contract: null,
       unverifiedReason: before.reason,
       agentName: options.facts.get("agent-name") ?? null,
+      dispatchName: null,
       supportsSdk: true,
     };
   }
@@ -261,11 +323,13 @@ export async function workerIntegrationStep(
     entry: string | null;
     dependency: string | null;
     name: string | null;
+    dispatchName: string | null;
     none: string;
   } = {
     entry: null,
     dependency: null,
     name: null,
+    dispatchName: null,
     none: "",
   };
   const take = (lines: readonly ParsedLine[]): null => {
@@ -286,6 +350,9 @@ export async function workerIntegrationStep(
             claimed.dependency = marker.value;
           }
           if (marker.field === AGENT_NAME_FACT) claimed.name = marker.value;
+          if (marker.field === DISPATCH_NAME_FACT) {
+            claimed.dispatchName = marker.value;
+          }
           break;
         case "none":
           claimed.none = marker.reason;
@@ -362,6 +429,7 @@ export async function workerIntegrationStep(
   }
 
   const named = claimed.name?.trim() ?? "";
+  const dispatched = claimed.dispatchName?.trim() ?? "";
   return {
     halted,
     entry,
@@ -373,6 +441,7 @@ export async function workerIntegrationStep(
           ? claimed.none
           : null,
     agentName: named === "" ? null : named,
+    dispatchName: dispatched === "" ? null : dispatched,
     supportsSdk: true,
   };
 }

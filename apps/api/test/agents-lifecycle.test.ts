@@ -528,6 +528,8 @@ describe("a connection's stored credential", () => {
         readonly agentPlatform: string | null;
         readonly connectionType: string;
         readonly accessVariant: string;
+        readonly modality: string;
+        readonly productLabel: string;
         readonly simulatorAdapter: boolean;
         readonly credentialRule: string;
         readonly fields: readonly { readonly key: string; readonly kind: string }[];
@@ -540,9 +542,20 @@ describe("a connection's stored credential", () => {
         one.agentPlatform === "livekit" &&
         one.connectionType === "livekit_room",
     );
-    expect(livekit.map((one) => one.accessVariant)).toEqual([
-      "livekit_room.project_credentials",
-      "livekit_room.customer_token_endpoint",
+    // Access variant and modality together, because one variant now carries
+    // two rows: the pair is what a form offers, and either half alone would
+    // stop describing the product the moment chat landed.
+    expect(
+      livekit.map((one) => `${one.accessVariant}/${one.modality}`),
+    ).toEqual([
+      "livekit_room.project_credentials/voice",
+      "livekit_room.project_credentials/chat",
+      "livekit_room.customer_token_endpoint/voice",
+    ]);
+    expect(livekit.map((one) => one.productLabel)).toEqual([
+      "LiveKit project credentials",
+      "LiveKit chat",
+      "LiveKit token endpoint",
     ]);
 
     // The three credential rules the product's Restore is written against,
@@ -642,7 +655,7 @@ describe("a connection's shape", () => {
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
-      config: { url: "wss://acme.livekit.cloud" },
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
       credentials: {
         apiKey: "livekit-key-A1B2C3D4WXYZ",
         apiSecret: "livekit-secret-E5F6G7H8QRST",

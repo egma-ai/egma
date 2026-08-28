@@ -207,7 +207,13 @@ def test_a_provider_library_is_never_imported_at_module_scope():
         at_module_scope = {
             node.module
             for node in tree.body
-            if isinstance(node, ast.ImportFrom) and node.module
+            # A relative import stays inside this package by definition,
+            # the same reading `imported_roots` above already takes. The
+            # level matters here because one of this package's own modules
+            # is *called* ``livekit``, and reading `from .livekit import`
+            # as the vendor's library would refuse a plug for importing
+            # the plug next door.
+            if isinstance(node, ast.ImportFrom) and node.module and node.level == 0
         } | {
             alias.name
             for node in tree.body

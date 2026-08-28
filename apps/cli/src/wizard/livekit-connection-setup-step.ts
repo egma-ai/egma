@@ -5,6 +5,13 @@
  * the customer's server URL and their key pair or token endpoint. The Egma SDK
  * inside the customer's own worker is a separate thing, wired by the mock
  * authoring step after the tests are written.
+ *
+ * The first question is the one the developer already has an opinion about:
+ * chat or voice. It comes before the credentials because it is the choice
+ * about what testing this agent is like, and the plumbing under it follows
+ * from the answer — chat is offered where Egma dispatches the worker itself,
+ * and nowhere else. The catalog is what says which pairs exist; this step
+ * never holds a list of its own.
  */
 
 import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
@@ -23,6 +30,7 @@ import {
   type RegisterOptions,
   type RegisterResult,
 } from "../platform/agents.ts";
+import { registrationLine } from "../retell/connect.ts";
 import {
   connectionOptionsForPlatform,
   readConnectionOptions,
@@ -53,6 +61,15 @@ export type LiveKitConnectionSetupStepOptions = {
   readonly suggestedName: string;
   /** The exact worker name LiveKit dispatches, read from the agent source. */
   readonly dispatchName: string;
+  /**
+   * The same name as the worker-integration task left it, when it ran.
+   *
+   * Discovery reads committed source, so a worker that registered no name
+   * comes back `unknown`. The integration task is the one visit that can have
+   * given it a name since, so its answer stands beside discovery's and either
+   * one being real is enough.
+   */
+  readonly integratedDispatchName?: string | undefined;
   /** The repository-relative worker entrypoint read from source. */
   readonly entrypoint: string;
   /**
@@ -175,7 +192,13 @@ function orderedFields(option: ConnectionOption): readonly ScopedField[] {
   ];
 }
 
-/** Fields the onboarding walk owns. Dispatch is discovered; metadata is not asked. */
+/**
+ * Fields the onboarding walk owns.
+ *
+ * The worker's name is read out of the repository — by discovery, or by the
+ * task that put it there — so asking for it would be asking a developer to
+ * retype something Egma has already seen. Metadata is not asked for at all.
+ */
 function wizardFields(option: ConnectionOption): readonly ScopedField[] {
   return orderedFields(option).filter(({ field }) => {
     const key = "key" in field ? field.key : field.field;
@@ -354,7 +377,7 @@ export async function liveKitConnectionSetupStep(
     return ending(catalog.reason);
   }
 
-  const variants = connectionOptionsForPlatform(
+  const offered = connectionOptionsForPlatform(
     catalog.catalog,
     "livekit",
   ).filter(
@@ -363,13 +386,15 @@ export async function liveKitConnectionSetupStep(
       (option.accessVariant === LIVEKIT_KEY_PAIR_VARIANT ||
         option.accessVariant === LIVEKIT_TOKEN_ENDPOINT_VARIANT),
   );
-  if (variants.length === 0) {
+  if (offered.length === 0) {
     return ending("This Egma instance did not describe a LiveKit connection setup.");
   }
 
   const discoveredName = options.suggestedName.trim() || "voice-agent";
   const suggestedName = options.existingAgent?.name ?? discoveredName;
-  const dispatchName = discoveredValue(options.dispatchName);
+  const dispatchName =
+    discoveredValue(options.dispatchName) ??
+    discoveredValue(options.integratedDispatchName ?? "");
   if (dispatchName === null) {
     return ending(
       "Egma could not find the LiveKit dispatch name in this repository, so it did not create a connection. Set the worker's agent name in code and run Egma again.",
@@ -383,26 +408,86 @@ export async function liveKitConnectionSetupStep(
   }
   const existing = options.existingAgent ?? null;
 
-  const selected = await ask(options.ui, options.signal, {
-    id: askId("variant"),
-    label: "How should Egma get LiveKit room tokens?",
-    help:
-      "Project credentials (API key and secret) are Recommended and let Egma " +
-      "run this repository's worker locally. An Advanced customer token endpoint " +
-      "keeps the signing secret with you and requires an already-running worker.",
-    kind: "choice",
-    required: true,
-    defaultValue: variants[0]!.accessVariant,
-    choices: variants.map((variant) => ({
-      value: variant.accessVariant,
-      label: variant.accessVariantLabel,
-    })),
-  });
-  if (options.signal.aborted) {
-    return { report: stopReport(options.signal, null), connected: null };
+  /*
+   * The modality first, and only when the catalog offers a choice.
+   *
+   * This is the question the developer has an opinion about — what testing
+   * this agent is like — and the plumbing under it follows from the answer.
+   * The choices are the modalities this instance actually offers on this
+   * connection type: an instance whose registry cannot conduct a chat
+   * simulation must not be asked a question one of whose answers it would then
+   * refuse, and a question with one answer is not a question.
+   */
+  const modalities = [...new Set(offered.map((option) => option.modality))];
+  let modality = modalities[0]!;
+  if (modalities.length > 1) {
+    const said = await ask(options.ui, options.signal, {
+      id: askId("modality"),
+      label: "How do you want to test this agent?",
+      help:
+        "Chat types to the agent and reads its words back, so a suite finishes " +
+        "in seconds and nothing is spoken. Voice reaches the agent through the " +
+        "room's audio, the way a person does. Chat also needs the chat setup in " +
+        "the worker, which the worker task already asked for.",
+      kind: "choice",
+      required: true,
+      defaultValue: modality,
+      choices: modalities.map((one) => ({
+        value: one,
+        label: `${one.charAt(0).toUpperCase()}${one.slice(1)}`,
+      })),
+    });
+    if (options.signal.aborted) {
+      return { report: stopReport(options.signal, null), connected: null };
+    }
+    const chosen = modalities.find((one) => one === said);
+    if (chosen === undefined) return ending("No LiveKit modality was chosen.");
+    modality = chosen;
   }
-  const variant = variants.find((entry) => entry.accessVariant === selected);
+
+  /*
+   * The pair is the key, not the access variant.
+   *
+   * Two catalog rows share `livekit_room.project_credentials` and differ only
+   * in modality, so matching the variant alone would answer with whichever row
+   * the server listed first — a voice connection saved out of a chat walk,
+   * with nothing anywhere saying so.
+   */
+  const forModality = offered.filter((option) => option.modality === modality);
+  let variant = forModality[0];
+  if (forModality.length > 1) {
+    const selected = await ask(options.ui, options.signal, {
+      id: askId("variant"),
+      label: "How should Egma get LiveKit room tokens?",
+      help:
+        "Project credentials (API key and secret) are Recommended and let Egma " +
+        "run this repository's worker locally. An Advanced customer token endpoint " +
+        "keeps the signing secret with you and requires an already-running worker.",
+      kind: "choice",
+      required: true,
+      defaultValue: forModality[0]!.accessVariant,
+      choices: forModality.map((one) => ({
+        value: one.accessVariant,
+        label: one.accessVariantLabel,
+      })),
+    });
+    if (options.signal.aborted) {
+      return { report: stopReport(options.signal, null), connected: null };
+    }
+    variant = forModality.find((entry) => entry.accessVariant === selected);
+  }
   if (variant === undefined) return ending("No LiveKit connection method was chosen.");
+  if (
+    modality === "chat" &&
+    variant.accessVariant === LIVEKIT_TOKEN_ENDPOINT_VARIANT
+  ) {
+    return ending(
+      "A token-endpoint LiveKit connection speaks voice, so Egma did not create a " +
+        "chat connection. Egma asks your endpoint for a token and never dispatches " +
+        "the worker itself, so it has no way to tell the agent to answer in text. " +
+        "Connect with LiveKit project credentials to test this agent over chat.",
+    );
+  }
 
   const ordered = wizardFields(variant);
   const required = await collectRequiredFields(
@@ -445,6 +530,7 @@ export async function liveKitConnectionSetupStep(
       ...common,
       variant: LIVEKIT_KEY_PAIR_VARIANT,
       agentName: dispatchName,
+      modality,
       credentials: heldCredentials,
     };
     localWorker = {
@@ -458,6 +544,9 @@ export async function liveKitConnectionSetupStep(
       ...common,
       variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
       tokenEndpoint: config["tokenEndpoint"] ?? "",
+      // Written as the word rather than passed through: chat on this variant
+      // was refused above, and the type says so here.
+      modality: "voice",
       credentials: liveKitTokenHeaders(credentials["headers"] ?? ""),
     };
     localWorker = null;
@@ -487,8 +576,13 @@ export async function liveKitConnectionSetupStep(
     options.ui.pushStatus(`${ACTION_MARK} LiveKit agent ${result.registered.agent.name}`);
     options.ui.pushStatus(`${DETAIL_MARK} Dispatch name ${dispatchName}.`);
     options.ui.pushStatus(
-      `${DETAIL_MARK} Reachable over ${result.registered.connection.name} (LiveKit voice).`,
+      `${DETAIL_MARK} Reachable over ${result.registered.connection.name} (LiveKit ${result.registered.connection.modality}).`,
     );
+    // One worker is one agent, so the second modality on a server and name
+    // Egma already holds is a connection added rather than a new agent. Saying
+    // so is what keeps that line from reading like a fresh registration.
+    const already = registrationLine(result.registered);
+    if (already !== null) options.ui.pushStatus(`${DETAIL_MARK} ${already}`);
     return {
       report: {
         kind: "connected",
