@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   bindingsFor,
   bindingVerdictOf,
+  canonicalJson,
   coverageClassOf,
   listRoutedNumbers,
   numbersRouting,
@@ -59,12 +60,19 @@ import { afterAll, describe, expect, it } from "vitest";
  *
  * ## What it does to the account
  *
- * It reads. Everything written to Retell is written by Egma's own run
- * lifecycle — one temporary agent version, created and deleted — and the suite's
- * whole job is to watch that happen and check what is left afterwards. It binds
- * no number, publishes nothing, and creates no agent. On the Egma side it
- * authors two mock tools (one error answer, one delayed answer) and deletes
- * them in a `finally` that runs even when a check fails, and it starts one run.
+ * On the **Retell** side it reads. Everything written there is written by Egma's
+ * own run lifecycle — one temporary agent version, created and deleted — and the
+ * suite's whole job is to watch that happen and check what is left afterwards.
+ * It binds no number, publishes nothing, and creates no agent.
+ *
+ * On the **Egma** side it must leave the account exactly as found too. Before it
+ * touches anything it snapshots every mock-tool row the project holds. It then
+ * seeds answers for the interceptable tools and edits two of them — one into an
+ * error, one into a delay — and starts one run. A real `finally` (in `afterAll`,
+ * so it runs on every failure path) puts all of that back: it edits the rows it
+ * changed back to exactly what they held, and deletes the rows it seeded that
+ * were not there before. So a developer's own authored answers survive the
+ * proof untouched.
  *
  * ## The script it follows
  *
@@ -108,15 +116,45 @@ const POLL_MILLISECONDS = 5_000;
 /** The delay the suite authors, long enough to be unmistakable on the record. */
 const AUTHORED_DELAY_MILLISECONDS = 3_000;
 
+/** One mock-tool row, in the shape a restore writes it back. */
+type MockToolRow = {
+  readonly id: string;
+  readonly tool: string;
+  readonly answer?: unknown;
+  readonly error?: unknown;
+  readonly delayMs: number;
+};
+
 /**
- * What this suite touched on the Egma side, so the teardown can settle it.
+ * What this suite touched on the Egma side, so the teardown can put it back.
  *
- * The seeded mock tools are deliberately **not** deleted: seeding is what the
- * tick does, and a developer who runs this proof wants the answers it authored
- * left behind to look at. What must not be left behind is a run still
- * conducting against somebody's real agent.
+ * `before` is every mock-tool row that existed **before** the suite seeded or
+ * edited anything, by id. The teardown restores each of them to exactly that,
+ * and deletes any row present now that is not in it — the ones this suite
+ * seeded. That is what makes "leaves the account as found" true on the Egma
+ * side, not only on Retell's.
  */
-const made: { runId: string | null } = { runId: null };
+const made: {
+  runId: string | null;
+  before: Map<string, MockToolRow> | null;
+} = { runId: null, before: null };
+
+/** Every mock-tool row the project holds right now, by id. */
+async function mockToolRows(): Promise<Map<string, MockToolRow>> {
+  const listed = await egma("GET", "/v1/mock-tools?pageSize=200");
+  const rows = (listed.body["mockTools"] as MockToolRow[]) ?? [];
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+/** The body that writes one row back to exactly what it held. */
+function restoreBody(row: MockToolRow): Record<string, unknown> {
+  return {
+    ...("error" in row && row.error !== undefined
+      ? { error: row.error }
+      : { answer: row.answer }),
+    delayMs: row.delayMs,
+  };
+}
 
 async function egma(
   method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -158,11 +196,35 @@ afterAll(async () => {
       );
     }
   }
+
+  // The Egma side, put back exactly as found: every row edited back to what it
+  // held, and every row this suite seeded deleted. Each on its own, so one
+  // failure cannot stop the next — the developer's authored answers are the
+  // thing this protects.
+  const before = made.before;
+  if (before !== null) {
+    const now = await mockToolRows().catch(() => new Map<string, MockToolRow>());
+    for (const [id, row] of now) {
+      if (before.has(id)) {
+        await egma("PATCH", `/v1/mock-tools/${id}`, restoreBody(before.get(id)!)).catch(
+          () => undefined,
+        );
+      } else {
+        await egma("DELETE", `/v1/mock-tools/${id}`).catch(() => undefined);
+      }
+    }
+  }
 });
 
-/** Every tool the serving version declares, in the one spelling a diff uses. */
+/**
+ * Every tool the serving version declares, in the one spelling a diff uses.
+ *
+ * `canonicalJson`, the same key-order-insensitive spelling the builder compares
+ * in — a plain `JSON.stringify` would cry "the serving version changed" the
+ * first time Retell happened to serialize a tool's keys in a different order.
+ */
 function toolPrint(document: Record<string, unknown>, type: string, id: string): string {
-  return JSON.stringify(
+  return canonicalJson(
     toolsOf({
       reference: { type: type as never, engineId: id, version: null },
       document,
@@ -172,6 +234,11 @@ function toolPrint(document: Record<string, unknown>, type: string, id: string):
 
 live("a mocked suite against the live agent", () => {
   it("leaves production exactly as it found it, and proves Egma answered", async () => {
+    // ── 0. Snapshot the Egma side, before a single row is seeded or edited, so
+    // the teardown can put it back exactly — the developer's authored answers
+    // included. Recorded on `made` so `afterAll` restores it on every path. ──
+    made.before = await mockToolRows();
+
     // ── 1. Capture. What the account looks like before Egma touches it. ──
     const listed = await listRoutedNumbers(key);
     expect(listed.kind, JSON.stringify(listed)).toBe("numbers");
