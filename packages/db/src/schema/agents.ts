@@ -53,6 +53,7 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 /** The direct paths Egma's simulator can select to reach an agent. */
 export const CONNECTION_TYPES = [
   "retell_chat_api",
+  "retell_playground",
   "retell_web_call",
   "phone_number",
   "livekit_room",
@@ -62,6 +63,7 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",
+  "retell_playground.api_key",
   "retell_web_call.api_key",
   "phone_number.public_e164",
   "livekit_room.project_credentials",

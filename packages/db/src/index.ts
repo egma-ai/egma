@@ -102,6 +102,12 @@ export {
   type MockedWorldEngine,
   type MockedWorldNumber,
 } from "./mock-tools/world.ts";
+export {
+  conductedWorldFrom,
+  conductedWorldRow,
+  type ConductedEngine,
+  type ConductedWorld,
+} from "./mock-tools/conducted.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,

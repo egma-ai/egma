@@ -455,6 +455,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "retell",
+    connectionType: "retell_playground",
+    accessVariant: "retell_playground.api_key",
+    modality: "chat",
+    productLabel: "Retell playground",
+  },
+  {
+    agentPlatform: "retell",
     connectionType: "retell_web_call",
     accessVariant: "retell_web_call.api_key",
     modality: "voice",
@@ -633,6 +640,51 @@ function e164PhoneNumber(key: string, value: unknown): string {
       "not_admitted",
       `the config's ${key} must be an E.164 phone number, which looks like ` +
         `+15551234567`,
+    );
+  }
+  return candidate;
+}
+
+/**
+ * Where a Retell-shaped API answers, when it is not Retell's own address.
+ *
+ * The one config key on this lane that is not about the agent. It exists for
+ * the two deployments that need it: a test conversing with a Retell-shaped
+ * server, and an installation whose outbound traffic goes through a proxy of
+ * its own. Left out — which is the ordinary case — everything reaches Retell.
+ *
+ * **A value here redirects the connection's own Retell key**, because the key
+ * travels as a bearer token to whatever address this names. That is deliberate
+ * and is the whole point of the key; it is written down here so that nobody has
+ * to work it out from the absence of a rule. Loopback and private addresses are
+ * therefore admitted on purpose — refusing them would refuse the proxy and the
+ * test this key exists for — while a URL carrying its own credentials or a
+ * control character is refused, because neither is an address anybody means.
+ */
+function retellApiUrl(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    parsed = undefined;
+  }
+
+  const scheme = parsed?.protocol;
+  if (
+    parsed === undefined ||
+    (scheme !== "http:" && scheme !== "https:") ||
+    !candidate.toLowerCase().startsWith(`${scheme}//`) ||
+    parsed.hostname === "" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    candidate.includes("\\") ||
+    /[\u0000-\u001F\u007F]/u.test(candidate)
+  ) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} must be an http or https URL, which looks like ` +
+        `https://api.retellai.com`,
     );
   }
   return candidate;
@@ -850,6 +902,87 @@ export const CONNECTION_REGISTRY: Readonly<
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
+    usesPlatformCarrier: false,
+  },
+  retell_playground: {
+    label: "Retell playground",
+    agentPlatforms: ["retell"],
+    /**
+     * Chat, and a chat with a **voice** agent — which is the whole of why this
+     * kind exists.
+     *
+     * `retell_chat_api` reaches a Retell *chat* agent. A Retell voice agent has
+     * no chat door there at all, so the only way to test one was to dial it.
+     * Retell's own dashboard tests a voice agent in text through the
+     * agent-playground-completion API, and this is that door: the same test
+     * suite over chat and over voice against one agent, which is the diagnostic
+     * the domain model promises — passes on text, fails on voice means the
+     * prompt is fine and the speech stack is broken.
+     *
+     * Voice is not admitted here, and never will be: a playground exchange
+     * synthesizes nothing and hears nothing. A voice simulation of the same
+     * agent is a phone or a web-call connection beside this one, on the same
+     * Egma agent, so both histories accumulate under one identity.
+     */
+    modalities: ["chat"],
+    // Retell brokers the exchange exactly as it brokers a chat session: Egma
+    // makes an outbound request and Retell runs the agent behind it.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_playground.api_key",
+        label: "Retell API key",
+        named: "a Retell playground connection",
+        config: {
+          retellAgentId: nonEmptyString,
+          // Left out by everybody but a test and a proxied deployment.
+          baseUrl: optional(retellApiUrl),
+        },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+          {
+            key: "baseUrl",
+            label: "Retell API URL",
+            kind: "url",
+            help: "Where Retell's API answers. Leave it empty to reach Retell itself; fill it in only for a deployment that goes through its own proxy.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the text exchanges this connection conducts. A read gives " +
+          "back its last four characters, so you can tell two keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
+      },
+    ],
+    // The same vendor agent as the voice connection beside it, deliberately:
+    // chat and voice land as two connections on **one** Egma agent, so the
+    // comparison the model promises is between two histories of one identity
+    // rather than between twins.
+    reuseKey: "retellAgentId",
+    // No plug yet. The registry may not claim what no code can run, so this
+    // flips to `true` in the same commit as the simulator adapter that
+    // conducts a playground exchange — `retell_playground` in
+    // `egma_simulator.plugs`. Until then a connection of this kind can be
+    // registered, and a run over it is refused at creation rather than queued
+    // forever for a conductor that does not exist.
+    simulatorAdapter: false,
     usesPlatformCarrier: false,
   },
   retell_web_call: {

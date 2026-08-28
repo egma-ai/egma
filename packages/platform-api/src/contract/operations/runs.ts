@@ -150,6 +150,46 @@ export const mockedWorldSchema = {
   additionalProperties: false,
 } as const;
 
+/**
+ * The world a run **read** at its start and conducts against, as a reader sees
+ * it: the version it resolved once, the engine that version runs on, and the
+ * three classes of that version's tools.
+ *
+ * Its sibling above records what Egma put onto somebody's platform so a
+ * teardown can put it back. This records the opposite: on a lane whose mocked
+ * answers ride each request, Egma writes nothing, and what is worth keeping is
+ * only what was read — above all the version, because the platform's own
+ * default is "the newest one" and a concurrent edit mints a newer one.
+ */
+export const conductedWorldSchema = {
+  type: "object",
+  properties: {
+    agentVersion: integerSchema,
+    engine: {
+      type: "object",
+      properties: {
+        type: stringSchema,
+        engineId: stringSchema,
+        version: nullable(integerSchema),
+      },
+      required: ["type", "engineId", "version"],
+      additionalProperties: false,
+    },
+    coverage: {
+      type: "object",
+      properties: {
+        mocked: arrayOf(stringSchema),
+        notInterceptable: arrayOf(stringSchema),
+        notInThisVersion: arrayOf(stringSchema),
+      },
+      required: ["mocked", "notInterceptable", "notInThisVersion"],
+      additionalProperties: false,
+    },
+  },
+  required: ["agentVersion", "engine", "coverage"],
+  additionalProperties: false,
+} as const;
+
 const simulationCountsSchema = {
   type: "object",
   properties: {
@@ -216,6 +256,7 @@ const runHeaderSchema = {
     modality: modalitySchema,
     productLabel: stringSchema,
     environment: nullable(stringSchema),
+    conductedAgentVersion: nullable(integerSchema),
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -245,6 +286,7 @@ const runHeaderSchema = {
     "modality",
     "productLabel",
     "environment",
+    "conductedAgentVersion",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -275,6 +317,7 @@ const runDetailSchema = {
   properties: {
     ...runHeaderSchema.properties,
     mockedWorld: nullable(mockedWorldSchema),
+    conductedWorld: nullable(conductedWorldSchema),
     connectionSnapshot: connectionSnapshotSchema,
     agent: nullable(identitySchema),
     connection: nullable({
@@ -289,6 +332,7 @@ const runDetailSchema = {
   required: [
     ...runHeaderSchema.required,
     "mockedWorld",
+    "conductedWorld",
     "connectionSnapshot",
     "agent",
     "connection",
@@ -315,6 +359,7 @@ const runSimulationSchema = {
     modality: modalitySchema,
     hasRecording: booleanSchema,
     mockToolCoverage: nullable(mockToolCoverageSchema),
+    conductedAgentVersion: nullable(integerSchema),
   },
   required: [
     "id",
@@ -334,6 +379,7 @@ const runSimulationSchema = {
     "modality",
     "hasRecording",
     "mockToolCoverage",
+    "conductedAgentVersion",
   ],
   additionalProperties: false,
 } as const;

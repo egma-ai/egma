@@ -64,6 +64,11 @@ import {
   mockedWorldRow,
   type MockedWorld,
 } from "../mock-tools/world.ts";
+import {
+  conductedWorldFrom,
+  conductedWorldRow,
+  type ConductedWorld,
+} from "../mock-tools/conducted.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -103,6 +108,21 @@ export type NewRun = {
   readonly idempotencyKey: string;
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
+  /**
+   * The world this run will conduct against, already read from the agent's
+   * platform, for the lanes that pin a version.
+   *
+   * **Read outside this call and handed in, deliberately.** Resolving a version
+   * and reading its tools are two requests to somebody else's API, and this
+   * function's whole body is one database transaction holding a lock on a test
+   * suite. A provider that answers slowly would hold that lock for as long as
+   * it took. So the caller reads first and fails the run out loud when the read
+   * fails — never a silent conduct against an unread world — and what arrives
+   * here is a settled fact to write down.
+   *
+   * Absent on every other lane, where nothing pins a version.
+   */
+  readonly conductedWorld?: ConductedWorld | undefined;
 };
 
 export type ConnectionSnapshot = {
@@ -130,6 +150,8 @@ export type Run = {
   readonly connectionSnapshot: ConnectionSnapshot;
   /** The temporary platform world this run built, or null when it built none. */
   readonly mockedWorld: MockedWorld | null;
+  /** The version and tools this run read at its start, or null for no pin. */
+  readonly conductedWorld: ConductedWorld | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -141,7 +163,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type { MockToolCoverage, MockedWorld };
+export type { MockToolCoverage, MockedWorld, ConductedWorld };
 
 export type Simulation = {
   readonly id: string;
@@ -167,6 +189,8 @@ export type Simulation = {
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly mockToolCoverage: MockToolCoverage | null;
+  /** The agent version this conversation was conducted against, or null. */
+  readonly conductedAgentVersion: number | null;
   readonly createdAt: Date;
 };
 
@@ -207,6 +231,7 @@ const RUN_COLUMNS = {
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
   mockedWorld: run.mockedWorld,
+  conductedWorld: run.conductedWorld,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -240,6 +265,7 @@ const SIMULATION_COLUMNS = {
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
+  conductedAgentVersion: simulation.conductedAgentVersion,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -255,6 +281,7 @@ type RunRow = {
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
   readonly mockedWorld: unknown;
+  readonly conductedWorld: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -382,7 +409,14 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const { status, triggeredVia, connectionSnapshot, mockedWorld, ...rest } = row;
+  const {
+    status,
+    triggeredVia,
+    connectionSnapshot,
+    mockedWorld,
+    conductedWorld,
+    ...rest
+  } = row;
   return {
     ...rest,
     suiteName,
@@ -393,6 +427,10 @@ function runFromRow(
     mockedWorld: mockedWorldFrom(
       mockedWorld,
       () => new Error(`run ${row.id} holds a malformed mocked world`),
+    ),
+    conductedWorld: conductedWorldFrom(
+      conductedWorld,
+      () => new Error(`run ${row.id} holds a malformed conducted world`),
     ),
   };
 }
@@ -689,6 +727,12 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           config: reached.config,
         },
         mockToolSnapshot,
+        // Read before this transaction opened; written down here so that every
+        // request this run makes names the same version, and a concurrent edit
+        // on the account cannot move what the suite is testing halfway through.
+        ...(input.conductedWorld === undefined
+          ? {}
+          : { conductedWorld: conductedWorldRow(input.conductedWorld) }),
         expectedSimulationCount,
         createdAt: at,
       }).returning(RUN_COLUMNS);
@@ -750,6 +794,10 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
               position: simulationCount + index + 1,
               modality: reached.modality,
               status: "queued" as const,
+              // The run's own resolved version, copied onto each conversation
+              // so a simulation read alone answers what it conducted.
+              conductedAgentVersion:
+                input.conductedWorld?.agentVersion ?? null,
               createdAt: at,
             })));
             simulationCount += pins.length;
