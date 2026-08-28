@@ -466,6 +466,46 @@ async def test_a_role_the_record_does_not_know_reads_back_verbatim(
     assert answered.text == "Your booking: Thu 14:30\nSent."
 
 
+async def test_a_platform_that_echoes_the_persona_does_not_make_it_speak_twice(
+    start_playground_stub,
+):
+    """Egma owns the persona's side of the history. A platform that repeats
+    the turn it was just given is repeating what is already written down,
+    and keeping the echo would have the caller say everything twice from
+    the next request onward."""
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        replies=[
+            Reply(),
+            Reply(
+                words="Thursday, then.",
+                extra=[{"role": "user", "content": "Anything Thursday?"}],
+            ),
+            Reply(words="Booked."),
+        ],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
+    )
+
+    await plug.open()
+    answered = await plug.deliver("Anything Thursday?")
+    await plug.deliver("Yes please.")
+    await plug.close()
+
+    # Not the agent's words either: the record knows this role, so it is
+    # neither spoken nor preserved as something nobody understood.
+    assert answered.text == "Thursday, then."
+    assert [
+        (message["role"], message["content"])
+        for message in running.stub.histories()[2]
+    ] == [
+        ("user", "Anything Thursday?"),
+        ("agent", "Thursday, then."),
+        ("user", "Yes please."),
+    ]
+
+
 async def test_a_message_with_nothing_a_record_can_read_is_still_kept(
     start_playground_stub,
 ):

@@ -18,7 +18,9 @@ threads the rest forward turn by turn:
 - **the history** — the platform's own message objects, kept **verbatim**,
   with the persona's turns added as they are spoken. Verbatim because a
   stateless engine reconstructs its own context from what it wrote, and a
-  message egma tidied is a message the agent never wrote;
+  message egma tidied is a message the agent never wrote. The one thing
+  not kept is the platform's echo of the persona's own turn, where it
+  makes one: egma wrote that turn and it is in the history already;
 - **the resume state** — the current node (and the component where a flow
   names one) for a conversation flow, the current state for a Retell LLM.
   Carried under the platform's own names, never read and never invented;
@@ -408,7 +410,16 @@ class RetellPlayground:
             raise PlugError(
                 "retell answered a playground completion with no messages list"
             )
-        self._history.extend(messages)
+        # Everything the platform said, verbatim — except its echo of the
+        # persona's own turn, which egma wrote into the history before
+        # sending it. Egma owns that side of the conversation; keeping an
+        # echo would have the caller say everything twice from the next
+        # request onward, and this is the one place that could happen.
+        self._history.extend(
+            message
+            for message in messages
+            if not (isinstance(message, dict) and message.get("role") == USER_ROLE)
+        )
 
         said: list[str] = []
         for message in messages:
