@@ -106,7 +106,12 @@ A chat plug's is three steps, for one simulation, in order, always:
 
 1. ``await open()`` — reach the platform and start the exchange. Returns
    the agent's greeting when the platform opens with one, else ``None``
-   (the persona will then speak first).
+   (the persona will then speak first). A plug whose platform says more
+   about the opening than words may return a whole ``AgentReply`` instead,
+   and the walk reads its ``text`` and ``platform_notes``. It does **not**
+   read ``ended`` there: opening is not where an exchange ends, and a
+   platform that ends on its own greeting is a plug's own to remember and
+   report on the next ``deliver``.
 2. ``await deliver(text)`` — hand the persona's turn to the platform and
    return the agent's answer as an ``AgentReply``:
    - ``text`` — what the agent said, or ``None`` for an answer that
@@ -115,6 +120,9 @@ A chat plug's is three steps, for one simulation, in order, always:
      this answer. The walk records any final words and reports the ending
      as the agent's doing. Once returned, ``deliver`` is never called
      again.
+   - ``platform_notes`` — what the platform said about the answer that the
+     agent did not say. Kept on the record beside the turn and never in
+     it, and never shown to the persona.
    ``deliver`` is called once per persona turn, sequentially — a plug
    never sees two deliveries in flight.
 3. ``await close()`` — tear the exchange down. Called exactly once,
@@ -220,6 +228,22 @@ class AgentReply:
     Empty is the ordinary case and never a claim that none happened: most
     ways of reaching an agent say nothing about its tools, and a plug that
     cannot see them reports none rather than guessing."""
+
+    platform_notes: tuple[str, ...] = ()
+    """What the platform said about this answer that the agent did not say.
+
+    A node transition it announced, a message in a role egma has never
+    seen — content that is real, that came from the agent's side, and that
+    **is not speech**. It goes on the record beside the turn and is never
+    part of the turn's own words, for two reasons that are the same
+    reason: the persona is handed the transcript and would read a
+    transition as something said to it, and the whole point of this
+    modality is that one scenario's chat transcript and voice transcript
+    are comparable — which they stop being the moment one of them carries
+    words nobody spoke.
+
+    Empty for every plug that has nothing of the kind, which is most of
+    them."""
 
 
 class PlugError(Exception):
@@ -339,7 +363,7 @@ class ConnectionPlug(Protocol):
     @property
     def provider_reference(self) -> str | None: ...
 
-    async def open(self) -> str | None: ...
+    async def open(self) -> str | AgentReply | None: ...
 
     async def deliver(self, text: str) -> AgentReply: ...
 

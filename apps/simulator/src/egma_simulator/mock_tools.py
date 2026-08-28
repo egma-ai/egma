@@ -229,12 +229,11 @@ class AuthoredAnswer:
     value, or — where the answer is the failure branch — the failure it
     raises. Untagged, because the tag is how the room exchange tells a
     return from a raise, and a platform serving the answer itself says
-    which one it is in its own words."""
+    which one it is in its own words.
 
-    recorded: str
-    """What the record carries for a call this answer served — the same
-    bytes the room exchange records, so a mocked call reads the same
-    whichever lane served it."""
+    It is also what a lane can hold a platform to: a plug that sees what
+    the tool was really given can compare it with this before letting the
+    record claim egma answered."""
 
     fails: bool
     """Whether this answer is the failure branch."""
@@ -315,7 +314,21 @@ class MockToolSeam:
         impossible.
 
         ``uncovered`` is the discovered names left over — the tools that
-        ran their own implementations, untouched and unobserved.
+        ran their own implementations.
+
+        **The three lists mean the same thing on both lanes, but they are
+        learned differently, and a reader should know which.** Where egma
+        *stands* in the tool path, ``discovered`` is the census the agent's
+        own session reported — every tool it has, called or not — and an
+        uncovered tool ran untouched and **unobserved**, so its presence
+        here is all that is known about it. Where egma's answers are
+        *handed to a platform* that serves them, there is no census to
+        ask: ``discovered`` is the tools the platform reported the agent
+        actually calling during this simulation, so a tool never reached
+        is simply absent, and an uncovered one ran untouched but **was
+        observed** — the platform said it happened. ``covered`` means the
+        same on both: the names egma stood ready to answer, once egma
+        really was in the path.
         """
         if not self._standing_ready:
             return None
@@ -343,7 +356,6 @@ class MockToolSeam:
             AuthoredAnswer(
                 tool_name=mock.tool_name,
                 served=_serialized(mock.answer["error" if mock.fails else "answer"]),
-                recorded=_recorded(mock),
                 fails=mock.fails,
             )
             for mock in self._answers.values()

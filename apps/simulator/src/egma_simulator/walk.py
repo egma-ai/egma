@@ -24,11 +24,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import ConnectionPlug
+from .plugs import AgentReply, ConnectionPlug
 
 logger = logging.getLogger(__name__)
 
-OnTurn = Callable[[str, str], Awaitable[None]]
+OnTurn = Callable[[str, str, tuple[str, ...]], Awaitable[None]]
+"""One transcript turn: who took it, what was said, and whatever the
+platform said *about* it that nobody said. The third is empty for almost
+every turn there has ever been, and it is a separate argument rather than
+part of the words for the reason the words are the transcript: the persona
+is handed those words back, and a transition read as speech is a
+conversation the agent never had."""
 OnTiming = Callable[[str, float], Awaitable[None]]
 OnToolCall = Callable[[str, str | None], Awaitable[None]]
 
@@ -175,9 +181,25 @@ async def conduct(
     loop = asyncio.get_running_loop()
     history: list[Turn] = []
 
-    async def record(speaker: str, text: str) -> None:
+    async def record(
+        speaker: str, text: str, notes: tuple[str, ...] = ()
+    ) -> None:
+        # The history is what the persona is handed, so it carries the
+        # words and nothing else. The notes go to the record only.
         history.append(Turn(speaker, text))
-        await on_turn(speaker, text)
+        await on_turn(speaker, text, notes)
+
+    async def record_answer(answer: AgentReply) -> None:
+        """One agent answer on the record, where there is anything to put.
+
+        An answer that carried no words is not a turn — except when the
+        platform said something about it, which is still the agent's side
+        of the conversation and still has to land somewhere. Then it is a
+        turn with no words, which is exactly what happened.
+        """
+        if answer.text is None and not answer.platform_notes:
+            return
+        await record("agent", answer.text or "", answer.platform_notes)
 
     async def answered() -> None:
         if on_answered is not None:
@@ -203,9 +225,16 @@ async def conduct(
         name=f"{name}:watchdog",
     )
     try:
-        greeting = await controls.guard(plug.open())
-        if greeting is not None:
-            await record("agent", greeting)
+        opened = await controls.guard(plug.open())
+        # Two shapes, because most platforms open with words and nothing
+        # else, and one that says more about its opening should not have to
+        # hold it back until the second turn to say it. `ended` is not read
+        # here: opening is not where an exchange ends, and a platform that
+        # ends on its own greeting is the plug's to remember.
+        if isinstance(opened, AgentReply):
+            await record_answer(opened)
+        elif opened is not None:
+            await record("agent", opened)
         await answered()
 
         while True:
@@ -234,8 +263,7 @@ async def conduct(
             if on_tool_call is not None:
                 for call in answer.tool_calls:
                     await on_tool_call(call.name, call.arguments)
-            if answer.text is not None:
-                await record("agent", answer.text)
+            await record_answer(answer)
             if answer.ended:
                 return ended(AGENT_ENDED)
             # The answer is whole, whatever it turned out to carry. Said

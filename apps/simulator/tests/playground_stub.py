@@ -88,7 +88,13 @@ class Reply:
     """The Retell-LLM state it moved to, if it moved."""
 
     variables: dict | None = None
-    """The dynamic variables as they stand after this exchange."""
+    """The dynamic variables the reply names. Whether a real reply names
+    all of them or only the ones that changed is not documented anywhere,
+    so a script can play either."""
+
+    variables_key: str = "retell_llm_dynamic_variables"
+    """Which name the reply carries them under. The plug reads two, and
+    this is how the second one is exercised."""
 
     ends: bool = False
     """Whether the agent ended the exchange with this answer."""
@@ -130,6 +136,16 @@ class PlaygroundStub:
     answers_without_messages: bool = False
     """A 2xx reply with no message list at all — the shape a plug must
     refuse rather than read as an agent that said nothing."""
+
+    ignores_tool_mocks: bool = False
+    """The failure the whole native-mock design rests on not happening: a
+    platform that does not know the ``tool_mocks`` field, ignores it the
+    way JSON APIs commonly do, and runs the customer's real tool instead.
+    Nothing on the wire says it happened — the reply looks ordinary — so
+    the only evidence is that the tool was given something else."""
+
+    retry_after: str | None = None
+    """What a throttling reply asks for in its ``Retry-After`` header."""
 
     requests: list[dict] = field(default_factory=list)
     """Every request served, in order, with its whole body — the exchange
@@ -194,7 +210,7 @@ class PlaygroundStub:
         )
         if served < len(self.refusals):
             told = f"key {self.api_key}" if self.echo_key_in_refusal else "no capacity"
-            raise _refusal(self.refusals[served], told)
+            raise _refusal(self.refusals[served], told, self.retry_after)
 
         if body.get("messages") is None:
             raise web.HTTPUnprocessableEntity(text="messages is required")
@@ -215,11 +231,15 @@ class PlaygroundStub:
         if self.answers_without_messages:
             return web.json_response({"agent_ended": False}, status=201)
 
-        offered = {
-            mock.get("tool_name"): mock
-            for mock in body.get("tool_mocks") or []
-            if isinstance(mock, dict)
-        }
+        offered = (
+            {}
+            if self.ignores_tool_mocks
+            else {
+                mock.get("tool_name"): mock
+                for mock in body.get("tool_mocks") or []
+                if isinstance(mock, dict)
+            }
+        )
         messages: list[dict] = []
         for index, tool in enumerate(reply.tools):
             call_id = f"tool_call_{served}_{index}"
@@ -275,7 +295,7 @@ class PlaygroundStub:
         if reply.state is not None:
             answered["current_state"] = reply.state
         if reply.variables is not None:
-            answered["retell_llm_dynamic_variables"] = reply.variables
+            answered[reply.variables_key] = reply.variables
         return web.json_response(answered, status=201)
 
     def build_app(self) -> web.Application:
@@ -284,7 +304,9 @@ class PlaygroundStub:
         return app
 
 
-def _refusal(status: int, told: str) -> web.HTTPException:
+def _refusal(
+    status: int, told: str, retry_after: str | None = None
+) -> web.HTTPException:
     """The platform saying no, in the status the script asked for."""
     body = json.dumps({"error_message": f"refused: {told}"})
     refusals = {
@@ -293,7 +315,9 @@ def _refusal(status: int, told: str) -> web.HTTPException:
         500: web.HTTPInternalServerError,
     }
     return refusals.get(status, web.HTTPBadRequest)(
-        text=body, content_type="application/json"
+        text=body,
+        content_type="application/json",
+        headers=None if retry_after is None else {"Retry-After": retry_after},
     )
 
 

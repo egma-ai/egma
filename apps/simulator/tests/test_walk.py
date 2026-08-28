@@ -46,8 +46,27 @@ def scripted_plug(config: dict) -> ScriptedCounterpart:
 def collect():
     turns: list[tuple[str, str]] = []
 
-    async def on_turn(speaker: str, text: str) -> None:
+    async def on_turn(
+        speaker: str, text: str, notes: tuple[str, ...] = ()
+    ) -> None:
         turns.append((speaker, text))
+
+    return turns, on_turn
+
+
+def collect_with_notes():
+    """The same, keeping what the platform said about each turn.
+
+    Separate from :func:`collect` because almost every test here is about
+    the conversation and would only be made harder to read by a third
+    element that is empty in all of them.
+    """
+    turns: list[tuple[str, str, tuple[str, ...]]] = []
+
+    async def on_turn(
+        speaker: str, text: str, notes: tuple[str, ...] = ()
+    ) -> None:
+        turns.append((speaker, text, notes))
 
     return turns, on_turn
 
@@ -217,6 +236,86 @@ async def test_a_cancel_after_the_walk_finished_changes_nothing():
     assert conducted.status == "completed"
     assert conducted.ending == "persona_concluded"
     assert len(turns) == 3
+
+
+class NotingPlug:
+    """A plug whose platform says things nobody said.
+
+    The shape a platform takes when it reports more about an answer than
+    the words in it — a flow announcing the node it moved to, a message in
+    a role egma has never seen.
+    """
+
+    def __init__(self, *, opening: AgentReply, answers: list[AgentReply]) -> None:
+        self.provider_reference = None
+        self._opening = opening
+        self._answers = answers
+
+    async def open(self) -> AgentReply:
+        return self._opening
+
+    async def deliver(self, text: str) -> AgentReply:
+        return self._answers.pop(0) if self._answers else AgentReply(text="Go on.")
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_what_the_platform_said_rides_the_record_and_not_the_turn():
+    """The rule the chat-versus-voice diagnostic rests on.
+
+    A transition is agent-side content and it is not speech. It reaches
+    whoever writes the record, beside the turn; it never joins the words,
+    because the words are what the persona is handed back and what a voice
+    transcript of the same scenario is compared against.
+    """
+    turns, recorder = collect_with_notes()
+    plug = NotingPlug(
+        opening=AgentReply(text="Front desk.", platform_notes=("moved to greet",)),
+        answers=[
+            AgentReply(text="Certainly.", platform_notes=("moved to lookup",)),
+        ],
+    )
+
+    await conduct(
+        persona=persona_for("First point."),
+        plug=plug,
+        max_turns=60,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=WalkControls(),
+        name="sim:test",
+    )
+
+    assert turns[0] == ("agent", "Front desk.", ("moved to greet",))
+    assert turns[1] == ("human", "First point.", ())
+    assert turns[2] == ("agent", "Certainly.", ("moved to lookup",))
+
+
+async def test_an_answer_with_no_words_the_platform_spoke_about_is_still_a_turn():
+    """An answer that carried no words is not a turn — unless the platform
+    said something about it, which is still the agent's side of the
+    conversation and still has to land somewhere."""
+    turns, recorder = collect_with_notes()
+    plug = NotingPlug(
+        opening=AgentReply(text=None),
+        answers=[AgentReply(text=None, platform_notes=("moved to lookup",))],
+    )
+
+    await conduct(
+        persona=persona_for("First point."),
+        plug=plug,
+        max_turns=4,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=WalkControls(),
+        name="sim:test",
+    )
+
+    assert turns[0] == ("human", "First point.", ())
+    assert turns[1] == ("agent", "", ("moved to lookup",))
 
 
 class ObservantPlug:

@@ -127,7 +127,7 @@ async def test_the_agent_opens_and_the_plug_conducts_the_whole_exchange(
         mock_tools=seam(),
     )
 
-    assert await plug.open() == "Lakeside Dental, how can I help?"
+    assert (await plug.open()).text == "Lakeside Dental, how can I help?"
     assert await plug.deliver("I need to move my cleaning.") == AgentReply(
         text="Of course — could I take your name?", ended=False
     )
@@ -165,7 +165,7 @@ async def test_an_agent_with_nothing_to_say_first_lets_the_persona_open(
         mock_tools=seam(),
     )
 
-    assert await plug.open() is None
+    assert (await plug.open()).text is None
     assert (await plug.deliver("Hello?")).text == "Yes?"
     await plug.close()
 
@@ -255,7 +255,7 @@ async def test_an_agent_that_ended_on_its_opening_is_not_argued_with(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
-    assert await plug.open() == "We are closed today."
+    assert (await plug.open()).text == "We are closed today."
     assert await plug.deliver("Oh — can I book for tomorrow?") == AgentReply(
         text=None, ended=True
     )
@@ -323,16 +323,33 @@ async def test_a_spec_carrying_no_version_asks_for_none(start_playground_stub):
     assert "agent_version" not in running.stub.requests[0]["body"]
 
 
-async def test_this_simulations_variables_reach_retell_and_the_reply_replaces_them(
-    start_playground_stub,
+@pytest.mark.parametrize(
+    "variables_key", ["retell_llm_dynamic_variables", "dynamic_variables"]
+)
+async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
+    start_playground_stub, variables_key
 ):
-    """Out byte for byte, and back the same way: a variable the agent set on
-    turn two is set on turn three, because the platform keeps nothing."""
+    """Out byte for byte, and back **over** what was already held.
+
+    A variable the agent set on turn two is set on turn three, because the
+    platform keeps nothing. And a variable it did not mention is still
+    set: whether a reply names every variable or only the ones that
+    changed is not documented anywhere, so a reply that names one is read
+    as naming one — which is what keeps egma's own attribution variable on
+    every request instead of vanishing after the first change.
+
+    Both names a reply might carry them under are exercised, because which
+    one a real reply uses is a guess until the developer's live run.
+    """
     running = await start_playground_stub(
         api_key=SENTINEL_KEY,
         replies=[
             Reply(),
-            Reply(words="Found you.", variables={"caller_name": "Margaret"}),
+            Reply(
+                words="Found you.",
+                variables={"caller_name": "Margaret"},
+                variables_key=variables_key,
+            ),
             Reply(words="Booked."),
         ],
     )
@@ -353,7 +370,12 @@ async def test_this_simulations_variables_reach_retell_and_the_reply_replaces_th
     ]
     assert carried[0] == {"egma_simulation": "sim_01", "caller_name": ""}
     assert carried[1] == {"egma_simulation": "sim_01", "caller_name": ""}
-    assert carried[2] == {"caller_name": "Margaret"}
+    assert carried[2] == {"egma_simulation": "sim_01", "caller_name": "Margaret"}
+    # The one that must never fall off: it is what a tool call the platform
+    # makes rides back to this simulation on.
+    assert all(
+        variables["egma_simulation"] == "sim_01" for variables in carried
+    ), carried
 
 
 async def test_a_spec_carrying_no_variables_sends_no_variable_block(
@@ -437,7 +459,10 @@ async def test_a_transition_the_platform_announces_lands_on_the_turn(
     answered = await plug.deliver("It's Margaret.")
     await plug.close()
 
-    assert answered.text == "moved to lookup_caller\nOne moment."
+    # Beside the turn, never in it: the persona is handed the words back,
+    # and a transition read as speech is a conversation nobody had.
+    assert answered.text == "One moment."
+    assert answered.platform_notes == ("moved to lookup_caller",)
 
 
 async def test_a_role_the_record_does_not_know_reads_back_verbatim(
@@ -463,7 +488,8 @@ async def test_a_role_the_record_does_not_know_reads_back_verbatim(
     answered = await plug.deliver("Text it to me.")
     await plug.close()
 
-    assert answered.text == "Your booking: Thu 14:30\nSent."
+    assert answered.text == "Sent."
+    assert answered.platform_notes == ("Your booking: Thu 14:30",)
 
 
 async def test_a_platform_that_echoes_the_persona_does_not_make_it_speak_twice(
@@ -523,7 +549,8 @@ async def test_a_message_with_nothing_a_record_can_read_is_still_kept(
     answered = await plug.deliver("Press one.")
     await plug.close()
 
-    assert answered.text == '{"role":"beeped","digits":"1"}'
+    assert answered.text is None
+    assert answered.platform_notes == ('{"role":"beeped","digits":"1"}',)
 
 
 # -- Mock tools ride the request ---------------------------------------------
@@ -656,6 +683,127 @@ async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
     assert call.mock_tool == "book_appointment"
 
 
+async def test_a_platform_that_ignored_the_mocks_fails_instead_of_being_stamped(
+    start_playground_stub,
+):
+    """The one guess on this lane that could cost a customer their isolation.
+
+    That the playground honours a field egma sends it is unverified until
+    the developer's live run, and a JSON API that does not know
+    ``tool_mocks`` commonly ignores it — in which case the real backend
+    runs and nothing on the wire says so. The only evidence is that the
+    tool was given something other than what egma sent, so that is checked
+    before any call is stamped, and a mismatch stops the simulation rather
+    than reporting it as isolated.
+    """
+    answers = seam(answering("check_calendar", {"slots": ["thu-1430"]}))
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        ignores_tool_mocks=True,
+        replies=[
+            Reply(),
+            Reply(
+                words="Nothing free, sorry.",
+                tools=[ToolTurn(name="check_calendar", real_result='{"slots":[]}')],
+            ),
+        ],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
+    )
+
+    await plug.open()
+    with pytest.raises(PlugError) as refusal:
+        await plug.deliver("Anything Thursday?")
+    await plug.close()
+
+    told = str(refusal.value)
+    assert "check_calendar" in told
+    assert "real implementation ran" in told, told
+    # The refusal names the tool and neither answer: one is the customer's
+    # authored data and the other their backend's.
+    assert "thu-1430" not in told and "slots" not in told
+    # And nothing was stamped: a call Egma cannot vouch for is not on the
+    # record as one Egma answered.
+    assert [call.mock_tool for call in answers.exchanged()] == []
+
+
+async def test_a_covered_call_the_platform_says_nothing_about_is_not_stamped(
+    start_playground_stub,
+):
+    """The same rule where the evidence is missing rather than wrong: Egma
+    cannot confirm its answer was served, so it will not claim it was."""
+    answers = seam(answering("check_calendar", {"slots": []}))
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        replies=[
+            Reply(),
+            Reply(
+                words="Checked.",
+                extra=[
+                    {
+                        "role": "tool_call_invocation",
+                        "tool_call_id": "call_with_no_result",
+                        "name": "check_calendar",
+                        "arguments": "{}",
+                    }
+                ],
+            ),
+        ],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
+    )
+
+    await plug.open()
+    with pytest.raises(PlugError, match="cannot confirm"):
+        await plug.deliver("Anything Thursday?")
+    await plug.close()
+
+
+async def test_an_answer_spelled_differently_by_the_platform_still_counts(
+    start_playground_stub,
+):
+    """Two equivalent JSON documents are one answer. A platform that
+    re-serializes egma's answer with spaces in it, or its keys the other
+    way round, has still served it — and failing a working simulation over
+    whitespace would be the check doing more harm than the hole it
+    closes."""
+    answers = seam(answering("check_calendar", {"slots": [], "open": True}))
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        replies=[
+            Reply(),
+            Reply(
+                words="Checked.",
+                extra=[
+                    {
+                        "role": "tool_call_invocation",
+                        "tool_call_id": "respelled",
+                        "name": "check_calendar",
+                        "arguments": "{}",
+                    },
+                    {
+                        "role": "tool_call_result",
+                        "tool_call_id": "respelled",
+                        "content": '{"open": true,  "slots": []}',
+                    },
+                ],
+            ),
+        ],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
+    )
+
+    await plug.open()
+    await plug.deliver("Anything Thursday?")
+    await plug.close()
+
+    (call,) = answers.exchanged()
+    assert call.mock_tool == "check_calendar"
+
+
 async def test_a_declared_delay_is_not_spent_on_this_lane(start_playground_stub):
     """Delays are speech-world fidelity — the layer chat deliberately
     excludes — and the answer is served inside Retell's own execution
@@ -736,10 +884,65 @@ async def test_a_throttle_that_lets_up_is_conducted_through(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
-    assert await plug.open() == "Lakeside Dental."
+    assert (await plug.open()).text == "Lakeside Dental."
     await plug.close()
 
     assert len(running.stub.requests) == 3
+
+
+async def test_a_throttle_that_says_how_long_to_wait_is_waited_out_that_long(
+    start_playground_stub, monkeypatch
+):
+    """A throttled platform saying how long it wants is worth more than any
+    number egma could pick — bounded, because a header is not a promise
+    this process has to keep for minutes."""
+    from egma_simulator.plugs import retell_playground
+
+    monkeypatch.setattr(retell_playground, "FIRST_BACKOFF_SECONDS", 0.001)
+    monkeypatch.setattr(retell_playground, "LONGEST_BACKOFF_SECONDS", 0.05)
+    slept: list[float] = []
+
+    async def remember(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(retell_playground.asyncio, "sleep", remember)
+
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        refusals=(429, 429),
+        retry_after="600",
+        replies=[Reply(words="Lakeside Dental.")],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
+    )
+
+    assert (await plug.open()).text == "Lakeside Dental."
+    await plug.close()
+
+    # Asked for ten minutes, capped: the wait is the platform's wish held
+    # to what a simulation can afford.
+    assert slept == [0.05, 0.05]
+
+
+@pytest.mark.parametrize("retry_after", ["not-a-number", "0", "-5"])
+async def test_a_retry_after_egma_cannot_use_falls_back_to_the_backoff(
+    start_playground_stub, quick_playground_backoff, retry_after
+):
+    """An HTTP date, a nonsense value, a zero: egma's own doubling backoff
+    is a perfectly good answer without any of them."""
+    running = await start_playground_stub(
+        api_key=SENTINEL_KEY,
+        refusals=(429,),
+        retry_after=retry_after,
+        replies=[Reply(words="Lakeside Dental.")],
+    )
+    plug = playground(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
+    )
+
+    assert (await plug.open()).text == "Lakeside Dental."
+    await plug.close()
 
 
 async def test_a_billing_wall_fails_naming_the_billing(start_playground_stub):

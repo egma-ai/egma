@@ -803,14 +803,28 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
 
     records = await workbench.wait_for(has_terminal("sim-playground-001"))
 
-    # The transcript, the transition included: a node transition arrives in
-    # a role the record does not know, and the rule for those is that they
-    # are preserved verbatim as the agent's own content rather than lost.
+    # The transcript is what was said and only that — which is what makes
+    # this record comparable with a voice record of the same scenario, and
+    # what keeps the persona from answering a node transition.
     assert turns_for(records, "sim-playground-001") == [
-        ("agent", "moved to greet\nLakeside Dental, how can I help?"),
+        ("agent", "Lakeside Dental, how can I help?"),
         ("human", "I need to move my Tuesday cleaning to Thursday."),
-        ("agent", "moved to offer_slot\nThursday at half past two, then."),
+        ("agent", "Thursday at half past two, then."),
     ]
+
+    # The transitions are on the record all the same, beside the turns they
+    # happened in: a node transition arrives in a role the record does not
+    # know, and the rule for those is that they are preserved verbatim as
+    # agent-side content rather than lost or spoken.
+    spans = [record["span"] for record in spans_for(records, "sim-playground-001")]
+    agent_turns = [span for span in spans if span["name"] == "agent_turn"]
+    assert [
+        span_attribute(span, "egma.turn.platform_notes") for span in agent_turns
+    ] == ['["moved to greet"]', '["moved to offer_slot"]']
+    human_turns = [span for span in spans if span["name"] == "human_turn"]
+    assert [
+        span_attribute(span, "egma.turn.platform_notes") for span in human_turns
+    ] == [None]
 
     terminal = terminal_event_for(records, "sim-playground-001")
     assert terminal["status"] == "completed"
@@ -830,7 +844,6 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # covered call carries what Egma answered with and the stamp that says
     # Egma authored it; the uncovered one carries neither, which is the
     # record's own way of saying a real backend did the work.
-    spans = [record["span"] for record in spans_for(records, "sim-playground-001")]
     calls = [span for span in spans if span["name"] == "tool_call"]
     assert [span_attribute(span, "egma.tool.name") for span in calls] == [
         "get_availability",

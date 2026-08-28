@@ -393,11 +393,17 @@ where a refused key and an endpoint nobody answers each end the simulation
 The `retell_playground` plug converses with `tests/playground_stub.py`: a
 real local HTTP server shaped like the completion API, which matches and
 serves the mocks each request carries the way the platform does — so a
-plug that forgot to send them would see real answers come back and the
-record would say so. Every wire field name that Retell's documentation
-was not in reach for is marked a guess in both files, in the same places,
-so one live run against a real account corrects both with two edits and
-leaves the whole suite still proving the behaviour.
+plug that forgot to send them would see real answers come back, and the
+plug refuses to stamp a call `mocked` until it has checked that the tool
+was really given Egma's own answer.
+
+Every wire field name that Retell's documentation was not in reach for is
+marked a guess in the plug's docstring. Correcting one after a live run
+means editing **three** places, listed here so none is missed: the plug,
+the stub, and `tests/test_plug_retell_playground.py`, which names several
+of the fields in its assertions. The stub deliberately does not import
+the plug's constants — a counterpart that took its wire from the thing it
+is testing would agree with a mistake instead of catching it.
 
 The `phone` plug converses through the scripted media backend the same way: a
 spec naming a number yields a transcript, an ending, per-turn timings and a

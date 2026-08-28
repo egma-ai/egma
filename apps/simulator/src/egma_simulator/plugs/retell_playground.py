@@ -72,13 +72,32 @@ stores nothing: there is no chat, no call and no id for either side to
 look this exchange up by. The report carries ``null`` rather than a
 synthetic id egma invented, because an id nobody else holds is not a join.
 
-**Roles the record does not know are preserved, never dropped.** Egma
-reads four: the agent's words, the persona's own turns echoed back, a tool
-being called, and what that call was given. Anything else — a node
-transition Retell announces, an SMS leg, whatever a newer platform grows —
-is kept **verbatim as agent-side content** on the turn it arrived in. That
-is also how a transition lands on the record: the platform says it, and
-egma writes down what it said rather than a word of its own.
+**Roles the record does not know are preserved, never dropped — and never
+spoken.** Egma reads four: the agent's words, the persona's own turns
+echoed back, a tool being called, and what that call was given. Anything
+else — a node transition Retell announces, an SMS leg, whatever a newer
+platform grows — is kept **verbatim as agent-side content** on the turn it
+arrived in, as that turn's ``platform_notes``: beside the words, never
+among them. That is also how a transition lands on the record.
+
+Beside rather than among, because the words are not just the record: they
+are handed back to the persona as the transcript it answers, and they are
+what a voice record of the same scenario is compared against. A transition
+in the turn text would have the persona replying to "moved to
+lookup_caller", and would make this lane's transcripts differ from the
+voice lane's by construction — which is the one comparison the whole
+modality exists for.
+
+**The mocks are verified before any call is stamped.** That the playground
+honours the tool-mock field is a guess (below), and it is the guess that
+could cost a customer their isolation: a JSON API that does not know a
+field commonly ignores it, and then the real backend runs while the record
+says egma answered. So what the platform reports the tool being given is
+compared against what egma sent for it, and a mismatch — or a covered call
+the platform says nothing about — fails the simulation loudly rather than
+being stamped. Verifying is not recording: what lands on the record is
+still egma's own rendering, and an uncovered call still lands as the bare
+observation it is.
 
 Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
 seals — and are read for the ``Authorization`` header and nothing else.
@@ -121,8 +140,14 @@ Back:
   agent's side. An end-tool invocation among the messages is honoured too,
   which is the same fact said the other way.
 - ``retell_llm_dynamic_variables`` or ``dynamic_variables`` (guess) — the
-  variables as they now stand.
+  variables as they now stand. **Whether a reply names all of them or only
+  the ones that changed is itself a guess**, so they are laid *over* what
+  egma holds rather than replacing it: a delta-shaped reply then loses
+  nothing, and a whole-set reply behaves identically.
 - the same three resume keys.
+
+A ``Retry-After`` on a throttled reply is honoured where it is a number of
+seconds, capped at :data:`LONGEST_BACKOFF_SECONDS`.
 """
 
 from __future__ import annotations
@@ -176,6 +201,14 @@ FIRST_BACKOFF_SECONDS = 1.0
 """How long the first retry waits; each one after it waits twice as long.
 Read at the moment it is spent, so a suite can collapse the waiting without
 changing the attempt sequence."""
+
+LONGEST_BACKOFF_SECONDS = 8.0
+"""The longest one retry ever waits, whatever the platform asked for.
+
+A ``Retry-After`` of ten minutes is a platform describing its own day, and
+a simulation that slept through it would report a shorter exchange than the
+test asked for — the very thing the bounded retry exists to prevent. Past
+this the honest answer is to fail naming the throttle."""
 
 RESUME_KEYS = ("current_node_id", "current_component_id", "current_state")
 """Where the engine had got to, in the platform's own names. Threaded and
@@ -285,6 +318,10 @@ class RetellPlayground:
             mock_tools if isinstance(mock_tools, MockToolSeam) else MockToolSeam()
         )
         answers = self._mock_tools.answers()
+        # What Egma sent for each name, kept so that what the platform
+        # reports giving the tool can be checked against it before any
+        # call is stamped mocked. See `_really_served`.
+        self._served = {answer.tool_name: answer.served for answer in answers}
         self._mocks = [
             {
                 "tool_name": answer.tool_name,
@@ -327,15 +364,21 @@ class RetellPlayground:
         """
         return None
 
-    async def open(self) -> str | None:
+    async def open(self) -> AgentReply:
         """Ask for the agent's opening line, with nothing said yet.
 
         One bounded exchange against an empty history. An agent configured
         to speak first has spoken by the time this answers; one that waits
         for the caller answers with nothing, and the persona opens instead.
+
+        The whole answer rather than its words alone, because a flow can
+        move node while it greets and that has to land on the opening turn
+        rather than on the next one. The walk does not read ``ended``
+        here; an agent that ended on its greeting is remembered and
+        reported on the first ``deliver`` instead.
         """
         self._session = aiohttp.ClientSession()
-        return self._read(await self._exchange()).text
+        return self._read(await self._exchange())
 
     async def deliver(self, text: str) -> AgentReply:
         if self._session is None:
@@ -421,16 +464,23 @@ class RetellPlayground:
             if not (isinstance(message, dict) and message.get("role") == USER_ROLE)
         )
 
+        results = {
+            message.get("tool_call_id"): message.get("content")
+            for message in messages
+            if isinstance(message, dict) and message.get("role") == RESULT_ROLE
+        }
         said: list[str] = []
+        noted: list[str] = []
         for message in messages:
             if not isinstance(message, dict) or message.get("role") not in KNOWN_ROLES:
                 # A role nobody here understands, or something that is not
-                # a message at all. Preserved as the agent's own content,
-                # exactly as it arrived: a platform that grows a fifth role
-                # must not cost this simulation part of its transcript.
+                # a message at all. Kept as agent-side content — beside the
+                # turn, never in it — because a platform that grows a fifth
+                # role must not cost this simulation part of its record,
+                # and must not put words in the agent's mouth either.
                 kept = _preserved(message)
                 if kept:
-                    said.append(kept)
+                    noted.append(kept)
                 continue
             role = message.get("role")
             if role == AGENT_ROLE:
@@ -438,7 +488,7 @@ class RetellPlayground:
                 if isinstance(spoken, str) and spoken.strip():
                     said.append(spoken.strip())
             elif role == INVOCATION_ROLE:
-                self._observed(message)
+                self._observed(message, results)
 
         self._resume_from(answered)
         self._variables_from(answered)
@@ -451,32 +501,67 @@ class RetellPlayground:
             # a call `mocked` and say what it was given. Reporting them
             # here as well would put each call on the record twice.
             tool_calls=(),
+            platform_notes=tuple(noted),
         )
 
-    def _observed(self, message: dict) -> None:
-        """One tool call Retell reported, handed to the seam that stamps it.
+    def _observed(self, message: dict, results: dict[Any, Any]) -> None:
+        """One tool call Retell reported, checked and then handed over.
 
-        Marked ``mocked`` exactly where the run's snapshot covers the
-        name, and that is sound rather than optimistic: a covered name
-        rode this request as a native mock matched by name alone, so
-        Retell answered it from egma's own answer and the real tool never
-        ran. A name the snapshot does not cover ran for real, and lands as
-        the observation it is.
+        A call whose name the run's snapshot covers is **verified before
+        it is stamped**. That the platform honours a field egma sends it
+        is the one guess on this lane that could silently cost a customer
+        their isolation: a JSON API that does not know ``tool_mocks``
+        commonly ignores it, and then the real backend runs while the
+        record says egma answered. So the answer the platform reports the
+        tool being given is compared with the answer egma sent for it, and
+        a mismatch fails the simulation loudly instead of stamping it.
 
-        What the call was *given* is not read off the reply, even though
-        the reply reports it. For a covered call it is egma's own answer
-        coming back, and the seam holds a better copy — one that still
-        says which branch it was. For an uncovered one it is the
-        customer's real backend answering, which is neither egma's to
-        vouch for nor something the record has an honest stamp for.
+        Verifying is not recording. What goes on the record is still
+        egma's own rendering — the seam holds the copy that says which
+        branch the answer was — and an uncovered call still lands as the
+        bare observation it is, because its return value is the customer's
+        backend's and nothing egma can vouch for.
         """
         name = message.get("name")
         if not isinstance(name, str) or not name.strip():
             return
+        called = name.strip()
+        if called in self._served:
+            self._really_served(called, results, message.get("tool_call_id"))
         arguments = message.get("arguments")
         self._mock_tools.reported(
-            name,
+            called,
             arguments=arguments if isinstance(arguments, str) and arguments else None,
+        )
+
+    def _really_served(
+        self, called: str, results: dict[Any, Any], call_id: object
+    ) -> None:
+        """Refuse to stamp a covered call the platform did not really serve.
+
+        Loud, and worded for whoever has to go and look: what egma sent,
+        that Retell did not use it, and what that means for the record. It
+        names the tool and neither answer — the served one is the
+        customer's authored data and the other is their backend's, and a
+        sentence about a mistake should not go on to repeat either.
+        """
+        if call_id not in results:
+            raise PlugError(
+                f"retell reported calling {called!r} and said nothing about "
+                "what the call was given, so Egma cannot confirm its own "
+                "answer was served. A tool call Egma cannot vouch for must "
+                "not be recorded as mocked: this simulation is stopped rather "
+                "than reported as isolated when it may not have been"
+            )
+        if _same_answer(results[call_id], self._served[called]):
+            return
+        raise PlugError(
+            f"retell called {called!r} and gave it something other than the "
+            "answer Egma sent for it, so the mock tools Egma passed on the "
+            "request were not used and this agent's real implementation ran. "
+            "Nothing here is safe to report as mocked. Check that this "
+            "version of the playground API takes native tool mocks under the "
+            "field name Egma sends them in"
         )
 
     def _resume_from(self, answered: dict) -> None:
@@ -497,18 +582,28 @@ class RetellPlayground:
                 self._resume[key] = moved
 
     def _variables_from(self, answered: dict) -> None:
-        """The variables as the reply left them, carried forward as they came.
+        """The variables as the reply left them, laid **over** the held set.
 
-        Not held to the contract's rule about what a rendered variable
-        may be. That rule guards the values *egma* sends, and is the last
-        place a mistake in a claimed spec can be named; these are the
-        platform's own values coming back, and a plug that refused one
-        would be refusing the agent's own state.
+        Merged rather than swapped, and that is the fail-safe reading of
+        an unmarked guess: whether a reply names every variable or only
+        the ones that changed is not documented anywhere egma could read,
+        and a plug that swapped would drop every variable a delta-shaped
+        reply left out. Egma's own attribution variable is among those, so
+        swapping would quietly stop this simulation being identifiable to
+        the agent's tools from the turn after the first change. A reply
+        wins for every name it does mention, which is right under both
+        readings.
+
+        The values are not held to the contract's rule about what a
+        rendered variable may be. That rule guards the values *egma*
+        sends, and is the last place a mistake in a claimed spec can be
+        named; these are the platform's own values coming back, and a plug
+        that refused one would be refusing the agent's own state.
         """
         for key in VARIABLE_KEYS:
             carried = answered.get(key)
             if isinstance(carried, dict):
-                self._variables = dict(carried)
+                self._variables = {**self._variables, **carried}
                 return
 
     # -- Reaching the platform, without ever saying the key -------------------
@@ -531,10 +626,12 @@ class RetellPlayground:
         url = f"{self._base_url}{self.completion_path}"
         attempts = 0
         while True:
-            status, body = await self._answered(session, url, payload)
+            status, body, asked_for = await self._attempt(session, url, payload)
             if status != TOO_MANY_REQUESTS or attempts >= RATE_LIMIT_RETRIES:
                 break
-            await asyncio.sleep(FIRST_BACKOFF_SECONDS * (2**attempts))
+            await asyncio.sleep(
+                _waiting(asked_for, FIRST_BACKOFF_SECONDS * (2**attempts))
+            )
             attempts += 1
 
         if status == TOO_MANY_REQUESTS:
@@ -575,10 +672,17 @@ class RetellPlayground:
             )
         return document
 
-    async def _answered(
+    async def _attempt(
         self, session: aiohttp.ClientSession, url: str, payload: dict
-    ) -> tuple[int, str]:
-        """One attempt: the status it came back with and what it said."""
+    ) -> tuple[int, str, str | None]:
+        """One attempt: the status, what it said, and when to come back.
+
+        The third is the platform's ``Retry-After`` where it sent one. A
+        throttled platform saying how long it wants is worth more than any
+        number egma could pick, and it is read here rather than guessed
+        at — bounded, because a header is not a promise this process has
+        to keep for minutes.
+        """
         try:
             async with session.post(
                 url,
@@ -586,12 +690,69 @@ class RetellPlayground:
                 headers=self._headers(),
                 timeout=self._timeout,
             ) as response:
-                return response.status, await response.text()
+                return (
+                    response.status,
+                    await response.text(),
+                    response.headers.get("Retry-After"),
+                )
         except UNREACHABLE as unreachable:
             raise PlugError(
                 f"retell was unreachable at {url}: "
                 f"{quotable(repr(unreachable), self._api_key)}"
             ) from unreachable
+
+
+def _waiting(asked_for: str | None, backing_off: float) -> float:
+    """How long to wait before trying a throttled request again.
+
+    The platform's own ``Retry-After`` where it sent a number egma can
+    read, and egma's own doubling backoff otherwise. Capped either way:
+    a header asking for ten minutes is a platform describing its own day,
+    and a simulation that slept through it would report a shorter exchange
+    than the test asked for — which is the whole thing the bounded retry
+    exists to prevent. Whichever wait is longer is the one taken, so the
+    platform is never asked again sooner than it said.
+    """
+    if asked_for is None:
+        return backing_off
+    try:
+        # Seconds only. `Retry-After` may also be an HTTP date, which is
+        # not read: parsing one would mean trusting two clocks to agree,
+        # and the backoff below is a perfectly good answer without it.
+        wanted = float(asked_for.strip())
+    except ValueError:
+        return backing_off
+    if wanted <= 0:
+        return backing_off
+    return min(max(wanted, backing_off), LONGEST_BACKOFF_SECONDS)
+
+
+def _same_answer(reported: object, served: str) -> bool:
+    """Whether the tool was really given the answer egma sent for it.
+
+    Compared as JSON values wherever both sides parse, because two
+    equivalent documents may be spelled differently — a re-serialized
+    object with spaces in it, keys in another order — and a plug that
+    called those different would fail a working simulation. Where either
+    side is not JSON, the bytes are compared as they are, which is the
+    only honest reading left.
+    """
+    mine, mine_read = _parsed(served)
+    if not isinstance(reported, str):
+        # Some platforms report a structured result rather than a string.
+        return mine_read and mine == reported
+    if reported == served:
+        return True
+    theirs, theirs_read = _parsed(reported)
+    return mine_read and theirs_read and mine == theirs
+
+
+def _parsed(document: str) -> tuple[object, bool]:
+    """One JSON document as its value, and whether it was one at all."""
+    try:
+        return json.loads(document), True
+    except ValueError:
+        return document, False
 
 
 def _preserved(message: object) -> str:
