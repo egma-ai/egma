@@ -659,7 +659,20 @@ class StubTextRoom(TextRoom):
 
     def persona_typed(self, topic: str, text: str) -> None:
         """Egma's turn arrives, and the agent takes its next one."""
+        first = not self.stub.typed
         self.stub.typed.append(TypedTurn(topic=topic, text=text))
+        late_greeting = self.stub.greeting_during_first_send
+        if first and late_greeting is not None:
+            # The stream's header lands while the send is still resolving,
+            # so the stamp is whatever the counter says mid-send — which
+            # is the greeting era, because the turn has not begun yet.
+            self.utterances.put_nowait(
+                Utterance(
+                    text=late_greeting,
+                    spoken=self.stub.marks_speech,
+                    turn=self._turn,
+                )
+            )
         if self._replies:
             self._agent_says(self._replies.pop(0))
         elif self.stub.hangs_up_after_replies:
@@ -757,6 +770,13 @@ class ChatStub:
 
     answer_delay_seconds: float = 0.0
     """How long the agent is quiet before it starts a turn."""
+
+    greeting_during_first_send: str | None = None
+    """A greeting that outran its wait and opens its stream while the
+    persona's first turn is still leaving egma. On a real wire that is a
+    header arriving during the send, before ``begin_turn`` has run — so
+    the fake plays it synchronously inside the send, stamped with the
+    turn counter exactly as it stands at that moment."""
 
     pause_seconds: float = 0.0
     """The gap inside a turn, between two of its utterances — the tool-call

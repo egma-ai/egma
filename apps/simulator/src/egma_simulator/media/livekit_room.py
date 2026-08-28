@@ -1748,14 +1748,21 @@ class LiveKitChatRoomBackend(RoomLifecycle):
 
         Only what this turn opened counts as this turn's answer. A stream
         that opened before the question went out is answering an earlier
-        one, however late it finishes, and is left off the record instead
-        of filed under a question it was never asked.
+        prompt — a greeting that outran its wait included — however late
+        it finishes, and is left off the record instead of filed under a
+        question it was never asked. That is why the send comes first and
+        the turn begins the moment it returns: the two run in one step of
+        the event loop, with no await between them, so there is no moment
+        at which a stream could open after the question left and still be
+        stamped with the turn before it. A stream that opens while the
+        text is still leaving egma is stamped with the old turn, because
+        nothing that had not yet arrived can have prompted it.
         """
         room = self._room
         if room is None:
             raise MediaBackendError("a persona turn was delivered before a room")
-        turn = room.begin_turn()
         await room.send(text)
+        turn = room.begin_turn()
         return await self._assembled(
             first_within=reply_seconds,
             quiet=quiet_seconds,

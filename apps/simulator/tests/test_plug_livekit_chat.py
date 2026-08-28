@@ -370,6 +370,35 @@ async def test_a_customers_own_modality_key_cannot_touch_the_simulation(
     assert ("agent", "Front desk.") in turns
 
 
+async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The late greeting lands mid-send, and the record refuses it.
+
+    An agent slower than the greeting wait can open its greeting's stream
+    while the persona's first turn is still leaving egma. The question has
+    not arrived anywhere, so those words cannot be its answer — and the
+    turn now begins only once the send has returned, in the same step of
+    the event loop, so a stream opening mid-send is stamped with the
+    greeting era and refused from the first answer. The refusal costs the
+    real answer nothing: a refused utterance leaves the reply budget
+    standing, so the answer that follows is recorded under the question
+    that prompted it.
+    """
+    stub = ChatStub(
+        greeting_during_first_send="Welcome to Lakeside Dental!",
+        replies=["Thursday at 2:15 is free.", "Booked.", "Anything else?"],
+    )
+    conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch
+    )
+
+    agent_turns = [text for speaker, text in turns if speaker == "agent"]
+    assert "Welcome to Lakeside Dental!" not in " ".join(agent_turns)
+    assert agent_turns[0] == "Thursday at 2:15 is free."
+    assert conducted.ending == "persona_concluded"
+
+
 async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
