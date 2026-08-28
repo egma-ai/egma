@@ -27,6 +27,9 @@ from pathlib import Path
 import aiohttp
 import pytest
 from aiohttp import web
+from playground_stub import PlaygroundStub
+from playground_stub import RunningStub as RunningPlayground
+from playground_stub import serving as serving_playground
 from retell_stub import RetellStub, RunningStub, serving
 
 from egma_simulator.config import DEFAULT_S3_BUCKET, DEFAULT_S3_REGION
@@ -539,6 +542,39 @@ async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningSt
             return await stack.enter_async_context(serving(RetellStub(**script)))
 
         yield start
+
+
+@pytest.fixture
+async def start_playground_stub() -> (
+    AsyncIterator[Callable[..., Awaitable[RunningPlayground]]]
+):
+    """Start playground-shaped stubs on loopback; each stops with the test.
+
+    The keyword arguments are :class:`PlaygroundStub`'s script — the key it
+    honors, the exchanges it plays, the statuses it refuses the leading
+    requests with.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+
+        async def start(**script: object) -> RunningPlayground:
+            return await stack.enter_async_context(
+                serving_playground(PlaygroundStub(**script))
+            )
+
+        yield start
+
+
+@pytest.fixture
+def quick_playground_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse the playground's rate-limit backoff to milliseconds.
+
+    Only the waiting is shortened. How many times a throttled request is
+    tried again, and what happens when they run out, are exactly the
+    production ones.
+    """
+    from egma_simulator.plugs import retell_playground
+
+    monkeypatch.setattr(retell_playground, "FIRST_BACKOFF_SECONDS", 0.001)
 
 
 @pytest.fixture

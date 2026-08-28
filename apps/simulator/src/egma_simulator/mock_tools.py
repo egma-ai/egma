@@ -41,6 +41,22 @@ receive an answer — a contract rather than a room feature, and it is why
 the room driver can register these against a real LiveKit and against the
 room-shaped stand-in CI runs, with nothing here changing.
 
+## The other way egma stands in the tool path
+
+Some platforms serve egma's answers themselves: the answers ride the
+request, the platform matches them by name, and it reports afterwards
+which tools were called and what each was given. Egma is just as much in
+the tool path there — the agent's real backend was never reached — but
+there is no exchange to conduct, so :meth:`MockToolSeam.hello` and
+:meth:`MockToolSeam.tool` have nothing to do.
+
+That lane uses three other doors: :meth:`MockToolSeam.answers` for the
+answers to send, :meth:`MockToolSeam.handed_over` to say they are in the
+platform's hands, and :meth:`MockToolSeam.reported` for each call the
+platform tells egma about afterwards. The answers are rendered here, once,
+so the bytes a tool is given are the same bytes on every lane and one
+record reads across them.
+
 ## What lands on the record
 
 Every call egma answers becomes a ``tool_call`` span: the name, the
@@ -194,6 +210,36 @@ class ExchangedToolCall:
     ended_unix_nano: int
 
 
+@dataclass(frozen=True)
+class AuthoredAnswer:
+    """One mock tool's answer, rendered for a platform that serves it.
+
+    The whole of what a lane needs to hand egma's answers to somebody
+    else: the name they are matched by, the bytes the tool is given, and
+    whether the answer is the failure branch — which such a platform says
+    its own way, because it is the one serving.
+    """
+
+    tool_name: str
+    """The agent's own name for the tool, verbatim — the whole of how a
+    call is matched, and never parsed or folded."""
+
+    served: str
+    """The value the tool is given, JSON-encoded: the tool's own return
+    value, or — where the answer is the failure branch — the failure it
+    raises. Untagged, because the tag is how the room exchange tells a
+    return from a raise, and a platform serving the answer itself says
+    which one it is in its own words."""
+
+    recorded: str
+    """What the record carries for a call this answer served — the same
+    bytes the room exchange records, so a mocked call reads the same
+    whichever lane served it."""
+
+    fails: bool
+    """Whether this answer is the failure branch."""
+
+
 Sleep = Callable[[float], Awaitable[None]]
 """How the declared delay is spent. Injected so a suite can hold it."""
 
@@ -281,6 +327,85 @@ class MockToolSeam:
                 name for name in self._discovered if name not in set(covered)
             ],
         }
+
+    # -- What a platform that serves egma's answers itself uses ---------------
+
+    def answers(self) -> tuple[AuthoredAnswer, ...]:
+        """Every answer this simulation holds, rendered once.
+
+        For the lane where the platform matches and serves them itself:
+        what it needs is the answers, not a handler. Rendered here rather
+        than by whoever sends them, so two lanes cannot spell one authored
+        answer two ways and leave a reader comparing bytes that only look
+        different.
+        """
+        return tuple(
+            AuthoredAnswer(
+                tool_name=mock.tool_name,
+                served=_serialized(mock.answer["error" if mock.fails else "answer"]),
+                recorded=_recorded(mock),
+                fails=mock.fails,
+            )
+            for mock in self._answers.values()
+        )
+
+    def handed_over(self) -> None:
+        """The answers are in the platform's own hands for this exchange.
+
+        The same claim :meth:`standing_ready` makes, and one more: on this
+        lane the two are one moment. There is no census to answer and no
+        call to serve, so the handing over *is* egma coming to stand
+        between the agent and its backends — every name in the snapshot
+        will be answered by the platform from here on, by the same
+        match-anything rule egma matches by.
+        """
+        self._standing_ready = True
+        self._stood_in_the_path = True
+
+    def reported(self, name: str, *, arguments: str | None = None) -> None:
+        """One tool call the platform says it made.
+
+        Written down the way a call egma served itself is, with two
+        differences that are both the truth about this lane. It is one
+        instant, because egma did not conduct the exchange and did not time
+        it. And the result rides **only** where the snapshot covers the
+        name: a covered call was answered from egma's own authored answer,
+        so recording that answer invents nothing, while an uncovered one
+        ran the customer's real implementation and its return value is
+        neither egma's to vouch for nor the record's to stamp. An uncovered
+        call lands as the observation it is — the name, the arguments, and
+        no stamp at all, which is the record's own way of saying a real
+        backend did the work.
+
+        The answer recorded for a covered call is **egma's own rendering**
+        and never the platform's echo of it, even where the platform
+        reports one. The two are the same value, and only egma's carries
+        the tag that tells a mocked failure from a tool that returned a
+        string — the platform says that part in its own field, which the
+        record has no room for.
+
+        Never *refused*: nothing here was asked of egma, so there was
+        nothing for egma to say no to.
+        """
+        called = name.strip()
+        if not called:
+            raise ValueError("a tool call the platform reported must name a tool")
+        now = self._clock()
+        if called not in self._discovered:
+            self._discovered = (*self._discovered, called)
+        mock = self._answers.get(called)
+        self._write_down(
+            ExchangedToolCall(
+                name=called,
+                arguments=arguments,
+                answer=None if mock is None else _recorded(mock),
+                mock_tool=None if mock is None else mock.tool_name,
+                late_attached=False,
+                refused=False,
+                began_unix_nano=now,
+                ended_unix_nano=now,
+            )
+        )
 
     # -- The two methods ------------------------------------------------------
 
@@ -432,12 +557,7 @@ class MockToolSeam:
         served = _serialized(mock.answer)
         _fits_on_the_wire(f"the mock tool for {name!r}", served)
         #
-        # Known and accepted: a tool whose own return value is an object
-        # with an `error` key records the same bytes a mocked failure
-        # does. The record's vocabulary gives the branch no slot of its
-        # own, and inventing one here would be this file deciding what the
-        # contract says.
-        recorded = served if mock.fails else _serialized(mock.answer["answer"])
+        recorded = _recorded(mock)
         # Answered, so egma really did stand between this tool and its
         # backend — which is what the coverage stamp claims.
         self._stood_in_the_path = True
@@ -505,6 +625,26 @@ def _speaks_this_version(asked: dict) -> None:
         f"{HELLO_METHOD} declares which version of this exchange it speaks; "
         f"Egma speaks {PROTOCOL_VERSION} and this one declared {declared}",
     )
+
+
+def _recorded(mock: MockTool) -> str:
+    """What the record carries for a call one mock tool answered.
+
+    The **wire** carries the tag — ``{"answer": …}`` or ``{"error": …}`` —
+    because whoever serves the answer has to know whether to return it to
+    the model or raise it, and an authored value that happened to look
+    like a failure would otherwise be one. The **record** carries what the
+    call was given: the tool's own return value, untagged, because that is
+    what the agent received and what a grader reads. A failure has no
+    return value to record, so there the tag stays — it is what keeps a
+    mocked failure from reading as a tool that returned a string.
+
+    Known and accepted: a tool whose own return value is an object with an
+    ``error`` key records the same bytes a mocked failure does. The
+    record's vocabulary gives the branch no slot of its own, and inventing
+    one here would be this file deciding what the contract says.
+    """
+    return _serialized(mock.answer if mock.fails else mock.answer["answer"])
 
 
 def _serialized(value: object) -> str:

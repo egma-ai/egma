@@ -382,6 +382,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
+    from .retell_playground import RetellPlayground
     from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
 
@@ -390,6 +391,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,
+        "retell_playground": RetellPlayground,
         "retell_web_call": RetellWebCall,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)
