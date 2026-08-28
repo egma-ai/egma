@@ -128,7 +128,7 @@ async def called(courier: Any, *args: Any, **kwargs: Any) -> Any:
 # right default: it needs no server, no account and no network, so it runs
 # on every machine and in CI. What it cannot say is whether egma is really
 # found in a real room's participant table, or whether the wait that makes
-# three of the four dispatch paths work really ends when a real participant
+# two of the three dispatch paths work really ends when a real participant
 # really arrives. Those are the two claims the room-name contract rests on,
 # and a fake that answers them is answering for itself.
 #

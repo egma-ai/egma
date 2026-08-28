@@ -104,10 +104,11 @@ agent learns it is in a simulation from the room's name, which begins
 persona's participant identity — see :mod:`egma_simulator.media.room`,
 where both are declared as the published contracts they are. Dispatch
 metadata cannot carry that signal: it reaches the agent only where egma
-dispatches by name, which is one of the four ways in. On the other three
-there is no dispatch at all, and an agent reading that channel for egma's
-context would find nothing and conclude it was in production while a
-simulation ran around it.
+dispatches by name, which is one of the three ways in. On the other two
+the customer's own endpoint dispatches and egma writes no metadata at
+all, so an agent reading that channel for egma's context would find
+nothing and conclude it was in production while a simulation ran around
+it.
 
 ## Answering for the agent's tools
 
@@ -747,7 +748,7 @@ class RoomLifecycle:
 
         Done at the join itself, which is the earliest moment it can be
         done and the only one that is early enough. The agent's side says
-        hello as its session starts, and on three of the four ways into a
+        hello as its session starts, and on two of the three ways into a
         room nothing egma does decides when that session starts: the
         worker can already be in the room, mid-hello, while egma is still
         connecting. A method registered a step later than the connect is a
@@ -837,7 +838,7 @@ class RoomLifecycle:
         not given, so putting a worker in the room is the endpoint's job
         and egma's part is to be in the room when it arrives.
 
-        On three of the four ways in the agent may have arrived already,
+        On two of the three ways in the agent may have arrived already,
         so the room is asked who is in it before anybody starts waiting
         for somebody to come.
         """

@@ -20,7 +20,7 @@
     "instructions": "Your card was charged twice for the same order this morning. You want the duplicate charge reversed and a confirmation number before you hang up."
   },
   "limits": {
-    "max_duration_seconds": 300,
+    "max_duration_seconds": 600,
     "max_turns": 40
   },
   "models": {

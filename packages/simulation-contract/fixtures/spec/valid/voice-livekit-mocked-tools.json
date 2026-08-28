@@ -24,7 +24,7 @@
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month. Find out what the practice offers you when the diary turns out to be full."
   },
   "limits": {
-    "max_duration_seconds": 300,
+    "max_duration_seconds": 600,
     "max_turns": 40
   },
   "models": {

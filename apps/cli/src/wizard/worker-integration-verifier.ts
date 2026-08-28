@@ -1196,10 +1196,10 @@ function requirementsEgmaDeclarations(source: string): readonly string[] {
  *
  * The floor is `0.2.0` because that is the first release in which `mockable`
  * and `monitor_livekit` decide from the job's room name. A `livekit_room`
- * connection can put a worker in an Egma room by four dispatch paths, and a
- * release below the floor reads dispatch metadata instead, which reaches the
- * worker on one of those four. Below the floor, therefore, mock tools are
- * inert on the other three and a simulation's spans leave through the
+ * connection can put a worker in an Egma room by three dispatch paths, and a
+ * release below the floor looks in dispatch metadata instead, where Egma
+ * writes nothing at all. Below the floor, therefore, mock tools are
+ * inert on every one of them and a simulation's spans leave through the
  * production door. Neither failure says anything from inside the worker: the
  * run completes, the real tools answer a synthetic caller, and the coverage
  * stamp is three empty lists. That silence is why the pin is proved from the

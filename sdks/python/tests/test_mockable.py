@@ -179,9 +179,9 @@ async def test_the_hello_wait_stays_clear_of_the_time_egma_gives_an_agent(sessio
 
 
 async def test_egma_arriving_after_the_agent_is_waited_for(session):
-    """The ordinary order, on three of the four dispatch paths into an egma room.
+    """The ordinary order, on two of the three dispatch paths into an egma room.
 
-    Nothing dispatches the worker on egma's behalf on those three, so the
+    Nothing dispatches the worker on egma's behalf on those two, so the
     agent is in the room first and egma walks in afterwards. The room's
     name already said this is a simulation, so this side may wait — and it
     connects before it waits, because a room nobody is connected to has

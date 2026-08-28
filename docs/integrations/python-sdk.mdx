@@ -31,7 +31,7 @@ Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
 The floor is `0.2.0` because that is the first release in which both functions
 read the room's name. A LiveKit connection puts your worker in an Egma room along
-four dispatch paths; releases below the floor looked in dispatch metadata, where
+three dispatch paths; releases below the floor looked in dispatch metadata, where
 Egma no longer writes anything, so `0.2.0` is what makes mock tools and the
 monitoring guard work at all.
 
@@ -105,7 +105,7 @@ Monitoring stays empty until a trace reaches Egma, then lists each production co
 
 Both functions ask one question, and they read the answer off the same place: **the name of the room the job was given.**
 
-Every room Egma holds a simulation in is named with the prefix `egma-sim-`. That prefix is a fixed, published contract. It does not change between releases, and it is the same on a self-hosted Egma as on the hosted one. Egma names the room before anything is dispatched into it, so the prefix is there on every one of the four dispatch paths that can put your worker in that room — Egma dispatching it by name, LiveKit's automatic dispatch handing it over, or your own token endpoint dispatching it.
+Every room Egma holds a simulation in is named with the prefix `egma-sim-`. That prefix is a fixed, published contract. It does not change between releases, and it is the same on a self-hosted Egma as on the hosted one. Egma names the room before anything is dispatched into it, so the prefix is there on every one of the three dispatch paths that can put your worker in that room — Egma dispatching it by name where it holds your project keys, or your own token endpoint dispatching it, whether by an API call of its own or by a `RoomConfiguration` inside the token it mints.
 
 Egma joins that room as a participant named `egma-persona`, or `egma-persona-<simulation id>` where your own endpoint minted the token. That identity is the address `mockable` sends mock-tool calls to. It is published for the same reason and is fixed in the same way.
 
@@ -269,7 +269,7 @@ This is production-safe by the same logic — a room Egma did not name means the
 - It fires on the room name alone, so a production room named to look like a simulation runs your canned answers. Refuse the `egma-sim-` prefix wherever your own side mints production tokens.
 
 <Warning>
-  Write this guard on the room name, and not on `egmaIdentity` in `ctx.job.metadata`. Your dispatch metadata is yours: Egma writes nothing into it on any of the four dispatch paths. A guard on that key is therefore false inside real simulations, and it goes on being false without complaining — reading a missing key raises nothing, so whatever you gated behind it runs its real implementation against a live caller.
+  Write this guard on the room name, and not on `egmaIdentity` in `ctx.job.metadata`. Your dispatch metadata is yours: Egma writes nothing into it on any of the three dispatch paths. A guard on that key is therefore false inside real simulations, and it goes on being false without complaining — reading a missing key raises nothing, so whatever you gated behind it runs its real implementation against a live caller.
 </Warning>
 
 Use this as a bridge while migrating, not as a permanent solution.

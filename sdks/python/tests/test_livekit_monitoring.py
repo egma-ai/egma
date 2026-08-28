@@ -172,13 +172,14 @@ async def test_real_exporter_posts_protobuf_with_the_project_key(monkeypatch):
 def test_an_egma_simulation_does_not_create_a_production_exporter(
     monkeypatch, caplog, context
 ):
-    """All four dispatch paths into an egma room, not just the one.
+    """All three dispatch paths into an egma room, not just the one.
 
     A simulation's spans have their own trace, so exporting the agent's
     side of the same room through the production door would put an
     invented second conversation into Monitoring. The room's name is the
-    one signal that arrives on all four paths: only an explicit dispatch
-    carries metadata, and the other three would otherwise export.
+    one signal that arrives on all three paths: egma writes no dispatch
+    metadata on any of them, so a worker reading that channel would
+    export on every one.
     """
     monkeypatch.delenv("EGMA_URL", raising=False)
     monkeypatch.delenv("EGMA_API_KEY", raising=False)

@@ -24,16 +24,17 @@ The name is read rather than the job's dispatch metadata because dispatch
 metadata belongs to the customer. LiveKit teaches it as the channel for a
 caller's own identifiers, so anything of egma's written there both
 collides with what a customer already reads and, worse, arrives on only
-one of the four dispatch paths that can put an agent in an egma room: it
-is carried by an explicit dispatch, and three of the four paths have
-none. A room name arrives on all four. Mock tools and the monitoring
-guard therefore hold on all four, instead of on the one dispatch path
-where egma dispatches the worker itself.
+one of the three dispatch paths that can put an agent in an egma room: it
+is carried by the dispatch egma makes itself, and on the other two the
+customer's own endpoint dispatches and egma writes nothing. A room name
+arrives on all three. Mock tools and the monitoring guard therefore hold
+on all three, instead of on the one dispatch path where egma dispatches
+the worker itself.
 
 It is also the only signal. Nothing in that metadata is read as a second
 way of saying "simulation", because a second way could catch no
 simulation room the prefix does not already catch — every one of them
-carries it, on all four dispatch paths — and could only add rooms that
+carries it, on all three dispatch paths — and could only add rooms that
 are not simulations at all. A production room whose own JSON happened to
 use the same key names would have its tools wrapped and its spans held
 back from production Monitoring, and a dropped trace is evidence a
@@ -46,7 +47,7 @@ It connects the job to its LiveKit room, if the agent's normal startup has
 not already done so. This is the one connect this SDK forces, it happens
 only in a room whose name already said simulation, and it is a stated
 consequence rather than an implementation detail: reading a room's
-participants needs a connected room, and on three of the four dispatch
+participants needs a connected room, and on two of the three dispatch
 paths the agent is in the room **before** egma is.
 
 It then finds egma among the room's remote participants, by name. egma
@@ -174,8 +175,8 @@ SIMULATION_ROOM_PREFIX = "egma-sim-"
 Fixed and published, which is the only reason a customer's SDK may key
 off it: egma mints ``egma-sim-<run>`` itself where it holds the project's
 keys, and asks the customer's own token endpoint for the same name where
-it does not, so the prefix is on the room on all four dispatch paths that
-can put an agent into one.
+it does not, so the prefix is on the room on all three dispatch paths
+that can put an agent into one.
 
 It is a weaker anchor than it looks and this side says so rather than
 pretending otherwise. A room name is chosen by whoever mints the join
@@ -255,7 +256,7 @@ STARTUP_SECONDS = EGMA_CONNECT_SECONDS + ARRIVAL_MARGIN_SECONDS
 
 Added up rather than picked, because the worst case this has to cover is
 an agent whose job starts at the very moment egma begins connecting —
-which is the ordinary case on three of the four dispatch paths. Written
+which is the ordinary case on two of the three dispatch paths. Written
 as the sum rather than as its answer so the two halves stay separately
 checkable: the 30 against egma's own constant, the 15 against the
 sentence above that says what it is for and what it deliberately leaves
@@ -796,7 +797,7 @@ async def _asked_until_egma_is_listening(
     """Send the census, allowing for an egma that is in but not yet listening.
 
     egma's participant enters the room before it registers the two methods
-    of the exchange, and on three of the four dispatch paths this agent
+    of the exchange, and on two of the three dispatch paths this agent
     can be asking in exactly that window. The transport answers an
     unregistered method with ``UNSUPPORTED_METHOD``, which this side would
     otherwise read as "there is no egma here" and fall open on for the

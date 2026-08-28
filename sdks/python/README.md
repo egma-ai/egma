@@ -19,9 +19,9 @@ pip install 'egma>=0.2.0'
 
 `0.2.0` is the floor because it is the first release that knows a
 simulation by the room's name, and so the first that holds on every one of
-the four dispatch paths. An unpinned install can resolve to a release that
-looks in the dispatch metadata instead, where Egma no longer writes
-anything — inert inside a real simulation on all four.
+the three dispatch paths. An unpinned install can resolve to a release
+that looks in the dispatch metadata instead, where Egma no longer writes
+anything — inert inside a real simulation on all three.
 
 For a LiveKit agent on Python 3.11 or newer.
 
@@ -169,7 +169,7 @@ those.
 In a simulation room, `mockable` connects the job with LiveKit's own
 `JobContext.connect()` if your startup has not already done so, then finds
 Egma among the room's participants: Egma joins as `egma-persona` or
-`egma-persona-<simulation>`. On three of the four dispatch paths your
+`egma-persona-<simulation>`. On two of the three dispatch paths your
 agent is in the room **before** Egma, so it waits for that participant,
 for up to 45 seconds and without polling anything outside the room. That
 is a long time to hold an agent before it greets anybody, and it is the

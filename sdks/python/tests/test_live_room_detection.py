@@ -8,7 +8,7 @@ settled that way, and both are load-bearing:
   participant table, and a fake table is a fake answer.
 - **the wait really ends.** Detection is the room's name, and the name is
   what lets this side wait for egma rather than conclude production. On
-  three of the four dispatch paths the agent is in the room *first*, so the
+  two of the three dispatch paths the agent is in the room *first*, so the
   wait is not a nicety there — it is the whole reason those paths work.
 
 So these run against a real server, and deliberately cost nothing to run:
@@ -160,12 +160,12 @@ async def test_egma_already_in_the_room_is_found_and_answers(
 async def test_the_agent_in_the_room_first_waits_for_egma(
     live_livekit: Any, session: Any
 ) -> None:
-    """The order that made three of the four dispatch paths work.
+    """The order that made two of the three dispatch paths work.
 
-    On automatic dispatch and on both token-endpoint paths the worker is
-    walked into the room as the room comes into existence, which is before
-    egma has joined it. The room's name is what says to wait; this proves
-    the waiting really ends when a real participant really arrives.
+    On both token-endpoint paths the worker is walked into the room as the
+    room comes into existence, which is before egma has joined it. The
+    room's name is what says to wait; this proves the waiting really ends
+    when a real participant really arrives.
     """
     room_name = "egma-sim-live-agent-first"
     room = await _agent_joins(live_livekit, room_name)

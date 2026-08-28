@@ -101,12 +101,13 @@ of the channels LiveKit gives an agent for its per-session context.
 | Channel | Where your agent reads it | When |
 |---|---|---|
 | Room metadata | `ctx.room.metadata` | Always |
-| Dispatch metadata | `ctx.job.metadata` | When the connection names an agent |
+| Dispatch metadata | `ctx.job.metadata` | Always, on this variant |
 
-Naming an agent is what creates a dispatch for the value to ride on. A blank
-agent name is automatic dispatch, where LiveKit hands the room to whichever
-worker is listening and there is no dispatch to carry anything, so the room is
-the only channel there.
+Every connection of this variant names an agent, and naming one is what creates
+the dispatch the value rides on. Egma dispatches your worker by name for every
+simulation, so both channels are always there — and the record can say which
+agent it graded, which a room handed to whichever worker was listening never
+could.
 
 Each channel carries your string byte for byte. Egma adds nothing to either and
 writes neither out again, so an agent reading `ctx.job.metadata` and one reading

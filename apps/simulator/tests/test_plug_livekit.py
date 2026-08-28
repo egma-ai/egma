@@ -971,10 +971,11 @@ async def test_a_connection_that_names_no_agent_is_refused_before_any_request(
 async def test_an_agent_that_got_into_the_room_first_is_still_somebody_who_came():
     """A worker already in the room is not a worker that never came.
 
-    On three of the four ways into a room, nothing egma does decides when
-    the worker is given the room: automatic dispatch hands it over the
-    moment the room exists, and a customer's own dispatcher hands it over
-    whenever it likes. So the ordinary case is an agent sitting in the
+    On two of the three ways into a room, nothing egma does decides when
+    the worker is given the room: the customer's own endpoint hands it
+    over whenever it likes, whether by an API call of its own or by a
+    ``RoomConfiguration`` inside the token it mints. So the ordinary case
+    is an agent sitting in the
     room, publishing, before egma's transport connects — and a room
     announces an arrival only to somebody who was already watching.
     Waiting for an event that will never fire would end a live simulation

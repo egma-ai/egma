@@ -29,7 +29,7 @@ against, and what the egma SDK inside the customer's worker reads to
 answer "am I in a simulation?"
 before it connects to anything — the one question that decides whether
 mock tools are served and whether the agent's spans go out the
-production door. Every room name built below begins with it on all four
+production door. Every room name built below begins with it on all three
 ways into a room, which is what makes that answer the same answer
 everywhere.
 
@@ -410,8 +410,8 @@ class JoinedRoom:
         """Run ``offer`` the instant this room is entered, before anything
         else learns the room is up.
 
-        The agent can already be in the room when egma arrives — on three
-        of the four ways in nothing egma does puts it there, so it joins
+        The agent can already be in the room when egma arrives — on two
+        of the three ways in nothing egma does puts it there, so it joins
         whenever its own dispatcher says. Whatever offers to answer for
         the agent's tools therefore has to be live at the earliest moment
         it *can* be live, which is the connect itself: a method registered
