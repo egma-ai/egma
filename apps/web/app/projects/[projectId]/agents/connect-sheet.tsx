@@ -283,7 +283,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const selectedModality = retellModality(selectedRetellAgent);
   const selectedRoutes =
     plan === null ? [] : retellCandidatesForPlan(plan, selectedRetellAgent);
-  const voiceRoutes = selectedRoutes.filter((one) => one.modality === "voice");
+  // The voice connection this flow offers is a phone number Egma dials, the
+  // way an agent's own callers reach it. Discovery also returns a web-call
+  // candidate for every voice agent, but that lane is Egma placing the call
+  // itself for the mocked-run tick, not a connection a person picks here — the
+  // CLI's connect offers only text and phone for the same reason. Left in, it
+  // would sit in the phone chooser as a blank option (it carries no number) and,
+  // being first, become the step's default — saving a web call where the person
+  // asked for a phone.
+  const voiceRoutes = selectedRoutes.filter(
+    (one) => one.modality === "voice" && one.connectionType === "phone_number",
+  );
   const chatRoute = selectedRoutes.find((one) => one.modality === "chat");
   const selectedVoiceRoute = voiceRoutes.find(
     (one) => retellCandidateValue(one) === retellRoute,

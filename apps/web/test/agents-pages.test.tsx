@@ -1714,9 +1714,14 @@ describe("goal-first agent setup", () => {
     const numbers = (await screen.findByLabelText(
       "Phone number*",
     )) as HTMLSelectElement;
-    expect([...numbers.options].map((one) => one.value)).toContain(
+    // Discovery offers this voice agent a web-call candidate too — the lane the
+    // mocked-run tick conducts over — but it carries no number, so it stays out
+    // of the phone chooser rather than sitting in it as a blank option and, by
+    // sorting first, becoming the step's default.
+    expect([...numbers.options].map((one) => one.value)).toEqual([
       "phone:+14155550100",
-    );
+    ]);
+    expect(numbers.value).toBe("phone:+14155550100");
   });
 
   it("uses one Retell key for Both and stores the selected voice route", async () => {
