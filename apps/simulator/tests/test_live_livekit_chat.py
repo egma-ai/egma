@@ -50,12 +50,19 @@ typed run can say:
   from here directly. What can be: the simulation did not end with the
   missing-chat-setup reason, which is the plug saying it never saw that
   mark or an audio track; and every second the agent spent answering,
-  less the most the plug can have added to it, adds up to less than
-  speaking those same words would have taken. That subtraction is the
-  quiet period, and it is now an upper bound rather than a fixed cost: an
-  agent that publishes its own state ends its turns without paying it.
-  Subtracting it anyway understates the agent's thinking time, which is
-  the safe direction for this assertion.
+  less the quiet period, adds up to less than speaking those same words
+  would have taken.
+
+  The quiet period is the only cost this plug can add to *every* turn,
+  and on an agent that publishes its own state it adds none at all, so
+  subtracting it understates the agent's thinking time — the safe
+  direction here. It is not the plug's ceiling. A turn that ends with a
+  stream still open pays up to ``TURN_DRAIN_SECONDS`` inside the same
+  ``deliver`` call the latency is measured across, and nothing below
+  subtracts that: a drained turn makes this assertion strict rather than
+  safe, and could fail it for a reason that is not speech pace. Such a
+  turn writes its own line in the simulator's log, which is where to look
+  if this fails on a run whose words were plainly typed.
 """
 
 from __future__ import annotations
@@ -233,11 +240,16 @@ async def test_the_simulator_types_a_whole_simulation_in_a_real_room(
     assert reference.startswith(f"{ROOM_PREFIX}-"), reference
 
     # Text-paced, on the one arithmetic a live run can be held to. Every
-    # answer's own latency less the most the plug can have added to it is
-    # at most the time the agent really took, and all of it together is
-    # less than speaking those same words would have cost. The quiet
-    # period is that upper bound: a turn the agent ended itself paid none
-    # of it, so subtracting it here can only understate the agent.
+    # answer's own latency less the quiet period is at most the time the
+    # agent really took, and all of it together is less than speaking
+    # those same words would have cost. The quiet period is the only cost
+    # this plug can add to every turn — a turn the agent ended itself paid
+    # none of it — so subtracting it here can only understate the agent.
+    # It is not the whole of what the plug can add: a turn that ended with
+    # a stream still open also paid TURN_DRAIN_SECONDS inside the measured
+    # call, and nothing subtracts that. A run with such a turn in it holds
+    # this assertion strictly rather than safely, and names the turn in
+    # the simulator's log.
     answering = [
         record["span"]
         for record in spans_for(records, SIMULATION)

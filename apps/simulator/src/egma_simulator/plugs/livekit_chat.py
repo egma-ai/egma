@@ -55,11 +55,14 @@ attribute, and its return to ``listening`` or ``idle`` is the end of the
 whole turn, the tool call inside it included. Egma keys on that arrival.
 Where it never arrives, because the agent is not a LiveKit session or
 because two quick transitions collapsed into a publish that changed
-nothing, :data:`TURN_QUIET_SECONDS` of quiet past the last stream to
-close ends the turn instead, and the agent leaving the room ends it for
-good. The quiet period is the fallback and no longer the rule, which is
-why it is smaller than the one this plug shipped with: an agent that says
-when it has finished does not pay it at all.
+nothing, or because the agent runs a realtime model and this plug's chat
+setup leaves it no audio output for the platform to publish that return
+for, :data:`TURN_QUIET_SECONDS` of quiet past the last stream to close
+ends the turn instead, and the agent leaving the room ends it for good.
+The quiet period is the fallback and no longer the rule, and that is the
+whole of what changed about it: an agent that says when it has finished
+does not pay it at all, and it stays the measured number for every agent
+that does.
 
 **And every stream this turn opened has to have closed.** The wire gives
 one text stream per utterance and closes it when that utterance is done,
@@ -70,10 +73,13 @@ turn while a stream stamped with it is still open: not a finished state,
 not a spent quiet period. Egma waits for it, bounded by
 :data:`TURN_DRAIN_SECONDS` so one stalled stream cannot hold a whole
 simulation, and says in the log when that bound is what ended the wait.
-Only two things cut that wait short, and neither of them is a turn being
-recorded: an audio track in the room, which this plug refuses as a
-missing chat setup, and the server dropping egma, which ends the
-simulation. This half is a fix, not a nicety: the turn used to end on
+Only two things keep that wait from being entered at all, and neither of
+them is a turn being recorded: an audio track in the room, which this
+plug refuses as a missing chat setup, and the server dropping egma,
+which ends the simulation. Both are read before the wait starts. Once it
+has started it watches this turn's streams and nothing else, so a track
+published or a room dropped inside it is not noticed until the wait is
+over. This half is a fix, not a nicety: the turn used to end on
 what had already arrived, the next turn refused those words for being
 older, and a customer read an agent turn that began part-way through a
 sentence with nothing to say a word had gone.
@@ -162,17 +168,20 @@ about to answer. This errs long, because the first wastes seconds and the
 second wastes the run.
 """
 
-TURN_QUIET_SECONDS = 3.0
+TURN_QUIET_SECONDS = 5.0
 """How long the room stays quiet before the agent's turn is over.
 
 **The fallback, not the rule.** The rule is the agent's own
 ``lk.agent.state``, and this number is what stands in where that never
-arrives: an agent that is not a LiveKit session and publishes no state at
-all, or a turn whose state changes were quick enough to collapse into a
-publish that said nothing new. It still has to be long enough for the
-slowest honest thing an agent does inside one turn — call a tool and
-answer out of what came back — because on those agents it is the whole of
-the rule, exactly as it was before.
+arrives. Three kinds of agent land here: one that is not a LiveKit
+session and publishes no state at all, one whose state changes were quick
+enough to collapse into a publish that said nothing new, and one running
+a realtime model, whose return to ``listening`` the agents SDK publishes
+only where the session has audio output — which this plug's chat setup
+switches off. So it still has to be long enough for the slowest honest
+thing an agent does inside one turn — call a tool and answer out of what
+came back — because on those agents it is the whole of the rule, exactly
+as it was before.
 
 Measured against the tool-calling fixture agent in a real room, on
 2026-08-28, with ``check_availability`` answered by a mock tool declaring
@@ -182,29 +191,32 @@ seconds**, of which the declared delay was 1.50 — so everything the wire
 itself costs, the tool round trip over LiveKit's own RPC included, is
 about **0.02 seconds**. A turn with no tool call in it arrived in 0.03.
 
-Five seconds was that measurement plus a budget for the one part it could
+Five seconds is that measurement plus a budget for the one part it could
 not include — the agent's model, because the account it ran on had no
-credit and a scripted one stood in. Three is the same measurement with a
-smaller budget for the same unmeasured part, and what pays for the cut is
-the state signal taking the common case away from this number entirely.
-The remaining budget is about one and a half seconds over the measured
-gap, which covers a small model on either side of a declared delay and
-not a slow one on both.
+credit and a scripted one stood in. It is the measured number and not a
+tuned one, deliberately: the budget has to clear the same gap
+:data:`REPLY_SECONDS` is written for, which is a declared mock-tool delay
+of three seconds with a model round trip on either side of it. A turn cut
+short here is an agent that publishes no state *and* is still inside one
+of those gaps, and the words it loses are the answer rather than the
+filler.
 
-The trade is written down rather than hidden, because it is a real one and
-it has a shape worth recognising on a future record: a turn cut short here
-is an agent that publishes no state *and* leaves more than three seconds
-between two utterances of one turn — a declared mock-tool delay plus the
-model on either side of it. Half of that shape is the customer's own
-configuration, which is why the driver names the room, the turn and the
-length of what it dropped every time it drops anything.
+Cutting it to three seconds was tried and taken back. It reads as free —
+the state signal now carries the common case — and it is not: what the
+cut removes is the whole of the rule for the three kinds of agent above,
+and a stateless agent that says a filler and answers three and a half
+seconds later loses its answer at three seconds and keeps it at five.
+``test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn``
+holds that case, so the number cannot be re-tuned quietly.
 
-The cost of the old number was measured too. On the founder's run of
-2026-08-28 the agent's turns landed between five and eight seconds after
-the persona's, against about 1.3 seconds for the persona to answer: seven
-quiet periods, thirty-five seconds, on a fifty-four second run. Two thirds
-of a chat simulation was this plug waiting to find out something the
-platform had already published.
+What the state signal changed is who pays, not how much. On the founder's
+run of 2026-08-28 the agent's turns landed between five and eight seconds
+after the persona's, against about 1.3 seconds for the persona to answer:
+seven quiet periods, thirty-five seconds, on a fifty-four second run. Two
+thirds of a chat simulation was this plug waiting to find out something
+the platform had already published. An agent that publishes its state now
+pays none of that, and the number is spent only where nothing else can
+end the turn.
 
 It is deliberately a plain number and not a wait that stretches while a
 mock-tool exchange is in flight. Egma answers only the tools this

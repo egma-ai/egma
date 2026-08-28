@@ -609,14 +609,49 @@ class StubLocalParticipant:
 
 
 class StubLocalRoom:
-    """What ``rtc.Room`` is to the text room: a participant, and a way out."""
+    """What ``rtc.Room`` is to the text room: a participant, a way out, and
+    every handler the driver registered on it.
+
+    The handlers are kept rather than ignored because they are the wire:
+    what LiveKit hands each event, and in what order, is the one thing a
+    fake cannot derive from the driver, and a script that reached past
+    them would prove nothing about the unpacking each one does.
+    """
 
     def __init__(self, participant: StubLocalParticipant) -> None:
         self.local_participant = participant
         self.left = False
+        self.handlers: dict[str, Any] = {}
+        """Every ``room.on`` handler, under the event name it answers."""
+        self.text_streams: dict[str, Any] = {}
+        """Every text-stream handler, under the topic it reads."""
+
+    def on(self, event: str) -> Any:
+        """``rtc.Room.on``, which is a decorator that keeps the handler."""
+
+        def keep(handler: Any) -> Any:
+            self.handlers[event] = handler
+            return handler
+
+        return keep
+
+    def register_text_stream_handler(self, topic: str, handler: Any) -> None:
+        self.text_streams[topic] = handler
 
     async def disconnect(self) -> None:
         self.left = True
+
+
+class StubParticipant:
+    """What the attributes event carries beside the attributes.
+
+    A participant object and never an identity string, because the driver
+    reads the identity off it: a fake that handed over the string already
+    would be doing the driver's work and proving its own.
+    """
+
+    def __init__(self, identity: str) -> None:
+        self.identity = identity
 
 
 @dataclass(frozen=True)
@@ -678,13 +713,15 @@ class ScriptedStream:
 class StubTextRoom(TextRoom):
     """The real text room, with the LiveKit under it answered here.
 
-    Only the join is stood in for, and everything a chat test then walks
-    is the driver's own code: stamping each stream at its header, reading
-    it to its close, dropping egma's own words, taking the agent's own
-    state off the attribute channel, deciding where a turn ends and
-    waiting out whatever it has to wait out, and offering the mock-tool
-    methods on egma's participant. What is scripted is only what the agent
-    does.
+    Only reaching a LiveKit is stood in for, and everything a chat test
+    then walks is the driver's own code: registering the handlers it reads
+    the wire through, stamping each stream at its header, reading it to
+    its close, dropping egma's own words, taking the agent's own state off
+    the attribute channel, deciding where a turn ends and waiting out
+    whatever it has to wait out, and offering the mock-tool methods on
+    egma's participant. Even the join registers through the driver, so a
+    script fires the very handlers a real room fires. What is scripted is
+    only what the agent does.
     """
 
     def __init__(self, backend: ChatRoomStubBackend, **built: Any) -> None:
@@ -692,6 +729,10 @@ class StubTextRoom(TextRoom):
         self._backend = backend
         self._replies: list[Scripted] = list(backend.stub.replies)
         self._speaking: asyncio.Task[None] | None = None
+        self._stating: set[asyncio.Task[None]] = set()
+        self._published_state: str | None = None
+        """The last state this agent really published. Only a change
+        travels the wire, so only a change goes out from here."""
         self.who_arrived: list[str] = []
 
     @property
@@ -700,17 +741,24 @@ class StubTextRoom(TextRoom):
 
     async def join(self) -> None:
         """Enter the room, with nothing under it but this script."""
-        self._room = StubLocalRoom(StubLocalParticipant(self))
+        room = StubLocalRoom(StubLocalParticipant(self))
+        # The driver's own registration, run here rather than stood in
+        # for: what a script fires below is the handler a real room fires,
+        # taking what a real room hands it.
+        self._watch(room)
+        self._room = room
         if self._backend.agent_is_coming:
             self.agent_arrives()
 
     async def leave(self) -> None:
         """Stop the agent mid-sentence, then leave the driver's own way."""
         speaking, self._speaking = self._speaking, None
-        if speaking is not None and not speaking.done():
-            speaking.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await speaking
+        stating, self._stating = self._stating, set()
+        for running in (speaking, *stating):
+            if running is not None and not running.done():
+                running.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await running
         await super().leave()
 
     async def perform_rpc(self, method: str, payload: str) -> str:
@@ -740,11 +788,25 @@ class StubTextRoom(TextRoom):
     def agent_publishes_state(self, state: str) -> None:
         """One ``lk.agent.state`` change, the way LiveKit delivers one.
 
-        Into the driver's own handler, under the attribute name and the
-        participant identity a real room would carry — so what a test
-        proves about the signal is proved about the code that reads it.
+        Into the handler the driver registered for
+        ``participant_attributes_changed``, with the changed attributes
+        first and the participant second. That order is this event's
+        alone — every other participant event in ``livekit.rtc`` puts the
+        participant first — so it is the one thing here a fake must not
+        skip past: a stub calling one method deeper would leave the whole
+        suite green with the two arguments the wrong way round.
+
+        Only a *change* goes out, because only changed attributes travel.
+        An agent setting the state it is already in publishes nothing,
+        which is the same fact that makes two fast transitions coalesce
+        into one.
         """
-        self._note_agent_state({AGENT_STATE_ATTRIBUTE: state}, AGENT_IDENTITY)
+        if state == self._published_state:
+            return
+        self._published_state = state
+        self._room.handlers["participant_attributes_changed"](
+            {AGENT_STATE_ATTRIBUTE: state}, StubParticipant(AGENT_IDENTITY)
+        )
 
     def persona_typed(self, topic: str, text: str) -> None:
         """Egma's turn arrives, and the agent takes its next one."""
@@ -806,7 +868,16 @@ class StubTextRoom(TextRoom):
             )
             streams.append(stream)
             self._agent_said(stream, AGENT_IDENTITY)
-        await self._then_states(opened, streams)
+        # Scheduled rather than awaited: the state still follows this
+        # turn's last close, and the departure below still does not wait
+        # for it. Awaiting it here made a scripted state a barrier the
+        # streams had to clear first, which quietly took the race out of
+        # every test that scripted both.
+        stating = asyncio.create_task(
+            self._then_states(opened, streams), name="chat-room-stub-states"
+        )
+        self._stating.add(stating)
+        stating.add_done_callback(self._stating.discard)
         # The departure does not wait for the streams to be read, because
         # on a real wire it does not: a participant's last words and its
         # leaving reach egma through one queue and the words are read in a
@@ -936,7 +1007,9 @@ class ChatStub:
     quiet period is still a real path. A turn scripted with
     ``["listening"]`` alone is the coalesced case: the platform dropped the
     intermediate publishes and egma never saw ``thinking`` or ``speaking``,
-    which is exactly why nothing may wait to see them."""
+    which is exactly why nothing may wait to see them. A state the agent
+    is already in publishes nothing, here as on the wire, so repeating one
+    from the turn before scripts silence rather than a second arrival."""
 
     agent_state_at_start: str | None = None
     """A state published the moment the worker arrives, before any
