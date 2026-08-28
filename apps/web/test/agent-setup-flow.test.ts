@@ -6,6 +6,8 @@ import {
   retellAgentsForPlan,
   retellCandidateValue,
   retellCandidatesForPlan,
+  stepAfterLiveKitChat,
+  stepAfterLiveKitCredentials,
   stepAfterPlatform,
   stepAfterRetellAgent,
   type RetellDiscoveredAgent,
@@ -175,10 +177,8 @@ describe("the goal-first agent setup plan", () => {
   it("defines the approved screen graph without putting screen order in provider payloads", () => {
     expect(stepAfterPlatform("simulation", "retell")).toBe("retell-key");
     expect(stepAfterPlatform("monitoring", "retell")).toBe("retell-key");
-    expect(stepAfterPlatform("simulation", "livekit")).toBe(
-      "livekit-simulation",
-    );
-    expect(stepAfterPlatform("both", "livekit")).toBe("livekit-simulation");
+    expect(stepAfterPlatform("simulation", "livekit")).toBe("livekit-modality");
+    expect(stepAfterPlatform("both", "livekit")).toBe("livekit-modality");
     expect(stepAfterPlatform("monitoring", "livekit")).toBe(
       "livekit-monitoring",
     );
@@ -218,5 +218,46 @@ describe("the goal-first agent setup plan", () => {
         goal: "monitoring",
       }),
     ).toBe("platform");
+  });
+
+  /**
+   * The modality is the first LiveKit screen, and a chat connection has one
+   * more screen after the credentials than a voice one — so Back has to walk a
+   * chat Both walk through four screens where a voice one has three.
+   */
+  it("puts the LiveKit modality question first and walks chat back through its instructions", () => {
+    const simulation = agentSetupPlan("simulation", "livekit");
+    const both = agentSetupPlan("both", "livekit");
+
+    expect(stepAfterLiveKitCredentials(simulation, "voice")).toBeNull();
+    expect(stepAfterLiveKitCredentials(simulation, "chat")).toBe("livekit-chat");
+    expect(stepAfterLiveKitCredentials(both, "voice")).toBe("livekit-monitoring");
+    expect(stepAfterLiveKitCredentials(both, "chat")).toBe("livekit-chat");
+    expect(stepAfterLiveKitChat(simulation)).toBeNull();
+    expect(stepAfterLiveKitChat(both)).toBe("livekit-monitoring");
+
+    expect(
+      previousAgentSetupStep({ step: "livekit-modality", goal: "simulation" }),
+    ).toBe("platform");
+    expect(
+      previousAgentSetupStep({ step: "livekit-simulation", goal: "simulation" }),
+    ).toBe("livekit-modality");
+    expect(
+      previousAgentSetupStep({ step: "livekit-chat", goal: "both" }),
+    ).toBe("livekit-simulation");
+    expect(
+      previousAgentSetupStep({
+        step: "livekit-monitoring",
+        goal: "both",
+        liveKitModality: "chat",
+      }),
+    ).toBe("livekit-chat");
+    expect(
+      previousAgentSetupStep({
+        step: "livekit-monitoring",
+        goal: "both",
+        liveKitModality: "voice",
+      }),
+    ).toBe("livekit-simulation");
   });
 });

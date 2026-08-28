@@ -51,18 +51,31 @@ import { mintKey, NEUTRAL_PERSON, request as ask } from "./traces.ts";
  * feed would prove nothing. What lands on the row is what a real report lands.
  */
 
-/** A voice connection that needs no live worker in these route-only tests. */
-const A_VOICE_AGENT = {
-  agentPlatform: "livekit",
-  connectionType: "livekit_room",
-  accessVariant: "livekit_room.project_credentials",
-  modality: "voice",
-  config: { url: "wss://acme.livekit.cloud" },
-  credentials: {
-    apiKey: "livekit-key-A1B2C3D4WXYZ",
-    apiSecret: "livekit-secret-E5F6G7H8QRST",
-  },
-} as const;
+/**
+ * A voice connection that needs no live worker in these route-only tests.
+ *
+ * The worker name is per-arrangement rather than fixed, because a server and a
+ * worker name together are what say two registrations are one agent. Every
+ * arrangement here wants an agent of its own, so each names its own worker;
+ * a shared name would quietly fold them into one and the second registration
+ * would answer `reused` where the suite expects a new agent.
+ */
+function aVoiceAgent(worker: number) {
+  return {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "voice",
+    config: {
+      url: "wss://acme.livekit.cloud",
+      agentName: `front-desk-${String(worker)}`,
+    },
+    credentials: {
+      apiKey: "livekit-key-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-E5F6G7H8QRST",
+    },
+  } as const;
+}
 
 /** The same shape, over chat, for the refusal that a chat has no audio. */
 const A_CHAT_AGENT = {
@@ -362,7 +375,7 @@ export async function aConductedRun(
   const registered = await ask(app, "POST", "/v1/agents", who.key, {
     agentPlatform: "retell",
     name: `Front desk ${modality} ${String(runs)}`,
-    connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
+    connection: modality === "voice" ? aVoiceAgent(runs) : A_CHAT_AGENT,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const agentId = (registered.body.agent as { id: string }).id;

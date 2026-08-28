@@ -96,6 +96,16 @@ type AccessVariant = {
   readonly credentials: CredentialRule;
   /** What a caller sending the *other* access variant's credentials is told. */
   readonly mixedUp?: string;
+  /**
+   * Fewer modalities than the connection type speaks, for a variant that
+   * cannot carry them all — absent means the type's own list. The narrowing
+   * and the sentence explaining it are one field, so a variant cannot lose one
+   * and keep the other.
+   */
+  readonly modalities?: {
+    readonly speaks: readonly string[];
+    readonly refusal: string;
+  };
 };
 
 type Descriptor = {
@@ -104,13 +114,30 @@ type Descriptor = {
   /** The access variants this connection type supports. */
   readonly accessVariants: readonly [AccessVariant, ...AccessVariant[]];
   /**
-   * Which config key decides that two registrations are about one vendor
-   * agent. A type that cannot answer that — a framework the customer runs
-   * themselves has no vendor identifier — declares none and always creates.
+   * How this kind decides that two registrations are about one vendor agent.
+   * A type that cannot decide it — a phone number is where egma dials rather
+   * than who answers — declares nothing and always creates.
+   *
+   * Two halves rather than one config key, because the honest identity is not
+   * always a value sitting in the config: `matchedKeys` is what a lookup can
+   * narrow by, and `identityOf` is what decides.
    */
-  readonly reuseKey?: string;
+  readonly reuse?: ReuseRule;
   /** Whether anything can conduct a run over this connection type today. */
   readonly simulatorAdapter: boolean;
+};
+
+type ReuseRule = {
+  /** Config keys every candidate must match. A filter, never the answer. */
+  readonly matchedKeys: readonly string[];
+  /**
+   * What one config stands for, or `undefined` when it stands for nothing —
+   * which is what makes an access variant carrying none of the keys create
+   * every time.
+   */
+  readonly identityOf: (
+    config: Readonly<Record<string, string>>,
+  ) => string | undefined;
 };
 
 function nonEmptyString(key: string, value: unknown): string {
@@ -172,6 +199,31 @@ function credentialString(what: string, field: string, value: unknown): string {
     );
   }
   return trimmed;
+}
+
+/**
+ * Which LiveKit server a url names, as one comparable string. The scheme is
+ * dropped because the SDKs normalise between the websocket pair and the HTTP
+ * pair themselves, so two spellings reach one server. `URL` already reports an
+ * empty port for one that is its scheme's default, so `wss://a`, `wss://a:443`
+ * and `ws://a:80` compare equal, while a self-hosted `:7880` is kept.
+ *
+ * Copied from the registry rather than imported, like every other gate here:
+ * this fixture re-implements the rules on purpose, so it can never be kinder
+ * than the real thing by borrowing from it.
+ */
+function livekitServerOrigin(url: string): string {
+  const written = url.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written.toLowerCase();
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/u, "");
+  return parsed.port === "" ? host : `${host}:${parsed.port}`;
 }
 
 /** The last four of one field — only ever a credential's public half. */
@@ -319,8 +371,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         },
       },
     ],
-    // The provider's own agent id: the first vendor to carry a reuse rule.
-    reuseKey: "retellAgentId",
+    // The provider's own agent id: the simple case the mechanism was built
+    // for, where one config key compared as it was stored is the identity.
+    reuse: {
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
     simulatorAdapter: true,
   },
   retell_playground: {
@@ -348,7 +404,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     ],
     // The same vendor agent as the voice connection beside it: chat and voice
     // land as two connections on one Egma agent, never a twin.
-    reuseKey: "retellAgentId",
+    reuse: {
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
     simulatorAdapter: true,
   },
   phone_number: {
@@ -384,8 +443,10 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     simulatorAdapter: true,
   },
   livekit_room: {
-    // Voice only, because voice is the lane that exists.
-    modalities: ["voice"],
+    // Chat is here because the plug that conducts one ships beside it: egma
+    // dispatches the named worker with the modality in its metadata and the
+    // agent goes text-only.
+    modalities: ["voice", "chat"],
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
@@ -404,12 +465,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         named: "a LiveKit room connection",
         config: {
           url: livekitServerUrl,
-          // Left out means automatic dispatch: whichever worker is listening.
-          agentName: optional(nonEmptyString),
+          // Demanded: every egma dispatch is explicit, so the record names
+          // the agent it graded.
+          agentName: nonEmptyString,
           // Handed to the agent exactly as written, on both of the channels
           // LiveKit gives an agent to read its per-session context from: the
-          // room's metadata always, and the dispatch's metadata as well
-          // wherever `agentName` above names a worker to dispatch.
+          // room's metadata always, and the dispatch's metadata too — the
+          // demanded `agentName` above always names a worker to dispatch.
           metadata: optional(jsonObjectText),
         },
         credentials: {
@@ -427,6 +489,18 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       {
         id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
+        // Voice only, on a kind that speaks both: egma joins a room this
+        // variant's endpoint let it into and never dispatches the worker, so
+        // it has nowhere to ask the agent to go text-only.
+        modalities: {
+          speaks: ["voice"],
+          refusal:
+            "a token-endpoint livekit connection speaks voice: Egma asks your " +
+            "endpoint for a token and never dispatches the worker itself, so " +
+            "it has no way to tell the agent to answer in text. Chat is " +
+            "offered on the LiveKit project credentials access variant, where " +
+            "Egma dispatches the named worker and sends the modality with it.",
+        },
         config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
         credentials: {
           required: true,
@@ -443,7 +517,20 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           "tokens from an apiKey and apiSecret.",
       },
     ],
-    // No reuse rule: the url names a server rather than an agent.
+    // The key is the server the worker stands on and the name it answers to.
+    // Neither half is an identity alone: a whole team shares one server, and
+    // one worker name commonly answers in both a staging project and a
+    // production one. `agentName` is what a lookup narrows by, because it is
+    // the half a plain comparison can settle honestly.
+    reuse: {
+      matchedKeys: ["agentName"],
+      identityOf: (config) => {
+        const url = config["url"];
+        const agentName = config["agentName"];
+        if (url === undefined || agentName === undefined) return undefined;
+        return `${livekitServerOrigin(url)}|${agentName}`;
+      },
+    },
     simulatorAdapter: true,
   },
 };
@@ -482,6 +569,13 @@ const CONNECTION_OPTIONS = [
   {
     agentPlatform: "livekit",
     connectionType: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "chat",
+    productLabel: "LiveKit chat",
+  },
+  {
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
@@ -502,11 +596,14 @@ const CONNECTION_OPTIONS = [
   },
 ] as const;
 
-export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map((option) => ({
-  ...option,
-  topology: (REGISTRY[option.connectionType] as Descriptor).topology,
-  simulatorAdapter: (REGISTRY[option.connectionType] as Descriptor).simulatorAdapter,
-}));
+export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map(
+  (option) => ({
+    ...option,
+    topology: (REGISTRY[option.connectionType] as Descriptor).topology,
+    simulatorAdapter: (REGISTRY[option.connectionType] as Descriptor)
+      .simulatorAdapter,
+  }),
+);
 
 function productLabelOf(
   agentPlatform: string | null,
@@ -560,7 +657,12 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_TYPES.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "agentPlatform", "projectId", "connection"] as const;
+const AGENT_KEYS = [
+  "name",
+  "agentPlatform",
+  "projectId",
+  "connection",
+] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -578,7 +680,10 @@ class Refusal extends Error {
   readonly status: number;
   readonly code: string;
 
-  constructor(message: string, options: { status?: number; code?: string } = {}) {
+  constructor(
+    message: string,
+    options: { status?: number; code?: string } = {},
+  ) {
     super(message);
     this.name = "Refusal";
     this.status = options.status ?? 400;
@@ -612,7 +717,9 @@ function refuseUnknownKeyIn(
           "stale.",
       );
     }
-    throw new Refusal(`${what} has no key "${key}"; it holds ${held.join(", ")}`);
+    throw new Refusal(
+      `${what} has no key "${key}"; it holds ${held.join(", ")}`,
+    );
   }
 }
 
@@ -627,15 +734,52 @@ function descriptorOf(connectionType: unknown): Descriptor {
   return descriptor;
 }
 
-function validModality(connectionType: string, modality: unknown): string {
+/**
+ * What one access variant of one kind speaks: the type's list unless the
+ * variant narrowed it.
+ */
+function modalitiesOf(
+  descriptor: Descriptor,
+  variant: AccessVariant,
+): readonly string[] {
+  return variant.modalities?.speaks ?? descriptor.modalities;
+}
+
+/**
+ * The modality checked against what this kind speaks *on this access variant*.
+ *
+ * The variant is resolved leniently on purpose. An id no entry claims is a
+ * tuple nobody supports, and `productLabelOf` is what has the sentence for it,
+ * so an unknown one falls back to the kind's own list rather than being
+ * refused here for the wrong reason.
+ */
+function validModality(
+  connectionType: string,
+  accessVariant: unknown,
+  modality: unknown,
+): string {
   const descriptor = descriptorOf(connectionType);
   const named = typeof modality === "string" ? modality : "";
-  if (!descriptor.modalities.includes(named)) {
-    throw new Refusal(
-      `a ${connectionType} connection speaks ${descriptor.modalities.join(" or ")}, and this one was asked for ${named}`,
-    );
+  const wanted = typeof accessVariant === "string" ? accessVariant : "";
+  const variant = descriptor.accessVariants.find((one) => one.id === wanted);
+  const speaking =
+    variant === undefined
+      ? descriptor.modalities
+      : modalitiesOf(descriptor, variant);
+  if (speaking.includes(named)) return named;
+
+  // The kind can do this and the caller's way of reaching it cannot, which is
+  // a different thing to be told — and only the variant knows why.
+  if (
+    variant?.modalities !== undefined &&
+    descriptor.modalities.includes(named)
+  ) {
+    throw new Refusal(variant.modalities.refusal);
   }
-  return named;
+
+  throw new Refusal(
+    `a ${connectionType} connection speaks ${speaking.join(" or ")}, and this one was asked for ${named}`,
+  );
 }
 
 function validConfig(
@@ -658,7 +802,9 @@ function validConfig(
 
   for (const key of Object.keys(config)) {
     if (!Object.hasOwn(gates, key)) {
-      throw new Refusal(`${what}'s config has no key "${key}"; it holds ${held}`);
+      throw new Refusal(
+        `${what}'s config has no key "${key}"; it holds ${held}`,
+      );
     }
   }
 
@@ -669,7 +815,10 @@ function validConfig(
       if (!isDemanded(demand)) continue;
       throw new Refusal(`${what}'s config needs ${key}`);
     }
-    stored[key] = (typeof demand === "function" ? demand : demand.gate)(key, value);
+    stored[key] = (typeof demand === "function" ? demand : demand.gate)(
+      key,
+      value,
+    );
   }
   return stored;
 }
@@ -748,7 +897,11 @@ function validCredentials(
   const gate = rule.gate ?? credentialString;
   const sealed: Record<string, string> = {};
   for (const field of rule.fields) {
-    sealed[field] = gate(what, field, (credentials as Record<string, unknown>)[field]);
+    sealed[field] = gate(
+      what,
+      field,
+      (credentials as Record<string, unknown>)[field],
+    );
   }
 
   return { sealed, hint: rule.hint(sealed) };
@@ -763,7 +916,10 @@ function validCredentials(
 function validName(name: unknown, what: string): string {
   const trimmed = typeof name === "string" ? name.trim() : "";
   if (trimmed === "") {
-    throw new Refusal(`${what} needs a name`, { status: 422, code: "unprocessable" });
+    throw new Refusal(`${what} needs a name`, {
+      status: 422,
+      code: "unprocessable",
+    });
   }
   return trimmed;
 }
@@ -1043,11 +1199,17 @@ export function agentRoutes(options: {
   };
 
   const authorized = (headers: Record<string, string | undefined>): boolean => {
-    const offered = (headers["authorization"] ?? "").replace(/^Bearer\s+/iu, "");
+    const offered = (headers["authorization"] ?? "").replace(
+      /^Bearer\s+/iu,
+      "",
+    );
     return offered !== "" && options.knowsKey(offered);
   };
 
-  const notAuthenticated: FixtureAnswer = { status: 401, body: NOT_AUTHENTICATED };
+  const notAuthenticated: FixtureAnswer = {
+    status: 401,
+    body: NOT_AUTHENTICATED,
+  };
 
   /**
    * An agent nobody can see reads exactly like an agent nobody wrote. Existence
@@ -1069,16 +1231,24 @@ export function agentRoutes(options: {
       return make();
     } catch (error) {
       if (error instanceof Refusal) {
-        return { status: error.status, body: { error: error.code, message: error.message } };
+        return {
+          status: error.status,
+          body: { error: error.code, message: error.message },
+        };
       }
       throw error;
     }
   };
 
   /** The smallest free `<kind>-<n>` among an agent's living connections. */
-  const freeConnectionName = (agentId: string, connectionType: string): string => {
+  const freeConnectionName = (
+    agentId: string,
+    connectionType: string,
+  ): string => {
     const taken = new Set(
-      connections.filter((held) => held.agentId === agentId).map((held) => held.name),
+      connections
+        .filter((held) => held.agentId === agentId)
+        .map((held) => held.name),
     );
     for (let n = 1; ; n += 1) {
       const candidate = `${connectionType}-${n}`;
@@ -1133,7 +1303,11 @@ export function agentRoutes(options: {
     const accessVariant =
       typeof input["accessVariant"] === "string" ? input["accessVariant"] : "";
     const descriptor = descriptorOf(connectionType);
-    const modality = validModality(connectionType, input["modality"]);
+    const modality = validModality(
+      connectionType,
+      accessVariant,
+      input["modality"],
+    );
     const productLabel = productLabelOf(
       agentPlatform,
       connectionType,
@@ -1160,27 +1334,41 @@ export function agentRoutes(options: {
     return {
       // A name sent blank is refused rather than dropped; absent is different
       // and means the smallest free numbered name.
-      name: input["name"] === undefined ? undefined : validName(input["name"], "a connection"),
+      name:
+        input["name"] === undefined
+          ? undefined
+          : validName(input["name"], "a connection"),
       agentPlatform,
       connectionType,
       accessVariant,
       modality,
       productLabel,
       topology: descriptor.topology,
-      environment: typeof input["environment"] === "string" ? input["environment"] : null,
+      environment:
+        typeof input["environment"] === "string" ? input["environment"] : null,
       config,
       credentials,
     };
   };
 
-  const writeConnection = (agent: StoredAgent, input: Admitted): StoredConnection => {
+  const writeConnection = (
+    agent: StoredAgent,
+    input: Admitted,
+  ): StoredConnection => {
     const { connectionType, modality, config, credentials } = input;
     const name = input.name ?? freeConnectionName(agent.id, connectionType);
-    if (connections.some((held) => held.agentId === agent.id && held.name === name)) {
-      throw new Refusal(`a connection named "${name}" already exists on this agent`, {
-        status: 409,
-        code: "name_taken",
-      });
+    if (
+      connections.some(
+        (held) => held.agentId === agent.id && held.name === name,
+      )
+    ) {
+      throw new Refusal(
+        `a connection named "${name}" already exists on this agent`,
+        {
+          status: 409,
+          code: "name_taken",
+        },
+      );
     }
 
     if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
@@ -1220,22 +1408,29 @@ export function agentRoutes(options: {
     input: Admitted,
   ): readonly StoredConnection[] => {
     const { connectionType } = input;
-    const reuseKey = REGISTRY[connectionType]?.reuseKey;
-    if (reuseKey === undefined) return [];
+    const reuse = REGISTRY[connectionType]?.reuse;
+    if (reuse === undefined) return [];
 
-    const named = input.config[reuseKey];
-    if (named === undefined || named.trim() === "") return [];
+    const vendorAgent = reuse.identityOf(input.config);
+    if (vendorAgent === undefined) return [];
 
-    // Oldest first, so a repeated registration chooses the same agent every
-    // time. The ids sort by mint time, so the order they were written in and
-    // the order the real instance sorts them by are one thing.
+    // The narrowing keys first, then the rule itself. The second pass is
+    // load-bearing rather than tidy: two spellings of one LiveKit server are
+    // one identity, and comparing stored strings could never say so.
+    //
+    // The platform is deliberately not compared. The real access layer does
+    // not compare it either — the connection type pins it — and a fixture
+    // stricter than the thing it mirrors teaches a client a rule that is not
+    // there.
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
-        held.agentPlatform === input.agentPlatform &&
         held.connectionType === connectionType &&
         held.accessVariant === input.accessVariant &&
-        held.config[reuseKey] === named.trim(),
+        reuse.matchedKeys.every(
+          (key) => held.config[key] === input.config[key],
+        ) &&
+        reuse.identityOf(held.config) === vendorAgent,
     );
   };
 
@@ -1277,11 +1472,14 @@ export function agentRoutes(options: {
             // will take is decided before what egma will do is.
             refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
             const envelope =
-              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
+              body["connection"] === undefined
+                ? undefined
+                : connectionIn(body["connection"]);
 
             // A write may name a project in its body. It never names one in
             // its address, and it never names an organization anywhere.
-            const named = typeof body["projectId"] === "string" ? body["projectId"] : null;
+            const named =
+              typeof body["projectId"] === "string" ? body["projectId"] : null;
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
@@ -1291,11 +1489,14 @@ export function agentRoutes(options: {
             // only pushes its production evidence belongs in the roster and
             // has nothing for Egma's simulator to dial.
             const boundTo = agentPlatformIn(body["agentPlatform"]);
-            const inline = envelope === undefined ? undefined : admitConnection(envelope);
+            const inline =
+              envelope === undefined ? undefined : admitConnection(envelope);
 
             if (inline !== undefined) {
               const living = sameVendorAgent(projectId, inline);
-              const same = living.find((held) => held.modality === inline.modality);
+              const same = living.find(
+                (held) => held.modality === inline.modality,
+              );
 
               if (same !== undefined) {
                 // Whole, never merged: what arrived replaces what is stored.
@@ -1303,12 +1504,17 @@ export function agentRoutes(options: {
                 // checked above — a registration egma would refuse never gets
                 // as far as rotating a live credential.
                 const { credentials } = inline;
-                if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
-                same.credentials = credentials === null ? null : credentials.sealed;
-                same.credentialsHint = credentials === null ? null : credentials.hint;
+                if (credentials !== null)
+                  sealed.push(...Object.values(credentials.sealed));
+                same.credentials =
+                  credentials === null ? null : credentials.sealed;
+                same.credentialsHint =
+                  credentials === null ? null : credentials.hint;
                 same.updatedAt = new Date().toISOString();
 
-                const owner = agents.find((held) => held.id === same.agentId) as StoredAgent;
+                const owner = agents.find(
+                  (held) => held.id === same.agentId,
+                ) as StoredAgent;
                 // No row was written, and saying 201 would be the protocol
                 // claiming something the `result` field is there to deny.
                 return {
@@ -1323,7 +1529,9 @@ export function agentRoutes(options: {
 
               const known = living[0];
               if (known !== undefined) {
-                const owner = agents.find((held) => held.id === known.agentId) as StoredAgent;
+                const owner = agents.find(
+                  (held) => held.id === known.agentId,
+                ) as StoredAgent;
                 return {
                   status: 201,
                   body: {
@@ -1335,11 +1543,18 @@ export function agentRoutes(options: {
               }
             }
 
-            if (agents.some((held) => held.projectId === projectId && held.name === name)) {
-              throw new Refusal(`an agent named "${name}" already exists in this project`, {
-                status: 409,
-                code: "name_taken",
-              });
+            if (
+              agents.some(
+                (held) => held.projectId === projectId && held.name === name,
+              )
+            ) {
+              throw new Refusal(
+                `an agent named "${name}" already exists in this project`,
+                {
+                  status: 409,
+                  code: "name_taken",
+                },
+              );
             }
 
             // Both rows or neither: a connection payload the registry turns
@@ -1348,7 +1563,10 @@ export function agentRoutes(options: {
 
             if (inline === undefined) {
               agents.push(agent);
-              return { status: 201, body: { result: "created", agent: agentOut(agent) } };
+              return {
+                status: 201,
+                body: { result: "created", agent: agentOut(agent) },
+              };
             }
 
             const before = connections.length;
@@ -1401,9 +1619,13 @@ export function agentRoutes(options: {
             // usually the one they just registered. The ids sort by mint time,
             // so reversing what was written is the order the real instance
             // reads them in.
-            const mine = agents.filter((agent) => agent.projectId === project).reverse();
+            const mine = agents
+              .filter((agent) => agent.projectId === project)
+              .reverse();
             const from =
-              cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
+              cursor === undefined
+                ? 0
+                : mine.findIndex((held) => held.id === cursor) + 1;
             const page = mine.slice(from, from + PAGE_SIZE);
             const more = mine.length > from + page.length;
 
@@ -1429,7 +1651,9 @@ export function agentRoutes(options: {
         path: "/v1/agents/:agentId",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
-          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          const agent = agents.find(
+            (held) => held.id === request.params["agentId"],
+          );
           if (agent === undefined) return noSuchAgent;
           return {
             status: 200,
@@ -1449,13 +1673,18 @@ export function agentRoutes(options: {
         path: "/v1/agents/:agentId/connections",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
-          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          const agent = agents.find(
+            (held) => held.id === request.params["agentId"],
+          );
           if (agent === undefined) return noSuchAgent;
           return answering(() => ({
             status: 201,
             body: {
               connection: connectionOut(
-                writeConnection(agent, admitConnection(connectionIn(request.body ?? {}))),
+                writeConnection(
+                  agent,
+                  admitConnection(connectionIn(request.body ?? {})),
+                ),
               ),
             },
           }));

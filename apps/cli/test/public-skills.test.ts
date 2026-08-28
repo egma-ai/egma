@@ -111,8 +111,8 @@ describe("the public skill source", () => {
       path.join(root, "references", "connect-retell.md"),
       "utf8",
     );
-    const sdk = await readFile(
-      path.join(root, "references", "integrate-egma-sdk.md"),
+    const integrating = await readFile(
+      path.join(root, "references", "integrate-livekit.md"),
       "utf8",
     );
     const livekit = await readFile(
@@ -128,10 +128,13 @@ describe("the public skill source", () => {
     expect(skill).toContain("[references/find-voice-agent.md](references/find-voice-agent.md)");
     expect(skill).toContain("[references/connect-retell.md](references/connect-retell.md)");
     expect(skill).toContain(
+      "[references/integrate-livekit.md](references/integrate-livekit.md)",
+    );
+    expect(skill).toContain(
       "[references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md)",
     );
     expect(skill).toContain("every `.env` file");
-    expect([finding, retell, sdk, livekit].join("\n")).not.toContain("`.env");
+    expect([finding, retell, integrating, livekit].join("\n")).not.toContain("`.env");
     expect(skill).not.toMatch(CLI_MARKER);
     expect(finding).toContain("Pipecat");
     expect(finding).toContain("Vapi");
@@ -234,7 +237,7 @@ describe("npx skills compatibility", () => {
     for (const file of [
       path.join("references", "find-voice-agent.md"),
       path.join("references", "connect-retell.md"),
-      path.join("references", "integrate-egma-sdk.md"),
+      path.join("references", "integrate-livekit.md"),
       path.join("references", "run-livekit-agent-locally.md"),
       path.join("scripts", "livekit-local.mjs"),
     ]) {

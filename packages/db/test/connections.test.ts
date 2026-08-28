@@ -82,6 +82,10 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
 /**
  * A live livekit payload. The credential halves carry distinct tails so a
  * hint, an envelope and a resolved pair can each be told apart at a glance.
+ *
+ * The agent name rides here rather than in each caller because every livekit
+ * connection holds one: egma dispatches explicitly, always, so that dispatch
+ * metadata reaches the worker at all.
  */
 function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
   return {
@@ -90,7 +94,7 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
     connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
-    config: { url: "wss://acme.livekit.cloud" },
+    config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
     credentials: {
       apiKey: "livekit-key-A1B2C3D4WXYZ",
       apiSecret: "livekit-secret-E5F6G7H8QRST",
@@ -605,7 +609,7 @@ describe("what the registry refuses at the door, by name", () => {
  * in sealed and come back only through the one door.
  */
 describe("a livekit connection", () => {
-  it("lands with url alone, dialling out, and reads back with the hint", async () => {
+  it("lands with a server and a name, dialling out, and reads back with the hint", async () => {
     const agentId = await agentNamed("LiveKit Bare");
 
     const added = await addConnection(
@@ -624,7 +628,7 @@ describe("a livekit connection", () => {
       modality: "voice",
       // Derived from the type: the agent joins the room egma opened.
       topology: "agent-dials-out",
-      config: { url: "wss://acme.livekit.cloud" },
+      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
       // The last four of the key, never of the secret.
       credentialsHint: "WXYZ",
     });
@@ -810,7 +814,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     // Nothing moved: the row is the shape it was, with the credential it had.
     expect(
       (await getConnection(actingAsAcme(), agentId, added?.id ?? ""))?.config,
-    ).toEqual({ url: "wss://acme.livekit.cloud" });
+    ).toEqual({ url: "wss://acme.livekit.cloud", agentName: "front-desk" });
   });
 
   it("refuses it even when the new shape's credentials come with it", async () => {
@@ -829,7 +833,10 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
 
     const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(untouched?.accessVariant).toBe("livekit_room.project_credentials");
-    expect(untouched?.config).toEqual({ url: "wss://acme.livekit.cloud" });
+    expect(untouched?.config).toEqual({
+      url: "wss://acme.livekit.cloud",
+      agentName: "front-desk",
+    });
   });
 
   /**

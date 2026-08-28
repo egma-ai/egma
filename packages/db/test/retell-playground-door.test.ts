@@ -39,8 +39,9 @@ describe("what a Retell playground connection is made of", () => {
     // Chat and voice land as two connections on one Egma agent, so the
     // comparison the domain model promises is between two histories of one
     // identity rather than between twins.
-    expect(descriptorOf(KIND).reuseKey).toBe("retellAgentId");
-    expect(descriptorOf("retell_web_call").reuseKey).toBe("retellAgentId");
+    expect(descriptorOf(KIND).reuse?.family).toBe("retellAgentId");
+    expect(descriptorOf("retell_web_call").reuse?.family).toBe("retellAgentId");
+    expect(descriptorOf("retell_chat_api").reuse?.family).toBe("retellAgentId");
   });
 
   it("is in the schema's two lists, so a row can carry it at all", () => {
@@ -199,13 +200,13 @@ describe("the playground door's refusals", () => {
   });
 
   it("refuses a garbage modality as not a modality at all", () => {
-    expect(() => validModality(KIND, "telepathy")).toThrow(
+    expect(() => validModality(KIND, VARIANT, "telepathy")).toThrow(
       '"telepathy" is not a modality; a retell_playground connection speaks chat',
     );
   });
 
   it("refuses voice by naming what it does speak", () => {
-    expect(() => validModality(KIND, "voice")).toThrow(
+    expect(() => validModality(KIND, VARIANT, "voice")).toThrow(
       "a retell_playground connection speaks chat, and this one was asked for voice",
     );
   });

@@ -180,6 +180,12 @@ The registry lives in :func:`plug_for` below: one entry per connection
 kind, the connection-type string exactly as specs will name it. A simulator holding
 no plug for a claimed spec's kind refuses the claim out loud and reports
 nothing — the row is the control plane's to sweep.
+
+A connection type may answer in both modalities, and one does. Its entry
+is then a small factory that reads the ``modality`` keyword, picks the
+plug for it, and passes every keyword straight on — never a rule written
+into whoever calls the registry, which must stay modality-blind for the
+same reason everything else here is.
 """
 
 from __future__ import annotations
@@ -401,13 +407,30 @@ keywords, it returns one plug for one simulation — in practice, the plug
 class itself."""
 
 
+def _livekit_room(*, modality: str, **rest: object) -> ConnectionPlug | VoiceConnection:
+    """One room, in whichever currency the simulation is conducted in.
+
+    The one connection type that answers in both modalities: the same
+    project, the same room and the same worker, reached with speech or
+    with typing. Which plug that is cannot be a class in the table above,
+    so it is decided here — and only here, because a caller that had to
+    know would be a caller that had stopped being plug-blind. A modality
+    neither plug speaks reaches the voice one and is refused by name,
+    which is where every other bad modality is already refused.
+    """
+    from .livekit import LiveKitRoom
+    from .livekit_chat import LiveKitChat
+
+    speaking = LiveKitChat if modality == "chat" else LiveKitRoom
+    return speaking(modality=modality, **rest)
+
+
 def plug_for(connection_type: str) -> PlugFactory | None:
     """The plug factory registered for one connection type, or ``None``.
 
     The registry is deliberately a literal here: adding a connection type is one
     import and one line, and the diff that adds it touches nothing else.
     """
-    from .livekit import LiveKitRoom
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
@@ -416,7 +439,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .scripted import ScriptedCounterpart
 
     return {
-        "livekit_room": LiveKitRoom,
+        "livekit_room": _livekit_room,
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,

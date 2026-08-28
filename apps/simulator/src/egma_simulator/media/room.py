@@ -74,6 +74,36 @@ def fresh_room_name() -> str:
     return f"{ROOM_PREFIX}-{uuid.uuid4().hex}"
 
 
+def fresh_chat_room_name() -> str:
+    """A chat simulation's room: the modality mark is the room's own name.
+
+    ``egma-sim-chat-`` is part of the published contract exactly as the
+    hyphenated ``egma-sim-`` above is, and for the same reason: it is what
+    the customer's own worker reads. The chat setup in Egma's LiveKit
+    integration instructions keys its one decision off this segment,
+    before the worker connects to anything — the room's name is the only
+    channel egma owns on every dispatch path, it is readable from the job
+    with no network and no parsing, and no key of the customer's can ever
+    collide with it. Everything that recognises ``egma-sim-`` — the SDK's
+    simulation detection, a token endpoint's allowlist, the hardening
+    recipe's empty timeout — still matches, because the prefix is
+    unchanged.
+
+    A voice room's name stays bare on purpose. Speech is what a LiveKit
+    agent already is; the marked case is the one asking it to be
+    something else. A hex suffix cannot begin ``chat-``, so the two forms
+    cannot be mistaken for each other.
+
+    Move the segment and every worker carrying the chat setup answers a
+    chat simulation aloud — the fail-fast then stops each of those
+    simulations at the agent's first utterance. The pin in
+    ``apps/simulator/tests/test_plug_livekit_chat.py`` writes the segment
+    out by hand so a rename here goes red rather than quiet; read that
+    red as the contract refusing to move.
+    """
+    return f"{ROOM_PREFIX}-chat-{uuid.uuid4().hex}"
+
+
 def room_name_for(simulation_id: str) -> str:
     return f"{ROOM_PREFIX}-{simulation_id}"
 

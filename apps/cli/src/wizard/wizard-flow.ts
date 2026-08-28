@@ -579,6 +579,11 @@ async function runWizardWithAgent(
   // One task owns the customer's worker and dependency manifest for the whole
   // sitting. It receives the final mode once, before remote monitoring setup,
   // test generation, or mock authoring can begin.
+  //
+  // It also runs before the connection step asks chat or voice, which is why
+  // that task carries the chat setup for every walk rather than for a chat one:
+  // the alternative is a second visit to the worker, and the whole point of one
+  // owner is that there is no second visit.
   let workerIntegration: WorkerIntegration | null = null;
   if (agentPlatform === "livekit") {
     workerIntegration = await workerIntegrationStep({
@@ -735,6 +740,11 @@ async function runWizardWithAgent(
         found.facts.get("agent-name") ??
         path.basename(cwd),
       dispatchName: found.facts.get("dispatch-name") ?? "",
+      // Discovery reads the worker as it was committed. The integration task is
+      // what can have given a nameless worker a name since, so its answer is
+      // offered beside discovery's and the walk stops only when neither source
+      // has a name.
+      integratedDispatchName: workerIntegration?.dispatchName ?? "",
       entrypoint: found.facts.get("entrypoint") ?? "",
       // The row monitoring created, when it ran: one agent row for one voice
       // agent, so this connection attaches to it rather than starting a second.

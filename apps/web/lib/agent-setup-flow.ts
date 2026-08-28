@@ -144,16 +144,45 @@ export type AgentSetupStep =
   | "retell-modality"
   | "retell-phone"
   | "retell-chat"
+  | "livekit-modality"
   | "livekit-simulation"
+  | "livekit-chat"
   | "livekit-monitoring";
 
-/** Provider capability decides the first provider-specific screen. */
+/**
+ * Provider capability decides the first provider-specific screen.
+ *
+ * On LiveKit that screen is the modality, not the credentials. Chat and voice
+ * are two different things to test, and which one this is decides what the
+ * credential screen may even offer — so the choice a person understands comes
+ * before the plumbing it settles.
+ */
 export function stepAfterPlatform(
   goal: AgentSetupGoal,
   platform: AgentSetupPlatform,
 ): AgentSetupStep {
   if (platform === "retell") return "retell-key";
-  return goal === "monitoring" ? "livekit-monitoring" : "livekit-simulation";
+  return goal === "monitoring" ? "livekit-monitoring" : "livekit-modality";
+}
+
+/**
+ * What follows a saved LiveKit connection, or `null` when the flow is done.
+ *
+ * A chat connection has one more screen to it, because the worker still needs
+ * six lines that Egma cannot write. It is a screen and not a state: nothing
+ * here is recorded, and the sheet claims no completion for it.
+ */
+export function stepAfterLiveKitCredentials(
+  plan: AgentSetupPlan,
+  modality: "chat" | "voice",
+): AgentSetupStep | null {
+  if (modality === "chat") return "livekit-chat";
+  return plan.monitoringInstructions ? "livekit-monitoring" : null;
+}
+
+/** What follows the chat instructions, or `null` when the flow is done. */
+export function stepAfterLiveKitChat(plan: AgentSetupPlan): AgentSetupStep | null {
+  return plan.monitoringInstructions ? "livekit-monitoring" : null;
 }
 
 /**
@@ -177,9 +206,12 @@ export function stepAfterRetellAgent(
 export function previousAgentSetupStep({
   step,
   goal,
+  liveKitModality = "",
 }: {
   readonly step: AgentSetupStep;
   readonly goal: AgentSetupGoal | "";
+  /** The LiveKit modality this walk chose, while it has chosen one. */
+  readonly liveKitModality?: "chat" | "voice" | "";
 }): AgentSetupStep | null {
   switch (step) {
     case "goal":
@@ -187,7 +219,7 @@ export function previousAgentSetupStep({
     case "platform":
       return "goal";
     case "retell-key":
-    case "livekit-simulation":
+    case "livekit-modality":
       return "platform";
     case "retell-agent":
       return "retell-key";
@@ -199,7 +231,14 @@ export function previousAgentSetupStep({
       return goal === "simulation" ? "retell-modality" : "retell-agent";
     case "retell-chat":
       return "retell-agent";
+    case "livekit-simulation":
+      return "livekit-modality";
+    case "livekit-chat":
+      return "livekit-simulation";
     case "livekit-monitoring":
-      return goal === "both" ? "livekit-simulation" : "platform";
+      // Both goals walk back the way they came, and a chat walk came through
+      // one more screen than a voice one.
+      if (goal !== "both") return "platform";
+      return liveKitModality === "chat" ? "livekit-chat" : "livekit-simulation";
   }
 }

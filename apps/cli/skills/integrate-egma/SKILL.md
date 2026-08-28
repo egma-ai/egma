@@ -1,6 +1,6 @@
 ---
 name: integrate-egma
-description: Integrate a repository's voice agent with Egma. Use when finding the agent, connecting a Retell agent, adding the Egma SDK to a LiveKit worker, or running that LiveKit worker locally for an Egma run.
+description: Integrate a repository's voice agent with Egma. Use when finding the agent, connecting a Retell agent, integrating a LiveKit worker with Egma, or running that LiveKit worker locally for an Egma run.
 ---
 
 # Integrate Egma
@@ -14,9 +14,9 @@ phases in this order:
 2. For Retell, read
    [references/connect-retell.md](references/connect-retell.md) before creating
    its Egma connection.
-3. For a Python LiveKit worker, read
-   [references/integrate-egma-sdk.md](references/integrate-egma-sdk.md) before
-   adding the testing or monitoring entry.
+3. For a LiveKit worker, read
+   [references/integrate-livekit.md](references/integrate-livekit.md) before
+   adding the chat setup, an Egma SDK entry, or a registered worker name.
 4. When an Egma run needs that LiveKit worker on this machine, read
    [references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md)
    and keep the worker running until Egma ends the run.

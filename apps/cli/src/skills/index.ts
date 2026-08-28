@@ -18,7 +18,7 @@ export type PublicSkillName =
 export type IntegrateEgmaReferenceName =
   | "connect-retell"
   | "find-voice-agent"
-  | "integrate-egma-sdk"
+  | "integrate-livekit"
   | "run-livekit-agent-locally";
 export const PUBLIC_SKILL_NAMES: readonly PublicSkillName[] = [
   "egma",

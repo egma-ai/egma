@@ -41,6 +41,8 @@ import {
   retellAgentsForPlan,
   retellCandidateValue,
   retellCandidatesForPlan,
+  stepAfterLiveKitChat,
+  stepAfterLiveKitCredentials,
   stepAfterPlatform,
   stepAfterRetellAgent,
   type AgentSetupGoal,
@@ -60,6 +62,7 @@ import { useDraftNavigation } from "@/ui/draft-navigation.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
+import { LiveKitChatInstructions } from "./livekit-chat-instructions.tsx";
 import { LiveKitMonitoringInstructions } from "./livekit-monitoring-instructions.tsx";
 import {
   ConnectionFields,
@@ -96,6 +99,28 @@ const NEW_AGENT = "";
 const SHORTEST_KEY = 8;
 const PROJECT_CREDENTIALS = "livekit_room.project_credentials";
 const TOKEN_ENDPOINT = "livekit_room.customer_token_endpoint";
+
+/**
+ * What each modality is, said as the difference a person is choosing between.
+ *
+ * Which of the two are offered is the catalog's answer and never this file's.
+ * What each one means is product language, and it is written once here so the
+ * card cannot say one thing while the surface after it says another.
+ */
+const MODALITY_CHOICES: Readonly<
+  Record<"chat" | "voice", { readonly title: string; readonly description: string }>
+> = {
+  voice: {
+    title: "Voice",
+    description:
+      "Egma speaks to the agent in the room, the way a person reaches it. Your worker needs no change.",
+  },
+  chat: {
+    title: "Chat",
+    description:
+      "Egma types to the agent and reads its words back. Fast, and it spends nothing on speech. Your worker needs a short setup, which Egma shows you next.",
+  },
+};
 
 function firstStep(
   goal: AgentSetupGoal | undefined,
@@ -167,6 +192,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const [testModality, setTestModality] = useState<"" | "chat" | "voice">("");
   const [discovering, setDiscovering] = useState(false);
 
+  const [livekitModality, setLivekitModality] = useState<"chat" | "voice" | "">(
+    "",
+  );
   const [livekitAccess, setLivekitAccess] = useState(PROJECT_CREDENTIALS);
   const [livekitAgentName, setLivekitAgentName] = useState("");
   const [livekitConfig, setLivekitConfig] = useState<
@@ -190,6 +218,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setTestModality("");
+    setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
     setLivekitConfig({});
@@ -305,7 +334,22 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           (one) => one.connectionType === "livekit_room",
         )
       : [];
-  const livekitOption = livekitOptions.find(
+  /** The modalities this Egma offers on a LiveKit room, in the catalog's order. */
+  const livekitModalities = [
+    ...new Set(livekitOptions.map((one) => one.modality)),
+  ];
+  /** The access variants that speak the chosen modality — chat has exactly one. */
+  const livekitAccessOptions = livekitOptions.filter(
+    (one) => one.modality === livekitModality,
+  );
+  /*
+   * The pair decides the row, never the access variant alone.
+   *
+   * Chat and voice share `livekit_room.project_credentials`, so matching the
+   * variant would answer with whichever row the server listed first — and a
+   * chat walk would save a voice connection with nothing anywhere saying so.
+   */
+  const livekitOption = livekitAccessOptions.find(
     (one) => one.accessVariant === livekitAccess,
   );
   const livekitFieldValue = (key: string): string =>
@@ -355,6 +399,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setTestModality("");
+    setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
     setLivekitConfig({});
@@ -373,8 +418,27 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setPlatform(next);
   }
 
+  /*
+   * Chat is offered on project credentials and nowhere else, because that is
+   * the access variant where Egma dispatches the worker and can tell it this
+   * simulation is typed. Choosing chat therefore settles the way in as well,
+   * and the screen that would have asked is not drawn.
+   */
+  function chooseLiveKitModality(next: "chat" | "voice"): void {
+    if (next !== livekitModality) {
+      setLivekitConfig({});
+      setLivekitCredentials({});
+    }
+    if (next === "chat") setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitModality(next);
+  }
+
   function back(): void {
-    const previous = previousAgentSetupStep({ step, goal });
+    const previous = previousAgentSetupStep({
+      step,
+      goal,
+      liveKitModality: livekitModality,
+    });
     if (previous === null) {
       leave();
       return;
@@ -603,23 +667,28 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   async function finishLiveKit(): Promise<void> {
-    if (goal === "" || livekitOption === undefined || !livekitReady) return;
+    if (goal === "" || plan === null || livekitOption === undefined) return;
+    // Saved already, and this press is the way on: a Both walk that came back
+    // to this screen must not save a second connection to move forward.
     if (completed !== null) {
-      transition("livekit-monitoring");
+      const next = stepAfterLiveKitCredentials(plan, livekitOption.modality);
+      if (next === null) onConnected(completed);
+      else transition(next);
       return;
     }
-    const displayName = livekitAgentName.trim();
+    if (!livekitReady) return;
     const result = await saveConnection(
-      displayName,
+      livekitAgentName.trim(),
       connectionBody(livekitOption),
     );
     if (result === null) return;
-    if (plan?.monitoringInstructions === true) {
-      setCompleted(result);
-      transition("livekit-monitoring");
-    } else {
+    const next = stepAfterLiveKitCredentials(plan, livekitOption.modality);
+    if (next === null) {
       onConnected(result);
+      return;
     }
+    setCompleted(result);
+    transition(next);
   }
 
   async function continueFlow(): Promise<void> {
@@ -670,9 +739,23 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           await finishRetellChat();
         }
         return;
+      case "livekit-modality":
+        if (livekitModality !== "") transition("livekit-simulation");
+        return;
       case "livekit-simulation":
         await finishLiveKit();
         return;
+      case "livekit-chat": {
+        const next = plan === null ? null : stepAfterLiveKitChat(plan);
+        if (next !== null) {
+          transition(next);
+        } else if (completed === null) {
+          onClose();
+        } else {
+          onConnected(completed);
+        }
+        return;
+      }
       case "livekit-monitoring":
         if (completed === null) onClose();
         else onConnected(completed);
@@ -712,6 +795,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     }
 
     const needsCatalog =
+      step === "livekit-modality" ||
       step === "livekit-simulation" ||
       step === "retell-phone" ||
       // The modality step can mint the playground connection on Continue, and
@@ -1023,11 +1107,40 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             ) : null}
           </div>
         );
+      case "livekit-modality":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="How do you want to test this agent?"
+              description="Run the same tests over both to tell a broken prompt from a broken speech stack."
+            />
+            <RadioGroup
+              className="gap-6"
+              aria-label="Simulation modality"
+              value={livekitModality}
+              onValueChange={(value) =>
+                chooseLiveKitModality(value as "chat" | "voice")
+              }
+            >
+              {livekitModalities.map((one) => (
+                <ChoiceCard
+                  key={one}
+                  value={one}
+                  title={MODALITY_CHOICES[one].title}
+                  description={MODALITY_CHOICES[one].description}
+                />
+              ))}
+            </RadioGroup>
+          </div>
+        );
+      case "livekit-chat":
+        return <LiveKitChatInstructions />;
       case "livekit-simulation":
         return (
           <LiveKitSimulationStep
             option={livekitOption}
             access={livekitAccess}
+            chooseAccess={livekitAccessOptions.length > 1}
             agentName={livekitAgentName}
             draft={{
               config: livekitConfig,
@@ -1052,7 +1165,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   const primaryLabel =
-    step === "goal" || step === "platform" || step === "retell-agent"
+    step === "goal" ||
+    step === "platform" ||
+    step === "retell-agent" ||
+    step === "livekit-modality"
       ? "Continue"
       : step === "retell-modality"
         ? // Chat mints here; voice carries on to choose a number.
@@ -1082,10 +1198,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             : step === "livekit-simulation"
               ? saving
                 ? "Saving…"
-                : goal === "both"
+                : // A chat walk has the setup instructions after this screen,
+                  // so this press is the save and nothing further. And a walk
+                  // that came back here has already saved, so it is neither.
+                  goal === "both" && livekitModality !== "chat"
                   ? "Continue to monitoring"
-                  : "Save connection"
-              : "Return to agents";
+                  : completed === null
+                    ? "Save connection"
+                    : "Continue"
+              : step === "livekit-chat" && goal === "both"
+                ? "Continue to monitoring"
+                : "Return to agents";
 
   const primaryDisabled =
     saving ||
@@ -1102,7 +1225,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
     (step === "retell-chat" && goal !== "monitoring" && catalog === null) ||
-    (step === "livekit-simulation" && !livekitReady);
+    (step === "livekit-modality" && livekitModality === "") ||
+    (step === "livekit-simulation" && completed === null && !livekitReady);
 
   const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
   const usable =
@@ -1266,6 +1390,7 @@ function SummaryRows({
 function LiveKitSimulationStep({
   option,
   access,
+  chooseAccess,
   agentName,
   draft,
   disabled,
@@ -1275,6 +1400,15 @@ function LiveKitSimulationStep({
 }: {
   readonly option: ConnectionOption | undefined;
   readonly access: string;
+  /**
+   * Whether the chosen modality has more than one way in.
+   *
+   * Voice has two, and which one this is changes what the form asks for. Chat
+   * has one — Egma has to dispatch the worker to tell it the simulation is
+   * typed — so there is nothing to choose and no control that pretends there
+   * is.
+   */
+  readonly chooseAccess: boolean;
   readonly agentName: string;
   readonly draft: Draft;
   readonly disabled: boolean;
@@ -1322,18 +1456,20 @@ function LiveKitSimulationStep({
             : undefined
         }
       />
-      <Field label="Connection type*" htmlFor="livekit-connection-type">
-        <Select
-          id="livekit-connection-type"
-          aria-required="true"
-          value={access}
-          disabled={disabled}
-          onChange={(event) => onAccessChange(event.target.value)}
-        >
-          <option value={PROJECT_CREDENTIALS}>Project credentials</option>
-          <option value={TOKEN_ENDPOINT}>Token endpoint</option>
-        </Select>
-      </Field>
+      {chooseAccess ? (
+        <Field label="Connection type*" htmlFor="livekit-connection-type">
+          <Select
+            id="livekit-connection-type"
+            aria-required="true"
+            value={access}
+            disabled={disabled}
+            onChange={(event) => onAccessChange(event.target.value)}
+          >
+            <option value={PROJECT_CREDENTIALS}>Project credentials</option>
+            <option value={TOKEN_ENDPOINT}>Token endpoint</option>
+          </Select>
+        </Field>
+      ) : null}
 
       <Field
         label="LiveKit agent name*"
