@@ -1163,6 +1163,19 @@ machine for one test session. It is also what the counterpart worker must
 be started against, and naming it here is what lets a person do that
 before there is anything running to ask."""
 
+LIVEKIT_START_SECONDS = 300.0
+"""How long ``docker run`` has to have the image and a container running.
+
+Generous because this is the call that fetches the image where the machine
+has not got it yet, and mean about it only in that it is bounded at all: an
+unbounded start is a whole test session hanging on a slow registry.
+"""
+
+LIVEKIT_STOP_SECONDS = 30.0
+"""How long the teardown waits for the container to go before giving up on
+it. A container that will not stop is a line in a log, never a failed run:
+the tests are over by then and the exit code is theirs, not docker's."""
+
 LIVEKIT_HEALTH_SECONDS = 30.0
 """How long a started server has to answer before it counts as one that
 will not start."""
@@ -1247,16 +1260,37 @@ def live_livekit() -> Iterator[LiveKitServer]:
         )
 
     name = f"egma-livekit-live-{os.getpid()}"
-    started = subprocess.run(
-        # Host networking because a room's media negotiates addresses of its
-        # own, and a published port would advertise one the container cannot
-        # reach from inside its own view of this machine.
-        ["docker", "run", "-d", "--rm", "--name", name, "--network", "host",
-         image, "--dev", "--bind", "0.0.0.0"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        started = subprocess.run(
+            # Host networking because a room's media negotiates addresses of
+            # its own, and a published port would advertise one the container
+            # cannot reach from inside its own view of this machine.
+            #
+            # Bound to loopback, and that is the security boundary rather than
+            # a preference. Host networking puts this server in this machine's
+            # own network namespace, so a bind of 0.0.0.0 would offer it on
+            # every interface the machine has — under the key pair `--dev`
+            # prints, which everybody knows. Anybody who could reach the host
+            # could then mint a token, join a room whose name is predictable,
+            # and answer to egma's name in it. Loopback is the whole of what
+            # these tests need.
+            ["docker", "run", "-d", "--rm", "--name", name, "--network", "host",
+             image, "--dev", "--bind", "127.0.0.1"],
+            capture_output=True,
+            text=True,
+            check=False,
+            # Bounded because this call fetches the image where the machine
+            # does not have it, and an unbounded fetch is a test session that
+            # hangs rather than one that skips or says what went wrong.
+            timeout=LIVEKIT_START_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+        pytest.skip(
+            f"docker did not start {image} within {LIVEKIT_START_SECONDS:.0f}s, "
+            "which is usually an image still being fetched on a slow link; "
+            "pull it once by hand and run again"
+        )
     if started.returncode != 0:
         pytest.skip(f"docker could not start {image}: {started.stderr.strip()[:200]}")
 
@@ -1275,4 +1309,9 @@ def live_livekit() -> Iterator[LiveKitServer]:
             time.sleep(0.2)
         yield LiveKitServer(LIVEKIT_DEV_URL, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
     finally:
-        subprocess.run(["docker", "stop", name], capture_output=True, check=False)
+        subprocess.run(
+            ["docker", "stop", name],
+            capture_output=True,
+            check=False,
+            timeout=LIVEKIT_STOP_SECONDS,
+        )
