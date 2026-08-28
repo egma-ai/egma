@@ -126,16 +126,16 @@ export type NewRun = {
    */
   readonly conductedWorld?: ConductedWorld | undefined;
   /**
-   * The connection's edit stamp at the moment the world above was read.
+   * A fingerprint of the connection the world above was read from.
    *
    * Travels with `conductedWorld` and only with it: the world was read from a
    * target before this transaction opened, and this is how the transaction
    * proves the target has not moved since. Under the lock `startRun` already
-   * holds on the connection, the stamp read now must equal this one, or the
-   * connection was edited mid-creation and the run is refused rather than
+   * holds on the connection, the fingerprint taken now must equal this one, or
+   * the connection was edited mid-creation and the run is refused rather than
    * written against a target its record would misname.
    */
-  readonly conductedConnectionAt?: Date | undefined;
+  readonly conductedConnectionIdentity?: string | undefined;
 };
 
 export type ConnectionSnapshot = {
@@ -671,7 +671,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
-          updatedAt: connection.updatedAt,
+          credentials: connection.credentials,
         })
         .from(connection)
         .innerJoin(agent, eq(connection.agentId, agent.id))
@@ -713,15 +713,25 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         // its key rotated — and the version and tools frozen from the old
         // target would then be stamped onto a run whose snapshot names the new
         // one. The `for("share")` above holds the row still for the rest of
-        // this transaction, so the stamp read now is the connection as it will
-        // be written; if it does not match the stamp the world was read at,
-        // the connection moved during creation. Refuse loudly and write
-        // nothing — the caller reads the connection again and retries.
-        if (
-          input.conductedConnectionAt === undefined ||
-          reached.updatedAt.getTime() !==
-            input.conductedConnectionAt.getTime()
-        ) {
+        // this transaction, so the fingerprint taken now is the connection as
+        // it will be written; if it does not match the fingerprint the world
+        // was read at, the connection moved during creation. The fingerprint
+        // is over the identity the world depends on — the config and the
+        // sealed key — never a clock, so an edit inside the same millisecond
+        // is caught like any other. Refuse loudly and write nothing; the
+        // caller reads the connection again and retries.
+        const identityNow = connectionIdentityToken(
+          stringRecordFromRow(
+            reached.config,
+            () =>
+              new Error(
+                `connection ${input.connectionId} holds config in a shape ` +
+                  `Egma never writes`,
+              ),
+          ),
+          reached.credentials,
+        );
+        if (input.conductedConnectionIdentity !== identityNow) {
           refuseRun(
             "not_admitted",
             `connection ${input.connectionId} was edited while Egma was ` +
@@ -926,23 +936,58 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
  *   of a run header, never in a refusal, and never logged — the run route hands
  *   it straight to the read and lets it go.
  */
+/**
+ * A deterministic fingerprint of the target a run-start read reached: the
+ * connection's non-secret config and the sealed shape of its credential.
+ *
+ * **Every field the world depends on, and nothing a timestamp does.** Which
+ * version a run reads and which tools it stamps are decided by the agent the
+ * config names, the address it names, and the key sealed beside it. A clock
+ * says only *when* the row was last written and lands on the millisecond, so
+ * two edits inside one millisecond share a stamp and one slips through. This
+ * hashes the identity itself, so a change to any of it changes the token and no
+ * granularity can hide it.
+ *
+ * **The sealed envelope, never the key inside it.** The credential is folded in
+ * as the ciphertext exactly as the row stores it — a re-seal with the very same
+ * key mints a fresh envelope and so reads as a change, which is the safe way to
+ * be wrong: a needless refusal a retry clears, never a key swap slipping past.
+ * The plaintext never enters the token and the token is a one-way hash, so it
+ * carries nothing a log or a run header must not hold.
+ */
+function connectionIdentityToken(
+  config: Readonly<Record<string, string>>,
+  credentialsEnvelope: string | null,
+): string {
+  const canonicalConfig = Object.keys(config)
+    .sort()
+    .map((key) => `${key}=${config[key]}`)
+    .join(" ");
+  return createHash("sha256")
+    .update(canonicalConfig)
+    .update("  ")
+    .update(credentialsEnvelope ?? " none")
+    .digest("hex");
+}
+
 export type RunStartReach = {
   /** Which reader the run route hands this to. */
   readonly connectionType: ConnectionType;
   readonly config: Readonly<Record<string, string>>;
   readonly apiKey: string;
   /**
-   * The connection's own edit stamp at the moment this reach was read.
+   * A fingerprint of the exact target this reach read, carried into the write.
    *
    * The world is read from this target *before* the run's transaction opens,
    * because reading it is a network call and the transaction holds a lock. So
    * the connection could be edited — its agent, its address, its key — between
    * this read and the write that snapshots it, and the run would then store a
-   * world read from one target while its record named another. `startRun` is
-   * handed this stamp and refuses if the connection has moved under it, so the
-   * world it froze and the target it names are always the same one.
+   * world read from one target while its record named another. `startRun` reads
+   * the connection again under its lock, fingerprints it the same way, and
+   * refuses if the two differ — so the world it froze and the target it names
+   * are always the same one.
    */
-  readonly connectionUpdatedAt: Date;
+  readonly connectionIdentity: string;
 };
 
 export async function resolveRunStartReach(
@@ -958,7 +1003,6 @@ export async function resolveRunStartReach(
       connectionType: connection.connectionType,
       config: connection.config,
       credentials: connection.credentials,
-      updatedAt: connection.updatedAt,
     })
     .from(connection)
     .where(
@@ -984,18 +1028,20 @@ export async function resolveRunStartReach(
   const apiKey = openedApiKey(row.credentials);
   if (apiKey === null) return undefined;
 
+  const config = stringRecordFromRow(
+    row.config,
+    () =>
+      new Error(
+        `connection ${connectionId} holds config in a shape Egma never ` +
+          `writes; the row needs repairing before anybody can run over it`,
+      ),
+  );
+
   return {
     connectionType: row.connectionType as ConnectionType,
-    config: stringRecordFromRow(
-      row.config,
-      () =>
-        new Error(
-          `connection ${connectionId} holds config in a shape Egma never ` +
-            `writes; the row needs repairing before anybody can run over it`,
-        ),
-    ),
+    config,
     apiKey,
-    connectionUpdatedAt: row.updatedAt,
+    connectionIdentity: connectionIdentityToken(config, row.credentials),
   };
 }
 

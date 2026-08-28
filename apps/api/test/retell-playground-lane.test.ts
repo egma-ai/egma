@@ -711,7 +711,8 @@ describe("the version a run resolved, on the record", () => {
     expect(reach).toBeDefined();
     if (reach === undefined) return;
 
-    // The edit lands after the world was read. `updatedAt` moves.
+    // The edit lands after the world was read: the agent, the address and the
+    // key all move.
     await updateConnection(who, agentId, connectionId, {
       config: {
         retellAgentId: "agent_moved_elsewhere",
@@ -727,7 +728,7 @@ describe("the version a run resolved, on the record", () => {
         connectionId,
         idempotencyKey: newId("run"),
         conductedWorld: A_CONDUCTED_WORLD,
-        conductedConnectionAt: reach.connectionUpdatedAt,
+        conductedConnectionIdentity: reach.connectionIdentity,
       }),
     ).rejects.toThrow(/was edited while Egma was reading the agent's platform/u);
 
@@ -739,10 +740,61 @@ describe("the version a run resolved, on the record", () => {
     expect(rows[0]?.count).toBe("0");
   });
 
+  it("refuses even when the edit shares the connection's millisecond", async () => {
+    // The reason the token is the identity and not a clock. `updated_at` lands
+    // on the millisecond, so an edit inside the same millisecond as the read
+    // would carry an equal timestamp — and a timestamp guard would wave it
+    // through. Here the identity-bearing config is changed while `updated_at`
+    // is pinned back to the exact value the read saw, the pathological case a
+    // clock cannot tell from no edit at all. The fingerprint is over the
+    // config and the sealed key, so it catches it regardless.
+    const { ada, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("playground_connection_same_ms", PLAYGROUND);
+    const who = contextFor(ada, "member");
+
+    const [before] = (
+      await api.database.sql<{ updated_at: string }>(
+        "select updated_at from connection where id = $1",
+        [connectionId],
+      )
+    ).rows;
+    const reach = await resolveRunStartReach(who, agentId, connectionId);
+    expect(reach).toBeDefined();
+    if (reach === undefined || before === undefined) return;
+
+    // The agent moves, and `updated_at` is put back to what the read saw — so
+    // the row's timestamp is byte-for-byte the reach's, and only the identity
+    // has changed.
+    await api.database.sql(
+      "update connection set config = $1::jsonb, updated_at = $2 where id = $3",
+      [
+        JSON.stringify({ retellAgentId: "agent_same_millisecond" }),
+        before.updated_at,
+        connectionId,
+      ],
+    );
+
+    await expect(
+      startRun(who, {
+        suiteId,
+        agentId,
+        connectionId,
+        idempotencyKey: newId("run"),
+        conductedWorld: A_CONDUCTED_WORLD,
+        conductedConnectionIdentity: reach.connectionIdentity,
+      }),
+    ).rejects.toThrow(/was edited while Egma was reading the agent's platform/u);
+
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
+  });
+
   it("writes the run when the connection held still through the read", async () => {
-    // The same path with no edit: the stamp the world was read at still equals
-    // the connection under the lock, so the world and the target agree and the
-    // run is written.
+    // The same path with no edit: the fingerprint the world was read at still
+    // equals the connection under the lock, so the world and the target agree
+    // and the run is written.
     const { ada, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun("playground_connection_still", PLAYGROUND);
     const who = contextFor(ada, "member");
@@ -757,7 +809,7 @@ describe("the version a run resolved, on the record", () => {
       connectionId,
       idempotencyKey: newId("run"),
       conductedWorld: A_CONDUCTED_WORLD,
-      conductedConnectionAt: reach.connectionUpdatedAt,
+      conductedConnectionIdentity: reach.connectionIdentity,
     });
     expect(started.conductedWorld).toEqual(A_CONDUCTED_WORLD);
   });
