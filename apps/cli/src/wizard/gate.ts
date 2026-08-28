@@ -99,13 +99,10 @@ export type TestGate = {
    */
   readonly mocks: readonly GateMock[];
   /**
-   * What the walk changed in the developer's own code, outside `egma/`.
+   * The integration files the coding agent reported outside `egma/`.
    *
-   * Today that is the one worker file the Egma SDK's testing entry went into.
-   * It is on this screen because it is the one edit the wizard makes that is
-   * not a test file, and because a developer pressing enter is agreeing to run
-   * against a worker Egma has just changed. Empty everywhere nothing was
-   * touched, and the screen then says nothing about it.
+   * These are a receipt, not an inventory of every supporting edit the coding
+   * agent made. Empty everywhere no integration files were reported.
    */
   readonly changed: readonly string[];
   /** What the tests would run against, for the sentence above the keys. */
@@ -212,7 +209,7 @@ export function gateFrom(
   },
   /** The project's mock tools, which every row runs inside. */
   mockTools: readonly MockToolEntry[] = [],
-  /** Files outside `egma/` the walk changed, as the developer would name them. */
+  /** Integration files outside `egma/` reported by the coding agent. */
   changed: readonly string[] = [],
 ): TestGate {
   const rows: GateRow[] = [];

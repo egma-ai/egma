@@ -53,6 +53,35 @@ export type StartLocalLiveKitWorker = (
   | { readonly kind: "failed"; readonly reason: string }
 >;
 
+/** A path-only incompatibility the local launcher can reject before setup. */
+export function localLiveKitWorkerFileIssue(
+  entrypoint: string,
+  dependencyManifest: string,
+): string | null {
+  const manifest = path.normalize(dependencyManifest);
+  const manifestName = path.basename(manifest).toLowerCase();
+  if (manifestName !== "pyproject.toml" && manifestName !== "requirements.txt") {
+    return (
+      `The coding agent reported ${JSON.stringify(dependencyManifest)}, but the local ` +
+      "LiveKit launcher supports only pyproject.toml or requirements.txt."
+    );
+  }
+
+  const workerFromProject = path.relative(
+    path.dirname(manifest),
+    path.normalize(entrypoint),
+  );
+  if (
+    workerFromProject === "" ||
+    workerFromProject === ".." ||
+    workerFromProject.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(workerFromProject)
+  ) {
+    return "The dependency manifest must be in the LiveKit worker project directory.";
+  }
+  return null;
+}
+
 /** The Windows system command that ends one process and all descendants. */
 export function windowsTreeKillArguments(
   pid: number,

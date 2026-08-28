@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -220,18 +220,40 @@ async function prepareLiveKitCli() {
 async function fileInside(cwd, value, label) {
   const candidate = path.resolve(cwd, value);
   const below = path.relative(cwd, candidate);
-  if (below === "" || below.startsWith("..") || path.isAbsolute(below)) {
+  if (
+    below === "" ||
+    below === ".." ||
+    below.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(below)
+  ) {
     throw new Error(`${label} must name a file inside --cwd`);
   }
   if (!(await stat(candidate)).isFile()) throw new Error(`${candidate} is not a file`);
-  return { absolute: candidate, relative: below };
+  const canonical = await realpath(candidate);
+  const canonicalBelow = path.relative(cwd, canonical);
+  if (
+    canonicalBelow === "" ||
+    canonicalBelow === ".." ||
+    canonicalBelow.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(canonicalBelow)
+  ) {
+    throw new Error(`${label} must not point outside --cwd`);
+  }
+  if (
+    path.basename(candidate).startsWith(".env") ||
+    path.basename(canonical).startsWith(".env")
+  ) {
+    throw new Error(`${label} must not name an environment file`);
+  }
+  return { absolute: canonical, relative: canonicalBelow };
 }
 
 async function workerArguments(cwdValue, entrypointValue, dependencyValue) {
-  const repository = path.resolve(cwdValue);
-  if (!(await stat(repository)).isDirectory()) {
-    throw new Error(`${repository} is not a directory`);
+  const shownRepository = path.resolve(cwdValue);
+  if (!(await stat(shownRepository)).isDirectory()) {
+    throw new Error(`${shownRepository} is not a directory`);
   }
+  const repository = await realpath(shownRepository);
   const entrypoint = await fileInside(
     repository,
     entrypointValue,
@@ -255,7 +277,8 @@ async function workerArguments(cwdValue, entrypointValue, dependencyValue) {
   const projectEntrypoint = path.relative(projectDir, entrypoint.absolute);
   if (
     projectEntrypoint === "" ||
-    projectEntrypoint.startsWith("..") ||
+    projectEntrypoint === ".." ||
+    projectEntrypoint.startsWith(`..${path.sep}`) ||
     path.isAbsolute(projectEntrypoint)
   ) {
     throw new Error(
