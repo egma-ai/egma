@@ -1,6 +1,6 @@
 {
   "name": "@egma/cli",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "type": "module",
   "description": "The Egma wizard and client: npx @egma/cli walks a developer to their first run.",
   "license": "Apache-2.0",
