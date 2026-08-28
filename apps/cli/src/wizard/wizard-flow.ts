@@ -36,6 +36,7 @@ import {
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
 import { folderPathsIn, readConfig } from "../folder/egma-folder.ts";
 import {
+  localLiveKitWorkerFileIssue,
   startLocalLiveKitWorker,
   type LocalLiveKitWorker,
   type StartLocalLiveKitWorker,
@@ -71,6 +72,7 @@ import {
   type LiveKitConnected,
 } from "./livekit-connection-setup-step.ts";
 import { mockAuthoringStep } from "./mock-authoring-step.ts";
+import { acceptRepositoryFileClaim } from "./repository-file-claim.ts";
 import { runStep } from "./run-step.ts";
 import { ACTION_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
@@ -767,6 +769,7 @@ async function runWizardWithAgent(
   advance({ type: "connection-ready" });
 
   const registered = connected.connected.registered;
+  const localWorkerSetup = connected.connected.localWorker;
   const written = await generateStep({
     ui,
     drivenAgent,
@@ -803,9 +806,37 @@ async function runWizardWithAgent(
           halted: {
             kind: "failed",
             reason:
-              "The coding agent did not complete the LiveKit worker integration, so Egma did not open review or push tests.",
+              "The coding agent did not complete the LiveKit worker integration, so Egma did not show the local test review or upload tests to Egma.",
           },
         };
+      }
+      if (localWorkerSetup !== null) {
+        const [worker, dependency] = await Promise.all([
+          acceptRepositoryFileClaim(
+            cwd,
+            localWorkerSetup.entrypoint,
+            "the LiveKit worker",
+          ),
+          acceptRepositoryFileClaim(
+            cwd,
+            localWorkerSetup.dependencyManifest,
+            "the Python dependency manifest",
+          ),
+        ]);
+        const refusal =
+          worker.kind === "refused"
+            ? worker.reason
+            : dependency.kind === "refused"
+              ? dependency.reason
+              : localLiveKitWorkerFileIssue(worker.file, dependency.file);
+        if (refusal !== null) {
+          return {
+            halted: {
+              kind: "failed",
+              reason: `${refusal} Egma did not show the local test review or upload tests to Egma.`,
+            },
+          };
+        }
       }
       advance({ type: "mocks-ready" });
       return {

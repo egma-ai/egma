@@ -307,6 +307,14 @@ function noMockingSteps(): FakeStep[] {
   ];
 }
 
+function mockingRemovesManifestSteps(): FakeStep[] {
+  return [
+    { kind: "remove-file", path: "requirements.txt" },
+    { kind: "say", text: "egma:none no external dependency tools to mock\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
 function mixedToolAbortSteps(): FakeStep[] {
   return [
     {
@@ -1006,6 +1014,29 @@ describe("LiveKit in the wizard", () => {
     expect(platform.registered.connections).toHaveLength(0);
     expect(platform.suites.suites).toHaveLength(0);
     expect(platform.tests.tests).toHaveLength(0);
+    expect(localWorkerRuns).toHaveLength(0);
+  });
+
+  it("rechecks local worker paths after all coding-agent work and before upload", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      integration: integrationSteps(),
+      mocking: mockingRemovesManifestSteps(),
+    });
+
+    expect(report).toMatchObject({
+      kind: "failed",
+      reason: expect.stringContaining(
+        "requirements.txt is not a readable file inside this repository",
+      ),
+    });
+    if (report.kind !== "failed") throw new Error("expected path recheck failure");
+    expect(report.reason).toContain(
+      "did not show the local test review or upload tests to Egma",
+    );
+    expect(ui.record.gate).toBeNull();
+    expect(platform.tests.tests).toHaveLength(0);
+    expect(platform.running.runs).toHaveLength(0);
     expect(localWorkerRuns).toHaveLength(0);
   });
 
