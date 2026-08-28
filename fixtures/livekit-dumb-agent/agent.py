@@ -46,12 +46,15 @@ holds it to.
 
 ## The six lines that make a chat simulation a chat simulation
 
-Egma sends the modality it is conducting in the job's own metadata, and
-these six lines read it and answer in kind: in a chat simulation the
-session takes no audio in, sends no audio out, and stops tying its
-transcription to speech it is not producing. That is the whole of the
-customer-side integration — no egma package, and the same shape in Node
-through its own input and output options.
+Egma says which kind of simulation a room conducts in the room's own
+name — a chat simulation's room begins ``egma-sim-chat-`` — and these
+six lines read it and answer in kind: in a chat simulation the session
+takes no audio in, sends no audio out, and stops tying its transcription
+to speech it is not producing. The name arrives with the job before the
+worker connects to anything, and no metadata key of anybody's can
+collide with it. That is the whole of the customer-side integration — no
+egma package, and the same shape in Node through its own input and
+output options.
 
 Without them the agent still answers a chat simulation, because a LiveKit
 session already listens for text. It answers it *aloud*: every reply is
@@ -60,8 +63,9 @@ producing it, so a fourteen-word answer takes nearly five seconds and the
 customer pays for speech nobody hears. Egma sees that on the wire and
 stops the simulation rather than grading it.
 
-**A production room carries no egma metadata**, so ``chat`` is false there
-and the options are the stock ones. The voice path is untouched by
+**A production room carries the customer's own name**, never egma's
+marked one, so ``chat`` is false there and the options are the stock
+ones. The voice path is untouched by
 construction rather than by care — which is the property
 ``tests/test_outside_egma.py`` already holds this file to.
 
@@ -74,10 +78,10 @@ function directly and treats missing configuration as an error.
 
 ``EGMA_DUMB_AGENT_NAME`` is the name this worker registers under, and it
 is the one prerequisite of the whole arrangement. Egma dispatches by name,
-always, because dispatch metadata is the only channel carrying the
-modality and the address of egma's mock-tool seam — and LiveKit's
-automatic dispatch, which is what a worker registered without a name gets,
-carries no dispatch metadata at all. Naming a worker that was previously
+always, so its record names the agent it graded — where LiveKit's
+automatic dispatch, which is what a worker registered without a name
+gets, would hand egma's rooms to whichever workers were listening.
+Naming a worker that was previously
 unnamed turns automatic dispatch off for it: it then joins only the rooms
 whose dispatch asks for it.
 
@@ -86,7 +90,6 @@ Run it with the project's own values in the environment (see README):
     uv run agent.py dev
 """
 
-import json
 import os
 
 from egma import mockable, monitor_livekit
@@ -171,10 +174,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # the agent's tools are all attached and nothing has been said yet.
     # Outside a simulation this returns having touched nothing.
     await mockable(agent, ctx, session)
-    # The six lines. A production room carries no egma metadata, so `chat`
-    # is false there and these are the stock options.
-    context = json.loads(ctx.job.metadata or "{}")
-    chat = context.get("modality") == "chat"
+    # The six lines. A production room is named by the customer's own
+    # system, never with egma's mark, so `chat` is false there and these
+    # are the stock options.
+    chat = ctx.job.room.name.startswith("egma-sim-chat-")
     options = (
         room_io.RoomOptions(
             audio_input=False,

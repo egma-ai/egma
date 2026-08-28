@@ -21,9 +21,9 @@ export type LiveKitAgentNameForm = {
  * whether it is there.
  *
  * There is nothing else left to decide here. Egma dispatches the named worker
- * for every simulation, because the dispatch metadata is the only channel that
- * carries the modality and the mock-tool address — so a connection without a
- * name reached the agent with neither, and the name is not a preference.
+ * for every simulation, so the record names the agent it graded — where a
+ * nameless connection would hand each room to whichever worker was listening —
+ * and the name is not a preference.
  *
  * The field is lifted out of the generic field list and drawn on its own so
  * the panel can say what a wrong name costs, which is that the agent never

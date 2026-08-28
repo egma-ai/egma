@@ -189,9 +189,9 @@ It asks how you want to test this agent first. **Chat** types to the agent and
 reads its words back, so a whole test suite finishes in seconds and nothing is
 spoken. **Voice** reaches the agent through the room's audio. Chat needs a
 short setup in your worker, which the same integration task gives your coding
-agent, and it is offered with project credentials alone: Egma dispatches your
-worker there, and that dispatch is the only channel that can tell the agent to
-answer in text.
+agent, and it is offered with project credentials alone: there Egma makes the room
+whose name tells your worker to answer in text, and dispatches the worker that
+reads it.
 
 For voice you then choose one of two setups:
 

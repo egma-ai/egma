@@ -1987,7 +1987,9 @@ describe("goal-first agent setup", () => {
       screen.getAllByRole("button", { name: "Copy" }),
     ).toHaveLength(2);
     const shown = document.body.textContent ?? "";
-    expect(shown).toContain('chat = context.get("modality") == "chat"');
+    expect(shown).toContain(
+      'chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+    );
     expect(shown).toContain("TextOutputOptions(sync_transcription=False)");
     expect(shown).not.toMatch(/chat (is )?(ready|configured|on)\b/i);
     expect(shown).not.toContain("Verified");
@@ -2528,10 +2530,10 @@ describe("one connection's page", () => {
   /**
    * A LiveKit connection saved before the name was demanded.
    *
-   * Egma cannot reach that agent: the dispatch metadata is the only channel
-   * that carries the modality and the mock-tool address, and there is no
-   * dispatch without a name. So the editor asks for one and refuses to save
-   * until it has it, rather than writing the row back the way it was.
+   * Egma will not conduct on that row: every Egma dispatch is explicit, and
+   * a connection with no name has no worker to dispatch. So the editor asks
+   * for one and refuses to save until it has it, rather than writing the row
+   * back the way it was.
    */
   it("requires a name from a LiveKit connection that was saved without one", async () => {
     const unnamed = {

@@ -84,8 +84,7 @@ Leave it running; Egma's simulations dispatch it per room.
 ## The six lines that make a chat simulation a chat simulation
 
 ```python
-context = json.loads(ctx.job.metadata or "{}")
-chat = context.get("modality") == "chat"
+chat = ctx.job.room.name.startswith("egma-sim-chat-")
 options = room_io.RoomOptions(
     audio_input=False,
     audio_output=False,
@@ -94,8 +93,9 @@ options = room_io.RoomOptions(
 ```
 
 They sit in `entrypoint`, beside the `mockable` line, and the options go
-to `session.start(..., room_options=options)`. Egma sends the modality it
-is conducting in the job's own metadata; these lines read it and answer in
+to `session.start(..., room_options=options)`. Egma says which kind of
+simulation a room conducts in the room's own name — a chat simulation's
+room begins `egma-sim-chat-` — and these lines read it and answer in
 kind. In a chat simulation the session takes no audio in, sends no audio
 out, and stops tying its transcription to speech it is not producing.
 
@@ -109,18 +109,18 @@ it, and the customer pays for speech nobody hears. Egma sees the published
 audio track on the wire and stops the simulation at the agent's first
 output rather than grading it.
 
-**A production room carries no Egma metadata**, so `chat` is false there
-and the options are the stock ones. The voice path is untouched by
+**A production room carries the customer's own name**, never Egma's
+marked one, so `chat` is false there and the options are the stock ones. The voice path is untouched by
 construction rather than by care, which is the property
 `tests/test_outside_egma.py` holds this file to.
 
 ## Naming the worker
 
 `EGMA_DUMB_AGENT_NAME` is the name this worker registers under, and it is
-required. Egma dispatches by name, always, because dispatch metadata is
-the only channel carrying the modality and the address of Egma's mock-tool
-seam — and LiveKit's automatic dispatch, which is what a worker registered
-without a name gets, carries no dispatch metadata at all.
+required. Egma dispatches by name, always, so its record names the agent
+it graded — where LiveKit's automatic dispatch, which is what a worker
+registered without a name gets, would hand Egma's rooms to whichever
+workers were listening.
 
 Naming a worker that was previously unnamed turns automatic dispatch off
 for it: it then joins only the rooms whose dispatch asks for it.

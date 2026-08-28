@@ -813,6 +813,9 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     # simulation, and the one join between egma's record and LiveKit's.
     assert conducted.provider_reference == stub.rooms[0].name
     assert conducted.provider_reference.startswith(f"{ROOM_PREFIX}-")
+    # And bare on purpose: the marked form is the chat lane's, and a voice
+    # room wearing it would mute every worker carrying the chat setup.
+    assert not conducted.provider_reference.startswith("egma-sim-chat-")
 
     # Measured, and measured per turn: the agent's quiet and speech on
     # each of its three turns, the persona's on each of its three, and the

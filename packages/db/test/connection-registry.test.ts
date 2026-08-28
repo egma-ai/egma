@@ -390,10 +390,10 @@ describe("a LiveKit room connection's url", () => {
 
 describe("a LiveKit room connection's agent name", () => {
   /**
-   * Demanded, because every egma dispatch is explicit. Dispatch metadata is
-   * the only channel that carries the simulation's modality and the mock-tool
-   * address, and LiveKit's automatic dispatch carries neither — so a nameless
-   * connection is one that reaches the agent with none of it.
+   * Demanded, because every egma dispatch is explicit: the record names the
+   * agent it graded, and the configured metadata always has a dispatch to
+   * ride — where a nameless connection would hand each room to whichever
+   * worker was listening.
    */
   it("is demanded, and the refusal names the key", () => {
     expect(() =>

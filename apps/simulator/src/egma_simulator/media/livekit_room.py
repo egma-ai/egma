@@ -11,14 +11,16 @@ verbs every media driver has (see :mod:`egma_simulator.media`):
    surface: it opens the websocket and negotiates the media.
 2. ``dial`` — get the agent in, by name, always explicitly. LiveKit
    would hand a new room to a worker registered without a name on its
-   own, and egma deliberately does not lean on that: **dispatch metadata
-   is the only channel that carries the simulation's modality and the
-   address of egma's mock-tool seam, and only an explicit dispatch
-   carries dispatch metadata.** A room filled automatically is a room
-   where the agent was never told which kind of simulation it is in and
-   never told who to ask about its tools. So the connection names the
-   agent, and one that names none is refused at the settings read,
-   before anything is reached.
+   own, and egma deliberately does not lean on that: **a room filled
+   automatically is a room where the record cannot say which agent it
+   graded** — whichever workers were listening took it — and where the
+   customer's configured metadata has no dispatch of egma's to ride.
+   The simulation's own signals need no dispatch to travel: the room's
+   name carries them (``egma-sim-`` says simulation, ``egma-sim-chat-``
+   says which kind), and egma is found among the room's participants by
+   the identity it joined as. So the connection names the agent, and one
+   that names none is refused at the settings read, before anything is
+   reached.
 3. ``wait_answered`` — the agent's participant arrives and its audio
    flows, within a bounded wait. Both halves matter: a participant that
    joins and publishes nothing is a worker that crashed on its first
@@ -174,6 +176,7 @@ from .room import (
     answering,
     delete_room,
     first_of,
+    fresh_chat_room_name,
     fresh_room_name,
     persona_name_for,
     room_name_for,
@@ -377,6 +380,12 @@ def dispatch_metadata(
     collision check once egma's own telemetry reports no hello from an SDK
     below the room-name minimum for a full release cycle.
 
+    While it lives it tells the truth: the ``modality`` here is the
+    conducting driver's own, never an assumed ``voice``. Nothing current
+    depends on it — the chat setup in the integration instructions reads
+    the room's name, not this block — so the deletion condition above
+    stays exactly as written.
+
     A customer's own key always wins. Where their configured JSON already
     uses one of these four names, or is not a JSON object at all, their
     string rides alone byte for byte and the block is dropped. Corrupting
@@ -558,18 +567,16 @@ class RoomSettings:
 
         # Demanded rather than defaulted, and demanded here so that a
         # connection nobody can dispatch is a sentence before any request
-        # leaves egma. Dispatch metadata is the only channel carrying the
-        # modality and the mock-tool address, and only an explicit
-        # dispatch carries dispatch metadata — so a nameless connection
-        # would conduct a simulation the agent was told nothing about,
-        # with every mocked tool quietly running for real.
+        # leaves egma. Every egma dispatch is explicit: a room filled by
+        # automatic dispatch goes to whichever workers are listening, so
+        # the record could never say which agent it graded, and the
+        # customer's configured metadata would have no dispatch to ride.
         agent_name = config.get("agentName")
         if not isinstance(agent_name, str) or not agent_name.strip():
             raise MediaBackendError(
                 "livekit config: agentName must be a non-empty string — the "
                 "name the agent's worker registered under, because Egma "
-                "dispatches it by name to tell it the modality and where to "
-                "ask about its tools"
+                "dispatches that worker by name for every simulation"
             )
 
         if not isinstance(credentials, dict):
@@ -806,12 +813,14 @@ class RoomLifecycle:
         # than through a second implementation of it.
         self._secrets = SecretRegistry()
         self._secrets.register(list(settings.secrets))
-        # A room egma opens itself is named after nothing, because nobody
-        # else has to recognise it. A room egma asks for a token into is
-        # named after the simulation, because the endpoint being asked has
-        # to be able to check the name against its own rules.
+        # A room egma opens itself is named by the driver conducting it,
+        # because the name is a channel: the chat driver's rooms carry the
+        # modality mark the customer's worker reads. A room egma asks for
+        # a token into is named after the simulation, because the endpoint
+        # being asked has to be able to check the name against its own
+        # rules.
         self._room_name = (
-            fresh_room_name()
+            self._fresh_room_name()
             if settings.mints_its_own
             else room_name_for(simulation_id)
         )
@@ -826,6 +835,12 @@ class RoomLifecycle:
         simulation, and what the report carries as the provider
         reference."""
         return self._room_name
+
+    def _fresh_room_name(self) -> str:
+        """What a room egma mints itself is called. The chat driver
+        overrides this with the marked form, because the name is where a
+        worker reads the modality from."""
+        return fresh_room_name()
 
     def _answer_for_mocked_tools(self) -> None:
         """Stand ready to answer for the agent's tools, in the room.
@@ -912,9 +927,10 @@ class RoomLifecycle:
         There is nothing to dial: who to reach is the room's own
         configuration, and asking for it is one explicit dispatch by the
         name the connection carries. Nothing here falls back on LiveKit's
-        automatic dispatch, because a room filled that way carries no
-        dispatch metadata — so the agent would learn neither the modality
-        nor where egma is standing for its tools.
+        automatic dispatch: a room filled that way goes to whichever
+        workers are listening, so the record could not name the agent it
+        graded, and the customer's configured metadata would have no
+        dispatch to ride.
 
         A connection that asks an endpoint for its tokens asks for nothing
         here at all. Dispatching takes the key pair egma deliberately was
@@ -1314,8 +1330,9 @@ class LiveKitRoomBackend(RoomLifecycle):
 # back off another. What makes that possible without touching the
 # customer's agent is that LiveKit's session already listens on the chat
 # topic; what makes it *fast* is the six lines the customer adds, which
-# read the modality out of the dispatch metadata this driver sends and
-# stop the agent synthesising speech nobody hears.
+# read the modality off the name of the room this driver makes — the
+# ``egma-sim-chat-`` mark — and stop the agent synthesising speech nobody
+# hears.
 
 
 @dataclass(frozen=True)
@@ -1430,7 +1447,7 @@ class TextRoom:
         def _published(publication: Any, _participant: Any) -> None:
             # Egma publishes nothing here, so a track in this room is the
             # agent's — and an agent publishing audio in a chat simulation
-            # is an agent that never read the modality it was sent.
+            # is an agent that never read the modality off its room's name.
             if getattr(publication, "kind", None) == rtc.TrackKind.KIND_AUDIO:
                 self.audio_published.set()
 
@@ -1658,6 +1675,12 @@ class LiveKitChatRoomBackend(RoomLifecycle):
     """
 
     MODALITY = "chat"
+
+    def _fresh_room_name(self) -> str:
+        """The marked form: ``egma-sim-chat-`` says which kind of
+        simulation this room conducts, to a worker deciding its room
+        options before it has connected to anything."""
+        return fresh_chat_room_name()
 
     async def open_room(self) -> None:
         """Get a way into the room and join it, publishing nothing."""

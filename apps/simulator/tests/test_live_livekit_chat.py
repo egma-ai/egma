@@ -5,10 +5,10 @@ the lifecycle and the turn rule are right and nothing at all about a real
 project, a real worker, or a real agent that has taken the six lines. This
 file is the other half: a spec whose connection names a room and says
 ``chat`` goes in at the control plane, egma makes the room in that
-project, dispatches the fixture worker into it with ``modality: chat`` in
-the dispatch metadata, types to it, reads its typed answers back, and the
-record that comes back is read the way the offline acceptance suite reads
-one.
+project — named with the ``egma-sim-chat-`` mark the worker reads —
+dispatches the fixture worker into it, types to it, reads its typed
+answers back, and the record that comes back is read the way the offline
+acceptance suite reads one.
 
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
@@ -32,7 +32,8 @@ corpus, because nothing here speaks a sentence. The shorter skip list is
 the product claim written as an environment.
 
 The counterpart is ``fixtures/livekit-dumb-agent``, carrying the six lines
-that read the modality egma sends. Start it first and leave it running.
+that read the modality off the room's name. Start it first and leave it
+running.
 
 ## What is asserted
 

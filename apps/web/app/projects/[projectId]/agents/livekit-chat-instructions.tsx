@@ -6,14 +6,14 @@ import { CopyBlock } from "./copy-block.tsx";
  * The chat setup, exactly as `skills/integrate-egma/references/integrate-livekit.md`
  * teaches it.
  *
- * One block of plain LiveKit code, and no Egma package behind it: the worker
- * reads the modality Egma sends with the dispatch and, when it says chat,
- * starts its room with no audio either way and no transcription
- * synchronisation. A room without Egma's metadata never sees `chat`, so a
- * production deployment behaves exactly as it did before.
+ * One block of plain LiveKit code, and no Egma package behind it: a chat
+ * simulation's room is named with Egma's `egma-sim-chat-` mark, and the worker
+ * that reads it starts its room with no audio either way and no transcription
+ * synchronisation. A production room is named by the customer's own system,
+ * never with the mark, so a production deployment behaves exactly as it did
+ * before.
  */
-export const CHAT_SETUP_SNIPPET = `context = json.loads(ctx.job.metadata or "{}")
-chat = context.get("modality") == "chat"
+export const CHAT_SETUP_SNIPPET = `chat = ctx.job.room.name.startswith("egma-sim-chat-")
 options = RoomOptions(
     audio_input=False,
     audio_output=False,
@@ -29,7 +29,7 @@ options = RoomOptions(
  */
 export const CHAT_SETUP_PROMPT = `Add Egma's chat setup to this repository's LiveKit worker.
 
-In the job entrypoint, read the modality out of the job's dispatch metadata. When it is "chat", build the room options with the audio input off, the audio output off, and text_output=TextOutputOptions(sync_transcription=False), and pass them to AgentSession.start as room_options. Otherwise keep the room options the worker already used. Add no package for this.
+In the job entrypoint, read the job's room name. When it starts with "egma-sim-chat-", build the room options with the audio input off, the audio output off, and text_output=TextOutputOptions(sync_transcription=False), and pass them to AgentSession.start as room_options. Otherwise keep the room options the worker already used. Add no package for this.
 
 Then register the worker under a name, with agent_name in its WorkerOptions, and tell me the name it registers under.
 
@@ -47,11 +47,17 @@ Change nothing else, and leave every environment file unread.`;
 export function LiveKitChatInstructions() {
   const steps = [
     { title: "Give this to your coding agent", value: CHAT_SETUP_PROMPT },
-    { title: "Or add these lines to the worker yourself", value: CHAT_SETUP_SNIPPET },
+    {
+      title: "Or add these lines to the worker yourself",
+      value: CHAT_SETUP_SNIPPET,
+    },
   ] as const;
 
   return (
-    <section className="flex flex-col gap-5" aria-labelledby="livekit-chat-title">
+    <section
+      className="flex flex-col gap-5"
+      aria-labelledby="livekit-chat-title"
+    >
       <div className="flex flex-col gap-2">
         <h3
           className="m-0 text-lg leading-(--line-tight) font-medium text-foreground"
@@ -84,10 +90,10 @@ export function LiveKitChatInstructions() {
         ))}
       </ol>
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-        Your live rooms are untouched: a room without Egma&apos;s metadata keeps
-        the options the worker always used. Egma cannot see this change from
-        here. Your first chat simulation is what confirms it — an agent that
-        still answers in speech stops at its first turn, and says so.
+        Your live rooms are untouched: a room without Egma&apos;s mark in its
+        name keeps the options the worker always used. Egma cannot see this
+        change from here. Your first chat simulation is what confirms it — an
+        agent that still answers in speech stops at its first turn, and says so.
       </p>
     </section>
   );

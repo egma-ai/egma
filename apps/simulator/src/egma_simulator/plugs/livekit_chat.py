@@ -12,8 +12,11 @@ walk's three verbs: open, deliver, close.
 
 Its config keys and its credentials are the voice plug's, read by the same
 driver, and its ``agentName`` is required for the same reason: egma
-dispatches explicitly, because dispatch metadata is the only channel that
-carries the modality and the address of egma's mock-tool seam.
+dispatches explicitly, so the record names the agent it graded. The
+modality itself needs no dispatch to travel — it is the name of the room
+this plug's driver mints, ``egma-sim-chat-`` against the voice lane's bare
+``egma-sim-``, read by the worker before it connects to anything. No key
+the customer configures can collide with a room's name.
 
 **No speech runs anywhere.** There is no text-to-speech leg, no
 speech-to-text leg, no Pipecat pipeline and no recording. A chat
@@ -27,9 +30,12 @@ two is broken.
 - **A voice simulation.** The plug carrying the speech legs is the one
   next door, and this one has no transport to give a pipeline.
 - **A connection that names a token endpoint.** Egma holds no key pair
-  there, so it can neither dispatch the worker nor tell it to go
-  text-only — and a chat run against an agent that was never told is the
-  slow, expensive path this lane exists to remove.
+  there, so it neither makes the room nor dispatches the worker — and
+  those are the two powers that tell an agent it is in a chat: the
+  telling is the room's name, and on that variant the name is a request
+  to the customer's endpoint rather than a fact egma controls. A chat
+  run against an agent that was never told is the slow, expensive path
+  this lane exists to remove.
 - **An agent that is speaking.** The wire says which of the two states an
   agent is in, and it says it at the agent's first output: a speaking
   agent publishes an audio track and its words carry LiveKit's
@@ -169,9 +175,9 @@ CHAT_SETUP_MISSING = (
     "the agent answered in speech rather than in text — audio published in "
     "the room, or words carrying LiveKit's transcribed-track mark — so it has "
     "not taken Egma's chat setup. A chat simulation needs the worker to read "
-    "the modality out of its dispatch metadata and start its session with "
-    "audio input and output off and its transcription unsynchronised; Egma's "
-    "LiveKit integration instructions carry the lines that do it"
+    "the modality off its room's name and start its session with audio input "
+    "and output off and its transcription unsynchronised; Egma's LiveKit "
+    "integration instructions carry the lines that do it"
 )
 """Why a simulation stops at the agent's first output.
 
@@ -211,9 +217,10 @@ class LiveKitChat:
         if access_variant == "livekit_room.customer_token_endpoint":
             raise PlugError(
                 "a livekit connection that names a tokenEndpoint holds no key "
-                "pair, so Egma can neither dispatch the agent nor tell it to "
-                "go text-only; chat is offered on the project-credential "
-                "access variant, where Egma dispatches"
+                "pair, so Egma neither makes the room whose name would tell "
+                "the agent it is in a chat, nor dispatches the worker that "
+                "must read it; chat is offered on the project-credential "
+                "access variant, where Egma holds both powers"
             )
 
         # Read here, before anything is reached, so a connection the driver

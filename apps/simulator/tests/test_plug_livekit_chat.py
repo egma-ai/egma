@@ -22,9 +22,9 @@ agent that never took the chat setup is caught at its **first** output,
 because a speech-paced exchange graded as if it were typed is a record of
 the wrong kind of run and every further turn spends more of the customer's
 speech budget proving the same thing twice. And a connection that names
-no agent is refused before a single request leaves egma, because egma
-dispatches explicitly or the agent is never told which kind of simulation
-it is in at all.
+no agent is refused before a single request leaves egma, because every
+egma dispatch is explicit: the record names the agent it graded, or there
+is no dispatch and whichever worker was listening takes the room.
 """
 
 from __future__ import annotations
@@ -291,10 +291,12 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
 ):
     """What an agent is told when it is asked for a typed simulation.
 
-    The modality is the one thing that lets it go text-only, so it has to
-    be on the block and it has to say ``chat``. Nothing whatever about
-    what the agent will be asked joins it, because an agent that reads its
-    script stops being under test.
+    The signal that lets it go text-only is the room's name; this block is
+    the retiring one an SDK older than room-name detection still reads,
+    and while it lives it tells the truth — ``chat`` for a typed room,
+    never an assumed ``voice``. Nothing whatever about what the agent will
+    be asked joins it, because an agent that reads its script stops being
+    under test.
     """
     scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
     stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
@@ -310,6 +312,62 @@ async def test_the_dispatch_carries_chat_and_none_of_the_test(
     }
     for word in ("Tuesday", "Thursday", "Margaret", "cleaning", A_PERSONALITY):
         assert word not in stub.dispatches[0].metadata
+
+
+async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The published contract, written out by hand on purpose.
+
+    A chat simulation's room begins ``egma-sim-chat-``, and the six lines
+    in Egma's LiveKit integration instructions key their one decision off
+    exactly that string — so this test spells it rather than importing the
+    constant that builds it. A rename in ``media/room.py`` must land here
+    as a red test: every worker already carrying the chat setup would
+    answer the renamed room aloud, and the fail-fast would stop each of
+    those simulations at the agent's first utterance. Read the red as the
+    contract refusing to move.
+
+    The bare ``egma-sim-`` prefix survives inside the marked form, so
+    everything that recognises it — the SDK's simulation detection, a
+    token endpoint's allowlist, the hardening recipe — still matches.
+    """
+    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
+    await chat_walk(tmp_path, stub, monkeypatch)
+
+    name = stub.rooms[0].name
+    assert name.startswith("egma-sim-chat-")
+    assert name.startswith("egma-sim-")
+    suffix = name[len("egma-sim-chat-") :]
+    assert suffix and all(digit in "0123456789abcdef" for digit in suffix)
+
+
+async def test_a_customers_own_modality_key_cannot_touch_the_simulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The collision the retiring block yields to, shrugged off whole.
+
+    A customer may configure metadata that uses egma's own key names — a
+    ``modality`` of their own among them. The block is then dropped and
+    their string rides alone, byte for byte, exactly as the voice lane
+    promises. Nothing about the simulation bends, because nothing the
+    simulation needs travels on that channel: the room's name carries the
+    modality and the persona's identity carries the mock-tool address.
+    This is the test that says the chat lane cannot be broken by any key
+    a customer writes.
+    """
+    configured = '{"modality":"my own word","simulationId":"their-id"}'
+    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
+    conducted, turns, _calls, _assembled = await chat_walk(
+        tmp_path, stub, monkeypatch, metadata=configured
+    )
+
+    # Their string, alone and untouched; egma's block dropped whole.
+    assert stub.dispatches[0].metadata == configured
+    # And the simulation neither noticed nor cared.
+    assert stub.rooms[0].name.startswith("egma-sim-chat-")
+    assert conducted.ending == "persona_concluded"
+    assert ("agent", "Front desk.") in turns
 
 
 async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
@@ -762,8 +820,9 @@ def test_the_plug_speaks_chat_only():
 
 
 def test_chat_is_refused_on_the_connection_that_names_a_token_endpoint():
-    """Egma holds no key pair there, so it can neither dispatch the worker
-    nor tell it to go text-only — and the refusal says which."""
+    """Egma holds no key pair there, so it neither makes the room whose
+    name would say chat nor dispatches the worker that must read it — and
+    the refusal says which."""
     with pytest.raises(PlugError) as refusal:
         LiveKitChat(
             modality="chat",
@@ -782,9 +841,9 @@ def test_chat_is_refused_on_the_connection_that_names_a_token_endpoint():
 
 @pytest.mark.parametrize("agent_name", [None, "", "   "])
 def test_a_chat_connection_that_names_no_agent_is_refused(agent_name: str | None):
-    """The same demand the voice plug makes, and for the same reason —
-    except that chat has a second one: the modality itself only reaches
-    the agent on a dispatch egma asked for by name."""
+    """The same demand the voice plug makes, and for the same reason:
+    an explicit dispatch is what lets the record name the agent it
+    graded, whichever modality the room conducts."""
     config: dict = {"url": A_URL}
     if agent_name is not None:
         config["agentName"] = agent_name

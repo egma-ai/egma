@@ -18,16 +18,18 @@ When several workers remain possible, ask the developer which one to change.
 
 ## Chat setup
 
-Egma sends the modality of each simulation in the job's dispatch metadata. A
-worker that reads `chat` there starts its room with the audio input, the audio
-output, and transcription synchronisation off, so the exchange stays text and
-the worker synthesizes no speech.
+Egma says which kind of simulation a room conducts in the room's own name: a
+chat simulation's room begins `egma-sim-chat-`. A worker that reads that mark
+starts its room with the audio input, the audio output, and transcription
+synchronisation off, so the exchange stays text and the worker synthesizes no
+speech. The name arrives with the job before the worker connects to anything,
+and it is the same signal on every dispatch path — no metadata key of yours or
+of Egma's is involved.
 
 Add these lines where the job entrypoint builds its room options:
 
 ```python
-context = json.loads(ctx.job.metadata or "{}")
-chat = context.get("modality") == "chat"
+chat = ctx.job.room.name.startswith("egma-sim-chat-")
 options = RoomOptions(
     audio_input=False,
     audio_output=False,
@@ -36,10 +38,9 @@ options = RoomOptions(
 ```
 
 Pass `options` to `AgentSession.start` as its `room_options`, and import the
-three names the block uses when the worker does not import them already:
+two names the block uses when the worker does not import them already:
 
 ```python
-import json
 from livekit.agents.voice.room_io import RoomOptions, TextOutputOptions
 
 await session.start(agent=agent, room=ctx.room, room_options=options)
@@ -49,8 +50,9 @@ This is the whole chat setup. It needs no Egma package and no Egma import, and
 a worker built with `@livekit/agents` takes the same change through its own
 input and output options.
 
-A production room carries no Egma metadata, so `chat` is false there and the
-worker keeps the room options it always used. The voice path is unchanged.
+A production room is named by your own system, never with Egma's `egma-sim-`
+mark, so `chat` is false there and the worker keeps the room options it always
+used. The voice path is unchanged.
 
 ## Egma SDK entries
 
@@ -138,10 +140,10 @@ supplies. Keep both values out of changed files and command output.
 
 ## Name the worker
 
-Every Egma dispatch is explicit, because the dispatch metadata is the only
-channel that carries the modality and the mock-tool address. A worker with no
-registered name cannot receive either, so give the worker a name in its own
-options:
+Every Egma dispatch is explicit, so Egma's record names the agent it graded
+and only the named worker takes the room. A worker with no registered name is
+dispatched automatically — whichever worker is listening takes every new room —
+so give the worker a name in its own options:
 
 ```python
 agents.cli.run_app(

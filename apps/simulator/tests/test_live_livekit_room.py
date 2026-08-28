@@ -57,9 +57,9 @@ this conducts against is what a registered connection would hand it.
 
 ## One dispatch style, because there is only one
 
-Egma dispatches by name, always: dispatch metadata is the only channel
-that carries the modality and the address of egma's mock-tool seam, and
-LiveKit's automatic dispatch carries no dispatch metadata at all. So
+Egma dispatches by name, always, so the record names the agent it
+graded — where automatic dispatch would hand the room to whichever
+workers were listening. So
 ``TEST_LIVEKIT_AGENT_NAME`` is required here rather than optional, and a
 blank one skips this test visibly instead of conducting a run the
 simulator would refuse. It falls back to ``EGMA_DUMB_AGENT_NAME``, which

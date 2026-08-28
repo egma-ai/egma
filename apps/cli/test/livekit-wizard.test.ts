@@ -919,7 +919,9 @@ describe("LiveKit in the wizard", () => {
     expect(task.replace(/\s+/gu, " ")).toContain(
       "It needs no Egma package and no Egma import",
     );
-    expect(task).toContain('chat = context.get("modality") == "chat"');
+    expect(task).toContain(
+      'chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+    );
     expect(task).toContain("## The worker's name");
     expect(task).toContain("egma:found dispatch-name front-desk");
   });

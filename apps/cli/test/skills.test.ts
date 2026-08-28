@@ -315,8 +315,13 @@ describe("Egma's instruction content", () => {
     const reference = integrateEgmaReference("integrate-livekit");
     const chat = referencePart(reference, "Chat setup");
 
-    expect(chat).toContain('context = json.loads(ctx.job.metadata or "{}")');
-    expect(chat).toContain('chat = context.get("modality") == "chat"');
+    // The mark is spelled by hand: it is the published contract the six
+    // lines key on, not a constant to import.
+    expect(chat).toContain(
+      'chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+    );
+    // The customer's metadata channels stay the customer's.
+    expect(chat).not.toContain("ctx.job.metadata");
     expect(chat).toContain("audio_input=False");
     expect(chat).toContain("audio_output=False");
     expect(chat).toContain("TextOutputOptions(sync_transcription=False)");
@@ -337,7 +342,7 @@ describe("Egma's instruction content", () => {
 
     // The customer's live rooms are untouched by taking it.
     expect(chat.replace(/\s+/gu, " ")).toContain(
-      "A production room carries no Egma metadata",
+      "A production room is named by your own system",
     );
   });
 

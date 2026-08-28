@@ -59,9 +59,10 @@ and hands back the transcript; by hand it is::
     uv run pytest tests/test_live_mock_tools.py -v -s
 
 The agent's name is required, not optional: egma dispatches explicitly,
-because dispatch metadata is the only channel carrying the address of
-egma's mock-tool seam — which is to say that this test's whole subject
-travels on it.
+so this test conducts against the one worker it names rather than
+whichever worker was listening — and the SDK on the far side finds egma
+by the room's name and the persona's identity, which is this test's
+whole subject crossing a real room.
 
 Each name falls back to the plain one the tool's own CLI reads, so one
 environment starts the worker and runs this. It skips — visibly, never
