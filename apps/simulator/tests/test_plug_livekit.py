@@ -1104,7 +1104,11 @@ async def test_the_dispatch_carries_the_customers_own_keys_untouched(
         scenario="One point.",
     )
 
-    assert stub.dispatches[0].metadata == '{"clinic":"lakeside","locale":"en-GB"}'
+    # Read the way an agent reads it, because that is the claim: the
+    # bytes are pinned next door, and what is pinned here is that parsing
+    # them gets the agent to its own keys.
+    carried = json.loads(stub.dispatches[0].metadata)
+    assert carried == {"clinic": "lakeside", "locale": "en-GB"}
 
 
 @pytest.mark.parametrize(
