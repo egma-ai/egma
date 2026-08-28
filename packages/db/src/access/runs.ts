@@ -50,6 +50,7 @@ import { openCredentials } from "../sealing.ts";
 import {
   resolveMockTools,
   type MockToolSnapshot,
+  type ResolvedMockTool,
   type SnapshotDefault,
   type SnapshotEntry,
 } from "../mock-tools/resolve.ts";
@@ -335,8 +336,7 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
     !Array.isArray(defaults) ||
     typeof overrides !== "object" ||
     overrides === null ||
-    Array.isArray(overrides) ||
-    Object.keys(overrides).length !== 0
+    Array.isArray(overrides)
   ) {
     throw malformed();
   }
@@ -350,13 +350,25 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
       : { answer: held.answer };
     return { toolName, delayMilliseconds, answer: read } as SnapshotEntry;
   };
+  // Read rather than assumed empty. What a pinned test version overrode is the
+  // branching mechanism — "the calendar has no free slots" is the same test
+  // with one answer changed — and the mock endpoint resolves it per simulation
+  // at serve time, so the run's frozen world has to be able to carry it.
+  const read: Record<string, readonly SnapshotEntry[]> = {};
+  for (const [testVersionId, entries] of Object.entries(
+    overrides as Record<string, unknown>,
+  )) {
+    if (!Array.isArray(entries)) throw malformed();
+    read[testVersionId] = entries.map(entryFromRow);
+  }
+
   return {
     defaults: defaults.map((entry): SnapshotDefault => {
       const mockToolId = (entry as Record<string, unknown>).mockToolId;
       if (typeof mockToolId !== "string") throw malformed();
       return { ...entryFromRow(entry), mockToolId };
     }),
-    overrides: {},
+    overrides: read,
   };
 }
 
@@ -1544,6 +1556,121 @@ export async function resolveSimulationStanding(
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
+}
+
+/**
+ * Everything the mock endpoint needs to answer one tool call, in one read.
+ *
+ * The request arrives from the agent's platform with no credential of egma's,
+ * so this read carries the whole of what the three gates ask: whether the run
+ * named is still live, whether the simulation named is that run's, and what
+ * that simulation's answers are. It takes no `AuthContext` for the same reason
+ * `resolveSimulationStanding` beside it takes none — there is no caller to
+ * resolve, and the row is the authority.
+ *
+ * `signingKey` is the agent's sealed platform key, opened. It is used to
+ * **verify** a signature the platform put on the request and for nothing else:
+ * nothing on this path spends it, and it never reaches an answer, a log, or a
+ * refusal.
+ *
+ * `undefined` means no such run, which is the first gate's answer.
+ */
+export type MockToolCallTarget = {
+  readonly runId: string;
+  /** Whether the run can still be conducting simulations. */
+  readonly runIsLive: boolean;
+  /** The simulation named, or `undefined` when it is not this run's. */
+  readonly simulation:
+    | {
+        readonly id: string;
+        readonly agentId: string;
+        readonly testVersionId: string;
+        readonly personaVersionId: string;
+        readonly status: SimulationStatus;
+        /** What this simulation is answered, project defaults and overrides merged. */
+        readonly answers: readonly ResolvedMockTool[];
+      }
+    | undefined;
+  readonly auth: AuthContext;
+  readonly signingKey: string | null;
+};
+
+export async function resolveMockToolCall(
+  runId: string,
+  simulationId: string,
+): Promise<MockToolCallTarget | undefined> {
+  const [header] = await db()
+    .select({
+      id: run.id,
+      organizationId: run.organizationId,
+      projectId: run.projectId,
+      status: run.status,
+      finishedAt: run.finishedAt,
+      mockToolSnapshot: run.mockToolSnapshot,
+      signingKey: agent.monitoringApiKey,
+    })
+    .from(run)
+    .innerJoin(agent, eq(run.agentId, agent.id))
+    .where(eq(run.id, runId))
+    .limit(1);
+  if (header === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      id: simulation.id,
+      agentId: simulation.agentId,
+      testVersionId: simulation.testVersionId,
+      personaVersionId: simulation.personaVersionId,
+      status: simulation.status,
+    })
+    .from(simulation)
+    .where(and(eq(simulation.id, simulationId), eq(simulation.runId, runId)))
+    .limit(1);
+
+  const snapshot = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
+
+  return {
+    runId: header.id,
+    // Live means the run can still be conducting: it has not been finished,
+    // and it has not been canceled. A finished run's world has been torn down,
+    // so an answer served after it would be an answer from a world that no
+    // longer exists.
+    runIsLive:
+      header.finishedAt === null &&
+      (header.status === "pending" || header.status === "running"),
+    simulation:
+      row === undefined
+        ? undefined
+        : {
+            id: row.id,
+            agentId: row.agentId,
+            testVersionId: row.testVersionId,
+            personaVersionId: row.personaVersionId,
+            status: row.status as SimulationStatus,
+            answers: resolveMockTools(snapshot, row.testVersionId),
+          },
+    auth: conductingContext(header.organizationId, header.projectId),
+    signingKey:
+      header.signingKey === null ? null : openedApiKey(header.signingKey),
+  };
+}
+
+/** The plaintext key inside a sealed `{ apiKey }` envelope, or null. */
+function openedApiKey(envelope: string): string | null {
+  try {
+    const opened = openCredentials(envelope);
+    if (
+      typeof opened === "object" &&
+      opened !== null &&
+      !Array.isArray(opened) &&
+      typeof (opened as { apiKey?: unknown }).apiKey === "string"
+    ) {
+      return (opened as { apiKey: string }).apiKey;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**
