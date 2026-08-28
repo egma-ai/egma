@@ -858,6 +858,57 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
+async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
+    workbench, start_simulator, start_playground_stub
+):
+    """The limits keep their job on this lane, unchanged.
+
+    Nothing in the plug ends an exchange the agent did not end, so an agent
+    that would answer forever runs out of turns instead — reported as the
+    limit it was and never as the agent failing. The coverage stamp is
+    still made, because Egma's answers were in the platform's hands from
+    the first request whether or not the agent ever called a tool.
+    """
+    sentinel = "SENTINEL-playground-key-limits-2f9b"
+    running = await start_playground_stub(
+        api_key=sentinel,
+        replies=[Reply(words="Lakeside Dental."), Reply(words="Go on.")],
+    )
+    spec = playground_spec(
+        "sim-playground-limit",
+        base_url=running.base_url,
+        api_key=sentinel,
+        max_turns=3,
+        scenario="I want to move my cleaning. I can do any Thursday.",
+        mock_tools=[
+            {
+                "tool_name": "get_availability",
+                "answer": {"answer": {"slots": []}},
+                "delay_milliseconds": 0,
+            }
+        ],
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-playground-limit"))
+
+    terminal = terminal_event_for(records, "sim-playground-limit")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "limit_reached"
+    assert "turn limit" in terminal["reason"], terminal["reason"]
+    assert terminal["facts"]["turn_count"] == 3
+    assert terminal["facts"]["provider_reference"] is None
+    assert terminal["facts"]["mock_tool_coverage"] == {
+        "discovered": [],
+        "covered": ["get_availability"],
+        "uncovered": [],
+    }
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
 async def test_a_playground_billing_wall_fails_loudly_and_says_nothing(
     workbench, start_simulator, start_playground_stub
 ):

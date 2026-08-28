@@ -54,6 +54,17 @@ served inside Retell's own execution, and a declared delay is speech-world
 fidelity — the layer chat deliberately excludes. Delays keep their whole
 meaning on the voice lanes.
 
+**Which tools may be answered at all is decided before this plug runs**,
+and that is why nothing here names a tool type. The run reads the agent's
+configuration once, classes each tool, and resolves an answer only for the
+ones it means to cover; this plug hands over exactly what it is given and
+marks a call ``mocked`` on exactly that basis. So the safe default for a
+kind nobody has proved yet — an MCP tool today, which Retell's own mocks
+do not match — is simply an answer that never arrives here, and the call
+lands on the record as the real one it was. A plug that guessed instead
+would be the one place a coverage stamp could start claiming isolation
+nobody had.
+
 **No provider reference exists, and the record says so.** The playground
 stores nothing: there is no chat, no call and no id for either side to
 look this exchange up by. The report carries ``null`` rather than a
@@ -290,7 +301,6 @@ class RetellPlayground:
         self._history: list[Any] = []
         self._resume: dict[str, Any] = {}
         self._ended = False
-        self._opened = False
 
     @property
     def base_url(self) -> str:
@@ -323,9 +333,7 @@ class RetellPlayground:
         for the caller answers with nothing, and the persona opens instead.
         """
         self._session = aiohttp.ClientSession()
-        answer = self._read(await self._exchange())
-        self._opened = True
-        return answer.text
+        return self._read(await self._exchange()).text
 
     async def deliver(self, text: str) -> AgentReply:
         if self._session is None:

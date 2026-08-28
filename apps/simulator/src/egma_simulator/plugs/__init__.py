@@ -64,11 +64,16 @@ nine keyword arguments:
 - ``mock_tools`` — egma's side of the mock-tool exchange for this
   simulation (:class:`egma_simulator.mock_tools.MockToolSeam`), already
   holding the answers the run resolved. Only a plug that can **put egma in
-  the agent's tool path** has any use for it, which today is the room: it
-  offers the exchange to whoever is in the room with it and says so, and
-  that saying-so is what puts a coverage stamp on the record. Every other
-  plug takes it and drops it, and its record honestly claims nothing about
-  tools, because egma was never in the path to learn anything.
+  the agent's tool path** has any use for it, and there are two ways to be
+  in it. A plug can *stand* in the path — the room does: it offers the
+  exchange to whoever is in the room with it and says so. Or it can *hand
+  the answers over* to a platform that serves them itself — the playground
+  does: they ride every request, and the platform matches them by name. In
+  both cases the saying-so is what puts a coverage stamp on the record, and
+  every tool call the plug learns of goes to the seam, which is the only
+  writer that can stamp one ``mocked``. Every other plug takes the seam and
+  drops it, and its record honestly claims nothing about tools, because
+  egma was never in the path to learn anything.
 - ``media`` — how a call reaches the telephone network for this
   simulation (:class:`egma_simulator.config.MediaSettings`), or ``None``
   on a deployment that places no calls. Already resolved: this
@@ -79,7 +84,7 @@ nine keyword arguments:
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
-connection is ever opened. Two of the eight are read for you where a plug
+connection is ever opened. Two of the nine are read for you where a plug
 uses them — :func:`named_version` and :func:`rendered_variables` below —
 so that two plugs reaching one platform cannot disagree about what a
 version reference is or what a variable may hold.
