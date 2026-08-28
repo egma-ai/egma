@@ -581,6 +581,41 @@ describe("reading an agent's reach from the list", () => {
       .mock.calls.map(([input]) => requestUrl(input as FetchInput));
   }
 
+  it("keeps the agent name and table layout stable while details are open", async () => {
+    listOf(LISTED_AGENT);
+    const view = render(<AgentsPage />);
+    const table = await screen.findByRole("table", {
+      name: "Agents in this project",
+    });
+    const name = within(table).getByText("Front desk");
+    const row = name.closest("tr");
+    expect(row).not.toBeNull();
+    if (row === null) throw new Error("The agent row was not rendered.");
+    const nameCell = row.cells[0];
+    const beforeRowClasses = new Set(row.className.split(/\s+/u));
+
+    fireEvent.click(within(row).getByText("Retell"));
+    routed.search = "?sheet=agent&agent=agt_1";
+    view.rerender(<AgentsPage />);
+    await screen.findByRole("dialog", { name: "Front desk" });
+
+    expect(row.cells[0]).toBe(nameCell);
+    expect(nameCell?.textContent).toContain("Front desk");
+    const activeMark = nameCell?.querySelector(
+      '[data-slot="current-row-mark"]',
+    );
+    expect(activeMark).not.toBeNull();
+    expect(activeMark?.parentElement).toBe(nameCell);
+    const addedTableBoxes = row.className
+      .split(/\s+/u)
+      .filter(
+        (className) =>
+          !beforeRowClasses.has(className) &&
+          (className === "relative" || className.startsWith("before:")),
+      );
+    expect(addedTableBoxes).toEqual([]);
+  });
+
   it("opens details from the row while the row shows capabilities", async () => {
     listOf(LISTED_AGENT);
     const view = render(<AgentsPage />);

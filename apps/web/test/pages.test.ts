@@ -661,7 +661,7 @@ describe("the pages", () => {
     expect(transcript).toContain("It is not a pass or fail result.");
     expect(transcript).toContain("shownScore(combinedScore)");
     expect(transcript).toMatch(
-      /import \{ shownScore \} from "[^"]*ui\/run-status\.tsx"/u,
+      /import \{[\s\S]*?\bshownScore\b[\s\S]*?\} from "[^"]*ui\/run-status\.tsx"/u,
     );
     expect(transcript).not.toMatch(/function shownScore\(/u);
   });

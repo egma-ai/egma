@@ -343,7 +343,7 @@ async function openRow(name: string): Promise<HTMLElement> {
 }
 
 /** The row a named persona is on, so one cell's word is read where it belongs. */
-function rowOf(name: string): HTMLElement {
+function rowOf(name: string): HTMLTableRowElement {
   const row = screen.getByRole("button", { name }).closest("tr");
   if (row === null) throw new Error(`no row for ${name}`);
   return row;
@@ -485,9 +485,14 @@ describe("the Personas list", () => {
 
     expect(open.getAttribute("aria-current")).toBe("true");
     expect(open.className).toContain("bg-selected");
-    expect(open.className).toContain("before:w-(--active-edge-width)");
-    expect(open.className).toContain("before:bg-brand");
-    expect(open.className).not.toContain("before:w-0.5");
+    const mark = open.cells[0]?.querySelector(
+      '[data-slot="current-row-mark"]',
+    );
+    expect(mark).not.toBeNull();
+    expect(mark?.className).toContain("w-(--active-edge-width)");
+    expect(mark?.className).toContain("bg-brand");
+    expect(mark?.className).not.toContain("w-0.5");
+    expect(open.className).not.toContain("before:");
     expect(other.getAttribute("aria-current")).toBeNull();
   });
 

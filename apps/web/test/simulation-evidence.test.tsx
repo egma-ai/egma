@@ -436,8 +436,11 @@ describe("one simulation's grades", () => {
     expect(within(history!).getByText("passed")).toBeTruthy();
 
     fireEvent.click(within(expected).getByRole("button", { name: "Read turn 2" }));
-    expect(await screen.findByRole("dialog", { name: "Transcript and audio" }))
-      .toBeTruthy();
+    const evidenceSheet = await screen.findByRole("dialog", {
+      name: "Transcript and audio",
+    });
+    expect(evidenceSheet.className).toContain("--sheet-width-wide");
+    expect(evidenceSheet.className).not.toContain("--sheet-width-extra-wide");
     await waitFor(() => {
       expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
         block: "center",
@@ -586,6 +589,67 @@ describe("the transcript time rail", () => {
     ).toBeNull();
   });
 
+  it("uses the compact continuous rail with shared time and speaker metadata", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const tool = {
+      spanId: "span_tool_compact",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const rendered = render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[tool as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    const rail = screen.getByRole("list", { name: "Transcript messages" });
+    expect(rail.className).toContain("border");
+    expect(rail.className).not.toContain("gap-3");
+
+    const userTurn = screen.getByLabelText("Turn 1, User");
+    const time = within(userTurn).getByText("0:01");
+    const speaker = within(userTurn).getByText("User");
+    const sentence = within(userTurn).getByText("Move Thursday's clean.");
+    expect(time.parentElement).toBe(speaker.parentElement);
+    expect(sentence.parentElement).not.toBe(time.parentElement);
+
+    const agentTurn = screen.getByLabelText("Turn 2, Agent");
+    const toolRow = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(agentTurn.contains(toolRow)).toBe(true);
+    expect(within(toolRow).getByText("Tool").parentElement).toBe(
+      within(toolRow).getByText("0:06").parentElement,
+    );
+    expect(toolRow.querySelector('[data-slot="state-mark"]')).toBeNull();
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[{ ...tool, status: "error" } as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+    expect(
+      screen
+        .getByLabelText("Tool call, lookup_appointment")
+        .querySelector('[data-state-mark="error"]'),
+    ).not.toBeNull();
+  });
+
   it("seeks speech without autoplay and expands exact tool requests and responses", () => {
     const read = evidence();
     const tool = {
@@ -658,6 +722,220 @@ describe("the transcript time rail", () => {
       />,
     );
     expect(screen.getByText(/Status not recorded ·/u)).toBeTruthy();
+  });
+
+  it.each([
+    {
+      source: "Retell",
+      agentStartedAt: "2026-08-15T10:00:39.606000Z",
+      toolStartedAt: "2026-08-15T10:00:37.362000Z",
+      shownOffset: "0:37",
+      toolBeforeSpeech: true,
+      throughIntermediateSpan: false,
+    },
+    {
+      source: "OTLP",
+      agentStartedAt: "2026-08-15T10:00:04.000000Z",
+      toolStartedAt: "2026-08-15T10:00:06.000000Z",
+      shownOffset: "0:06",
+      toolBeforeSpeech: false,
+      throughIntermediateSpan: true,
+    },
+  ])(
+    "shows a $source tool at its real offset inside the invoking agent turn",
+    ({
+      agentStartedAt,
+      toolStartedAt,
+      shownOffset,
+      toolBeforeSpeech,
+      throughIntermediateSpan,
+    }) => {
+      const read = evidence();
+      const original = read.transcript as NonNullable<typeof read.transcript>;
+      const tool = {
+        spanId: "span_tool_owned",
+        parentSpanId: throughIntermediateSpan
+          ? "span_model_owned"
+          : "span_agent_owned",
+        name: "get_availability",
+        kind: "tool" as const,
+        status: "ok" as const,
+        startedAt: toolStartedAt,
+        durationNs: "250000000",
+        text: "",
+        audioUrl: "",
+        toolName: "get_availability",
+        toolArguments: "{}",
+        toolResult: "{}",
+        spans: [],
+      };
+      const model = {
+        spanId: "span_model_owned",
+        parentSpanId: "span_agent_owned",
+        name: "model_response",
+        kind: "model" as const,
+        status: "ok" as const,
+        startedAt: "2026-08-15T10:00:05.000000Z",
+        durationNs: "2000000000",
+        text: "",
+        audioUrl: "",
+        toolName: "",
+        toolArguments: "",
+        toolResult: "",
+        spans: [tool],
+      };
+      const agent = {
+        ...turn(
+          "span_agent_owned",
+          "turn:agent",
+          "I found an opening.",
+          4,
+        ),
+        startedAt: agentStartedAt,
+        spans: throughIntermediateSpan ? [model] : [tool],
+      };
+      const transcript = {
+        ...original,
+        endedAt: "2026-08-15T10:01:00.000000Z",
+        durationNs: "60000000000",
+        spanCount: throughIntermediateSpan ? 5 : 4,
+        toolSpanCount: 1,
+        turns: [
+          turn(
+            "span_human_owned",
+            "turn:human",
+            "Find an appointment.",
+            1,
+          ),
+          agent,
+        ],
+      };
+
+      render(
+        <ChatTranscript
+          transcript={transcript as never}
+          toolCalls={transcriptToolCalls(transcript as never)}
+          onSeek={vi.fn()}
+        />,
+      );
+
+      const toolRow = screen.getByLabelText("Tool call, get_availability");
+      const agentTurn = screen.getByLabelText("Turn 2, Agent");
+      const spokenContent = within(agentTurn).getByText("I found an opening.");
+      expect(
+        screen.getByRole("button", {
+          name:
+            `Seek recording to tool call get_availability at ${shownOffset}`,
+        }),
+      ).toBeTruthy();
+      expect(agentTurn.contains(toolRow)).toBe(true);
+      expect(
+        Boolean(
+          toolRow.compareDocumentPosition(spokenContent) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ).toBe(toolBeforeSpeech);
+    },
+  );
+
+  it("keeps intervening speech ahead of an Agent group whose tool started early", () => {
+    const read = evidence();
+    const original = read.transcript as NonNullable<typeof read.transcript>;
+    const tool = {
+      spanId: "span_tool_early",
+      parentSpanId: "span_agent_after_interruption",
+      name: "get_availability",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:37.362000Z",
+      durationNs: "531000000",
+      text: "",
+      audioUrl: "",
+      toolName: "get_availability",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const agent = {
+      ...turn(
+        "span_agent_after_interruption",
+        "turn:agent",
+        "I found an opening.",
+        39,
+      ),
+      startedAt: "2026-08-15T10:00:39.606000Z",
+      spans: [tool],
+    };
+    const transcript = {
+      ...original,
+      endedAt: "2026-08-15T10:01:00.000000Z",
+      durationNs: "60000000000",
+      spanCount: 5,
+      toolSpanCount: 1,
+      turns: [
+        turn("span_human_first", "turn:human", "Find an appointment.", 1),
+        turn("span_human_between", "turn:human", "Any provider is fine.", 38),
+        agent,
+      ],
+    };
+
+    render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={transcriptToolCalls(transcript as never)}
+      />,
+    );
+
+    const turns = screen.getAllByLabelText(/^Turn \d+,/u);
+    expect(turns.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Turn 1, User",
+      "Turn 2, User",
+      "Turn 3, Agent",
+    ]);
+    const agentTurn = turns[2];
+    const toolRow = screen.getByLabelText("Tool call, get_availability");
+    expect(agentTurn?.contains(toolRow)).toBe(true);
+    expect(
+      Boolean(
+        toolRow.compareDocumentPosition(
+          within(agentTurn!).getByText("I found an opening."),
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a tool without an owning Agent turn visible on the time rail", () => {
+    const read = evidence();
+    const orphan = {
+      spanId: "span_tool_orphan",
+      parentSpanId: "span_missing_parent",
+      name: "send_reminder",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "send_reminder",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+
+    render(
+      <ChatTranscript
+        transcript={read.transcript as never}
+        toolCalls={[orphan as never]}
+      />,
+    );
+
+    const toolRow = screen.getByLabelText("Tool call, send_reminder");
+    expect(toolRow).toBeTruthy();
+    expect(
+      screen
+        .getAllByLabelText(/^Turn \d+,/u)
+        .every((turnRow) => !turnRow.contains(toolRow)),
+    ).toBe(true);
   });
 
   it("uses the recording span for transcript timestamps and seeking", () => {

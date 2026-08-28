@@ -828,6 +828,32 @@ describe("a page of rows", () => {
     ]);
   });
 
+  it("keeps the current-row edge outside table layout at every breakpoint", () => {
+    render(
+      <DataTable
+        label="Agents"
+        columns={COLUMNS}
+        currentKey="agt_1"
+        rows={ROWS}
+        keyOf={(row) => row.id}
+      />,
+    );
+
+    const table = screen.getByRole("table", { name: "Agents" });
+    const current = within(table).getAllByRole("row")[1] as HTMLElement;
+    const firstCell = within(current).getAllByRole("cell")[0] as HTMLElement;
+    const mark = firstCell.querySelector('[data-slot="current-row-mark"]');
+
+    expect(current.classList.contains("relative")).toBe(false);
+    expect(
+      Array.from(current.classList).some((name) => name.startsWith("before:")),
+    ).toBe(false);
+    expect(current.classList.contains("stacked:relative")).toBe(true);
+    expect(firstCell.classList.contains("relative")).toBe(true);
+    expect(firstCell.classList.contains("stacked:static")).toBe(true);
+    expect(mark?.parentElement).toBe(firstCell);
+  });
+
   it("offers the next page only where the list said there is one", () => {
     const { rerender } = render(
       <DataTable label="Agents" columns={COLUMNS} rows={ROWS} keyOf={(row) => row.id} />,
@@ -1069,6 +1095,40 @@ describe("a dialog", () => {
     expect(pressed).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("dialog", { name: "Transcript and audio" }))
       .toBeTruthy();
+  });
+
+  it("closes an opted-in reading sheet when its page is pressed", async () => {
+    const pressed = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={pressed}>Another transcript</button>
+        <Dialog
+          dismissOnOutsidePointer
+          kind="sheet"
+          title="Production transcript"
+          onClose={vi.fn()}
+        >
+          <audio aria-label="Call recording" />
+        </Dialog>
+      </>,
+    );
+
+    const behind = screen.getByRole("button", { name: "Another transcript" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    behind.focus();
+    expect(
+      screen.getByRole("dialog", { name: "Production transcript" }),
+    ).toBeTruthy();
+    fireEvent.pointerDown(behind);
+    fireEvent.click(behind);
+
+    expect(pressed).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("dialog", { name: "Production transcript" }),
+    ).toBeNull();
+    expect(document.activeElement).toBe(behind);
   });
 
   /**

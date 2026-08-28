@@ -32,6 +32,22 @@ const TRANSCRIPT_ID = "trace-transcript";
 
 type Section = "summary" | "transcript";
 
+/**
+ * A press on another transcript is a replacement, not a dismissal. The row's
+ * primary control and its otherwise inert cells both open that next record;
+ * every other page target closes the current sheet in the normal way.
+ */
+function dismissOutsideTraceRow(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true;
+  const row = target.closest('[data-slot="data-table-row"]');
+  if (row === null) return true;
+  if (row.matches('[data-current="true"]')) return true;
+  const control = target.closest(
+    "button,a,input,label,select,textarea",
+  );
+  return control !== null && control.closest('[data-primary="true"]') === null;
+}
+
 export type OpenTrace = {
   readonly traceId: string;
   readonly from: string;
@@ -175,8 +191,9 @@ export function TraceSheet({
 
   return (
     <Dialog
+      dismissOnOutsidePointer={dismissOutsideTraceRow}
       kind="sheet"
-      size="wide"
+      size="extra-wide"
       title={
         <>
           <span className="flex min-w-0 items-center gap-3 pr-2">
