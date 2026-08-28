@@ -8,10 +8,11 @@ import process from "node:process";
 
 const MINIMUM_VERSION = [2, 18, 2];
 // 0.2.0 is the first Egma SDK release whose two entries decide from the job's
-// room name. Below it they read dispatch metadata, which reaches the worker on
-// one of the four LiveKit dispatch paths, so a lower version is inert on the
-// other three without saying so. A local worker that reports ready on such an
-// environment sends the developer into a run whose mock tools never answer.
+// room name. Below it they look in dispatch metadata, where Egma writes
+// nothing at all, so a lower version is inert on every one of the three
+// LiveKit dispatch paths without saying so. A local worker that reports ready
+// on such an environment sends the developer into a run whose mock tools never
+// answer.
 const MINIMUM_EGMA_VERSION = [0, 2, 0];
 const MINIMUM_EGMA_SHOWN = MINIMUM_EGMA_VERSION.join(".");
 const LIVEKIT_INSTALLER = "https://get.livekit.io/cli";

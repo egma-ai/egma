@@ -28,7 +28,7 @@
     "instructions": "My card was charged twice for the same order this morning. I need the duplicate charge reversed and a confirmation number before my train arrives. Please be quick about it."
   },
   "limits": {
-    "max_duration_seconds": 300,
+    "max_duration_seconds": 600,
     "max_turns": 40
   },
   "models": {

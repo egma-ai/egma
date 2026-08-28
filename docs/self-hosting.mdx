@@ -208,20 +208,14 @@ schedule, so the two can drift apart in either direction.
 Mock tools on every dispatch path need `egma>=0.2.0` in the worker **and** a
 simulator from this baseline or newer.
 
-A worker on an SDK below `0.2.0` reads a small context block out of its dispatch
-metadata, and the simulator still writes that block — but only on a connection
-that dispatches the worker by name, and only where the connection's own
-`metadata` leaves room for it. It is dropped where that configured JSON already
-uses `simulationId`, `modality`, `egmaIdentity` or `protocolVersion`: the
-customer's string rides alone, and the simulator logs a warning naming the keys
-that collided. That warning is where an old worker's lost mock tools are
-explained, so it is the line to search for when one comes up empty.
-
-So an older worker is inert inside a real simulation on the other three dispatch
-paths, and on the named-dispatch path too whenever the block is dropped: its
-real tools run against a live caller, and the simulation's coverage stamp is
-three empty lists. Raising the worker's pin to `0.2.0` is the one fix that holds
-on every dispatch path, and it is the half you do not control.
+A worker on an SDK below `0.2.0` looked for Egma in its dispatch metadata. The
+simulator writes nothing there any more — that channel is the customer's, whole
+— so such a worker never finds Egma at all. It is inert inside a real
+simulation: its real tools run against a live caller, and the simulation's
+coverage stamp is three empty lists. Nothing on Egma's side says why — from
+here it looks the same as a worker carrying no Egma SDK at all — so the worker's
+own debug log is where that shows. Raising its pin to `0.2.0` is the one fix,
+and it is the half you do not control.
 
 Upgrading the worker first loses nothing. The `egma-sim-` room-name prefix and
 the `egma-persona` participant identity are frozen contracts, so a `0.2.0`

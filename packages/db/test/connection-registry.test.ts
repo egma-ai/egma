@@ -478,17 +478,14 @@ describe("a LiveKit room connection's metadata", () => {
   });
 
   /**
-   * LiveKit carries at most 512 KiB in a metadata field, and egma merges a
-   * small block of its own into the dispatch copy, so what is admitted here
-   * stops short of the ceiling. A value refused at the dispatch instead would
-   * be a room already opened and every simulation on the connection failing
-   * for a reason the record cannot act on.
+   * LiveKit carries at most 512 KiB in a metadata field, and egma carries the
+   * stored string onto both of its channels without adding to either, so the
+   * limit checked here is LiveKit's own. A value refused at the dispatch
+   * instead would be a room already opened and every simulation on the
+   * connection failing for a reason the record cannot act on.
    *
-   * The number in the refusal is egma's, not LiveKit's, and the sentence has
-   * to say so. A customer who reads "livekit carries at most 520192" and then
-   * reads LiveKit's own documented 512 KiB is looking at two numbers that
-   * disagree with nothing to tell them which one refused their value, so the
-   * refusal names both limits and whose each one is.
+   * The refusal names the number, because a size refused without one leaves
+   * the customer guessing how much to cut.
    */
   it("refuses a value too large for livekit to carry, and says the size", () => {
     const roomy = `{"tenant":"${"a".repeat(520 * 1024)}"}`;
@@ -497,25 +494,19 @@ describe("a LiveKit room connection's metadata", () => {
         ...LIVEKIT_CONFIG,
         metadata: roomy,
       }),
-    ).toThrow(/the config's metadata is \d+ bytes and egma admits at most \d+/);
-    expect(() =>
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        metadata: roomy,
-      }),
-    ).toThrow(/livekit's own ceiling is 524288 bytes/);
+    ).toThrow(/the config's metadata is \d+ bytes and livekit carries at most 524288/);
 
     // Measured in UTF-8 bytes rather than characters, because bytes are what
-    // goes on the wire: this one is a fifth of the ceiling in characters and
-    // over it in bytes, and a length check would let it through to the room.
+    // goes on the wire: this one is under the ceiling in characters and over
+    // it in bytes, and a length check would let it through to the room.
     const multibyte = `{"tenant":"${"€".repeat(200_000)}"}`;
-    expect(multibyte.length).toBeLessThan(504 * 1024);
+    expect(multibyte.length).toBeLessThan(512 * 1024);
     expect(() =>
       validConfig("livekit_room", "livekit_room.project_credentials", {
         ...LIVEKIT_CONFIG,
         metadata: multibyte,
       }),
-    ).toThrow(/the config's metadata is \d+ bytes and egma admits at most \d+/);
+    ).toThrow(/the config's metadata is \d+ bytes and livekit carries at most 524288/);
 
     // What a real value looks like beside those two: admitted whole.
     const ordinary = `{"tenant":"acme","locale":"en-GB"}`;

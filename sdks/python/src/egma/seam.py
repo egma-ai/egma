@@ -194,7 +194,7 @@ EGMA_NOT_LISTENING_YET = frozenset({1400})
 
 ``1400`` is the method the destination does not serve. egma's participant
 is in the room before it registers the two methods of this exchange, and
-on three of the four dispatch paths into an egma room the agent can
+on two of the three dispatch paths into an egma room the agent can
 be asking inside that window — so this is the one refusal a census may be
 sent again on, bounded, rather than fallen open on.
 
