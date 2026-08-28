@@ -483,6 +483,11 @@ export const runOperations = {
     responses: {
       201: { description: "The bounded header for the new run.", schema: runHeaderSchema },
       ...commonWriteRefusals,
+      // A run over a lane that pins a version reads the agent's own platform
+      // before anything is written. A platform that would not answer is not
+      // the caller's mistake and is not fixed by changing the request — it is
+      // fixed by asking again — so it takes its own code and its own status.
+      503: refusalResponse,
     },
   }),
 

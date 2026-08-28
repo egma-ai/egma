@@ -14660,6 +14660,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       },

@@ -73,6 +73,7 @@ import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
   connectionIsConductable,
+  connectionTypeReadsPlatformAtRunStart,
   noSimulatorAdapterMessage,
   platformOfConnectionType,
 } from "./connection-registry.ts";
@@ -841,6 +842,93 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
     return winner;
   }
   return created;
+}
+
+/**
+ * How a run-start read reaches the agent's platform: the connection's own
+ * config, and the key sealed on it.
+ *
+ * **The second door onto a connection's plaintext, and it is deliberately not
+ * the first one widened.** `resolveSimulationConnection` unseals for the
+ * simulator and for nothing else, because conducting is the only thing done
+ * there. This one exists because a run over some kinds cannot honestly begin
+ * until Egma has read the agent's own configuration — which version is serving,
+ * and what tools that version has — and reading it means reaching the platform
+ * with the key that will conduct over it.
+ *
+ * It is held narrow in four ways at once, and each one is load-bearing:
+ *
+ * - **Only for the kinds that declare a run-start read.** Every other kind
+ *   answers `undefined` however well-formed the request is, so this can never
+ *   become "unseal any connection".
+ * - **Gated on `start_and_cancel_runs`**, the permission for the act it serves,
+ *   rather than on read.
+ * - **Asked with an agent and a connection the caller already named**, in their
+ *   own tenancy, so there is no argument by which it could be pointed at
+ *   somebody else's row.
+ * - **The key goes to the provider client and nowhere else.** It is never part
+ *   of a run header, never in a refusal, and never logged — the run route hands
+ *   it straight to the read and lets it go.
+ */
+export type RunStartReach = {
+  readonly connectionType: ConnectionType;
+  readonly accessVariant: AccessVariant;
+  readonly config: Readonly<Record<string, string>>;
+  readonly apiKey: string;
+};
+
+export async function resolveRunStartReach(
+  auth: AuthContext,
+  agentId: string,
+  connectionId: string,
+): Promise<RunStartReach | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.projectId === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      connectionType: connection.connectionType,
+      accessVariant: connection.accessVariant,
+      config: connection.config,
+      credentials: connection.credentials,
+    })
+    .from(connection)
+    .where(
+      within(
+        auth,
+        connection,
+        and(
+          eq(connection.id, connectionId),
+          eq(connection.agentId, agentId),
+          eq(connection.projectId, auth.projectId),
+          isNull(connection.archivedAt),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+  if (!connectionTypeReadsPlatformAtRunStart(row.connectionType)) {
+    return undefined;
+  }
+  if (row.credentials === null) return undefined;
+
+  const apiKey = openedApiKey(row.credentials);
+  if (apiKey === null) return undefined;
+
+  return {
+    connectionType: row.connectionType as ConnectionType,
+    accessVariant: row.accessVariant as AccessVariant,
+    config: stringRecordFromRow(
+      row.config,
+      () =>
+        new Error(
+          `connection ${connectionId} holds config in a shape Egma never ` +
+            `writes; the row needs repairing before anybody can run over it`,
+        ),
+    ),
+    apiKey,
+  };
 }
 
 export async function runAlreadyStartedFor(

@@ -22,6 +22,7 @@ import {
   credentialFor,
   type ProviderCredentialSource,
 } from "@egma/provider-credentials";
+import { SIMULATION_VARIABLE } from "@egma/retell";
 import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
@@ -412,12 +413,38 @@ async function assembledSpec(
   // mid-run tears nothing. The simulator receives the answers already
   // decided, exactly as it receives everything else: flattened, with
   // nothing left to look up and nothing left to choose between.
-  const mockTools = resolveMockTools(
+  const resolved = resolveMockTools(
     evidence.mockToolSnapshot,
     claim.testVersionId,
-  ).map((mock) => ({
+  );
+
+  // **Which of the run's answers this lane may actually serve.**
+  //
+  // A run that read the agent's configuration knows which tools Egma can stand
+  // in front of. On such a lane the answers travel to the platform as its own
+  // native mocks, and the platform answers for a name or runs the customer's
+  // real implementation — there is no third thing it can do. So a name Egma
+  // classed *not interceptable by construction* or *not in this version* is
+  // deliberately left off: sending it would be Egma claiming to have stood in
+  // front of a tool that in fact reached the real world, which is the one thing
+  // a coverage stamp exists to prevent.
+  //
+  // Every other lane serves what the run resolved, unfiltered, because Egma
+  // itself is in the tool path there and answers for whatever it is asked.
+  const conductedCoverage = run.conductedWorld?.coverage;
+  const servable =
+    conductedCoverage === undefined
+      ? resolved
+      : resolved.filter((mock) =>
+          conductedCoverage.mocked.includes(mock.toolName),
+        );
+
+  const mockTools = servable.map((mock) => ({
     tool_name: mock.toolName,
     answer: mock.answer,
+    // Carried on every lane, and deliberately never spent on a chat one: a
+    // declared delay is speech-world fidelity, which is the layer chat leaves
+    // out. It rides along so one authored answer serves every modality.
     delay_milliseconds: mock.delayMilliseconds,
   }));
 
@@ -465,7 +492,23 @@ async function assembledSpec(
     },
     models,
     scenario: { instructions: testVersion.scenario },
+    // The same walls the chat lane has always had, by modality and by nothing
+    // else. A playground exchange is a chat, so it gets the chat numbers.
     limits: SIMULATION_LIMITS[claim.modality],
+    // **The version, always, on a lane that resolved one.** The plug would
+    // conduct without it and Retell would then pick its newest version — which
+    // a concurrent edit can move between one simulation and the next. The run
+    // resolved it once for exactly this reason.
+    ...(run.conductedWorld === null
+      ? {}
+      : { agent_version: run.conductedWorld.agentVersion }),
+    // Egma's own attribution variable, and it is what a tool call the platform
+    // makes rides back to this simulation on. Sent on the lanes that render
+    // variables at all; absent stays absent, because an empty block is a value
+    // a platform renders rather than a block nobody sent.
+    ...(run.conductedWorld === null
+      ? {}
+      : { dynamic_variables: { [SIMULATION_VARIABLE]: claim.id } }),
     // Left out entirely where the run mocks nothing, which is what most
     // runs do: a simulation egma answers no tool for is byte for byte the
     // work order it was before mock tools existed, and an empty list

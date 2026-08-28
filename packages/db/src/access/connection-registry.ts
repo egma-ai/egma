@@ -1300,6 +1300,32 @@ export function connectionIsConductable(
   );
 }
 
+/**
+ * The connection types whose run start reads the agent's own platform.
+ *
+ * **A named set rather than a fact worked out from something else**, because
+ * what it unlocks is narrow and specific: the one door that opens a
+ * connection's sealed credential outside the simulator. A run over one of these
+ * kinds cannot honestly begin until Egma has read which version the agent
+ * serves and what that version's tools are, and reading either means reaching
+ * the platform with the connection's own key.
+ *
+ * Every other kind reads nothing at run start and gets nothing unsealed.
+ */
+const READS_PLATFORM_AT_RUN_START: ReadonlySet<string> = new Set([
+  // The playground names its version on every request, so the version has to
+  // be resolved once before the first one — and the three-class coverage stamp
+  // comes from the same read.
+  "retell_playground",
+]);
+
+/** Whether a run over this kind has to read the platform before it starts. */
+export function connectionTypeReadsPlatformAtRunStart(
+  connectionType: string,
+): boolean {
+  return READS_PLATFORM_AT_RUN_START.has(connectionType);
+}
+
 /** Whether this kind needs the deployment carrier on its claimed work order. */
 export function connectionTypeUsesPlatformCarrier(
   connectionType: string,

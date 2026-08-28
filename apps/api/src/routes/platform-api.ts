@@ -119,6 +119,11 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
+    // The run-start read reaches Retell on the lanes that pin a version, so
+    // this group takes the same test seam the two provider groups above do.
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
   void app.register(simulationRoutes, credentialed);
   void app.register(recordingRoutes, { ...credentialed, blob: options.blob });

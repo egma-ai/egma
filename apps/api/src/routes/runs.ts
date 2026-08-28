@@ -1,6 +1,8 @@
 import {
   cancelRun,
+  conductedWorldRow,
   connectionTypeOf,
+  connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
   getAgent,
   getConnection,
@@ -16,6 +18,7 @@ import {
   ProjectOutsideOrganizationError,
   readRunGradingProgress,
   readSimulationGradingStates,
+  resolveRunStartReach,
   runAlreadyStartedFor,
   RUN_STATUSES,
   RunWriteRefusedError,
@@ -23,6 +26,7 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type ConductedWorld,
   type ExpectedTestVersion,
   type NewRun,
   type Run,
@@ -55,12 +59,15 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
+import { readPlaygroundWorld } from "../providers/retell-playground.ts";
 
 export type RunRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
+  /** Test seam for the run-start read on the lanes that pin a version. */
+  readonly retellFetch?: typeof fetch | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -188,6 +195,10 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
+    // The one number off the conducted world, which is cheap enough for a
+    // list: a reader scanning a page of runs can see which version each of
+    // them tested. The lists beside it are not, and are answered below.
+    conductedAgentVersion: run.conductedWorld?.agentVersion ?? null,
     // The temporary world, whole: the version branched from, the version
     // minted, the engine it runs on, and each touched number's routing exactly
     // as it was read. A reader sees what Egma promised to put back. Absent from
@@ -196,6 +207,15 @@ function describedHeader(
       ? {
           mockedWorld:
             run.mockedWorld === null ? null : mockedWorldRow(run.mockedWorld),
+          // The world this run read rather than built: the version, the engine
+          // it runs on, and the three classes of that version's tools. On the
+          // detail read for the same reason the mocked world is — the coverage
+          // lists are per-run detail, not something to repeat two hundred times
+          // down a page.
+          conductedWorld:
+            run.conductedWorld === null
+              ? null
+              : conductedWorldRow(run.conductedWorld),
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,
@@ -281,6 +301,9 @@ function describedSimulation(
       simulation.mockToolCoverage === null
         ? null
         : mockToolCoverageRow(simulation.mockToolCoverage),
+    // Evidence pins at the evidence grain: this row says what it conducted,
+    // without a reader having to fetch the run to find out.
+    conductedAgentVersion: simulation.conductedAgentVersion,
   };
 }
 
@@ -445,7 +468,52 @@ export async function runRoutes(
         }
       }
 
-      const started = await startRun(acting.auth, input);
+      // The run-start read, on the lanes that pin a version and on no other.
+      //
+      // **Before the run row exists, and loudly.** A resolve or a tool read
+      // that failed after the row was written would leave a queued run nobody
+      // can conduct honestly; refused here, nothing was started and the
+      // sentence says so. And a run admitted without this read would conduct
+      // against a world Egma never looked at, whose coverage stamp would be a
+      // claim about tools nobody saw.
+      const kind = await connectionTypeOf(acting.auth, connectionId);
+      let conducted: ConductedWorld | undefined;
+      if (kind !== undefined && connectionTypeReadsPlatformAtRunStart(kind)) {
+        const reach = await resolveRunStartReach(
+          acting.auth,
+          agentId,
+          connectionId,
+        );
+        if (reach === undefined) {
+          return unprocessable(
+            reply,
+            `there is no active connection ${connectionId} on agent ` +
+              `${agentId} that Egma can read the agent's platform with`,
+          );
+        }
+        const read = await readPlaygroundWorld(
+          {
+            apiKey: reach.apiKey,
+            agentId: reach.config["retellAgentId"] ?? "",
+            ...(reach.config["baseUrl"] === undefined
+              ? {}
+              : { baseUrl: reach.config["baseUrl"] }),
+          },
+          options.retellFetch,
+        );
+        if (read.kind === "refused") {
+          return unprocessable(reply, read.message);
+        }
+        if (read.kind !== "world") {
+          return sendRefusal(reply, "provider_unavailable", read.message);
+        }
+        conducted = read.world;
+      }
+
+      const started = await startRun(acting.auth, {
+        ...input,
+        ...(conducted === undefined ? {} : { conductedWorld: conducted }),
+      });
       const described = await headerOf(
         acting.auth,
         started.id,

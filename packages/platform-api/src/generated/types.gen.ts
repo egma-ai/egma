@@ -4121,6 +4121,10 @@ export type CreateRunErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type CreateRunError = CreateRunErrors[keyof CreateRunErrors];

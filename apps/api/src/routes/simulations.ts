@@ -238,6 +238,10 @@ export async function simulationRoutes(
         startedAt: simulation.startedAt?.toISOString() ?? null,
         endedAt: simulation.endedAt?.toISOString() ?? null,
         providerReference: simulation.providerReference,
+        // What this one conversation was conducted against, off its own row.
+        // A result is read here, so it answers here — never by fetching the
+        // run to find out.
+        conductedAgentVersion: simulation.conductedAgentVersion,
         hasRecording: simulation.recordingReference !== null,
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
