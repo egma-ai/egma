@@ -647,9 +647,7 @@ def direct_models(
         "deepgram": "nova-3-general",
         "openai": "gpt-live-transcribe",
     }[stt_provider]
-    stt_adapter = {"deepgram": "deepgram", "openai": "openai_realtime"}[
-        stt_provider
-    ]
+    stt_adapter = {"deepgram": "deepgram", "openai": "openai_realtime"}[stt_provider]
     stt = {
         "provider": stt_provider,
         "model": stt_model,
@@ -1171,10 +1169,14 @@ has not got it yet, and mean about it only in that it is bounded at all: an
 unbounded start is a whole test session hanging on a slow registry.
 """
 
-LIVEKIT_STOP_SECONDS = 30.0
-"""How long the teardown waits for the container to go before giving up on
-it. A container that will not stop is a line in a log, never a failed run:
-the tests are over by then and the exit code is theirs, not docker's."""
+LIVEKIT_STOP_SECONDS = 10.0
+"""How long the teardown gives the container to go down politely before
+docker kills it. Deliberately well under ``LIVEKIT_DOCKER_SECONDS``, which
+bounds the call itself: the inner grace period has to expire first, or the
+outer bound fires on a stop that was working and the container is left
+behind for the ``rm -f`` to catch. A container that will not stop is a
+line in a log, never a failed run — the tests are over by then and the
+exit code is theirs, not docker's."""
 
 LIVEKIT_HEALTH_SECONDS = 30.0
 """How long a started server has to answer before it counts as one that
@@ -1223,6 +1225,40 @@ def _livekit_answering(url: str) -> bool:
         return True
     except OSError:
         return False
+
+
+LIVEKIT_DOCKER_SECONDS = 30.0
+"""How long any one docker call about the container may take.
+
+Every call below is bounded, and the bound has to be the *outer* one: a
+docker daemon that has stopped answering hangs `rm` and `logs` exactly as
+readily as it hangs `run`, and a fixture that recovers from one hang by
+making an unbounded call has not recovered. Thirty seconds is far more
+than a local daemon needs to answer about one container, and it turns a
+sick daemon into a named skip rather than a session that never returns.
+"""
+
+
+def _docker(*argv: str) -> subprocess.CompletedProcess[str] | None:
+    """One bounded docker call that never raises.
+
+    Used for every call that runs while something has already gone wrong —
+    tearing the container down, or reading its logs to say why it never
+    answered. A failure here is not the finding; letting it raise would
+    replace a real test result with a teardown error, and letting it hang
+    would replace the whole session with nothing. `None` says the call did
+    not complete, which every caller treats as "nothing more to learn".
+    """
+    try:
+        return subprocess.run(
+            ["docker", *argv],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=LIVEKIT_DOCKER_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 @pytest.fixture(scope="session")
@@ -1274,8 +1310,20 @@ def live_livekit() -> Iterator[LiveKitServer]:
             # could then mint a token, join a room whose name is predictable,
             # and answer to egma's name in it. Loopback is the whole of what
             # these tests need.
-            ["docker", "run", "-d", "--rm", "--name", name, "--network", "host",
-             image, "--dev", "--bind", "127.0.0.1"],
+            [
+                "docker",
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                name,
+                "--network",
+                "host",
+                image,
+                "--dev",
+                "--bind",
+                "127.0.0.1",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -1285,7 +1333,7 @@ def live_livekit() -> Iterator[LiveKitServer]:
             timeout=LIVEKIT_START_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+        _docker("rm", "-f", name)
         pytest.skip(
             f"docker did not start {image} within {LIVEKIT_START_SECONDS:.0f}s, "
             "which is usually an image still being fetched on a slow link; "
@@ -1298,20 +1346,22 @@ def live_livekit() -> Iterator[LiveKitServer]:
         deadline = time.monotonic() + LIVEKIT_HEALTH_SECONDS
         while not _livekit_answering(LIVEKIT_DEV_URL):
             if time.monotonic() > deadline:
-                logs = subprocess.run(
-                    ["docker", "logs", "--tail", "20", name],
-                    capture_output=True, text=True, check=False,
+                logs = _docker("logs", "--tail", "20", name)
+                said = (
+                    logs.stderr.strip()[:400]
+                    if logs
+                    else ("docker itself stopped answering too")
                 )
+                _docker("rm", "-f", name)
                 pytest.fail(
                     f"{image} did not answer on {LIVEKIT_DEV_URL} within "
-                    f"{LIVEKIT_HEALTH_SECONDS:.0f}s: {logs.stderr.strip()[:400]}"
+                    f"{LIVEKIT_HEALTH_SECONDS:.0f}s: {said}"
                 )
             time.sleep(0.2)
         yield LiveKitServer(LIVEKIT_DEV_URL, LIVEKIT_DEV_KEY, LIVEKIT_DEV_SECRET)
     finally:
-        subprocess.run(
-            ["docker", "stop", name],
-            capture_output=True,
-            check=False,
-            timeout=LIVEKIT_STOP_SECONDS,
-        )
+        # Never raises, whatever docker does: a teardown exception here
+        # would replace every result this session earned with an error
+        # about the cleanup of a container that is thrown away regardless.
+        if _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name) is None:
+            _docker("rm", "-f", name)

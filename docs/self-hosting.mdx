@@ -212,9 +212,10 @@ A worker on an SDK below `0.2.0` looked for Egma in its dispatch metadata. The
 simulator writes nothing there any more — that channel is the customer's, whole
 — so such a worker never finds Egma at all. It is inert inside a real
 simulation: its real tools run against a live caller, and the simulation's
-coverage stamp is three empty lists, with nothing in the log to say why.
-Raising the worker's pin to `0.2.0` is the one fix, and it is the half you do
-not control.
+coverage stamp is three empty lists. Nothing on Egma's side says why — from
+here it looks the same as a worker carrying no Egma SDK at all — so the worker's
+own debug log is where that shows. Raising its pin to `0.2.0` is the one fix,
+and it is the half you do not control.
 
 Upgrading the worker first loses nothing. The `egma-sim-` room-name prefix and
 the `egma-persona` participant identity are frozen contracts, so a `0.2.0`

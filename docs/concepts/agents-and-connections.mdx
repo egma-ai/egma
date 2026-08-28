@@ -108,7 +108,7 @@ agent name is automatic dispatch, where LiveKit hands the room to whichever
 worker is listening and there is no dispatch to carry anything, so the room is
 the only channel there.
 
-Both channels carry your string byte for byte. Egma adds nothing to either and
+Each channel carries your string byte for byte. Egma adds nothing to either and
 writes neither out again, so an agent reading `ctx.job.metadata` and one reading
 `ctx.room.metadata` see the same bytes you configured — and see them in a
 simulation exactly as they see them in production.
