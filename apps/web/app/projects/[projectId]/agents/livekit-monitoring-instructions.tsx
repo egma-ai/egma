@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { CopyBlock } from "./copy-block.tsx";
 
 // Pinned, because the floor is what makes the guard hold. `monitor_livekit`
 // reads the job's room name to tell a simulation from a production call, and
@@ -23,27 +22,6 @@ const API_KEY_PLACEHOLDER = "<your-project-api-key>";
 
 function environmentValues(egmaUrl: string): string {
   return `EGMA_URL=${egmaUrl}\nEGMA_API_KEY=${API_KEY_PLACEHOLDER}`;
-}
-
-function CopyBlock({ value }: { readonly value: string }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy(): Promise<void> {
-    if (navigator.clipboard === undefined) return;
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-  }
-
-  return (
-    <div className="flex items-start justify-between gap-3 border border-border bg-surface-soft p-3">
-      <pre className="m-0 min-w-0 overflow-x-auto whitespace-pre-wrap font-mono text-sm leading-(--line-normal) text-foreground">
-        {value}
-      </pre>
-      <Button type="button" size="sm" variant="ghost" onClick={() => void copy()}>
-        {copied ? "Copied" : "Copy"}
-      </Button>
-    </div>
-  );
 }
 
 /**

@@ -82,6 +82,15 @@ below is scanned for it, on the way through and on the way out."""
 
 A_SIMULATION = "sim-room-001"
 
+AN_AGENT = "front-desk"
+"""The name the agent's worker registered under.
+
+The default of every builder below, because a livekit connection now
+carries one always: egma dispatches explicitly, so a connection naming no
+agent is refused before anything is reached, and a test whose subject is
+something else would otherwise be testing that refusal instead.
+"""
+
 
 def local_endpoint_socket(addr_info: tuple[object, ...]) -> socket.socket:
     """Connect to the local contract endpoint in tests that need the next hop."""
@@ -567,7 +576,7 @@ def livekit_spec(
     simulation_id: str = A_SIMULATION,
     *,
     url: str = A_URL,
-    agent_name: str | None = None,
+    agent_name: str | None = AN_AGENT,
     metadata: object = None,
     scenario: str = A_SCENARIO,
     max_turns: int = 60,
@@ -649,7 +658,7 @@ def room(stub: RoomStub, **config: object) -> LiveKitRoom:
     return LiveKitRoom(
         modality="voice",
         access_variant="livekit_room.project_credentials",
-        config={"url": A_URL} | config,
+        config={"url": A_URL, "agentName": AN_AGENT} | config,
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
         driver=stub.driver,
@@ -732,8 +741,21 @@ async def room_walk(
     return conducted, turns, measures, assembled
 
 
-def test_the_registry_knows_the_livekit_plug():
-    assert plug_for("livekit_room") is LiveKitRoom
+def test_the_registry_answers_a_room_spec_with_the_plug_for_its_modality():
+    """One connection type, two modalities, and the registry is where the
+    choice lives — nowhere above it learns which of the two it got."""
+    from egma_simulator.plugs.livekit_chat import LiveKitChat
+
+    factory = plug_for("livekit_room")
+    assert factory is not None
+    built = {
+        "access_variant": "livekit_room.project_credentials",
+        "config": {"url": A_URL, "agentName": AN_AGENT},
+        "credentials": {"apiKey": A_KEY, "apiSecret": A_SECRET},
+        "simulation_id": A_SIMULATION,
+    }
+    assert isinstance(factory(modality="voice", **built), LiveKitRoom)
+    assert isinstance(factory(modality="chat", **built), LiveKitChat)
 
 
 def test_a_room_is_one_pipecat_voice_connection():
@@ -791,6 +813,9 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     # simulation, and the one join between egma's record and LiveKit's.
     assert conducted.provider_reference == stub.rooms[0].name
     assert conducted.provider_reference.startswith(f"{ROOM_PREFIX}-")
+    # And bare on purpose: the marked form is the chat lane's, and a voice
+    # room wearing it would mute every worker carrying the chat setup.
+    assert not conducted.provider_reference.startswith("egma-sim-chat-")
 
     # Measured, and measured per turn: the agent's quiet and speech on
     # each of its three turns, the persona's on each of its three, and the
@@ -919,25 +944,34 @@ async def test_a_named_agent_is_dispatched_by_name(
 
 
 @pytest.mark.parametrize("agent_name", [None, "", "   "])
-async def test_an_unnamed_agent_takes_the_automatic_path(
+async def test_a_connection_that_names_no_agent_is_refused_before_any_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_name: str | None
 ):
-    """The automatic path: a worker registered without a name is given
-    every new room in the project, so making the room *was* the request
-    and egma asks for nothing more."""
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
-    conducted, turns, _measures, _assembled = await room_walk(
-        tmp_path,
-        stub,
-        monkeypatch,
-        agent_name=agent_name,
-        scenario="One point.",
-    )
+    """There is no automatic path any more, and there cannot be one.
 
-    assert conducted.ending == "persona_concluded"
-    assert turns[0] == ("agent", "Front desk.")
-    assert stub.dispatches == [], "nothing is dispatched when nothing is named"
-    assert len(stub.rooms) == 1
+    LiveKit would hand a new room to a worker registered without a name,
+    but such a room carries no dispatch metadata — so the agent would
+    never learn the modality it is in and never learn where egma is
+    standing for its tools, and every mocked tool would quietly run for
+    real. So a nameless connection is refused at the settings read, by
+    name, and nothing is asked of the customer's project at all.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+
+    with pytest.raises(PlugError) as refused:
+        await room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            agent_name=agent_name,
+            scenario="One point.",
+        )
+
+    told = str(refused.value)
+    assert "agentName" in told, "the key nobody filled in has to be on the record"
+    assert failed_ending(refused.value) == ERROR
+    assert stub.rooms == [], "nothing was made"
+    assert stub.dispatches == [], "nothing was asked for"
 
 
 async def test_an_agent_that_got_into_the_room_first_is_still_somebody_who_came():
@@ -988,7 +1022,7 @@ async def test_the_mock_tool_methods_are_offered_at_the_join():
     plug = LiveKitRoom(
         modality="voice",
         access_variant="livekit_room.project_credentials",
-        config={"url": A_URL},
+        config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
         mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
@@ -1029,7 +1063,7 @@ async def test_a_refusal_at_the_join_leaves_the_second_offer_its_chance():
     plug = LiveKitRoom(
         modality="voice",
         access_variant="livekit_room.project_credentials",
-        config={"url": A_URL},
+        config={"url": A_URL, "agentName": AN_AGENT},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
         mock_tools=MockToolSeam((MockTool("check_calendar", {"answer": {}}, 0),)),
@@ -1132,7 +1166,8 @@ async def test_the_dispatch_carries_none_of_the_test(
         assert word not in stub.dispatches[0].metadata
 
 
-def test_the_retiring_context_rides_under_the_customers_json():
+@pytest.mark.parametrize("modality", ["voice", "chat"])
+def test_the_retiring_context_rides_under_the_customers_json(modality: str):
     """Both, where they fit: the customer's object with egma's four facts
     added beneath it.
 
@@ -1140,18 +1175,23 @@ def test_the_retiring_context_rides_under_the_customers_json():
     all four ways into a room. These four keys are here for one reason —
     an SDK older than room-name detection reads them and nothing else —
     and the customer's keys are what the message is actually for, so they
-    arrive with their values intact.
+    arrive with their values intact. The modality among the four is the
+    conducting driver's own and pinned in both currencies: while the
+    block lives, it tells the truth.
     """
     carried = json.loads(
         dispatch_metadata(
-            '{"clinic":"lakeside"}', "sim_01ABC", egma_identity="egma-persona"
+            '{"clinic":"lakeside"}',
+            "sim_01ABC",
+            modality=modality,
+            egma_identity="egma-persona",
         )
     )
 
     assert carried == {
         "clinic": "lakeside",
         "simulationId": "sim_01ABC",
-        "modality": "voice",
+        "modality": modality,
         "egmaIdentity": "egma-persona",
         "protocolVersion": PROTOCOL_VERSION,
     }
@@ -1162,7 +1202,9 @@ def test_a_connection_that_configured_nothing_carries_the_retiring_context_alone
     risk — which is the one case where egma's own block is the whole
     message rather than a few keys under somebody else's."""
     assert json.loads(
-        dispatch_metadata(None, "sim_01ABC", egma_identity="egma-persona")
+        dispatch_metadata(
+            None, "sim_01ABC", modality="voice", egma_identity="egma-persona"
+        )
     ) == {
         "simulationId": "sim_01ABC",
         "modality": "voice",
@@ -1189,7 +1231,9 @@ def test_a_customers_own_key_wins_over_the_retiring_context(configured: str):
     simulation, which the room's own name gives it back.
     """
     assert (
-        dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
+        dispatch_metadata(
+            configured, "sim_01ABC", modality="voice", egma_identity="egma-persona"
+        )
         == configured
     )
 
@@ -1210,7 +1254,9 @@ def test_the_two_channels_carry_the_same_value():
     the second of those.
     """
     configured = '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}'
-    carried = dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
+    carried = dispatch_metadata(
+        configured, "sim_01ABC", modality="voice", egma_identity="egma-persona"
+    )
 
     assert json.loads(carried)["tenant"] == json.loads(configured)["tenant"]
     assert json.loads(carried)["city"] == json.loads(configured)["city"]
@@ -1227,7 +1273,9 @@ def test_metadata_that_is_not_an_object_rides_exactly_as_configured():
     an unparsable string through is corrupting it.
     """
     assert (
-        dispatch_metadata("not json at all", "sim_01ABC", egma_identity="p")
+        dispatch_metadata(
+            "not json at all", "sim_01ABC", modality="voice", egma_identity="p"
+        )
         == "not json at all"
     )
 
@@ -1346,22 +1394,6 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-async def test_an_unnamed_worker_that_never_comes_says_where_to_look(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The automatic path fails differently and has to read differently:
-    there is no name to check, so the reason names the other two things
-    that could be wrong."""
-    monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
-    stub = RoomStub(agent_joins=False)
-
-    with pytest.raises(PlugError) as never_came:
-        await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
-
-    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
-    assert "automatic dispatch" in str(never_came.value)
-
-
 async def test_a_worker_that_joins_and_publishes_nothing_never_joined_either(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1462,7 +1494,7 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
     caplog.set_level(logging.INFO)
     settings = RoomSettings.from_connection(
         "livekit_room.project_credentials",
-        {"url": "http://127.0.0.1:1"},
+        {"url": "http://127.0.0.1:1", "agentName": AN_AGENT},
         {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     driver = LiveKitRoomBackend(settings=settings, simulation_id=A_SIMULATION)
@@ -1684,13 +1716,25 @@ async def test_closing_a_simulation_that_never_opened_asks_for_nothing():
         ({"url": 7}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
         ({"url": "livekit.cloud"}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
         ({"url": A_URL, "agentName": 7}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
-        ({"url": A_URL, "metadata": 7}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
-        ({"url": A_URL, "urls": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}),
-        ({"url": A_URL}, None),
-        ({"url": A_URL}, {}),
-        ({"url": A_URL}, {"apiKey": A_KEY}),
-        ({"url": A_URL}, {"apiKey": A_KEY, "apiSecret": ""}),
-        ({"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET, "token": "x"}),
+        (
+            {"url": A_URL, "agentName": AN_AGENT, "metadata": 7},
+            {"apiKey": A_KEY, "apiSecret": A_SECRET},
+        ),
+        (
+            {"url": A_URL, "agentName": AN_AGENT, "urls": A_URL},
+            {"apiKey": A_KEY, "apiSecret": A_SECRET},
+        ),
+        ({"url": A_URL, "agentName": AN_AGENT}, None),
+        ({"url": A_URL, "agentName": AN_AGENT}, {}),
+        ({"url": A_URL, "agentName": AN_AGENT}, {"apiKey": A_KEY}),
+        (
+            {"url": A_URL, "agentName": AN_AGENT},
+            {"apiKey": A_KEY, "apiSecret": ""},
+        ),
+        (
+            {"url": A_URL, "agentName": AN_AGENT},
+            {"apiKey": A_KEY, "apiSecret": A_SECRET, "token": "x"},
+        ),
     ],
 )
 def test_a_connection_the_plug_cannot_use_is_refused(connection: tuple):
@@ -1717,12 +1761,17 @@ def test_a_config_typo_is_named_in_the_refusal():
 
 def test_a_refusal_about_a_credential_never_quotes_one():
     """The refusal a blank secret gets says which field, never what was in
-    it — a sentence about a secret must not carry one."""
+    it — a sentence about a secret must not carry one.
+
+    The connection names its agent, deliberately: the config block is read
+    before the credentials, so a nameless one here would be refused for
+    the name and prove nothing about a secret.
+    """
     with pytest.raises(PlugError) as refusal:
         LiveKitRoom(
             modality="voice",
             access_variant="livekit_room.project_credentials",
-            config={"url": A_URL},
+            config={"url": A_URL, "agentName": AN_AGENT},
             credentials={"apiKey": A_KEY, "apiSecret": "   "},
             simulation_id=A_SIMULATION,
         )
@@ -1748,7 +1797,8 @@ def test_the_room_is_made_fresh_and_never_reused():
     simulations on one line."""
     settings = RoomSettings.from_connection(
         "livekit_room.project_credentials",
-        {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+        {"url": A_URL, "agentName": AN_AGENT},
+        {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     built = [
         LiveKitRoomBackend(settings=settings, simulation_id=A_SIMULATION).room_name
@@ -1763,7 +1813,8 @@ def test_the_settings_never_show_the_secret_when_they_are_printed():
     one, so this one does not carry it."""
     settings = RoomSettings.from_connection(
         "livekit_room.project_credentials",
-        {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+        {"url": A_URL, "agentName": AN_AGENT},
+        {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
     assert A_SECRET not in repr(settings)
     assert settings.secrets == (A_SECRET,)
@@ -1802,7 +1853,8 @@ def test_the_fake_is_the_real_driver_with_its_network_answered():
     driver = stub.driver(
         settings=RoomSettings.from_connection(
             "livekit_room.project_credentials",
-            {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
+            {"url": A_URL, "agentName": AN_AGENT},
+            {"apiKey": A_KEY, "apiSecret": A_SECRET},
         ),
         simulation_id=A_SIMULATION,
     )

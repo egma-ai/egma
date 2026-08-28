@@ -1136,7 +1136,7 @@ describe("choosing both", () => {
         path.join(
           publicSkillDirectory("integrate-egma"),
           "references",
-          "integrate-egma-sdk.md",
+          "integrate-livekit.md",
         ),
         "utf8",
       )

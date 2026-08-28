@@ -3073,6 +3073,12 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("radio", { name: "LiveKit" }).click();
       await walk.getByRole("button", { name: "Continue" }).click();
 
+      // How the agent is tested is asked before anything is pasted, because it
+      // is the choice a person understands and it decides which credentials
+      // the next screen asks for. This walk is the voice one.
+      await walk.getByRole("radio", { name: /^Voice/u }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+
       const deployedName = "appointment-scheduling-langsmith";
       await walk.fill("#livekit-agent-name", deployedName);
       await walk.fill("#config-url", "wss://browser-test.livekit.cloud");

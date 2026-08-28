@@ -118,3 +118,34 @@ def test_the_supported_livekit_version_exposes_its_current_provider():
     """The SDK reuses this provider so it cannot erase Cloud observability."""
 
     assert monitoring._livekit_provider() is not None
+def test_the_six_lines_key_on_the_marked_room_name_before_the_session_starts():
+    """The chat decision, read off the source of the entrypoint itself.
+
+    The mark is written out by hand here, exactly as egma's own suite
+    writes it, because it is a published contract and not a constant to
+    import: a chat simulation's room begins ``egma-sim-chat-``, the name
+    arrives with the job before the worker connects to anything, and the
+    six lines have decided their room options off it by the time the
+    session starts. Read a failure here as the contract refusing to move.
+
+    The customer's metadata channels stay the customer's: nothing in the
+    entrypoint reads ``ctx.job.metadata`` or ``ctx.room.metadata``, so no
+    key anybody configures — a ``modality`` of their own included — can
+    reach into this decision.
+    """
+    from agent import entrypoint
+
+    body = inspect.getsource(entrypoint)
+    lines = [line.strip() for line in body.splitlines()]
+
+    def line_of(said: str) -> int:
+        found = [i for i, line in enumerate(lines) if said in line]
+        assert found, f"no line of entrypoint() carries {said!r}: {lines}"
+        return found[0]
+
+    decided = line_of('chat = ctx.job.room.name.startswith("egma-sim-chat-")')
+    started = line_of("await session.start(")
+    assert decided < started
+
+    assert "ctx.job.metadata" not in body
+    assert "ctx.room.metadata" not in body

@@ -34,11 +34,35 @@ import {
 } from "../src/wizard/test-generation.ts";
 import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
 import { workerIntegrationInstructions } from "../src/wizard/worker-integration-step.ts";
-import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
+import {
+  BANNED,
+  LIVEKIT_SESSION_OBJECT,
+  SCENARIO_HEADING,
+} from "./support/glossary.ts";
 
 const run = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
+
+/**
+ * One top-level part of a reference, so a boundary inside a file can be
+ * asserted as a boundary.
+ *
+ * The LiveKit reference teaches three separate changes, and what each part
+ * must *not* say is as load-bearing as what it says — the chat setup that
+ * names no package, the SDK boundary that stays with the SDK. Reading the
+ * whole file could only prove a string is somewhere in it.
+ */
+function referencePart(reference: string, heading: string): string {
+  const held = reference
+    .split(/^## /mu)
+    .find((part) => part.startsWith(`${heading}\n`));
+  expect({ heading, found: held !== undefined }).toEqual({
+    heading,
+    found: true,
+  });
+  return held ?? "";
+}
 
 describe("Egma's instruction content", () => {
   it("keeps every public skill in the standard standalone shape", () => {
@@ -57,7 +81,12 @@ describe("Egma's instruction content", () => {
     expect(discovery.startsWith(publicSkill("integrate-egma"))).toBe(true);
     expect(discovery).toContain(publicSkillDirectory("integrate-egma"));
     expect(discovery).not.toContain("# Connect a Retell agent");
-    for (const marker of ["egma:found", "egma:note", "egma:none", "egma:abort"]) {
+    for (const marker of [
+      "egma:found",
+      "egma:note",
+      "egma:none",
+      "egma:abort",
+    ]) {
       expect(discovery).toContain(marker);
     }
 
@@ -74,7 +103,12 @@ describe("Egma's instruction content", () => {
       },
       2,
     );
-    for (const marker of ["egma:plan", "egma:writing", "egma:wrote", "egma:abort"]) {
+    for (const marker of [
+      "egma:plan",
+      "egma:writing",
+      "egma:wrote",
+      "egma:abort",
+    ]) {
       expect(writing).toContain(marker);
     }
 
@@ -106,14 +140,18 @@ describe("Egma's instruction content", () => {
       1,
     );
     expect(instructions.indexOf(writing)).toBe(0);
-    expect(instructions.indexOf(writing)).toBeLessThan(instructions.indexOf("# Your task"));
+    expect(instructions.indexOf(writing)).toBeLessThan(
+      instructions.indexOf("# Your task"),
+    );
   });
 
   /** Code owns the field names; all prose that asks for them must agree. */
   it("asks for the facts Egma reads back, in the words Egma reads them", () => {
     const unwrapped = (text: string): string => text.replace(/\s+/gu, " ");
     const finding = discoveryInstructions("/repo");
-    const readme = unwrapped(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"));
+    const readme = unwrapped(
+      readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+    );
     const pasted = unwrapped(pasteFallbackMessage());
 
     for (const fact of FACTS) {
@@ -138,7 +176,9 @@ describe("Egma's instruction content", () => {
     ].join("\n");
 
     expect(drivingSkill()).toContain(layout);
-    expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
+    expect(
+      readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+    ).toContain(layout);
   });
 
   it("still reads as prose after examples that contain code fences", () => {
@@ -159,7 +199,11 @@ describe("Egma's instruction content", () => {
     };
 
     const held: readonly (readonly [string, string, string])[] = [
-      ["skills/egma/SKILL.md", drivingSkill(), "## Keep the folder and Egma in step"],
+      [
+        "skills/egma/SKILL.md",
+        drivingSkill(),
+        "## Keep the folder and Egma in step",
+      ],
       [
         "skills/integrate-egma/SKILL.md",
         publicSkill("integrate-egma"),
@@ -179,7 +223,10 @@ describe("Egma's instruction content", () => {
 
     for (const [where, content, heading] of held) {
       expect(content, where).toContain(heading);
-      expect({ where, shownAsCode: insideAFence(content).has(heading) }).toEqual({
+      expect({
+        where,
+        shownAsCode: insideAFence(content).has(heading),
+      }).toEqual({
         where,
         shownAsCode: false,
       });
@@ -188,7 +235,9 @@ describe("Egma's instruction content", () => {
 
   it("says where each kind of mock-tool answer belongs", () => {
     const driving = drivingSkill().replace(/\s+/gu, " ");
-    expect(driving).toContain("Project-wide answers live in `egma/mock-tools.md`");
+    expect(driving).toContain(
+      "Project-wide answers live in `egma/mock-tools.md`",
+    );
     expect(driving).toContain("inside that test file under `## Mock tools`");
 
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
@@ -251,7 +300,50 @@ describe("Egma's instruction content", () => {
     expect(writing).toContain(
       "Where the project has no mocked world, a block here is the only answer Egma will serve",
     );
-    expect(writing).not.toContain("only when this test needs an answer different");
+    expect(writing).not.toContain(
+      "only when this test needs an answer different",
+    );
+  });
+
+  /**
+   * The chat setup is the part a customer takes without adopting anything of
+   * Egma's, and that boundary is the whole of its promise: a team told to
+   * install a package to answer in text has a dependency review in front of a
+   * change that is one block of plain LiveKit code.
+   */
+  it("teaches the chat setup without an Egma package or the Python boundary", () => {
+    const reference = integrateEgmaReference("integrate-livekit");
+    const chat = referencePart(reference, "Chat setup");
+
+    // The mark is spelled by hand: it is the published contract the six
+    // lines key on, not a constant to import.
+    expect(chat).toContain(
+      'chat = ctx.job.room.name.startswith("egma-sim-chat-")',
+    );
+    // The customer's metadata channels stay the customer's.
+    expect(chat).not.toContain("ctx.job.metadata");
+    expect(chat).toContain("audio_input=False");
+    expect(chat).toContain("audio_output=False");
+    expect(chat).toContain("TextOutputOptions(sync_transcription=False)");
+
+    // Nothing of Egma's is installed or imported to take it.
+    expect(chat).not.toContain("pip install");
+    expect(chat).not.toContain("from egma import");
+    expect(chat).not.toContain("egma>=");
+
+    // A Node worker is named here as one the setup reaches, and the SDK's
+    // Python-only boundary is written once, inside the part that has it.
+    expect(chat).toContain("@livekit/agents");
+    expect(chat).not.toContain("does not yet support");
+    expect(reference.split("does not yet support")).toHaveLength(2);
+    expect(referencePart(reference, "Egma SDK entries")).toContain(
+      "does not yet support",
+    );
+
+    // The customer's live rooms are untouched by taking it.
+    expect(chat.replace(/\s+/gu, " ")).toContain(
+      "A production room is named by your own system",
+    );
   });
 
   /** The router owns common safety; the selected reference adds SDK-specific bounds. */
@@ -261,7 +353,7 @@ describe("Egma's instruction content", () => {
       path.join(
         publicSkillDirectory("integrate-egma"),
         "references",
-        "integrate-egma-sdk.md",
+        "integrate-livekit.md",
       ),
       "utf8",
     );
@@ -270,12 +362,10 @@ describe("Egma's instruction content", () => {
     expect(sdk).toContain("await mockable(agent, ctx, session)");
     expect(sdk).toContain("AgentSession.start");
     expect(sdk).toContain("do not add another\nconnection call");
-    const testingExample = /## Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(
-      sdk,
-    )?.[1];
-    const bothExample = /## Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(
-      sdk,
-    )?.[1];
+    const testingExample =
+      /### Testing entry[\s\S]*?```python\n([\s\S]*?)```/u.exec(sdk)?.[1];
+    const bothExample =
+      /### Both entries[\s\S]*?```python\n([\s\S]*?)```/u.exec(sdk)?.[1];
     expect(testingExample).toBeDefined();
     expect(bothExample).toBeDefined();
     expect(testingExample).not.toContain("await ctx.connect()");
@@ -283,23 +373,47 @@ describe("Egma's instruction content", () => {
       bothExample?.indexOf("await mockable(agent, ctx, session)") ?? -1,
     );
     expect(bothExample).not.toContain("await ctx.connect()");
-    expect(bothExample?.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
-      bothExample?.indexOf("await session.start") ?? -1,
-    );
+    expect(
+      bothExample?.indexOf("await mockable(agent, ctx, session)"),
+    ).toBeLessThan(bothExample?.indexOf("await session.start") ?? -1);
     // The monitoring entry, which ticket 02 reuses and this lane never adds.
     expect(sdk).toContain("monitor_livekit(ctx)");
     expect(sdk).toContain("ctx.connect()");
     expect(sdk).toContain("EGMA_URL");
     expect(sdk).toContain("EGMA_API_KEY");
-    expect(integration).toContain("Leave every `.env` file unread and unchanged");
-    expect(sdk).toContain("Keep both values out of changed files and command output");
+    expect(integration).toContain(
+      "Leave every `.env` file unread and unchanged",
+    );
+    expect(sdk).toContain(
+      "Keep both values out of changed files and command output",
+    );
     expect(sdk).not.toContain(".env");
     expect(sdk).toContain("When the entrypoint is unknown");
     expect(sdk.replace(/\s+/gu, " ")).toContain("Do not guess a worker file");
   });
 
+  /**
+   * The name is the price of every dispatch, so it travels with the setup that
+   * needs it rather than surfacing later as a run that reached nothing.
+   */
+  it("makes the registered worker name part of the same integration", () => {
+    const naming = referencePart(
+      integrateEgmaReference("integrate-livekit"),
+      "Name the worker",
+    );
+
+    expect(naming).toContain("WorkerOptions");
+    expect(naming).toContain('agent_name="front-desk"');
+    expect(naming.replace(/\s+/gu, " ")).toContain(
+      "A worker with a registered name no longer joins rooms automatically",
+    );
+    // Said plainly, once. The consequence is real and it is not a hazard.
+    expect(naming).not.toMatch(/\bwarning\b/iu);
+    expect(naming).not.toMatch(/^>/mu);
+  });
+
   it("requires the first Python SDK release that reads the room name", () => {
-    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const sdk = integrateEgmaReference("integrate-livekit");
 
     expect(sdk).toContain("`egma>=0.2.0`");
     expect(sdk).not.toContain("0.1.1");
@@ -349,15 +463,19 @@ describe("Egma's instruction content", () => {
     expect(authoring).toContain("TaskGroup");
     expect(authoring).toContain("in-memory state");
     expect(authoring).toContain("egma:none");
-    expect(authoring).toContain("mixes an external effect with agent-runtime control");
+    expect(authoring).toContain(
+      "mixes an external effect with agent-runtime control",
+    );
     expect(authoring).toContain("egma:abort");
-    expect(authoring).toContain("cannot safely run only half of its implementation");
+    expect(authoring).toContain(
+      "cannot safely run only half of its implementation",
+    );
     expect(authoring).not.toContain("For **each real tool**");
   });
 
   it("gives one worker owner the selected SDK reference and final mode", () => {
     const router = publicSkill("integrate-egma");
-    const sdk = integrateEgmaReference("integrate-egma-sdk");
+    const sdk = integrateEgmaReference("integrate-livekit");
     const integration = workerIntegrationInstructions(
       "/repo",
       new Map([["framework", "livekit-agents"]]),
@@ -375,7 +493,11 @@ describe("Egma's instruction content", () => {
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "connect-retell.md",
+      ),
       "utf8",
     );
     expect(retell).toContain("retell-sdk");
@@ -402,7 +524,11 @@ describe("Egma's instruction content", () => {
 
   it("uses Egma's product words in public and dispatched content", () => {
     const retell = readFileSync(
-      path.join(publicSkillDirectory("integrate-egma"), "references", "connect-retell.md"),
+      path.join(
+        publicSkillDirectory("integrate-egma"),
+        "references",
+        "connect-retell.md",
+      ),
       "utf8",
     );
     const livekit = readFileSync(
@@ -426,7 +552,11 @@ describe("Egma's instruction content", () => {
         // `call` is an ordinary verb here, not the banned noun for a simulation.
         .replace("Do not call it skipped.", "");
       for (const banned of BANNED) {
-        expect({ name, banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
+        expect({
+          name,
+          banned: String(banned),
+          hit: banned.exec(content)?.[0] ?? null,
+        }).toEqual({
           name,
           banned: String(banned),
           hit: null,
@@ -437,7 +567,8 @@ describe("Egma's instruction content", () => {
   });
 
   it("carves out only the file-format heading from the vocabulary guard", () => {
-    const taken = (text: string): string => text.replaceAll(SCENARIO_HEADING, "");
+    const taken = (text: string): string =>
+      text.replaceAll(SCENARIO_HEADING, "");
 
     expect(taken("## Scenario")).toBe("");
     expect(taken("- **`## Scenario`** is prose.")).toBe("- **** is prose.");
@@ -464,8 +595,12 @@ describe("Egma's instruction content", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
       expect(paths).toContain(`skills/${name}/SKILL.md`);
     }
-    expect(paths).toContain("skills/integrate-egma/references/connect-retell.md");
-    expect(paths).toContain("skills/integrate-egma/references/find-voice-agent.md");
+    expect(paths).toContain(
+      "skills/integrate-egma/references/connect-retell.md",
+    );
+    expect(paths).toContain(
+      "skills/integrate-egma/references/find-voice-agent.md",
+    );
     expect(paths).toContain("skills/integrate-egma/scripts/livekit-local.mjs");
     expect(paths.some((file) => file.startsWith("context/"))).toBe(false);
     for (const removed of [
@@ -482,13 +617,15 @@ describe("Egma's instruction content", () => {
   it("reads every instruction from its package path", () => {
     for (const name of PUBLIC_SKILL_NAMES) {
       const file = publicSkillFile(name);
-      expect(path.relative(PACKAGE_ROOT, file)).toBe(path.join("skills", name, "SKILL.md"));
+      expect(path.relative(PACKAGE_ROOT, file)).toBe(
+        path.join("skills", name, "SKILL.md"),
+      );
       expect(readFileSync(file, "utf8")).toContain(publicSkill(name));
     }
     for (const [referenceName, heading] of [
       ["connect-retell", "# Connect a Retell agent"],
       ["find-voice-agent", "# Find the voice agent"],
-      ["integrate-egma-sdk", "# Add the Egma SDK to a LiveKit worker"],
+      ["integrate-livekit", "# Integrate a LiveKit worker with Egma"],
       ["run-livekit-agent-locally", "# Run a LiveKit agent locally"],
     ] as const) {
       const reference = path.join(
@@ -497,7 +634,12 @@ describe("Egma's instruction content", () => {
         `${referenceName}.md`,
       );
       expect(path.relative(PACKAGE_ROOT, reference)).toBe(
-        path.join("skills", "integrate-egma", "references", `${referenceName}.md`),
+        path.join(
+          "skills",
+          "integrate-egma",
+          "references",
+          `${referenceName}.md`,
+        ),
       );
       expect(readFileSync(reference, "utf8")).toContain(heading);
     }

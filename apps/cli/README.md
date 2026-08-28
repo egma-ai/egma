@@ -183,7 +183,17 @@ grounded in.
 
 For LiveKit, the wizard reads `GET /v1/connection-options` from the Egma
 platform. The platform supplies the field names, help text, and credential
-rules. You then choose one of two setups:
+rules.
+
+It asks how you want to test this agent first. **Chat** types to the agent and
+reads its words back, so a whole test suite finishes in seconds and nothing is
+spoken. **Voice** reaches the agent through the room's audio. Chat needs a
+short setup in your worker, which the same integration task gives your coding
+agent, and it is offered with project credentials alone: there Egma makes the room
+whose name tells your worker to answer in text, and dispatches the worker that
+reads it.
+
+For voice you then choose one of two setups:
 
 - **LiveKit project credentials — Recommended.** This is the quickest setup.
   Give Egma the project URL, API key, and API secret so it can manage room
@@ -196,9 +206,14 @@ Secrets are drawn as dots and never enter wizard state, the coding-agent
 context, a repository file, a log, or a command argument. Setup does not contact
 the LiveKit server or token endpoint. Egma sends the completed connection to
 `POST /v1/agents`, where the credentials are sealed. If the platform refuses a
-field, the wizard shows that reason and gives one correction attempt. If an
-agent name is already taken, it asks for another name; it never joins two
-LiveKit targets by URL because a LiveKit URL identifies a server, not an agent.
+field, the wizard shows that reason and gives one correction attempt.
+
+One worker is one Egma agent. Registering the same server and the same
+registered worker name again adds a connection to the agent Egma already holds,
+so a chat result and a voice result stay side by side on one agent. A worker of
+the same name on a second server stays a second agent; when the Egma agent name
+that one wants is already taken, the wizard says so and stops rather than
+joining two deployments under one row.
 
 LiveKit keeps its prompt and tools in repository code. Test writing therefore
 uses the repository evidence and the context already held by the same coding
