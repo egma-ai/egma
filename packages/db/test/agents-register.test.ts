@@ -51,14 +51,17 @@ function registration(overrides: {
   readonly modality?: "chat" | "voice";
   readonly retellAgentId?: string;
   readonly apiKey?: string;
+  /** The Retell text lane this registration takes, chat API by default. */
+  readonly lane?: "retell_chat_api" | "retell_playground";
 }): NewAgent {
+  const lane = overrides.lane ?? "retell_chat_api";
   return {
     name: overrides.name ?? "Front desk",
     agentPlatform: "retell",
     connection: {
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      connectionType: lane,
+      accessVariant: `${lane}.api_key`,
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -108,6 +111,45 @@ describe("two identical registrations arriving together", () => {
       [acme.project, "Racing"],
     );
     expect(rows[0]?.count).toBe("1");
+  });
+
+  it("settle to one for the playground lane too, since it carries the reuse key", async () => {
+    // The playground shares the reuse key the chat API carries — the vendor
+    // agent id — so the same advisory lock and committed read behind it settle
+    // a racing playground registration to one agent, not a twin.
+    const racing = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        registerAgent(
+          actingIn(acme.project),
+          registration({
+            name: "Racing playground",
+            lane: "retell_playground",
+            retellAgentId: "agent_playground_race",
+          }),
+        ),
+      ),
+    );
+
+    expect(new Set(racing.map((one) => one.agent.id)).size).toBe(1);
+    expect(new Set(racing.map((one) => one.connection?.id)).size).toBe(1);
+    const results = racing.map((one) => one.result);
+    expect(results.filter((one) => one === "created")).toHaveLength(1);
+    expect(results.filter((one) => one === "reused")).toHaveLength(3);
+
+    // One agent, and the one connection is the playground.
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from agent where project_id = $1 and name = $2",
+      [acme.project, "Racing playground"],
+    );
+    expect(rows[0]?.count).toBe("1");
+    const connections = await listConnections(
+      actingIn(acme.project),
+      racing[0]!.agent.id,
+    );
+    expect(connections).toBeDefined();
+    expect((connections ?? []).map((one) => one.connectionType)).toEqual([
+      "retell_playground",
+    ]);
   });
 });
 
