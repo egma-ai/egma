@@ -1923,19 +1923,36 @@ describe("the saved theme", () => {
       await page.evaluate(() => localStorage.removeItem("egma-theme"));
       await page.reload();
 
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
+      // Every read below follows a reload or a click, so every one of them
+      // is polled. A bare read asks once, at whatever moment the previous
+      // line happened to return, and the theme is written by script after
+      // the document is: on a loaded machine the answer is simply not there
+      // yet, and the read fails for a reason that has nothing to do with
+      // the theme. Polling waits for the state the click or the reload was
+      // always going to reach.
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("light");
       const account = page.locator('aside button[aria-label^="Account"]');
       await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
       await controls.first().click();
 
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
-      expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
-      expect(await controls.first().getAttribute("aria-checked")).toBe("true");
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("dark");
+      await expect
+        .poll(() => page.evaluate(() => localStorage.getItem("egma-theme")))
+        .toBe("dark");
+      await expect
+        .poll(() => controls.first().getAttribute("aria-checked"))
+        .toBe("true");
 
       await page.reload();
-      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      await expect
+        .poll(() => page.locator("html").getAttribute("data-theme"))
+        .toBe("dark");
       await page.locator('aside button[aria-label^="Account"]').click();
       await expect
         .poll(() => page.getByRole("switch", { name: "Dark theme" }).first().getAttribute("aria-checked"))
