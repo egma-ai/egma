@@ -161,6 +161,16 @@
   --bad-border: color-mix(in srgb, var(--bad) 38%, var(--border));
 
   /*
+   * The fill of a note that carries a state — a warning the reader must see, a
+   * refusal explaining why something cannot happen. The state color pulled
+   * nearly all the way back to paper, so the note reads as a quiet tinted panel
+   * rather than a coloured block, with its `-border` edge above carrying the
+   * meaning. Derived like the edges, so one declaration follows both themes.
+   */
+  --warn-surface: color-mix(in srgb, var(--warn) 6%, var(--surface));
+  --bad-surface: color-mix(in srgb, var(--bad) 6%, var(--surface));
+
+  /*
    * The dialog scrim, which is what makes the page behind one read as inert.
    *
    * It is mixed from Midnight Ink rather than from `--foreground`, and that is
@@ -694,6 +704,9 @@
   --color-success-border: var(--good-border);
   --color-warning-border: var(--warn-border);
   --color-failure-border: var(--bad-border);
+  /* The quiet tinted fill of a state note, derived above beside the edges. */
+  --color-warning-surface: var(--warn-surface);
+  --color-failure-surface: var(--bad-surface);
   --color-scrim: var(--scrim);
 
   /* ----------------------------------------------------------------- Shape */

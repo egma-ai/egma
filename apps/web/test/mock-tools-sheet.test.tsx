@@ -307,6 +307,56 @@ describe("the mock-tools panel", () => {
     });
   });
 
+  it("shows an unchecked box for an off agent, never one that reads as agreed", async () => {
+    answerWith({
+      ticked: false,
+      discovered: discovery({
+        numbers: [
+          {
+            number: "+12567332874",
+            label: "After hours",
+            verdicts: ["hijackable"],
+            pin: true,
+          },
+        ],
+      }),
+    });
+    render(<AgentsPage />);
+    await openMockTools();
+
+    // Off, so the box reflects only this session's answer: nobody has toggled
+    // it, so it is unchecked. A pre-checked box would claim an agreement the
+    // person never gave.
+    const box = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+  });
+
+  it("states the standing consent for an on agent, without a pre-checked box", async () => {
+    answerWith({
+      ticked: true,
+      discovered: discovery({
+        numbers: [
+          {
+            number: "+12567332874",
+            label: "After hours",
+            verdicts: ["hijackable"],
+            pin: true,
+          },
+        ],
+      }),
+    });
+    render(<AgentsPage />);
+    await openMockTools();
+
+    // Already on: the pin is covered by the tick's standing consent, and that
+    // is stated as a fact rather than shown as a checkbox the person is
+    // depicted as having ticked.
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(
+      screen.getByText(/pinned during each run and restored afterwards under that standing consent/u),
+    ).toBeDefined();
+  });
+
   it("shows the reason the box cannot go on, rather than a control that does nothing", async () => {
     answerWith({
       ticked: false,

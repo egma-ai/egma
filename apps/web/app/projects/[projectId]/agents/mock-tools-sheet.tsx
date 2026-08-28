@@ -108,13 +108,21 @@ export function MockToolsSheet({
   const on = agent.mockToolsDuringSimulations;
 
   const discover = useCallback(
-    async (seed: boolean): Promise<Discovery | null> => {
+    /**
+     * `alive` is what gates every state write, so a slow first read cannot
+     * overwrite a newer one. A retry (`attempt++`) mounts a fresh effect whose
+     * own `alive` returns false for the previous read, and the answer of the
+     * one that has since been superseded is dropped on arrival rather than
+     * painted over the newer result.
+     */
+    async (seed: boolean, alive: () => boolean = () => true): Promise<Discovery | null> => {
       const answer = await platformAnswer(
         discoverMockTools(
           { agentId: agent.id, projectId, ...(seed ? { seed: true } : {}) },
           { client: platformClient },
         ),
       );
+      if (!alive()) return null;
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
         return null;
@@ -132,9 +140,7 @@ export function MockToolsSheet({
   useEffect(() => {
     let current = true;
     setRead({ status: "loading" });
-    void discover(false).then(() => {
-      if (!current) return;
-    });
+    void discover(false, () => current);
     return () => {
       current = false;
     };
@@ -235,8 +241,9 @@ export function MockToolsSheet({
               {found === null || found.numbers.length === 0 ? null : (
                 <NumbersSection
                   numbers={found.numbers}
-                  consented={pinConsent || on}
-                  mayConsent={mayAuthor && !on}
+                  on={on}
+                  consented={pinConsent}
+                  mayConsent={mayAuthor}
                   onConsent={setPinConsent}
                 />
               )}
@@ -349,7 +356,7 @@ function RefusalNote({ message }: { readonly message: string }) {
   return (
     <section
       aria-labelledby="mock-tools-refusal-heading"
-      className="flex min-w-0 flex-col gap-2 border border-failure/40 bg-failure/5 p-4"
+      className="flex min-w-0 flex-col gap-2 border border-failure-border bg-failure-surface p-4"
       role="note"
     >
       <h2
@@ -372,7 +379,7 @@ function WarningsSection({
   return (
     <section
       aria-labelledby="mock-tools-warnings-heading"
-      className="flex min-w-0 flex-col gap-2 border border-warning/40 bg-warning/5 p-4"
+      className="flex min-w-0 flex-col gap-2 border border-warning-border bg-warning-surface p-4"
     >
       <h2
         className="m-0 text-sm font-medium text-warning"
@@ -402,11 +409,15 @@ function WarningsSection({
  */
 function NumbersSection({
   numbers,
+  on,
   consented,
   mayConsent,
   onConsent,
 }: {
   readonly numbers: readonly DiscoveredNumber[];
+  /** Whether mock tools is already on for this agent — standing consent given. */
+  readonly on: boolean;
+  /** This session's own answer to the pin question. Never the tick's state. */
   readonly consented: boolean;
   readonly mayConsent: boolean;
   readonly onConsent: (next: boolean) => void;
@@ -446,7 +457,18 @@ function NumbersSection({
           </li>
         ))}
       </ul>
-      {toPin.length === 0 ? null : (
+      {toPin.length === 0 ? null : on ? (
+        // Already on, so the tick's standing consent already covers the pin —
+        // stated as the fact it is, never a pre-checked box the person is shown
+        // as having agreed to when they may never have been asked this session.
+        <p className="m-0 border border-border p-4 text-sm text-faint" role="note">
+          Mock tools is on, so {toPin.length === 1 ? "this number is" : "these numbers are"}{" "}
+          pinned during each run and restored afterwards under that standing
+          consent.
+        </p>
+      ) : (
+        // Off, and this is the question that has to be answered to turn it on.
+        // The box reflects only this session's own toggle.
         <label className="flex items-start gap-3 border border-border p-4">
           <Checkbox
             checked={consented}
