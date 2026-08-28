@@ -101,6 +101,17 @@ export const CODES = {
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
+  /**
+   * A run over an agent with mock tools turned on, whose mocked world could not
+   * be built.
+   *
+   * **Its own code, because the alternative was conducting the run anyway.** A
+   * ticked agent promises every simulation runs in a mocked world; a run that
+   * quietly fell back to the real tools would be a green result over the
+   * customer's production backend. So the run is canceled and this is what the
+   * caller is told, with the platform's own reason in the sentence.
+   */
+  mocked_world_unbuildable: 422,
   too_many_requests: 429,
   /**
    * A fault, answered without relaying whatever the fault said.

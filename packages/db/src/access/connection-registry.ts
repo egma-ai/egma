@@ -1056,12 +1056,10 @@ export const CONNECTION_REGISTRY: Readonly<
       },
     ],
     reuseKey: "retellAgentId",
-    // No plug yet. The registry may not claim what no code can run, so this
-    // flips to `true` in the same commit as the simulator adapter that places
-    // the call and joins the room. Until then a connection of this kind can be
-    // registered — a customer may describe how Egma will reach their agent —
-    // and a run over it is refused at creation rather than queued forever.
-    simulatorAdapter: false,
+    // The plug places the call and joins the room Retell opens for it, and the
+    // control plane hands each simulation the version to place it against. A
+    // run over this kind is conductable, so the registry says so.
+    simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
   phone_number: {

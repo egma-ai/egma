@@ -86,8 +86,8 @@ export type DiscoverAgentsResponses = {
             modality: 'chat' | 'voice';
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
-                connectionType: 'retell_chat_api' | 'phone_number';
-                accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164';
+                connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number';
+                accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
                 config: {
@@ -515,9 +515,13 @@ export type UpdateAgentData = {
     body?: {
         name?: string;
         /**
-         * Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is.
+         * Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is. Turning it on runs discovery first and is refused with its reason where the agent cannot be mocked; it also seeds a mock tool, with a deterministic default answer, for every tool Egma can intercept and does not already answer for.
          */
         mockToolsDuringSimulations?: boolean;
+        /**
+         * Consent to Egma pinning a telephone number that follows the platform's `latest` pointer to the version it already resolves to, for the length of each run, and putting the binding back afterwards. Required only when such a number routes to this agent: without it, branching a temporary version would send real callers to it the instant it exists. Sending false, or leaving it out where it is needed, refuses the tick with the reason — a box promising isolation never quietly runs real tools.
+         */
+        pinNumbersDuringRuns?: boolean;
     };
     path: {
         agentId: string;
@@ -702,6 +706,94 @@ export type AddConnectionResponses = {
 };
 
 export type AddConnectionResponse = AddConnectionResponses[keyof AddConnectionResponses];
+
+export type DiscoverMockToolsData = {
+    body?: {
+        /**
+         * Also seed a mock tool for every interceptable tool this project does not answer for yet. Never overwrites an authored answer: a known name keeps its row. Absent is a read.
+         */
+        seed?: boolean;
+    };
+    path: {
+        agentId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/agents/{agentId}/mock-tools:discover';
+};
+
+export type DiscoverMockToolsErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
+};
+
+export type DiscoverMockToolsError = DiscoverMockToolsErrors[keyof DiscoverMockToolsErrors];
+
+export type DiscoverMockToolsResponses = {
+    /**
+     * What a mocked run over this agent would cover.
+     */
+    200: {
+        mockable: boolean;
+        refusal: {
+            reason: 'custom_llm_engine' | 'pin_consent_required' | 'phone_only_agent' | 'keys_disagree' | 'platform_unavailable';
+            message: string;
+        } | null;
+        engine: 'retell-llm' | 'conversation-flow' | 'custom-llm' | null;
+        servingVersion: number | null;
+        tools: Array<{
+            name: string;
+            type: string;
+            coverage: 'mocked' | 'notInterceptable' | 'notInThisVersion';
+            answered: boolean;
+        }>;
+        warnings: Array<{
+            toolName: string;
+            toolType: string;
+            effect: string;
+        }>;
+        numbers: Array<{
+            number: string;
+            label: string;
+            verdicts: Array<'numeric' | 'environment-tag' | 'latest-published' | 'hijackable'>;
+            pin: boolean;
+        }>;
+        seeded: Array<string>;
+    };
+};
+
+export type DiscoverMockToolsResponse = DiscoverMockToolsResponses[keyof DiscoverMockToolsResponses];
 
 export type ArchiveAgentData = {
     body?: {

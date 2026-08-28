@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addConnection,
   AgentWriteRefusedError,
+  claimSimulations,
   coverageFromClasses,
   createAgent,
   failSimulation,
@@ -458,6 +459,156 @@ describe("the world a run built", () => {
       .then(() => undefined)
       .catch((error: unknown) => error);
     expect(String(refused)).toMatch(/written once/u);
+  });
+});
+
+describe("the gate that keeps a mocked run honest", () => {
+  /**
+   * **A mocked run's simulations cannot be claimed until its world exists.**
+   *
+   * This is what makes "a run that cannot build its world fails before a single
+   * simulation" true rather than merely intended. It is a condition on the
+   * claim itself, so it is closed from the instant the rows are written — there
+   * is no window between the run being created and the builder starting in
+   * which a simulator could get in front of it.
+   */
+  it("holds a ticked agent's queued simulations back, and lets them go when the draft lands", async () => {
+    const created = await createAgent(acting(), {
+      name: "Gated agent",
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
+
+    const claimable = async (): Promise<readonly string[]> => {
+      const rows = await database.sql<{ id: string }>(
+        `select s.id
+           from simulation s
+           join run r on r.id = s.run_id
+           join agent a on a.id = r.agent_id
+          where s.status = 'queued'
+            and s.run_id = $1
+            and not (
+              a.mock_tools_during_simulations = true
+              and r.connection_snapshot->>'connectionType'
+                    in ('retell_web_call', 'retell_chat_api')
+              and (
+                r.mocked_world is null
+                or r.mocked_world->>'draftVersion' is null
+              )
+            )`,
+        [runId],
+      );
+      return rows.rows.map((row) => row.id);
+    };
+
+    // Nothing yet: the world has not been recorded at all.
+    expect(await claimable()).toEqual([]);
+
+    // The capture, written before anything was branched. Still nothing —
+    // a world with no temporary version in it is a world half built.
+    await recordMockedWorld(acting(), runId, { ...WORLD, draftVersion: null });
+    expect(await claimable()).toEqual([]);
+
+    // The branch landed, and now the run is somebody's to conduct.
+    await recordMockedWorld(acting(), runId, WORLD);
+    expect(await claimable()).toEqual([simulationId]);
+  });
+
+  it("holds nothing back for a run that mocks nothing", async () => {
+    const created = await createAgent(acting(), {
+      name: "Unticked agent",
+      agentPlatform: "retell",
+    });
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
+
+    const rows = await database.sql<{ id: string }>(
+      `select s.id
+         from simulation s
+         join run r on r.id = s.run_id
+         join agent a on a.id = r.agent_id
+        where s.status = 'queued'
+          and s.run_id = $1
+          and not (
+            a.mock_tools_during_simulations = true
+            and r.connection_snapshot->>'connectionType'
+                  in ('retell_web_call', 'retell_chat_api')
+            and (
+              r.mocked_world is null
+              or r.mocked_world->>'draftVersion' is null
+            )
+          )`,
+      [runId],
+    );
+    // Which is every run in the product but a handful: the condition costs a
+    // run that mocks nothing exactly nothing.
+    expect(rows.rows.map((row) => row.id)).toEqual([simulationId]);
+  });
+
+  it("holds the gate through the real claim, not only a copy of its SQL", async () => {
+    // The proof above reads a hand-written copy of the predicate. This one goes
+    // through `claimSimulations` itself, so dropping `runIsReadyToConduct` from
+    // the claim — the one line that closes the gate — fails a test rather than
+    // passing quietly.
+    const created = await createAgent(acting(), {
+      name: "Claim-gated agent",
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
+
+    const claimedOur = async (): Promise<boolean> => {
+      // A claimant of this test's own, and a capacity large enough that its
+      // simulation is reached if it is eligible at all. Whatever else the queue
+      // holds is claimed too and does not change this answer.
+      const claims = await claimSimulations({
+        claimant: `gate-proof-${runId}`,
+        capacity: 50,
+      });
+      return claims.some((claim) => claim.id === simulationId);
+    };
+
+    // Ticked, mockable lane, no draft recorded: the real claim passes it over.
+    expect(await claimedOur()).toBe(false);
+    // The run stays pending, because nothing of its was claimed.
+    expect((await getRun(acting(), runId))?.status).toBe("pending");
+
+    // The draft lands, and now the real claim takes it.
+    await recordMockedWorld(acting(), runId, WORLD);
+    expect(await claimedOur()).toBe(true);
   });
 });
 

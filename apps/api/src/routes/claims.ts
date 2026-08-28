@@ -222,6 +222,78 @@ async function modelsBlock(
   };
 }
 
+/**
+ * The version this simulation is placed against and the variables it carries —
+ * one code path for both lanes that name a version, or nothing at all.
+ *
+ * **The version** is named explicitly, because the platform's own default is
+ * "the newest version" — which a concurrent edit or a branch can move between
+ * one simulation and the next. Where it comes from is the only thing the two
+ * lanes differ on:
+ *
+ * - **the draft lane** hands the DRAFT version Egma branched, so the
+ *   conversation reaches the mocked tools on the temporary version;
+ * - **the playground lane** hands the RESOLVED serving version the run read
+ *   once at start, so every simulation of the run tests the one version a real
+ *   caller reaches.
+ *
+ * The draft version wins when both are somehow present, because a draft-lane run
+ * is being conducted against the mocked tools and nothing else would be honest;
+ * in practice a run is over one lane, so at most one is set.
+ *
+ * **The variables** are what the platform renders per call, and Egma passes only
+ * its own: the attribution variable that carries this simulation's identifier
+ * into the tool URL. Everything else falls back to the version's declared
+ * defaults. Both lanes hand it, because both render variables.
+ *
+ * The attribution variable is **asserted rather than assumed**. The whole tool
+ * record of a mocked simulation rides on it: the swapped URL carries
+ * `{{egma_simulation}}` as a path segment, and a spec that omitted it would send
+ * every tool call to a path naming no simulation — which the endpoint refuses,
+ * silently losing every tool fact the run exists to collect. Nothing else
+ * catches that, so it is caught here, where the value is put in.
+ */
+function runVersionSpecOf(
+  run: Run,
+  simulationId: string,
+): Record<string, unknown> {
+  const draftVersion = run.mockedWorld?.draftVersion ?? null;
+  const version =
+    draftVersion !== null
+      ? draftVersion
+      : run.conductedWorld !== null
+        ? run.conductedWorld.agentVersion
+        : undefined;
+  if (version === undefined) return {};
+
+  const variables = dynamicVariablesFor(simulationId);
+  if (variables[SIMULATION_VARIABLE] !== simulationId) {
+    throw new Error(
+      `simulation ${simulationId} would be conducted against a named version ` +
+        `whose variables do not carry ${SIMULATION_VARIABLE}, so no tool call ` +
+        "it made could be traced back to it",
+    );
+  }
+
+  return {
+    agent_version: version,
+    dynamic_variables: variables,
+  };
+}
+
+/**
+ * The variables one simulation is conducted with.
+ *
+ * One entry today, and the assertion above is on its answer rather than inside
+ * it deliberately: authored caller-context variables are a named later chapter,
+ * and the day this function merges a second source is the day it could drop the
+ * first. The check is placed where it will still be looking at the whole answer
+ * when that happens.
+ */
+function dynamicVariablesFor(simulationId: string): Record<string, string> {
+  return { [SIMULATION_VARIABLE]: simulationId };
+}
+
 /** What a claim request said, once every field has been read and refused for itself. */
 type ClaimAsk = {
   readonly claimant: string;
@@ -469,6 +541,11 @@ async function assembledSpec(
     throw fault;
   }
 
+  // The version this simulation is placed against and the variables it carries,
+  // for whichever lane named a version — the draft lane's temporary version or
+  // the playground lane's resolved serving version, in one code path.
+  const versionSpec = runVersionSpecOf(run, claim.id);
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -480,6 +557,7 @@ async function assembledSpec(
       config: connection.config,
       credentials: connection.credentials,
     },
+    ...versionSpec,
     // Flat and whole, straight off the pinned version: the name this person
     // gives the agent, who they are, and the language the roleplay runs in.
     // The identity name is the authored one — never the team's label for the
@@ -495,20 +573,11 @@ async function assembledSpec(
     // The same walls the chat lane has always had, by modality and by nothing
     // else. A playground exchange is a chat, so it gets the chat numbers.
     limits: SIMULATION_LIMITS[claim.modality],
-    // **The version, always, on a lane that resolved one.** The plug would
-    // conduct without it and Retell would then pick its newest version — which
-    // a concurrent edit can move between one simulation and the next. The run
-    // resolved it once for exactly this reason.
-    ...(run.conductedWorld === null
-      ? {}
-      : { agent_version: run.conductedWorld.agentVersion }),
-    // Egma's own attribution variable, and it is what a tool call the platform
-    // makes rides back to this simulation on. Sent on the lanes that render
-    // variables at all; absent stays absent, because an empty block is a value
-    // a platform renders rather than a block nobody sent.
-    ...(run.conductedWorld === null
-      ? {}
-      : { dynamic_variables: { [SIMULATION_VARIABLE]: claim.id } }),
+    // `agent_version` and `dynamic_variables` are handed by `versionSpec` above,
+    // one path for both lanes — the draft lane's temporary version and the
+    // playground lane's resolved serving version alike. They are not written a
+    // second time here.
+    //
     // Left out entirely where the run mocks nothing, which is what most
     // runs do: a simulation egma answers no tool for is byte for byte the
     // work order it was before mock tools existed, and an empty list

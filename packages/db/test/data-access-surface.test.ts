@@ -334,6 +334,10 @@ const CONTEXT_REQUIRING = [
   // to put it back and readable by the landing that stamps a simulation's
   // coverage from it.
   "recordMockedWorld",
+  // What one agent's runs still owe somebody's platform account: a temporary
+  // version that was never deleted, a pinned number that was never put back.
+  // The sweep's whole input, read inside the project like any other run read.
+  "outstandingMockedWorlds",
   "simulationMockedWorld",
   "simulationStatusCountsOfRuns",
   "startRun",
@@ -525,6 +529,11 @@ const VALUES = [
   // for — never a config or a credential.
   "connectionTypeReadsPlatformAtRunStart",
   "connectionTypeUsesPlatformCarrier",
+  // Which connection lanes a run over them builds a mocked world for. Two
+  // names and no gate: the gate itself is a condition inside the claim, where
+  // nothing outside this package has a query to put it in.
+  "connectionTypeTakesMockedWorld",
+  "MOCKABLE_CONNECTION_TYPES",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",

@@ -59,6 +59,7 @@ import {
   sendRefusal,
   unprocessable,
 } from "../http/refusals.ts";
+import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
 import {
   readPlaygroundWorld,
@@ -98,7 +99,12 @@ export type RunRoutesOptions = {
   readonly rateLimit: RateLimit;
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
-  /** Test seam for the run-start read on the lanes that pin a version. */
+  /**
+   * Test seam for the Retell reads and writes a run start makes, on the two
+   * lanes that reach the platform: the draft lane's mocked-world build, and the
+   * playground lane's version-pinning run-start read. The real one is `fetch`,
+   * and a run that neither mocks nor pins a version reaches no platform here.
+   */
   readonly retellFetch?: typeof fetch | undefined;
 };
 
@@ -500,14 +506,16 @@ export async function runRoutes(
         }
       }
 
-      // The run-start read, on the lanes that pin a version and on no other.
+      // Two lanes reach the platform when a run starts, and a run is over at
+      // most one of them. They are dispatched by connection type and never both
+      // run for one run.
       //
-      // **Before the run row exists, and loudly.** A resolve or a tool read
-      // that failed after the row was written would leave a queued run nobody
-      // can conduct honestly; refused here, nothing was started and the
-      // sentence says so. And a run admitted without this read would conduct
-      // against a world Egma never looked at, whose coverage stamp would be a
-      // claim about tools nobody saw.
+      // **The playground lane reads its world before the run row exists.** A
+      // resolve or a tool read that failed after the row was written would leave
+      // a queued run nobody can conduct honestly; refused here, nothing was
+      // started and the sentence says so. A run admitted without this read would
+      // conduct against a world Egma never looked at, whose coverage stamp would
+      // be a claim about tools nobody saw.
       const kind = await connectionTypeOf(acting.auth, connectionId);
       let conducted: ConductedWorld | undefined;
       let conductedIdentity: string | undefined;
@@ -556,6 +564,31 @@ export async function runRoutes(
               conductedConnectionIdentity: conductedIdentity,
             }),
       });
+
+      // **The draft lane builds its mocked world after the run row exists**, on
+      // no other lane. It happens after `startRun` because the temporary
+      // version's tool URLs carry this run's identifier, and nothing races it: a
+      // mocked run's simulations are unclaimable until the record names a
+      // temporary version, from the instant they are written. This is a no-op
+      // for a playground run — not a mockable draft lane — and for an unticked
+      // agent; only a run over a mockable draft lane whose agent carries the
+      // tick reaches Retell here. A world that cannot be built cancels the run
+      // and is answered as itself, never as a run that started.
+      const world = await buildRunMockedWorld(
+        acting.auth,
+        started,
+        {
+          baseUrl: options.baseUrl,
+          ...(options.retellFetch === undefined
+            ? {}
+            : { retellFetch: options.retellFetch }),
+        },
+        request.log,
+      );
+      if (world.kind === "refused") {
+        return sendRefusal(reply, "mocked_world_unbuildable", world.reason);
+      }
+
       const described = await headerOf(
         acting.auth,
         started.id,

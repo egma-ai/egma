@@ -31,6 +31,8 @@ export * from "./numbers.ts";
 export * from "./versions.ts";
 export * from "./tools.ts";
 export * from "./mock-draft.ts";
+export * from "./discovery.ts";
+export * from "./mocked-world.ts";
 export * from "./playground.ts";
 
 /** How many agents one listing request asks for. */

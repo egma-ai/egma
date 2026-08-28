@@ -119,8 +119,10 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
-    // The run-start read reaches Retell on the lanes that pin a version, so
-    // this group takes the same test seam the two provider groups above do.
+    // The one Retell seam the run start needs, for both lanes that reach the
+    // platform at creation: the draft lane's mocked-world build (the tick), and
+    // the playground lane's version-pinning run-start read. Same test seam the
+    // two provider groups above take.
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),

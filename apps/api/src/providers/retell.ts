@@ -37,6 +37,14 @@ export type RetellConnectionCandidate =
     }
   | {
       readonly agentPlatform: "retell";
+      readonly connectionType: "retell_web_call";
+      readonly accessVariant: "retell_web_call.api_key";
+      readonly modality: "voice";
+      readonly productLabel: string;
+      readonly config: { readonly retellAgentId: string };
+    }
+  | {
+      readonly agentPlatform: "retell";
       readonly connectionType: "phone_number";
       readonly accessVariant: "phone_number.public_e164";
       readonly modality: "voice";
@@ -76,6 +84,10 @@ type RetellCandidateToConfirm =
       readonly config: { readonly retellAgentId: string };
     }
   | {
+      readonly connectionType: "retell_web_call";
+      readonly config: { readonly retellAgentId: string };
+    }
+  | {
       readonly connectionType: "phone_number";
       readonly config: { readonly phoneNumber: string };
     };
@@ -111,6 +123,37 @@ function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
       "retell_chat_api",
       "retell_chat_api.api_key",
       "chat",
+    ),
+    config: { retellAgentId: platformAgentId },
+  };
+}
+
+/**
+ * The web-call lane, offered for every Retell voice agent.
+ *
+ * **It is offered whether or not the agent has a telephone number**, and that
+ * is the difference between it and the phone candidate beside it: Egma creates
+ * this call itself against the agent, so there is nothing to be routed and
+ * nothing to dial. It is also the lane a mocked run is conducted over — the
+ * published number is never dialled for one — so an agent whose only candidate
+ * was its phone number would be an agent the tick could do nothing for.
+ *
+ * A web call is WebRTC and not the phone band, so a simulation over it is a
+ * different unit from a phone simulation of the same agent. The registry's
+ * connection-band rule is what keeps the two from being compared; this only
+ * offers the choice.
+ */
+function webCallCandidate(platformAgentId: string): RetellConnectionCandidate {
+  return {
+    agentPlatform: "retell",
+    connectionType: "retell_web_call",
+    accessVariant: "retell_web_call.api_key",
+    modality: "voice",
+    productLabel: productLabelOf(
+      "retell",
+      "retell_web_call",
+      "retell_web_call.api_key",
+      "voice",
     ),
     config: { retellAgentId: platformAgentId },
   };
@@ -181,9 +224,15 @@ export async function discoverRetellAgents(
       connectionCandidates:
         agent.modality === "chat"
           ? [chatCandidate(agent.id)]
-          : numbersAnswering(numbers, agent.id).map(({ number }) =>
-              phoneCandidate(number),
-            ),
+          : [
+              // The web call first: it needs nothing of the customer's to be
+              // routed, it is what a mocked run is conducted over, and it is
+              // the one voice lane every voice agent has.
+              webCallCandidate(agent.id),
+              ...numbersAnswering(numbers, agent.id).map(({ number }) =>
+                phoneCandidate(number),
+              ),
+            ],
     })),
   };
 }
@@ -293,6 +342,20 @@ export async function confirmRetellCandidate(
       kind: "rejected",
       message: "That Retell agent is chat-only. Choose a voice agent.",
     };
+  }
+
+  if (candidate.connectionType === "retell_web_call") {
+    // Nothing else to confirm: Egma creates this call itself against the
+    // agent, so the agent still being a listed voice agent is the whole of
+    // what has to still be true.
+    if (candidate.config.retellAgentId !== platformAgentId) {
+      return {
+        kind: "rejected",
+        message:
+          "That web-call connection names a different Retell agent. Load the account again and choose an available connection.",
+      };
+    }
+    return { kind: "ready", candidate: webCallCandidate(platformAgentId) };
   }
 
   const number = await confirmNumber(key, candidate.config.phoneNumber, reach);
