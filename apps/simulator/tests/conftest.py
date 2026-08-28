@@ -583,6 +583,8 @@ def a_spec(
     models: dict | None = None,
     mock_tools: list[dict] | None = None,
     platform: dict | None = None,
+    agent_version: object = None,
+    dynamic_variables: dict[str, str] | None = None,
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
     walls, one exchange. What differs between two specs is the connection
@@ -610,6 +612,13 @@ def a_spec(
         },
         "models": models or direct_models(modality=modality),
     }
+    if agent_version is not None:
+        # Absent rather than null for the reason below: a spec that named
+        # no version is what the control plane really sends for a run that
+        # takes the platform's own default.
+        spec["agent_version"] = agent_version
+    if dynamic_variables:
+        spec["dynamic_variables"] = dynamic_variables
     if mock_tools:
         spec["mock_tools"] = mock_tools
     if platform:

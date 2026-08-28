@@ -39,8 +39,12 @@ touching the others:
   what answers, so a Retell agent, a Vapi agent and a person behind a
   number are all one plug. `livekit` reaches an agent where it lives: a
   room made in the customer's own LiveKit project, joined outbound, with
-  the agent's worker dispatched into it. To write the next, read the
-  `plugs/__init__.py` docstring; it is the entire brief.
+  the agent's worker dispatched into it. `retell_web_call` reaches a
+  Retell *voice* agent the same way its browser callers do: egma creates
+  the call itself — against a named version of the agent, with this
+  simulation's variables attached — and Retell answers with a way into a
+  LiveKit room, so the plug creates and the room media joins. To write the
+  next, read the `plugs/__init__.py` docstring; it is the entire brief.
 - **The media backends** (`media/`) — how a voice exchange's audio
   travels. One driver per way in, behind a four-method seam: create a
   Pipecat transport, dial, wait until somebody answers, tear it down.
@@ -491,8 +495,10 @@ src/egma_simulator/
   plugs/          The platform-plug seam. Its __init__ docstring is the
                   plug author's whole brief; scripted.py chats,
                   loopback.py speaks, retell.py is the first real
-                  platform, phone.py dials a number, and livekit.py holds
-                  an exchange in the agent's own room.
+                  platform, phone.py dials a number, livekit.py holds
+                  an exchange in the agent's own room, and
+                  retell_web_call.py creates a Retell web call and
+                  conducts it in the room that call opens.
   media/          The media-backend seam: how a voice exchange's Pipecat
                   transport is created. Its __init__ docstring is the
                   driver author's whole brief; livekit.py places real calls over a SIP
