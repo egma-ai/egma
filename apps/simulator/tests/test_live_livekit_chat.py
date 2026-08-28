@@ -50,8 +50,12 @@ typed run can say:
   from here directly. What can be: the simulation did not end with the
   missing-chat-setup reason, which is the plug saying it never saw that
   mark or an audio track; and every second the agent spent answering,
-  less the quiet period this plug pays on every turn by construction, adds
-  up to less than speaking those same words would have taken.
+  less the most the plug can have added to it, adds up to less than
+  speaking those same words would have taken. That subtraction is the
+  quiet period, and it is now an upper bound rather than a fixed cost: an
+  agent that publishes its own state ends its turns without paying it.
+  Subtracting it anyway understates the agent's thinking time, which is
+  the safe direction for this assertion.
 """
 
 from __future__ import annotations
@@ -112,8 +116,9 @@ SIMULATION = "sim-livekit-chat-live-001"
 
 # Short walls on purpose: a live exchange pays real model tokens per turn,
 # and this proves the path works rather than that an agent can type all
-# day. Roomier than a hermetic run's because the quiet period is paid once
-# per turn and the persona's own brain answers between them.
+# day. Roomier than a hermetic run's because the persona's own brain
+# answers between the turns, and because a turn the agent does not end
+# itself still waits out the quiet period.
 MAX_TURNS = 8
 MAX_DURATION_SECONDS = 90
 
@@ -228,9 +233,11 @@ async def test_the_simulator_types_a_whole_simulation_in_a_real_room(
     assert reference.startswith(f"{ROOM_PREFIX}-"), reference
 
     # Text-paced, on the one arithmetic a live run can be held to. Every
-    # answer's own latency less the quiet period the plug pays by
-    # construction is the time the agent really took, and all of it
-    # together is less than speaking those same words would have cost.
+    # answer's own latency less the most the plug can have added to it is
+    # at most the time the agent really took, and all of it together is
+    # less than speaking those same words would have cost. The quiet
+    # period is that upper bound: a turn the agent ended itself paid none
+    # of it, so subtracting it here can only understate the agent.
     answering = [
         record["span"]
         for record in spans_for(records, SIMULATION)

@@ -237,9 +237,59 @@ why a chat simulation needs nothing installed in the agent to be *heard*.
 TRANSCRIPTION_TOPIC = "lk.transcription"
 """The text-stream topic the agent's own words come back on.
 
-One stream per utterance, and the stream **closing** is the only
-end-of-turn marker this wire has. An agent that says a filler, calls a
-tool and then answers sends three streams for one turn.
+One stream per utterance, opened at its first chunk and closed when that
+utterance is done. The close is an end-of-*utterance* marker and nothing
+more: an agent that says a filler, calls a tool and then answers sends
+three streams for one turn. What says the *turn* is over arrives on
+another channel entirely — :data:`AGENT_STATE_ATTRIBUTE`.
+
+This docstring used to say the close was the only end-of-turn marker this
+wire has. It was not, and that sentence is why the driver below waited out
+a fixed quiet period on every turn instead of reading the marker the
+platform already publishes. Corrected here so nobody derives the old rule
+from the old sentence a second time.
+"""
+
+AGENT_STATE_ATTRIBUTE = "lk.agent.state"
+"""The participant attribute an agent publishes its own turn state on.
+
+LiveKit's own agent session sets it on every change of state, out of
+``RoomIO`` — which registers that handler whether or not the session has
+any audio in it, so a text-only agent publishes it exactly as a speaking
+one does. A chat simulation therefore watches an agent go ``listening`` →
+``thinking`` → ``speaking`` → ``listening``, with ``speaking`` flipped by
+the first forwarded *text* where there is no audio output to flip it. The
+return to ``listening`` is the end-of-turn marker
+:data:`TRANSCRIPTION_TOPIC` does not carry.
+
+Two facts keep it from being the whole rule, and both are why the quiet
+period survives underneath it rather than being replaced by it:
+
+- **An agent that is not a LiveKit ``AgentSession`` publishes nothing
+  here.** Egma reads the attribute where it is offered and requires it
+  nowhere.
+- **Fast transitions coalesce.** ``RoomIO`` cancels the in-flight
+  attribute write before starting the next one, so a turn whose states
+  change faster than one round trip to the server can publish only its
+  last state — and where that last state is the one already published,
+  nothing is published at all. So egma keys on the *arrival* of a
+  finished state and never assumes it saw ``thinking`` or ``speaking``
+  first.
+
+Read from LiveKit's documentation and from the agents SDK in this
+checkout, and not yet observed on a live wire. That is the third reason
+the fallback below is a real path rather than a formality.
+"""
+
+AGENT_FINISHED_STATES = frozenset({"listening", "idle"})
+"""The states that mean the agent has finished the turn it was taking.
+
+``listening`` is where a session sits between turns and ``idle`` where it
+sits when nothing is listening at all. Every other state is the agent
+still working, and that includes the whole of a tool call: the SDK moves a
+turn from ``speaking`` to ``thinking`` when a tool returns output rather
+than back to ``listening``, so a filler, a tool call and the answer out of
+it stay one turn on this channel as they are on the other one.
 """
 
 SPOKEN_TRACK_ATTRIBUTE = "lk.transcribed_track_id"
@@ -1360,6 +1410,18 @@ class Utterance:
     would put the agent's words against a question it never answered.
     """
 
+    opened: int
+    """Where this stream opened in the room's own order of streams.
+
+    A turn is several utterances joined together, and they are joined in
+    *this* order rather than in the order they finished arriving. The two
+    are not the same order: a stream that opens first may close last, and
+    when it did the agent's opening words landed behind the sentence that
+    followed them and the record read as if the agent began mid-sentence.
+    Arrival order is what the queue can offer; open order is what the
+    agent actually said.
+    """
+
 
 @dataclass(frozen=True)
 class AgentTurn:
@@ -1389,10 +1451,17 @@ class TextRoom:
     to nothing, offers the mock-tool methods on its own participant, types
     on one topic and reads closed streams off another.
 
-    What it exposes upward is four events and a queue, because that is the
+    What it exposes upward is five events and a queue, because that is the
     whole of what the wire says: somebody arrived, somebody published
-    audio, the agent left, the room dropped egma — and, in order, every
-    utterance that finished arriving.
+    audio, the agent left, the room dropped egma, the agent said it has
+    finished its turn — and, in order, every utterance that finished
+    arriving.
+
+    It also answers one question the queue cannot: which streams this room
+    knows are still *open*. A queue holds what has finished; a turn that
+    ends on what has finished alone throws away whatever had started and
+    not landed, which is exactly how the agent's opening words once left
+    the record.
     """
 
     def __init__(
@@ -1409,7 +1478,19 @@ class TextRoom:
         self._quotable = quotable
         self._room: Any = None
         self._leaving = False
-        self._reading: set[asyncio.Task[None]] = set()
+        self._reading: dict[asyncio.Task[None], int] = {}
+        """Every stream being read, against the turn it opened in.
+
+        A set of tasks was enough while nothing asked *whose* they were.
+        Half of the turn-end rule is that a turn does not end while a
+        stream it opened is still open, and answering that needs the
+        stamp beside the task rather than only inside the utterance the
+        task has not produced yet.
+        """
+        self._opened = 0
+        """How many streams this room has seen open, ever. The order key
+        an utterance carries, and the reason a turn can be joined in the
+        order the agent said it rather than the order it finished."""
         self.utterances: asyncio.Queue[Utterance] = asyncio.Queue()
         self._turn = 0
         """Which persona turn is outstanding. Nought is the greeting's, which
@@ -1418,6 +1499,20 @@ class TextRoom:
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
         self.audio_published = asyncio.Event()
+        self.agent_finished = asyncio.Event()
+        """Set when the agent's own state says it has finished a turn.
+
+        Cleared where a turn begins, and cleared again by every utterance
+        that lands afterwards: a stream that closes after the agent called
+        itself finished is the agent still writing, and the latch has to
+        follow the words rather than outrank them.
+        """
+        self.agent_state: str | None = None
+        """The last state the agent published about itself, or ``None``
+        where it has never published one. Kept for what it says in a log
+        about a turn that went wrong; nothing decides on it directly,
+        because a state egma has not seen is not a state that did not
+        happen."""
 
     @property
     def joined(self) -> bool:
@@ -1442,6 +1537,12 @@ class TextRoom:
         def _left(_participant: Any) -> None:
             if not self._leaving:
                 self.ended.set()
+
+        @room.on("participant_attributes_changed")
+        def _stated(changed: dict[str, str], participant: Any) -> None:
+            # The agent's own word for where it is in its turn, on the one
+            # channel that carries an end-of-turn marker at all.
+            self._note_agent_state(changed, getattr(participant, "identity", ""))
 
         @room.on("track_published")
         def _published(publication: Any, _participant: Any) -> None:
@@ -1549,24 +1650,44 @@ class TextRoom:
         answers.
         """
         self._turn += 1
+        # Whatever the agent last said about itself, it said about the turn
+        # before this one. A finished state that arrived then must not end
+        # a turn that has not been answered yet.
+        self.agent_finished.clear()
         return self._turn
 
-    async def next_utterance(self, *, within: float) -> Utterance | None:
+    async def next_utterance(
+        self, *, within: float, finished_ends_it: bool = False
+    ) -> Utterance | None:
         """The next finished utterance, or nothing inside the budget.
 
-        Three things end the wait early and each one means the turn is
-        over: the utterance arriving, the agent leaving, and an audio
-        track appearing. The last is not an answer at all — it is the
-        wire saying this agent is speaking, and there is no point waiting
-        out a quiet period for words that will arrive at speech pace.
+        Four things end the wait early and each one means nothing more is
+        coming on its own: the utterance arriving, the agent leaving, an
+        audio track appearing, and the agent's own state saying it has
+        finished. The track is not an answer at all — it is the wire
+        saying this agent is speaking, and there is no point waiting out a
+        quiet period for words that will arrive at speech pace.
+
+        ``finished_ends_it`` is off until the turn has heard something,
+        and that is deliberate rather than defensive. A session publishes
+        ``listening`` when it *starts*, before it has been asked anything
+        and before it greets anybody, so a turn that took a finished state
+        as an answer would end the greeting before the agent opened its
+        mouth. Waiting for the first word is a different question from
+        waiting for the next one, and the caller pays a different budget
+        for it; the state signal only answers the second.
+
+        Returning ``None`` never means the turn is over on its own. It
+        means nothing more will *arrive* on its own — the caller still
+        owes this turn every stream it opened and has not seen close.
         """
         if not self.utterances.empty():
             return self.utterances.get_nowait()
         taking = asyncio.ensure_future(self.utterances.get())
-        stopping = [
-            asyncio.ensure_future(event.wait())
-            for event in (self.ended, self.failed, self.audio_published)
-        ]
+        watched = [self.ended, self.failed, self.audio_published]
+        if finished_ends_it:
+            watched.append(self.agent_finished)
+        stopping = [asyncio.ensure_future(event.wait()) for event in watched]
         try:
             done, _pending = await asyncio.wait(
                 [taking, *stopping],
@@ -1592,7 +1713,7 @@ class TextRoom:
         room, self._room = self._room, None
         self._leaving = True
         self.ended.set()
-        for reader in self._reading:
+        for reader in list(self._reading):
             if not reader.done():
                 reader.cancel()
         self._reading.clear()
@@ -1620,19 +1741,82 @@ class TextRoom:
         """
         if identity == PERSONA_IDENTITY:
             return
+        self._opened += 1
+        turn = self._turn
         reading = asyncio.create_task(
-            self._read(reader, self._turn), name="livekit-agent-utterance"
+            self._read(reader, turn, self._opened), name="livekit-agent-utterance"
         )
-        self._reading.add(reading)
-        reading.add_done_callback(self._reading.discard)
+        # Held against its turn, not merely held: what the turn-end rule
+        # asks of this set is which streams *this* turn is still owed.
+        self._reading[reading] = turn
+        reading.add_done_callback(lambda done: self._reading.pop(done, None))
 
-    async def _read(self, reader: Any, turn: int) -> None:
+    def _note_agent_state(self, changed: dict[str, str], identity: str) -> None:
+        """Take the agent's own word for where it is in its turn.
+
+        Dropped for egma's own participant for the reason its own words
+        are dropped one method up: nothing egma publishes about itself is
+        the agent saying anything.
+
+        Only a *finished* state does anything, and it only ever sets the
+        latch. Nothing here waits for ``thinking`` or ``speaking`` first,
+        because the platform is free to publish neither: it cancels an
+        attribute write that a faster transition overtakes, so a quick
+        turn can announce only where it ended up.
+        """
+        if identity == PERSONA_IDENTITY:
+            return
+        state = changed.get(AGENT_STATE_ATTRIBUTE)
+        if state is None:
+            return
+        self.agent_state = state
+        if state in AGENT_FINISHED_STATES:
+            self.agent_finished.set()
+
+    def streams_open_in(self, turn: int) -> int:
+        """How many streams this turn opened have not closed yet.
+
+        The question a queue cannot answer, and the one half the turn-end
+        rule turns on: an utterance that has begun arriving is owed to the
+        turn it began in, however long it takes to finish.
+        """
+        return sum(
+            1
+            for reading, stamped in self._reading.items()
+            if stamped == turn and not reading.done()
+        )
+
+    async def settle_turn(self, turn: int, *, within: float) -> None:
+        """Let this turn's still-open streams finish, for a bounded while.
+
+        The bound is what keeps one stalled stream from holding a whole
+        simulation, and :meth:`streams_open_in` is what the caller asks
+        afterwards to find out whether the bound is what ended the wait.
+
+        Waited on with :func:`asyncio.wait` rather than gathered, because
+        a gather that times out cancels what it was waiting for. A reader
+        cancelled here would lose its words *and* its line in the log —
+        and a dropped utterance nobody can see is the whole shape of the
+        defect this rule exists to end.
+        """
+        reading = [
+            reading
+            for reading, stamped in self._reading.items()
+            if stamped == turn and not reading.done()
+        ]
+        if not reading:
+            return
+        await asyncio.wait(reading, timeout=max(within, 0.0))
+
+    async def _read(self, reader: Any, turn: int, opened: int) -> None:
         """One utterance, whole, or a line about why it was not.
 
-        ``turn`` is the one that was outstanding when this stream opened,
-        taken by the caller at the header. It travels with the words
-        because by the time they are all here the answer may be to a
-        question two turns old.
+        ``turn`` is the one that was outstanding when this stream opened
+        and ``opened`` is where it opened in the room's order of streams,
+        both taken by the caller at the header. They travel with the words
+        because by the time the words are all here the answer may be to a
+        question two turns old, and because the order streams finish in is
+        not the order the agent said them in.
         """
         attributes = getattr(reader.info, "attributes", None) or {}
         spoken = SPOKEN_TRACK_ATTRIBUTE in attributes
@@ -1641,8 +1825,17 @@ class TextRoom:
         except asyncio.CancelledError:
             raise
         except Exception as unread:
+            # One of the two ways an utterance leaves the record, and the
+            # log has to say which: this is the whole stream lost, so the
+            # length is not known and cannot be. The other way names a
+            # length every time, which is how the two are told apart on a
+            # record from a production run.
             logger.warning(
-                "an utterance in %s never reached its close: %s",
+                "an utterance left the record on the unread-stream path: the "
+                "stream opened in turn %d in room %s never reached its close, "
+                "so none of its words are on the record and how many there "
+                "were is not known: %s",
+                turn,
                 self._room_name,
                 self._quotable(repr(unread)),
             )
@@ -1653,11 +1846,21 @@ class TextRoom:
         # is a fact about the agent rather than about the words.
         if said or spoken:
             self.utterances.put_nowait(
-                Utterance(text=said, spoken=spoken, turn=turn)
+                Utterance(text=said, spoken=spoken, turn=turn, opened=opened)
             )
+            # An utterance landing now outranks whatever the agent said
+            # about itself before it: a stream that closes after a
+            # finished state is the agent still writing when it announced
+            # it had stopped.
+            self.agent_finished.clear()
 
     async def _settled(self) -> None:
-        """Let a stream the agent closed on its way out finish arriving."""
+        """Let a stream the agent closed on its way out finish arriving.
+
+        Every open stream, whatever turn it opened in, because a departure
+        is not a turn boundary: the goodbye an agent leaves on is the last
+        thing it will ever say and there is no next turn to owe it to.
+        """
         reading = [reader for reader in self._reading if not reader.done()]
         if not reading:
             return
@@ -1718,7 +1921,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         return self._room_name
 
     async def wait_greeting(
-        self, seconds: float, *, quiet_seconds: float
+        self, seconds: float, *, quiet_seconds: float, drain_seconds: float
     ) -> AgentTurn:
         """What the agent opens with, if it opens with anything.
 
@@ -1727,15 +1930,26 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         open. The budget is separate from the quiet period because a
         greeting is a whole model round trip after a session starts, where
         a quiet period is the gap between two things already being said.
+
+        The greeting is also the one turn the agent's own state cannot
+        end. A session publishes ``listening`` the moment it starts, which
+        is before it has greeted anybody — so here that state means ready,
+        never finished, and only the first word egma hears turns the
+        signal on.
         """
         # Nought: the only turn the agent takes before it has been asked
         # anything is the one it opens with.
         return await self._assembled(
-            first_within=seconds, quiet=quiet_seconds, turn=0
+            first_within=seconds, quiet=quiet_seconds, drain=drain_seconds, turn=0
         )
 
     async def deliver(
-        self, text: str, *, reply_seconds: float, quiet_seconds: float
+        self,
+        text: str,
+        *,
+        reply_seconds: float,
+        quiet_seconds: float,
+        drain_seconds: float,
     ) -> AgentTurn:
         """Type one persona turn in, and read the agent's answer back.
 
@@ -1766,6 +1980,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         return await self._assembled(
             first_within=reply_seconds,
             quiet=quiet_seconds,
+            drain=drain_seconds,
             turn=turn,
             silence_ends_it=True,
         )
@@ -1775,17 +1990,43 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         *,
         first_within: float,
         quiet: float,
+        drain: float,
         turn: int,
         silence_ends_it: bool = False,
     ) -> AgentTurn:
         """One agent turn, out of however many utterances it took.
 
-        An utterance ends when its stream closes. The *turn* ends when the
-        room has stayed quiet for the whole quiet period past that close,
-        because the wire carries no other end-of-turn marker: an agent
-        that says a filler, calls a tool and then answers is one turn that
-        arrived in pieces, and a rule that stopped at the first close
-        would put the filler on the record and the answer nowhere.
+        An utterance ends when its stream closes. The *turn* ends when two
+        separate things hold together, and either one alone gets a turn
+        wrong.
+
+        **The agent has to be finished.** It says so itself: a LiveKit
+        session publishes :data:`AGENT_STATE_ATTRIBUTE` and its return to
+        a finished state is the end of the whole turn, the tool call
+        inside it included. Where that never arrives — an agent that is
+        not a LiveKit session, or a turn whose state changes coalesced
+        into a publish that changed nothing — the room going quiet for the
+        whole quiet period says the same thing less certainly, and the
+        agent leaving says it for good. An agent that says a filler, calls
+        a tool and then answers is one turn that arrived in pieces, and a
+        rule that stopped at the first close would put the filler on the
+        record and the answer nowhere.
+
+        **And every stream this turn opened has to have closed.** Neither
+        a finished state, nor a spent quiet period, nor anything else ends
+        a turn while a stream stamped with it is still open. That is not a
+        refinement: a stream is stamped when it *opens*, so one that opens
+        promptly and finishes late still belongs to the question it began
+        answering — and a turn that ended on what had already arrived
+        threw those words away, because the next turn then refuses them
+        for being older. The record read as if the agent began
+        mid-sentence, with nothing on it saying a word had gone. The wait
+        is bounded, because one stalled stream must not hold a whole
+        simulation; when the bound is what ends it, the log says so.
+
+        The turn's utterances are joined in the order their streams
+        *opened*, which is the order the agent said them. Arrival order is
+        what a queue can offer and it is not the same order.
 
         ``silence_ends_it`` is what keeps a delivered turn from running on
         into a question egma can no longer answer honestly. A stream is
@@ -1800,30 +2041,83 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         room = self._room
         if room is None:
             raise MediaBackendError("an answer was read before a room")
-        said: list[str] = []
+        clock = asyncio.get_running_loop()
+        said: list[Utterance] = []
         heard = False
         speaking = room.audio_published.is_set()
         budget = first_within
+        left_to_drain = drain
         while not speaking:
-            utterance = await room.next_utterance(within=budget)
+            # The state signal only answers the second question a turn
+            # asks — whether there is more to come — so it is off until
+            # something has come. Before that the caller's own budget owns
+            # the wait, because a session announces itself listening
+            # before it has said a word.
+            utterance = await room.next_utterance(
+                within=budget, finished_ends_it=heard
+            )
             if utterance is None:
-                break
+                # An audio track appearing is not this turn ending, it is
+                # the wire saying the agent is speaking — and there is
+                # nothing about a still-open stream worth waiting for
+                # then. The answer is the refusal above this driver, and
+                # it is owed at the agent's first output rather than at
+                # the end of a bound.
+                if room.audio_published.is_set():
+                    speaking = True
+                    break
+                # Nothing more will arrive on its own. What can still
+                # arrive is a stream this turn already owns.
+                if not room.streams_open_in(turn):
+                    break
+                began = clock.time()
+                await room.settle_turn(turn, within=left_to_drain)
+                left_to_drain = max(0.0, left_to_drain - (clock.time() - began))
+                still_open = room.streams_open_in(turn)
+                # Only a spent bound ends the turn here. A stream still
+                # open with time left on the bound is one that opened
+                # *during* the wait — the agent starting another utterance
+                # of this same turn — and calling that a stalled stream
+                # would drop it and file a line saying the opposite of
+                # what happened.
+                if still_open and left_to_drain <= 0:
+                    logger.warning(
+                        "an utterance may leave the record on the open-stream "
+                        "path: %d stream(s) opened in turn %d in room %s had "
+                        "not closed after the whole %.0fs bound, so the turn "
+                        "ends without them and whatever they carry will be "
+                        "refused by the turn after. The agent's last "
+                        "published state was %s",
+                        still_open,
+                        turn,
+                        self._room_name,
+                        drain,
+                        room.agent_state or "nothing at all",
+                    )
+                    break
+                # Whatever closed is on the queue now, so take it before
+                # waiting on anything: the turn is not over, it was only
+                # slower than the wait for it.
+                budget = 0.0
+                continue
             if utterance.turn < turn:
                 # An answer to a question two turns ago, finishing now. The
                 # budget is what makes this rare; the stamp is what keeps it
                 # from being read as an answer to the question just asked.
                 logger.warning(
-                    "an utterance opened in turn %d arrived during turn %d and "
-                    "was left off the record: %d characters in room %s",
+                    "an utterance left the record on the stale-turn path: a "
+                    "stream opened in turn %d closed during turn %d in room "
+                    "%s, after the turn it belonged to had already ended, so "
+                    "its %d characters are on no turn at all",
                     utterance.turn,
                     turn,
-                    len(utterance.text),
                     self._room_name,
+                    len(utterance.text),
                 )
                 continue
             heard = True
             if utterance.text:
-                said.append(utterance.text)
+                said.append(utterance)
             speaking = utterance.spoken or room.audio_published.is_set()
             budget = quiet
         if room.failed.is_set():
@@ -1844,7 +2138,15 @@ class LiveKitChatRoomBackend(RoomLifecycle):
                 ending=ERROR,
             )
         return AgentTurn(
-            text="\n".join(said) or None,
+            # In the order the streams opened, which is the order the agent
+            # said them. A stream that opens first and closes last arrives
+            # last, and joining on arrival put the agent's opening words
+            # behind the sentence that followed them.
+            text="\n".join(
+                utterance.text
+                for utterance in sorted(said, key=lambda heard: heard.opened)
+            )
+            or None,
             ended=room.ended.is_set(),
             speaking=speaking,
         )

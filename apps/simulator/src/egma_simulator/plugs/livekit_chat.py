@@ -46,24 +46,48 @@ two is broken.
 
 ## Where a turn ends
 
-Here, and it is the one real design question chat has. The wire gives one
-text stream per utterance and closes it when the utterance is done, and
-that close is a real end-of-utterance marker. It is not an end-of-*turn*
-marker: an agent that says a filler, calls a tool and then answers sends
-three streams for one turn. So the turn ends after
-:data:`TURN_QUIET_SECONDS` of quiet past the last close — long enough for
-a tool call to come back, and the number is written down with its
-reasoning below rather than tuned in silence.
+Here, and it is the one real design question chat has. Two things have to
+hold together, and either one on its own gets a turn wrong.
 
-Which turn an utterance belongs to is the same question asked backwards,
-and the wire answers it once: a stream is stamped with the turn that was
-outstanding when it **opened**, so one that opens promptly and finishes
-late still belongs to the question it began answering. What the wire
-cannot answer is a stream that has not opened at all by the time the next
-question goes out — nothing distinguishes a late answer to this question
-from a prompt answer to the next. So a delivered turn that hears nothing
-inside :data:`REPLY_SECONDS` ends the exchange rather than asking again.
-The greeting is exempt, because nothing has been asked yet.
+**The agent has to be finished.** It says so itself. A LiveKit session
+publishes its own state — ``lk.agent.state`` — as a participant
+attribute, and its return to ``listening`` or ``idle`` is the end of the
+whole turn, the tool call inside it included. Egma keys on that arrival.
+Where it never arrives, because the agent is not a LiveKit session or
+because two quick transitions collapsed into a publish that changed
+nothing, :data:`TURN_QUIET_SECONDS` of quiet past the last stream to
+close ends the turn instead, and the agent leaving the room ends it for
+good. The quiet period is the fallback and no longer the rule, which is
+why it is smaller than the one this plug shipped with: an agent that says
+when it has finished does not pay it at all.
+
+**And every stream this turn opened has to have closed.** The wire gives
+one text stream per utterance and closes it when that utterance is done,
+and a stream is stamped with the turn that was outstanding when it
+**opened** — so one that opens promptly and finishes late still belongs
+to the question it began answering. Nothing ends a turn while a stream
+stamped with it is still open: not a finished state, not a spent quiet
+period. Egma waits for it, bounded by :data:`TURN_DRAIN_SECONDS` so one
+stalled stream cannot hold a whole simulation, and says in the log when
+that bound is what ended the wait. This half is a fix, not a nicety: the
+turn used to end on what had already arrived, the next turn refused those
+words for being older, and a customer read an agent turn that began
+part-way through a sentence with nothing to say a word had gone.
+
+The turn's utterances are joined in the order their streams *opened*,
+which is the order the agent said them and not the order they finished.
+
+What no rule can answer is a stream that has not opened at all by the time
+the next question goes out — nothing distinguishes a late answer to this
+question from a prompt answer to the next. So a delivered turn that hears
+nothing inside :data:`REPLY_SECONDS` ends the exchange rather than asking
+again. The greeting is exempt, because nothing has been asked yet.
+
+Nor can the state signal end a turn that has heard nothing, greeting or
+not: it answers whether there is *more* to come, and a turn with no first
+word yet is asking a different question, on a different budget. That is
+what keeps the greeting whole, because a session publishes ``listening``
+the moment it starts — which is before it has greeted anybody.
 
 ## Answering for the agent's tools
 
@@ -134,13 +158,17 @@ about to answer. This errs long, because the first wastes seconds and the
 second wastes the run.
 """
 
-TURN_QUIET_SECONDS = 5.0
+TURN_QUIET_SECONDS = 3.0
 """How long the room stays quiet before the agent's turn is over.
 
-The wire has no end-of-turn marker — one stream per utterance, closed when
-that utterance is done — so this is the whole of the rule, and it has to
-be long enough for the slowest honest thing an agent does inside one turn:
-call a tool and answer out of what came back.
+**The fallback, not the rule.** The rule is the agent's own
+``lk.agent.state``, and this number is what stands in where that never
+arrives: an agent that is not a LiveKit session and publishes no state at
+all, or a turn whose state changes were quick enough to collapse into a
+publish that said nothing new. It still has to be long enough for the
+slowest honest thing an agent does inside one turn — call a tool and
+answer out of what came back — because on those agents it is the whole of
+the rule, exactly as it was before.
 
 Measured against the tool-calling fixture agent in a real room, on
 2026-08-28, with ``check_availability`` answered by a mock tool declaring
@@ -150,14 +178,29 @@ seconds**, of which the declared delay was 1.50 — so everything the wire
 itself costs, the tool round trip over LiveKit's own RPC included, is
 about **0.02 seconds**. A turn with no tool call in it arrived in 0.03.
 
-What that measurement could not include is the agent's model, because the
-account it ran on had no credit and a scripted one stood in. So the number
-is the measured parts plus a budget for the unmeasured one: the worst
-honest shape is a turn where the model emits no filler at all, and this
-one budget then has to cover a round trip, the declared delay, and a
-second round trip on the answer. Five seconds leaves about three and a
-half for the two round trips of a small model, which is comfortable for
-one and survives a slow one.
+Five seconds was that measurement plus a budget for the one part it could
+not include — the agent's model, because the account it ran on had no
+credit and a scripted one stood in. Three is the same measurement with a
+smaller budget for the same unmeasured part, and what pays for the cut is
+the state signal taking the common case away from this number entirely.
+The remaining budget is about one and a half seconds over the measured
+gap, which covers a small model on either side of a declared delay and
+not a slow one on both.
+
+The trade is written down rather than hidden, because it is a real one and
+it has a shape worth recognising on a future record: a turn cut short here
+is an agent that publishes no state *and* leaves more than three seconds
+between two utterances of one turn — a declared mock-tool delay plus the
+model on either side of it. Half of that shape is the customer's own
+configuration, which is why the driver names the room, the turn and the
+length of what it dropped every time it drops anything.
+
+The cost of the old number was measured too. On the founder's run of
+2026-08-28 the agent's turns landed between five and eight seconds after
+the persona's, against about 1.3 seconds for the persona to answer: seven
+quiet periods, thirty-five seconds, on a fifty-four second run. Two thirds
+of a chat simulation was this plug waiting to find out something the
+platform had already published.
 
 It is deliberately a plain number and not a wait that stretches while a
 mock-tool exchange is in flight. Egma answers only the tools this
@@ -165,10 +208,35 @@ simulation has answers for; the agent's other tools run their own
 implementations with egma nowhere near them, and a rule that shortened the
 turn whenever egma happened not to be in the path would cut exactly those
 turns off. This plug claims nothing it cannot see, and it cannot see them.
+"""
 
-Paid once per turn, which is the cost of the rule and is why the number is
-as small as the fixture allows rather than as large as would be safe. It
-is the smallest of this plug's three waits for that reason alone.
+TURN_DRAIN_SECONDS = 15.0
+"""How long a turn waits for a stream it opened and has not seen close.
+
+Paid only where a turn would otherwise end owing itself an utterance: the
+room is quiet, or the agent has said it is finished, and a stream stamped
+with this turn is still open. Then the words are already on their way and
+ending the turn without them puts them on no turn at all — which is the
+defect this bound exists to make rare rather than silent.
+
+Bounded because the alternative is not bounded. A stream whose close never
+arrives — a trailer the wire lost, an agent process that died mid-sentence
+— would otherwise hold the turn, and behind it the simulation, for as long
+as the run's own duration limit. Better a named number and a line in the
+log than a simulation that ends as ``limit_reached`` with no idea why.
+
+Fifteen seconds, which is half the reply budget, and the halving is the
+reasoning: :data:`REPLY_SECONDS` covers a whole model round trip with a
+tool call inside it, and a stream that has *opened* has already paid that
+round trip. What is left is the writing of one utterance the agent has
+already begun. Erring long, because erring short costs a word off the
+record — the failure this whole rule exists to end — while erring long
+only costs seconds on an exchange that is already going wrong.
+
+It is not the greeting's, the reply's or the quiet period's business and
+so it is not folded into any of them: those three measure how long egma
+waits for an agent to *start*, and this measures how long it waits for one
+that has started to finish.
 """
 
 CHAT_SETUP_MISSING = (
@@ -263,7 +331,9 @@ class LiveKitChat:
             await self._backend.dial()
             self._reference = await self._backend.wait_arrived(AGENT_JOIN_SECONDS)
             greeting = await self._backend.wait_greeting(
-                GREETING_SECONDS, quiet_seconds=TURN_QUIET_SECONDS
+                GREETING_SECONDS,
+                quiet_seconds=TURN_QUIET_SECONDS,
+                drain_seconds=TURN_DRAIN_SECONDS,
             )
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
@@ -277,6 +347,7 @@ class LiveKitChat:
                 text,
                 reply_seconds=REPLY_SECONDS,
                 quiet_seconds=TURN_QUIET_SECONDS,
+                drain_seconds=TURN_DRAIN_SECONDS,
             )
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
