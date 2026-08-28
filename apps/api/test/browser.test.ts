@@ -1295,13 +1295,13 @@ describe("what a project recorded in production", () => {
         "opening the transcript sheet keeps the trace table grid fixed",
       ).toEqual(tableShapeBefore);
 
-      // The reading surface is the approved 640px wide sheet. It stays beside
-      // the table, so there is no scrim over the page.
+      // Production gets the expanded reading width on a desktop. It stays
+      // beside the table, so there is no scrim over the page.
       expect(
         await sheet.evaluate((element) =>
           Math.round(element.getBoundingClientRect().width),
         ),
-      ).toBe(640);
+      ).toBe(760);
       expect(await page.locator('[data-slot="dialog-overlay"]').count()).toBe(0);
 
       const overview = sheet.getByRole("region", { name: "Call overview" });
@@ -1458,6 +1458,36 @@ describe("what a project recorded in production", () => {
             return styleOf(element.parentElement ?? element).whiteSpace;
           }),
         ).toBe("nowrap");
+
+        /*
+         * The wider production variant does not force the desktop maximum
+         * onto a narrow screen. The continuous rail still fits the 640px
+         * reading sheet without its own horizontal scroll.
+         */
+        await page.locator("tbody tr").first().locator("td").first().click();
+        const sheet = page.locator('[data-kind="sheet"]');
+        await sheet.waitFor();
+        expect(
+          await sheet.evaluate((element) =>
+            Math.round(element.getBoundingClientRect().width),
+          ),
+        ).toBe(640);
+        const transcript = sheet.locator(
+          'ol[aria-label="Transcript messages"]',
+        );
+        await transcript.waitFor({ state: "attached" });
+        expect(
+          await transcript.evaluate((rail) => {
+            const firstEvent = rail.querySelector("li > :first-child");
+            return {
+              noHorizontalOverflow: rail.scrollWidth === rail.clientWidth,
+              metadataWidth: Math.round(
+                firstEvent?.firstElementChild?.getBoundingClientRect().width ??
+                  0,
+              ),
+            };
+          }),
+        ).toEqual({ noHorizontalOverflow: true, metadataWidth: 104 });
       } finally {
         await page.setViewportSize(previous);
       }

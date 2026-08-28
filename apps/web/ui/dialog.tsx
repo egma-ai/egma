@@ -69,16 +69,17 @@ const PANEL_SHAPE = {
     "overflow-y-auto border-y-0 border-l-0",
   ],
   /*
-   * **One side sheet look, in two sizes.** This is the same panel
-   * `components/ui/sheet.tsx` draws — right-anchored, Pure Paper behind a
-   * hairline on its left edge, no corner, the same travel — and both widths
-   * are the theme's rather than numbers written here.
+   * **One side sheet look, with reading widths chosen by content.** This is the
+   * same panel `components/ui/sheet.tsx` draws — right-anchored, Pure Paper
+   * behind a hairline on its left edge, no corner, the same travel — and every
+   * width is the theme's rather than a number written here.
    *
    * The two components are still two, and the difference is behaviour: this
    * one is a *reading* surface that deliberately leaves the page beside it
    * usable, and that one is a modal form portaled inside `<main>`.
-   * `size="wide"` is for the reading surface, where the content is a
-   * transcript rather than a form and 440px is not enough of a page.
+   * `size="wide"` and `size="extra-wide"` are for reading surfaces, where the
+   * content is a transcript rather than a form and 440px is not enough of a
+   * page.
    */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
@@ -98,6 +99,13 @@ const PANEL_WIDE = {
   dialog: "",
   drawer: "",
   sheet: "w-[min(var(--sheet-width-wide),100vw)]",
+} as const;
+
+/** More room for the production trace rail without changing other readers. */
+const PANEL_EXTRA_WIDE = {
+  dialog: "",
+  drawer: "",
+  sheet: "w-[min(var(--sheet-width-extra-wide),100vw)]",
 } as const;
 
 /**
@@ -175,10 +183,10 @@ export function Dialog({
 }: {
   readonly kind?: "dialog" | "drawer" | "sheet";
   /**
-   * How much room the surface needs. `wide` is the reading sheet — evidence
-   * beside a page — and does nothing to the other two kinds.
+   * How much room the surface needs. `wide` and `extra-wide` are reading-sheet
+   * sizes — evidence beside a page — and do nothing to the other two kinds.
    */
-  readonly size?: "default" | "wide";
+  readonly size?: "default" | "wide" | "extra-wide";
   /** Text for ordinary dialogs, or structured title content for evidence sheets. */
   readonly title: ReactNode;
   readonly onClose: () => void;
@@ -282,7 +290,11 @@ export function Dialog({
       }}
     >
       <DialogContent
-        className={cn(PANEL_SHAPE[kind], size === "wide" && PANEL_WIDE[kind])}
+        className={cn(
+          PANEL_SHAPE[kind],
+          size === "wide" && PANEL_WIDE[kind],
+          size === "extra-wide" && PANEL_EXTRA_WIDE[kind],
+        )}
         ref={panelRef}
         showOverlay={TAKES_THE_SCREEN[kind]}
         data-kind={kind}

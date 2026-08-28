@@ -193,7 +193,7 @@ export function TraceSheet({
     <Dialog
       dismissOnOutsidePointer={dismissOutsideTraceRow}
       kind="sheet"
-      size="wide"
+      size="extra-wide"
       title={
         <>
           <span className="flex min-w-0 items-center gap-3 pr-2">

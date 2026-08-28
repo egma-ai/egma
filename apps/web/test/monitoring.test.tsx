@@ -471,7 +471,10 @@ describe("what the Monitoring list shows", () => {
 
     /* Reproduce the reported path: press the row, not its Trace ID control. */
     fireEvent.click(agent);
-    await screen.findByRole("dialog", { name: /Trace/u });
+    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
+
+    expect(sheet.className).toContain("--sheet-width-extra-wide");
+    expect(sheet.className).not.toContain("--sheet-width-wide");
 
     expect(row.cells[agentColumn]).toBe(agentCell);
     expect(row.cells[agentColumn]?.textContent).toContain("kelly");

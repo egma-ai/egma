@@ -436,8 +436,11 @@ describe("one simulation's grades", () => {
     expect(within(history!).getByText("passed")).toBeTruthy();
 
     fireEvent.click(within(expected).getByRole("button", { name: "Read turn 2" }));
-    expect(await screen.findByRole("dialog", { name: "Transcript and audio" }))
-      .toBeTruthy();
+    const evidenceSheet = await screen.findByRole("dialog", {
+      name: "Transcript and audio",
+    });
+    expect(evidenceSheet.className).toContain("--sheet-width-wide");
+    expect(evidenceSheet.className).not.toContain("--sheet-width-extra-wide");
     await waitFor(() => {
       expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
         block: "center",
@@ -584,6 +587,67 @@ describe("the transcript time rail", () => {
     expect(
       screen.queryByText("Egma filed no spoken turns for this simulation."),
     ).toBeNull();
+  });
+
+  it("uses the compact continuous rail with shared time and speaker metadata", () => {
+    const read = evidence();
+    const transcript = read.transcript as NonNullable<
+      ReturnType<typeof evidence>["transcript"]
+    >;
+    const tool = {
+      spanId: "span_tool_compact",
+      parentSpanId: "span_agent",
+      name: "lookup_appointment",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "250000000",
+      text: "",
+      audioUrl: "",
+      toolName: "lookup_appointment",
+      toolArguments: "{}",
+      toolResult: "{}",
+      spans: [],
+    };
+    const rendered = render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[tool as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+
+    const rail = screen.getByRole("list", { name: "Transcript messages" });
+    expect(rail.className).toContain("border");
+    expect(rail.className).not.toContain("gap-3");
+
+    const userTurn = screen.getByLabelText("Turn 1, User");
+    const time = within(userTurn).getByText("0:01");
+    const speaker = within(userTurn).getByText("User");
+    const sentence = within(userTurn).getByText("Move Thursday's clean.");
+    expect(time.parentElement).toBe(speaker.parentElement);
+    expect(sentence.parentElement).not.toBe(time.parentElement);
+
+    const agentTurn = screen.getByLabelText("Turn 2, Agent");
+    const toolRow = screen.getByLabelText("Tool call, lookup_appointment");
+    expect(agentTurn.contains(toolRow)).toBe(true);
+    expect(within(toolRow).getByText("Tool").parentElement).toBe(
+      within(toolRow).getByText("0:06").parentElement,
+    );
+    expect(toolRow.querySelector('[data-slot="state-mark"]')).toBeNull();
+
+    rendered.rerender(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={[{ ...tool, status: "error" } as never]}
+        onSeek={vi.fn()}
+      />,
+    );
+    expect(
+      screen
+        .getByLabelText("Tool call, lookup_appointment")
+        .querySelector('[data-state-mark="error"]'),
+    ).not.toBeNull();
   });
 
   it("seeks speech without autoplay and expands exact tool requests and responses", () => {

@@ -1619,16 +1619,17 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   const seconds = secondsInto(step.startedAt, timelineStartedAt);
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
   const Container = nested ? "div" : "li";
+  const metadataClassName =
+    "flex min-h-(--transcript-tool-min-height) items-center gap-2 border-r border-border px-2 py-1 text-left pointer-coarse:min-h-(--tap-target)";
 
   return (
     <Container
       className={cn(
-        "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface-soft",
-        "max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
-        nested ? "border-0" : "border border-border",
+        "relative grid min-w-0 grid-cols-[var(--transcript-meta-width)_minmax(0,1fr)] overflow-hidden bg-surface-soft",
+        !nested && "not-last:border-b not-last:border-border",
         separated && "border-border border-t",
-        selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
-        active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
+        selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-(--active-edge-width) before:bg-brand",
+        active && "after:absolute after:inset-y-0 after:right-0 after:w-(--active-edge-width) after:bg-foreground",
       )}
       role={nested ? "group" : undefined}
       data-active={active ? "true" : "false"}
@@ -1636,47 +1637,55 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
       aria-label={`Tool call, ${name}`}
       aria-current={active ? "true" : undefined}
     >
-      <div className="flex min-h-(--tap-target) flex-col items-start justify-center border-r border-border px-3 py-2">
-        {onSeek === undefined || seconds === null ? (
+      {onSeek === undefined || seconds === null ? (
+        <div className={metadataClassName}>
           <time
-            className="font-mono text-sm tabular-nums text-muted-foreground"
+            className="min-w-0 truncate font-mono text-sm tabular-nums text-muted-foreground"
             dateTime={step.startedAt}
             title={asSecond(step.startedAt)}
           >
             {shownTime}
           </time>
-        ) : (
-          <button
-            className="cursor-pointer border-0 bg-transparent p-0 font-mono text-sm tabular-nums text-foreground underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline"
-            type="button"
-            aria-label={`Seek recording to tool call ${name} at ${shownTime}`}
-            onClick={() => {
-              onSeek(step.spanId, seconds);
-            }}
+          <span className="text-sm text-muted-foreground">Tool</span>
+        </div>
+      ) : (
+        <button
+          className={cn(
+            metadataClassName,
+            "cursor-pointer bg-transparent text-foreground underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline",
+          )}
+          type="button"
+          aria-label={`Seek recording to tool call ${name} at ${shownTime}`}
+          onClick={() => {
+            onSeek(step.spanId, seconds);
+          }}
+        >
+          <time
+            className="min-w-0 truncate font-mono text-sm tabular-nums"
+            dateTime={step.startedAt}
+            title={asSecond(step.startedAt)}
           >
             {shownTime}
-          </button>
-        )}
-      </div>
+          </time>
+          <span className="text-sm text-muted-foreground">Tool</span>
+        </button>
+      )}
       <details className="group/details min-w-0">
         <summary
-          className="grid min-h-(--tap-target) cursor-pointer list-none grid-cols-[12px_minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-3 text-foreground [&::-webkit-details-marker]:hidden"
+          className="flex min-h-(--transcript-tool-min-height) cursor-pointer list-none items-center gap-3 px-2 py-1 text-foreground pointer-coarse:min-h-(--tap-target) [&::-webkit-details-marker]:hidden"
           onClick={() => {
             if (onSeek !== undefined && seconds !== null) {
               onSeek(step.spanId, seconds);
             }
           }}
         >
-          <StateMark kind={failed ? "error" : succeeded ? "complete" : "waiting"} />
-          <span className="min-w-0">
-            <span className="block truncate font-mono text-sm text-foreground">
-              {name}
-            </span>
-            <span className="mt-1 block text-sm text-muted-foreground">Tool call</span>
+          {failed ? <StateMark kind="error" /> : null}
+          <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
+            {name}
           </span>
           <span
             className={cn(
-              "text-end text-sm text-muted-foreground",
+              "flex-none whitespace-nowrap text-end text-sm text-muted-foreground",
               failed && "text-failure",
             )}
           >
@@ -1745,24 +1754,24 @@ const TranscriptTurn = memo(function TranscriptTurn({
   const shownTime = seconds === null ? "Time unavailable" : clockText(seconds);
   const speechContent = (
     <>
-      <div className="flex min-h-(--tap-target) flex-col items-start justify-center border-r border-border px-3 py-2">
+      <div className="flex min-h-(--transcript-turn-min-height) items-center gap-2 border-r border-border px-2 py-1 pointer-coarse:min-h-(--tap-target)">
         <time
-          className="font-mono text-sm tabular-nums text-muted-foreground"
+          className="min-w-0 truncate font-mono text-sm tabular-nums text-muted-foreground"
           dateTime={turn.startedAt}
           title={asSecond(turn.startedAt)}
         >
           {shownTime}
         </time>
-      </div>
-      <div className="min-w-0 px-4 py-3">
-        <p
+        <span
           className={cn(
-            "m-0 mb-1 text-sm font-medium",
+            "min-w-0 truncate text-sm",
             human ? "text-foreground" : "text-brand",
           )}
         >
           {speaker}
-        </p>
+        </span>
+      </div>
+      <div className="flex min-h-(--transcript-turn-min-height) min-w-0 items-center px-2 py-1 pointer-coarse:min-h-(--tap-target)">
         <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-foreground">
           {turn.text === "" ? (
             <span className="text-faint italic">Nothing was said.</span>
@@ -1776,7 +1785,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
 
   return (
     <li
-      className="group w-full min-w-0 scroll-my-8 overflow-hidden border border-border target:border-brand"
+      className="group relative w-full min-w-0 scroll-my-8 overflow-hidden not-last:border-b not-last:border-border target:before:absolute target:before:inset-y-0 target:before:left-0 target:before:z-10 target:before:w-(--active-edge-width) target:before:bg-brand"
       id={`transcript-turn-${String(turnNumber)}`}
       aria-label={`Turn ${String(turnNumber)}, ${speaker}`}
     >
@@ -1800,10 +1809,10 @@ const TranscriptTurn = memo(function TranscriptTurn({
         return onSeek === undefined || seconds === null ? (
           <div
             className={cn(
-              "relative grid min-w-0 grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
+              "relative grid min-w-0 grid-cols-[var(--transcript-meta-width)_minmax(0,1fr)] overflow-hidden bg-surface",
               "group-target:bg-selected",
               at > 0 && "border-border border-t",
-              active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
+              active && "after:absolute after:inset-y-0 after:right-0 after:w-(--active-edge-width) after:bg-foreground",
             )}
             key={event.step.spanId}
             aria-current={active ? "true" : undefined}
@@ -1813,11 +1822,11 @@ const TranscriptTurn = memo(function TranscriptTurn({
         ) : (
           <button
             className={cn(
-              "relative grid min-w-0 w-full cursor-pointer grid-cols-[64px_minmax(0,1fr)] overflow-hidden bg-surface p-0 text-left max-[40rem]:grid-cols-[56px_minmax(0,1fr)]",
+              "relative grid min-w-0 w-full cursor-pointer grid-cols-[var(--transcript-meta-width)_minmax(0,1fr)] overflow-hidden border-0 bg-surface p-0 text-left",
               "pointer-hover:bg-surface-soft group-target:bg-selected",
               at > 0 && "border-border border-t",
-              selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-brand",
-              active && "after:absolute after:inset-y-0 after:right-0 after:w-0.5 after:bg-foreground",
+              selected && "bg-selected before:absolute before:inset-y-0 before:left-0 before:w-(--active-edge-width) before:bg-brand",
+              active && "after:absolute after:inset-y-0 after:right-0 after:w-(--active-edge-width) after:bg-foreground",
             )}
             key={event.step.spanId}
             type="button"
@@ -1915,7 +1924,7 @@ export function ChatTranscript({
 
   return (
     <ol
-      className="m-0 flex min-w-0 list-none flex-col gap-3 p-0"
+      className="m-0 flex min-w-0 list-none flex-col overflow-hidden border border-border bg-surface p-0"
       aria-label="Transcript messages"
     >
       {groups.map((group) => {
