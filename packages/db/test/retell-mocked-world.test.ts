@@ -461,6 +461,111 @@ describe("the world a run built", () => {
   });
 });
 
+describe("the gate that keeps a mocked run honest", () => {
+  /**
+   * **A mocked run's simulations cannot be claimed until its world exists.**
+   *
+   * This is what makes "a run that cannot build its world fails before a single
+   * simulation" true rather than merely intended. It is a condition on the
+   * claim itself, so it is closed from the instant the rows are written — there
+   * is no window between the run being created and the builder starting in
+   * which a simulator could get in front of it.
+   */
+  it("holds a ticked agent's queued simulations back, and lets them go when the draft lands", async () => {
+    const created = await createAgent(acting(), {
+      name: "Gated agent",
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection.id);
+
+    const claimable = async (): Promise<readonly string[]> => {
+      const rows = await database.sql<{ id: string }>(
+        `select s.id
+           from simulation s
+           join run r on r.id = s.run_id
+           join agent a on a.id = r.agent_id
+          where s.status = 'queued'
+            and s.run_id = $1
+            and not (
+              a.mock_tools_during_simulations = true
+              and r.connection_snapshot->>'connectionType'
+                    in ('retell_web_call', 'retell_chat_api')
+              and (
+                r.mocked_world is null
+                or r.mocked_world->>'draftVersion' is null
+              )
+            )`,
+        [runId],
+      );
+      return rows.rows.map((row) => row.id);
+    };
+
+    // Nothing yet: the world has not been recorded at all.
+    expect(await claimable()).toEqual([]);
+
+    // The capture, written before anything was branched. Still nothing —
+    // a world with no temporary version in it is a world half built.
+    await recordMockedWorld(acting(), runId, { ...WORLD, draftVersion: null });
+    expect(await claimable()).toEqual([]);
+
+    // The branch landed, and now the run is somebody's to conduct.
+    await recordMockedWorld(acting(), runId, WORLD);
+    expect(await claimable()).toEqual([simulationId]);
+  });
+
+  it("holds nothing back for a run that mocks nothing", async () => {
+    const created = await createAgent(acting(), {
+      name: "Unticked agent",
+      agentPlatform: "retell",
+    });
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection.id);
+
+    const rows = await database.sql<{ id: string }>(
+      `select s.id
+         from simulation s
+         join run r on r.id = s.run_id
+         join agent a on a.id = r.agent_id
+        where s.status = 'queued'
+          and s.run_id = $1
+          and not (
+            a.mock_tools_during_simulations = true
+            and r.connection_snapshot->>'connectionType'
+                  in ('retell_web_call', 'retell_chat_api')
+            and (
+              r.mocked_world is null
+              or r.mocked_world->>'draftVersion' is null
+            )
+          )`,
+      [runId],
+    );
+    // Which is every run in the product but a handful: the condition costs a
+    // run that mocks nothing exactly nothing.
+    expect(rows.rows.map((row) => row.id)).toEqual([simulationId]);
+  });
+});
+
 describe("the three-class coverage stamp", () => {
   it("round-trips the record's serialization", async () => {
     const created = await createAgent(acting(), {
