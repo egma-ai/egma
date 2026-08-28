@@ -248,6 +248,7 @@ class NotingPlug:
 
     def __init__(self, *, opening: AgentReply, answers: list[AgentReply]) -> None:
         self.provider_reference = None
+        self.delivered = 0
         self._opening = opening
         self._answers = answers
 
@@ -255,6 +256,7 @@ class NotingPlug:
         return self._opening
 
     async def deliver(self, text: str) -> AgentReply:
+        self.delivered += 1
         return self._answers.pop(0) if self._answers else AgentReply(text="Go on.")
 
     async def close(self) -> None:
@@ -291,6 +293,94 @@ async def test_what_the_platform_said_rides_the_record_and_not_the_turn():
     assert turns[0] == ("agent", "Front desk.", ("moved to greet",))
     assert turns[1] == ("human", "First point.", ())
     assert turns[2] == ("agent", "Certainly.", ("moved to lookup",))
+
+
+async def test_an_agent_that_ends_on_its_greeting_ends_the_walk_there():
+    """"We are closed today" and a goodbye — rare, and real.
+
+    The exchange is over before the persona has said anything, so nothing
+    is asked of it: a turn taken after the agent had gone would be a line
+    on the record nobody heard, and whichever ending tripped afterwards —
+    the persona concluding, a limit — would be reported instead of the
+    agent's own doing.
+    """
+    turns, recorder = collect_with_notes()
+    plug = NotingPlug(
+        opening=AgentReply(text="We are closed today. Goodbye.", ended=True),
+        answers=[],
+    )
+
+    conducted = await conduct(
+        persona=persona_for("First point."),
+        plug=plug,
+        max_turns=60,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=WalkControls(),
+        name="sim:test",
+    )
+
+    assert turns == [("agent", "We are closed today. Goodbye.", ())]
+    assert plug.delivered == 0, "the persona was asked to speak to nobody"
+    assert conducted == Conducted(
+        status="completed",
+        ending="agent_ended",
+        reason="the agent ended the exchange",
+        provider_reference=None,
+    )
+
+
+async def test_an_agent_ending_on_a_greeting_with_no_words_still_ends_the_walk():
+    """The same, from a platform that ends without saying anything: there
+    is no turn to record and the walk is over all the same."""
+    turns, recorder = collect_with_notes()
+    plug = NotingPlug(opening=AgentReply(text=None, ended=True), answers=[])
+
+    conducted = await conduct(
+        persona=persona_for("First point."),
+        plug=plug,
+        max_turns=60,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=WalkControls(),
+        name="sim:test",
+    )
+
+    assert turns == []
+    assert plug.delivered == 0
+    assert conducted.ending == "agent_ended"
+
+
+async def test_a_greeting_that_did_not_end_anything_walks_on_as_ever():
+    """The guard is on the flag and nothing else: an opening reply that
+    says the exchange continues is the ordinary case, and it does."""
+    turns, recorder = collect_with_notes()
+    plug = NotingPlug(
+        opening=AgentReply(text="Front desk."),
+        answers=[AgentReply(text="Certainly.")],
+    )
+
+    conducted = await conduct(
+        persona=persona_for("First point."),
+        plug=plug,
+        max_turns=60,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=WalkControls(),
+        name="sim:test",
+    )
+
+    assert [speaker for speaker, _text, _notes in turns] == [
+        "agent",
+        "human",
+        "agent",
+        "human",
+    ]
+    assert plug.delivered == 1
+    assert conducted.ending == "persona_concluded"
 
 
 async def test_an_answer_with_no_words_the_platform_spoke_about_is_still_a_turn():

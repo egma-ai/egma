@@ -373,9 +373,9 @@ class RetellPlayground:
 
         The whole answer rather than its words alone, because a flow can
         move node while it greets and that has to land on the opening turn
-        rather than on the next one. The walk does not read ``ended``
-        here; an agent that ended on its greeting is remembered and
-        reported on the first ``deliver`` instead.
+        rather than on the next one — and because an agent can end the
+        exchange with its greeting, which the walk reads here and reports
+        as the agent's own doing without ever asking the persona to speak.
         """
         self._session = aiohttp.ClientSession()
         return self._read(await self._exchange())
@@ -387,10 +387,13 @@ class RetellPlayground:
                 "opened"
             )
         if self._ended:
-            # The agent ended the exchange with its opening line — rare,
-            # and real: "we are closed today" and a goodbye. Retell would
-            # answer a request continuing an ended exchange with a refusal,
-            # so the ending is reported rather than argued with.
+            # The exchange is already over — the agent ended it with its
+            # opening line, say. The walk stops at the opening for exactly
+            # that case and never gets here, so this is for anything else
+            # that drives a plug: a request continuing an ended exchange
+            # is a refusal from Retell rather than a turn, and reporting
+            # the ending again is the honest answer to a question already
+            # answered.
             return AgentReply(text=None, ended=True)
         self._history.append({"role": USER_ROLE, "content": text})
         return self._read(await self._exchange())

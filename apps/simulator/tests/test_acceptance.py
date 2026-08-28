@@ -871,6 +871,50 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
+async def test_a_playground_agent_that_ends_on_its_greeting_reads_back_that_way(
+    workbench, start_simulator, start_playground_stub
+):
+    """The agent closing the exchange with its own opening line.
+
+    "We are closed today" and a goodbye, before the persona has said
+    anything. The record shows the greeting and nothing after it: no
+    persona turn, because there was nobody left to say it to, and the
+    ending is the agent's own doing rather than whichever limit would have
+    tripped later.
+    """
+    sentinel = "SENTINEL-playground-key-closed-4a8d"
+    running = await start_playground_stub(
+        api_key=sentinel,
+        replies=[
+            Reply(words="We are closed today. Please call back tomorrow.", ends=True)
+        ],
+    )
+    spec = playground_spec(
+        "sim-playground-closed",
+        base_url=running.base_url,
+        api_key=sentinel,
+        scenario="I need to move my Tuesday cleaning to Thursday.",
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-playground-closed"))
+
+    assert turns_for(records, "sim-playground-closed") == [
+        ("agent", "We are closed today. Please call back tomorrow."),
+    ]
+    terminal = terminal_event_for(records, "sim-playground-closed")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "agent_ended"
+    assert terminal["facts"]["turn_count"] == 1
+    # One request and no more: nothing was delivered into an exchange that
+    # was already over.
+    assert len(running.stub.requests) == 1
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
 async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
     workbench, start_simulator, start_playground_stub
 ):

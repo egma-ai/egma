@@ -228,11 +228,18 @@ async def conduct(
         opened = await controls.guard(plug.open())
         # Two shapes, because most platforms open with words and nothing
         # else, and one that says more about its opening should not have to
-        # hold it back until the second turn to say it. `ended` is not read
-        # here: opening is not where an exchange ends, and a platform that
-        # ends on its own greeting is the plug's to remember.
+        # hold it back until the second turn to say it.
         if isinstance(opened, AgentReply):
             await record_answer(opened)
+            if opened.ended:
+                # An agent that ends the exchange with its own greeting:
+                # "we are closed today" and a goodbye. Rare, and real. The
+                # exchange is over before the persona has said anything,
+                # so the walk stops here — asking the persona for a turn
+                # would put a line on the record that nobody heard, and
+                # whatever ended the walk afterwards would be reported as
+                # the ending instead of the agent's own doing.
+                return ended(AGENT_ENDED)
         elif opened is not None:
             await record("agent", opened)
         await answered()

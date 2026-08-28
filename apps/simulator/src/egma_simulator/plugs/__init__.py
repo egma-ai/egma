@@ -108,10 +108,10 @@ A chat plug's is three steps, for one simulation, in order, always:
    the agent's greeting when the platform opens with one, else ``None``
    (the persona will then speak first). A plug whose platform says more
    about the opening than words may return a whole ``AgentReply`` instead,
-   and the walk reads its ``text`` and ``platform_notes``. It does **not**
-   read ``ended`` there: opening is not where an exchange ends, and a
-   platform that ends on its own greeting is a plug's own to remember and
-   report on the next ``deliver``.
+   and the walk reads all three of its facts — ``text``,
+   ``platform_notes``, and ``ended``. An agent that ends the exchange with
+   its own greeting ends the walk there, reported as the agent's doing;
+   ``deliver`` is then never called at all.
 2. ``await deliver(text)`` — hand the persona's turn to the platform and
    return the agent's answer as an ``AgentReply``:
    - ``text`` — what the agent said, or ``None`` for an answer that
