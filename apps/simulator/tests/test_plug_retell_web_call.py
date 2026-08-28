@@ -22,6 +22,7 @@ room it has no power to delete.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -679,7 +680,7 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
 
     produced: list[str] = []
     try:
-        _conducted, _turns, assembled = await web_call_walk(
+        conducted, _turns, assembled = await web_call_walk(
             tmp_path,
             room,
             monkeypatch,
@@ -688,6 +689,10 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
         )
         recording = (tmp_path / assembled.audio["recording"]).read_bytes()
         produced.append(recording.decode("latin-1"))
+        # What the record is built out of, including the one thing this
+        # plug puts on it by name: Retell's call id, which is a reference
+        # and not a way into anything.
+        produced += [repr(conducted), json.dumps(assembled.audio)]
     except PlugError as refused:
         produced += [str(refused), repr(refused.__cause__)]
 

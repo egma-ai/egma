@@ -208,7 +208,7 @@ class RetellWebCall:
         self._driver_factory = driver or LiveKitRoomBackend
         self._timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
         self._call_id: str | None = None
-        self._spent = False
+        self._conducted = False
         self._room: Any = None
         self._media: VoiceMedia | None = None
 
@@ -241,20 +241,21 @@ class RetellWebCall:
 
     async def prepare(self) -> VoiceMedia:
         """Create the call, then build the transport for the room it opens."""
-        if self._spent:
-            # Not tried and refused: refused before it is tried. Retell
+        if self._conducted:
+            # Refused before it is tried, not tried and refused. Retell
             # mints an access token for one entry into one room, so a
             # second attempt on this call is a request whose answer is
             # already known, and asking would only make the reason worse.
             raise PlugError(
-                "a retell web call is joined once and its access token is "
-                "spent on that join; conducting again needs a new call"
+                "a retell web call is created once and joined once — its "
+                "access token is spent on that join — so conducting again "
+                "needs a new call"
             )
-        self._spent = True
+        self._conducted = True
 
-        created = await self._create_call()
+        token = await self._create_call()
         self._room = self._built(
-            settings=RoomSettings(url=self._room_host, given_token=created["token"]),
+            settings=RoomSettings(url=self._room_host, given_token=token),
             simulation_id=self._simulation_id,
             # Deliberately none: egma does not stand in this agent's tool
             # path, so nothing is offered in the room and the record makes
@@ -265,9 +266,9 @@ class RetellWebCall:
             self._media = await self._room.create_transport()
             return self._media
         except MediaBackendError as refused:
-            raise PlugError(self._about_the_room(refused), ending=refused.ending) from (
-                refused
-            )
+            raise PlugError(
+                self._about_the_room(refused), ending=refused.ending
+            ) from refused
 
     async def open(self) -> None:
         """Wait for Retell's agent to be in the room and to be heard.
@@ -282,9 +283,9 @@ class RetellWebCall:
             await self._room.dial()
             await self._room.wait_answered(AGENT_JOIN_SECONDS)
         except MediaBackendError as refused:
-            raise PlugError(self._about_the_room(refused), ending=refused.ending) from (
-                refused
-            )
+            raise PlugError(
+                self._about_the_room(refused), ending=refused.ending
+            ) from refused
 
     async def close(self) -> None:
         """Leave the room. Safe from every state.
@@ -300,8 +301,13 @@ class RetellWebCall:
 
     # -- The one place this plug reaches Retell ------------------------------
 
-    async def _create_call(self) -> dict[str, str]:
-        """Create the call, or refuse in a sentence that carries no secret."""
+    async def _create_call(self) -> str:
+        """Create the call and come back with the way into its room.
+
+        Or refuse in a sentence that carries no secret: what a person needs
+        is the status Retell answered with, the URL it answered from, and
+        Retell's own words about what was wrong. None of the three is one.
+        """
         url = f"{self._base_url}{CREATE_PATH}"
         try:
             async with (
@@ -347,11 +353,12 @@ class RetellWebCall:
                 f"retell created web call {call_id} with no access_token, so "
                 "there is no way into the room it opened"
             )
-        # Held from here as the credential it is: whoever has it can join
-        # this call's room. It is registered with the room driver's own
-        # scrubbing below, before anything can quote it.
+        # The token is held from here as the credential it is: whoever has
+        # it can join this call's room. It goes straight into the room
+        # settings, which register it with the driver's own scrubbing
+        # before anything downstream can quote it.
         self._call_id = call_id
-        return {"call_id": call_id, "token": token}
+        return token
 
     def _creation(self) -> dict:
         """What one web call is created with.

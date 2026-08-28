@@ -71,7 +71,10 @@ eight keyword arguments:
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
-connection is ever opened.
+connection is ever opened. Two of the eight are read for you where a plug
+uses them — :func:`named_version` and :func:`rendered_variables` below —
+so that two plugs reaching one platform cannot disagree about what a
+version reference is or what a variable may hold.
 
 ## Chat or voice: same job, different currency
 
