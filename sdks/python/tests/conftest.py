@@ -390,5 +390,14 @@ def live_livekit() -> Iterator[LiveKit]:
         # Never raises, whatever docker does: a teardown exception here
         # would replace every result this session earned with an error
         # about the cleanup of a container that is thrown away regardless.
-        if _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name) is None:
+        #
+        # A stop that did not succeed is followed by `rm -f`, and the test
+        # is on the exit status rather than on whether the call returned.
+        # A `docker stop` that answers non-zero has left the container
+        # running just as surely as one that never answered at all — and
+        # this container holds the host's own port 7880, so surviving this
+        # teardown means every later session finds the port taken and
+        # skips. Two ways to fail, one cleanup.
+        stopped = _docker("stop", "-t", f"{LIVEKIT_STOP_SECONDS:.0f}", name)
+        if stopped is None or stopped.returncode != 0:
             _docker("rm", "-f", name)
