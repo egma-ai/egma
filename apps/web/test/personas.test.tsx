@@ -460,7 +460,7 @@ describe("the Personas list", () => {
     expect(await rowMenuItems("Everyday caller")).toEqual(["Fork"]);
   });
 
-  it("marks the open record's row with the grey soft surface, not the wash", async () => {
+  it("marks the open record's row with Ember Wash and a leading mark", async () => {
     apiAnswers({
       ...screenWith("admin", [RITA, PREDEFINED]),
       "GET /v1/personas/prs_1": { status: 200, body: RITA },
@@ -474,7 +474,7 @@ describe("the Personas list", () => {
     /*
      * Held before the sheet opens: an open sheet makes the page behind it
      * inert, so the row is no longer reachable through the accessibility tree
-     * — which is the point of the grey, and would otherwise stop this reading
+     * — which is the point of the wash, and would otherwise stop this reading
      * the state it is about. React updates the same node either way.
      */
     await screen.findByText("Impatient Rita");
@@ -484,9 +484,10 @@ describe("the Personas list", () => {
     await openRow("Impatient Rita");
 
     expect(open.getAttribute("aria-current")).toBe("true");
-    expect(open.className).toContain("bg-surface-soft");
-    /* Ember Wash is the primary action's fill and never an open row's. */
-    expect(open.className).not.toContain("bg-surface-active");
+    expect(open.className).toContain("bg-selected");
+    expect(open.className).toContain("before:w-(--active-edge-width)");
+    expect(open.className).toContain("before:bg-brand");
+    expect(open.className).not.toContain("before:w-0.5");
     expect(other.getAttribute("aria-current")).toBeNull();
   });
 

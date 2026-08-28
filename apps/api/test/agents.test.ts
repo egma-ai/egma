@@ -217,6 +217,7 @@ describe("discovering simulation agents", () => {
         {
           platformAgentId: "agent_voice_1",
           name: "Front desk",
+          modality: "voice",
           connectionCandidates: [
             {
               agentPlatform: "retell",
@@ -231,6 +232,7 @@ describe("discovering simulation agents", () => {
         {
           platformAgentId: "agent_chat_1",
           name: "Chat only",
+          modality: "chat",
           connectionCandidates: [
             {
               agentPlatform: "retell",
@@ -245,6 +247,7 @@ describe("discovering simulation agents", () => {
         {
           platformAgentId: "agent_voice_without_number",
           name: "Not routed",
+          modality: "voice",
           connectionCandidates: [],
         },
       ],
@@ -254,7 +257,7 @@ describe("discovering simulation agents", () => {
     expect(JSON.stringify(answer.body)).not.toContain("outbound_agent_id");
   });
 
-  it("keeps chat candidates when Retell cannot list phone numbers", async () => {
+  it("does not hide voice agents when Retell cannot list phone numbers", async () => {
     api = await createApi("retell_chat_discovery_without_phone_listing");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-chat-still-works-WXYZ";
@@ -300,29 +303,11 @@ describe("discovering simulation agents", () => {
       },
     );
 
-    expect(answer.status).toBe(200);
+    expect(answer.status).toBe(503);
     expect(answer.body).toEqual({
-      agents: [
-        {
-          platformAgentId: "agent_chat_1",
-          name: "Chat agent",
-          connectionCandidates: [
-            {
-              agentPlatform: "retell",
-              connectionType: "retell_chat_api",
-              accessVariant: "retell_chat_api.api_key",
-              modality: "chat",
-              productLabel: "Retell chat",
-              config: { retellAgentId: "agent_chat_1" },
-            },
-          ],
-        },
-        {
-          platformAgentId: "agent_voice_1",
-          name: "Voice agent",
-          connectionCandidates: [],
-        },
-      ],
+      error: "provider_unavailable",
+      message:
+        "Retell could not read this account. Check its network and try again.",
     });
     expect(JSON.stringify(answer.body)).not.toContain(retellKey);
   });
@@ -556,6 +541,7 @@ describe("discovering simulation agents", () => {
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     const bound = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(agentOf(bound).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(bound).monitoringConfigured).toBe(false);
 
     // And the second one, for another Retell agent, is refused by name.
     const refused = await post(
@@ -622,6 +608,7 @@ describe("discovering simulation agents", () => {
 
     const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(agentOf(after).pullProductionCalls).toBe(true);
+    expect(agentOf(after).monitoringConfigured).toBe(true);
     expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
     // The key is sealed on the agent, and only its last characters come back.
     expect(agentOf(after).monitoringKeyPresent).toBe(true);
@@ -1096,6 +1083,42 @@ describe("discovering simulation agents", () => {
     const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(read.body.connections).toEqual([]);
   });
+
+  it("returns the monitoring state written by an inline Retell registration", async () => {
+    api = await createApi("retell_inline_registration_response_state");
+    const ada = await signUp(api.app, "ada-inline@acme.example", "Acme");
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    const registered = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        pullProductionCalls: true,
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    });
+
+    expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+    expect(agentOf(registered)).toMatchObject({
+      platformAgentId: "agent_voice_1",
+      retellModality: "voice",
+      monitoringKeyPresent: true,
+      monitoringApiKeyHint: "WXYZ",
+      pullProductionCalls: true,
+      monitoringConfigured: true,
+    });
+    const reread = await get(
+      `/v1/agents/${String(agentOf(registered).id)}`,
+      withKey(ada.secret),
+    );
+    expect(agentOf(registered)).toEqual(agentOf(reread));
+  });
 });
 
 describe("registering an agent", () => {
@@ -1116,6 +1139,7 @@ describe("registering an agent", () => {
       projectId: ada.projectId,
       agentPlatform: "retell",
       platformAgentId: null,
+      retellModality: "chat",
       pullProductionCalls: false,
     });
     expect(connectionOf(registered)).toMatchObject({

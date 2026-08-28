@@ -1045,7 +1045,7 @@ export const discoverRetellVoiceAgents = <ThrowOnError extends boolean = false>(
 export const startMonitoring = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     agentPlatform: 'retell';
-    apiKey: string;
+    apiKey?: string;
     watch: Array<{
         platformAgentId: string;
         name?: string;

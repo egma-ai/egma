@@ -228,6 +228,7 @@ describe("runs list presentation", () => {
 
     expect(headers).toEqual(["Run", "Test suite", "Agent", "Started", "Status"]);
     expect(within(table).queryByText("Execution")).toBeNull();
+    expect(within(table).queryByText("Total avg score")).toBeNull();
     expect(within(table).queryByText("Combined score")).toBeNull();
     expect(within(table).getByText("Front desk")).toBeTruthy();
     const started = within(table).getByText("Aug 25, 2026");

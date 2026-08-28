@@ -37,6 +37,8 @@ export type RetellConnectionCandidate =
 export type RetellDiscoveredAgent = {
   readonly platformAgentId: string;
   readonly name: string;
+  /** Retell's own channel, even when this agent has no usable route yet. */
+  readonly modality: "voice" | "chat";
   readonly connectionCandidates: readonly RetellConnectionCandidate[];
 };
 
@@ -125,19 +127,25 @@ export async function discoverRetellAgents(
   const agents = await listAgents(key, reach);
   if (agents.kind !== "agents") return discoveryFailure(agents);
 
-  // Chat setup is complete from the agent listing alone. Phone-number access
-  // only adds candidates for voice agents, so its failure must not discard a
-  // usable chat connection discovered by the successful account read.
+  // A voice agent without a listed number is a real provider fact. Do not turn
+  // a failed number listing into that fact: the UI would disable a routed
+  // agent and tell the person it has no phone number. Discovery therefore
+  // succeeds only after every provider read needed to describe the account
+  // succeeds.
   const listedNumbers = agents.agents.some((agent) => agent.modality === "voice")
     ? await listNumbers(key, reach)
     : undefined;
-  const numbers = listedNumbers?.kind === "numbers" ? listedNumbers.numbers : [];
+  if (listedNumbers !== undefined && listedNumbers.kind !== "numbers") {
+    return discoveryFailure(listedNumbers);
+  }
+  const numbers = listedNumbers?.numbers ?? [];
 
   return {
     kind: "ready",
     agents: agents.agents.map((agent) => ({
       platformAgentId: agent.id,
       name: agent.name,
+      modality: agent.modality,
       connectionCandidates:
         agent.modality === "chat"
           ? [chatCandidate(agent.id)]

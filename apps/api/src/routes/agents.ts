@@ -878,16 +878,18 @@ function describedAgent(one: Agent): Record<string, unknown> {
     id: one.id,
     projectId: one.projectId,
     name: one.name,
-    // Which platform runs this agent, that platform's own id for it, and
-    // whether egma is pulling its production calls. Null until somebody binds
-    // it; the key itself never leaves the row, only its hint.
+    // Which platform runs this agent, that platform's own id, its durable
+    // Retell modality, and the pull facts. The key itself never leaves the row,
+    // only its hint.
     agentPlatform: one.agentPlatform,
     platformAgentId: one.platformAgentId,
+    retellModality: one.retellModality,
     monitoringKeyPresent: one.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: one.monitoringApiKeyHint,
     pullProductionCalls: one.pullProductionCalls,
-    // Whether it pulls and when it last received: the two monitoring facts an
-    // agent states about itself, and never a condition word beside them.
+    monitoringConfigured: one.monitoringConfigured,
+    // Setup survives a stop because the machine notebook survives it too.
+    // Last received remains a bare fact, never a health judgment.
     lastReceivedAt: one.lastReceivedAt?.toISOString() ?? null,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
@@ -1181,7 +1183,7 @@ export async function agentRoutes(
       if (found.kind === "unavailable") {
         return refused(reply, {
           refused: true,
-          error: "unavailable",
+          error: "provider_unavailable",
           message: found.message,
         });
       }
@@ -1346,6 +1348,7 @@ export async function agentRoutes(
      * reused or extended alike — because custody belongs to the identity, not
      * to the request that happened to carry the paste.
      */
+    let responseAgent = registered.agent;
     if (confirmedInline?.custody !== undefined) {
       /*
        * A registration can reuse an agent that already exists, so this is the
@@ -1396,6 +1399,13 @@ export async function agentRoutes(
         }
         return refused(reply, stopped);
       }
+      const afterCustody = await getAgent(acting, registered.agent.id);
+      if (afterCustody === undefined) {
+        throw new Error(
+          `Agent ${registered.agent.id} disappeared after taking Retell custody.`,
+        );
+      }
+      responseAgent = afterCustody;
     }
 
     // Created and extended each wrote a row; reused wrote none, and saying 201
@@ -1403,7 +1413,7 @@ export async function agentRoutes(
     // there to deny.
     return reply.code(registered.result === "reused" ? 200 : 201).send({
       result: registered.result,
-      agent: describedAgent(registered.agent),
+      agent: describedAgent(responseAgent),
       ...(registered.connection === undefined
         ? {}
         : { connection: describedConnection(registered.connection) }),

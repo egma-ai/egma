@@ -56,6 +56,7 @@ import {
   recordingOriginOf,
   SimulationEvidenceSummary,
   simulationToolCalls,
+  TranscriptEmpty,
   useSimulationEvidenceRecording,
 } from "../../../../../ui/simulation-evidence.tsx";
 import { Actions, SearchField } from "../../../../../ui/section.tsx";
@@ -265,7 +266,7 @@ function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }
             key={`${older.gradedAt}:${String(older.graderDefinitionVersion)}`}
           >
             <span className="font-mono tabular-nums text-muted-foreground">
-              {asSecond(older.gradedAt)} · score {older.score === null ? "—" : shownScore(older.score)}
+              {asSecond(older.gradedAt)} · score {older.score === null ? "-" : shownScore(older.score)}
             </span>
             <GradeResultText result={older.result} />
           </div>
@@ -383,7 +384,9 @@ function GraderResultCard({
             missing={stillGrading ? "Grading" : "No grade"}
           />
           <span className="font-mono text-sm tabular-nums text-foreground">
-            Total Score {row.grade === null ? "—" : shownScore(row.grade.score)}
+            Total Score {row.grade === null || row.grade.score === null
+              ? "-"
+              : shownScore(row.grade.score)}
           </span>
         </div>
       </header>
@@ -438,7 +441,7 @@ function GraderResultCard({
                       data-label="Total Score"
                     >
                       {behavior.assertion?.score === undefined
-                        ? "—"
+                        ? "-"
                         : shownScore(behavior.assertion.score)}
                     </TableCell>
                   </TableRow>
@@ -571,11 +574,7 @@ function TranscriptAndAudio({
           Conversation
         </h3>
         {evidence.transcript === null ? (
-          <div className="border border-border bg-surface p-5">
-            <p className="m-0 text-sm text-muted-foreground">
-              No transcript was filed for this simulation.
-            </p>
-          </div>
+          <TranscriptEmpty />
         ) : (
           <div className="flex min-w-0 flex-col gap-3">
             {evidence.transcript.spansTruncated ? (

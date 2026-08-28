@@ -69,17 +69,20 @@ curl -X POST \
 
 **`POST /v1/monitoring/start`**
 
-Seals the Retell key onto every agent this request names, turns each agent's
-pull switch on, and starts a fixed 30-day import for each. After the import
-finishes, Egma checks for new finished conversations about every 30 seconds.
+Uses the supplied Retell key, or the key already stored on each named Egma
+agent, and turns each agent's pull switch on. The first monitoring setup starts
+a fixed 30-day import. Resuming a stopped agent starts from the current moment.
+Egma then checks for new finished conversations about every 30 seconds.
 
 <ParamField body="agentPlatform" type="string" required>
   `retell`. Push platforms need no start request.
 </ParamField>
 
-<ParamField body="apiKey" type="string" required>
-  Retell platform API key. Egma seals it on each agent and never returns it.
-  It needs Retell Monitor or History Read permission as well as Agent Read.
+<ParamField body="apiKey" type="string">
+  Retell platform API key. It is required when an entry does not name an
+  existing Egma `agentId` that already stores a monitoring key. Egma seals a
+  supplied key and never returns it. The key needs Retell Monitor or History
+  Read permission as well as Agent Read.
 </ParamField>
 
 <ParamField body="watch" type="object[]" required>
@@ -89,7 +92,8 @@ finishes, Egma checks for new finished conversations about every 30 seconds.
 
 Each `watch` entry resolves to one Egma agent:
 
-- With `agentId`, that agent is bound to `platformAgentId` and switched on.
+- With `agentId`, Egma switches on that agent when it is unbound or already
+  bound to the same `platformAgentId`. It refuses a different existing binding.
 - Without `agentId`, Egma looks for an agent in the project already bound to
   `platformAgentId` and updates it. When none exists, Egma registers a new
   agent under `name` and switches it on. Watching a Retell agent Egma does not
@@ -107,20 +111,27 @@ Each `watch` entry resolves to one Egma agent:
   `name_taken`, `not_found`, or `archived`. `message` is the whole sentence to show.
 </ResponseField>
 
-**Every entry is attempted and every entry is answered.** Egma starts each
-`watch` entry on its own, so one entry failing does not stop the others and
-does not undo them. Read both arrays: `watching` is what is now running, and
-`refused` is what stayed as it was. Sending the request again with only the
-refused entries is safe — an agent already switched on is never started twice.
+When `apiKey` is present, **every entry is attempted and every entry is
+answered**. Egma starts each `watch` entry on its own, so one entry failing does
+not stop the others and does not undo them. Read both arrays: `watching` is what
+is now running, and `refused` is what stayed as it was. Sending the request
+again with only the refused entries is safe — an agent already switched on is
+never started twice.
+
+You may omit `apiKey` only to resume existing agents. Every `watch` entry must
+then include an `agentId`, and each named agent must already store a monitoring
+key for the same Retell agent. Egma checks the complete list before it changes
+any switch. A failed stored-key check rejects the request with `422`; no entry
+starts.
 
 One Egma agent watches one Retell agent. An entry that would put a second
 switched-on agent on the same Retell agent comes back in `refused` with
 `reason: "contested"` and a message naming the agent already watching it. Turn
 that agent's switch off first, or start monitoring from it instead.
 
-The key is a monitoring credential and is kept apart from any key a connection
-holds for simulations. Egma asks for it here even when a connection on the same
-agent already stores one for the same Retell account.
+The key is a monitoring credential. Egma stores it on the agent and never
+returns it. Supply it when you first configure monitoring or register an agent.
+Omit it only for the stored-key resume case described above.
 
 ```bash
 curl -X POST \

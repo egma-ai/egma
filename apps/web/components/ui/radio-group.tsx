@@ -100,12 +100,14 @@ const radioItemVariants = cva(
           /* A real target on a coarse pointer, without growing what a mouse gets. */
           "pointer-coarse:min-h-(--tap-target)",
           "pointer-hover:text-foreground",
-          /*
-           * The chosen option carries an Ember underline as well as the wash,
-           * because state is never colour alone.
-           */
-          "data-[state=checked]:bg-selected data-[state=checked]:text-foreground",
-          "data-[state=checked]:shadow-[inset_0_-2px_0_var(--accent)]",
+          /* The chosen option carries the approved Ember line on its top edge. */
+          "data-[state=checked]:bg-surface data-[state=checked]:font-medium data-[state=checked]:text-foreground",
+          "data-[state=checked]:shadow-[inset_0_2px_0_var(--accent)]",
+        ],
+        card: [
+          "flex min-h-(--tap-target) w-full items-start gap-3 border border-border bg-surface p-4 text-left",
+          "text-foreground pointer-hover:border-border-strong",
+          "data-[state=checked]:border-brand data-[state=checked]:bg-selected",
         ],
       },
     },
@@ -126,7 +128,7 @@ function RadioGroupItem({
       className={cn(radioItemVariants({ shape }), className)}
       {...props}
     >
-      {shape === "segment" ? (
+      {shape === "segment" || shape === "card" ? (
         children
       ) : (
         <RadioGroupPrimitive.Indicator
@@ -139,4 +141,27 @@ function RadioGroupItem({
   );
 }
 
-export { RadioGroup, RadioGroupItem, radioItemVariants };
+/** The visible dot inside a card-shaped radio option. */
+function RadioCardIndicator({
+  className,
+  ...props
+}: ComponentProps<"span">) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "size-4 flex-none rounded-full border border-border-strong",
+        "group-data-[state=checked]:border-4 group-data-[state=checked]:border-brand",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export {
+  RadioCardIndicator,
+  RadioGroup,
+  RadioGroupItem,
+  radioItemVariants,
+};

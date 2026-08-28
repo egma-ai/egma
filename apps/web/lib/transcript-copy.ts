@@ -47,17 +47,8 @@ export const LIST = {
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
   setUp: "Set up Egma",
-  /**
-   * The one action this page offers, and it is a verb about an agent rather
-   * than a noun about an object: there is no monitoring setup to fill in any
-   * more. A per-agent switch turns pull on, and push needs nothing at all
-   * (ADR-0015).
-   *
-   * **It opens a picker over this page rather than leading anywhere** — the
-   * full Start-monitoring page is retired, and the same words head the sheet
-   * that replaced it (boards `JGS-0`, `JN2-0`).
-   */
-  monitorAgent: "Monitor an agent",
+  /** The one action this page offers. Agents owns the shared setup flow. */
+  monitorAgent: "Set up monitoring",
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
@@ -187,18 +178,11 @@ export const QUIET = {
     lead: "Widen the window above to look further back.",
   },
   setUp: {
-    /*
-     * **The board's card, in this file's vocabulary.** `JGS-0` heads it "No
-     * production calls yet" over "…and its calls appear here as they finish",
-     * and *call* is on the banned list these two pages are held to: what a
-     * person reads here is a transcript, and the word is checked rather than
-     * merely intended. The shape, the measure and the action under it are the
-     * board's; two nouns are the product's own.
-     */
-    title: "No production transcripts yet",
+    /** Exact empty state from Paper board 26. */
+    title: "No production traces yet",
     lead:
-      "Monitor an agent you have already added, and what it does in " +
-      "production appears here as it finishes.",
+      "Set up monitoring for an agent. Traces appear here after Egma receives " +
+      "production traffic.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

@@ -1,4 +1,5 @@
 import {
+  AgentAlreadyBoundError,
   checkpointMonitoringPage,
   claimDueMonitoringPull,
   createAgent,
@@ -16,6 +17,7 @@ import {
   registerAgentPullingProductionCalls,
   releaseMonitoringLease,
   renewMonitoringLease,
+  sealAgentMonitoringKey,
   sweepExpiredRetellCallMarkers,
   transientRetellCallState,
   yieldMonitoringLease,
@@ -203,6 +205,72 @@ describe("the pull switch", () => {
     expect(await readAgentPullState(at(acme, ada), agentId)).not.toHaveProperty(
       "monitoringApiKey",
     );
+  });
+
+  /** The notebook, not the shared key, records that monitoring has run. */
+  it("distinguishes a connection key from monitoring that was stopped", async () => {
+    const auth = at(acme, ada);
+    const agentId = await agentNamed("Front desk");
+    await sealAgentMonitoringKey(auth, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+
+    expect(await getAgent(auth, agentId)).toMatchObject({
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+      pullProductionCalls: false,
+      monitoringConfigured: false,
+    });
+
+    await enablePullProductionCalls(auth, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+    expect((await getAgent(auth, agentId))?.monitoringConfigured).toBe(true);
+
+    await disablePullProductionCalls(auth, agentId);
+    expect(await getAgent(auth, agentId)).toMatchObject({
+      pullProductionCalls: false,
+      monitoringConfigured: true,
+    });
+  });
+
+  it("refuses to switch one agent to another platform agent inside the locked write", async () => {
+    const auth = at(acme, ada);
+    const agentId = await agentNamed("Front desk");
+    await sealAgentMonitoringKey(auth, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+
+    const refusal = await enablePullProductionCalls(auth, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_2",
+      apiKey: ROTATED_KEY,
+      now: SETUP_TIME,
+    }).catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(AgentAlreadyBoundError);
+    expect(refusal).toMatchObject({
+      boundTo: "agent_retell_voice_1",
+      asked: "agent_retell_voice_2",
+    });
+    expect(await readAgentPullState(auth, agentId)).toMatchObject({
+      pullProductionCalls: false,
+      platformAgentId: "agent_retell_voice_1",
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+    });
+    expect(await notebook(agentId)).toBeUndefined();
   });
 
   /**

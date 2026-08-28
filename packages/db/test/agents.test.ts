@@ -101,8 +101,10 @@ describe("creating an agent", () => {
     expect(fetched).toMatchObject({
       agentPlatform: "livekit",
       platformAgentId: null,
+      retellModality: null,
       monitoringApiKeyHint: null,
       pullProductionCalls: false,
+      monitoringConfigured: false,
     });
   });
 

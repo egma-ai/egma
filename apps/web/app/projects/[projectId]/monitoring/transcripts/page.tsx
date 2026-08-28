@@ -9,10 +9,9 @@ import { TranscriptsScreen } from "./screen.tsx";
 /**
  * What this project's agents did in production, newest first.
  *
- * The page is the address; `screen.tsx` is the screen, and the picker this area
- * opens is a state of it. One other address renders the same component with
- * that panel forced open, which is what keeps `monitoring/start` working after
- * it stopped being a page of its own.
+ * The page is the address and `screen.tsx` is the screen. Monitoring setup is
+ * owned by the shared Connect agent flow on Agents; the retired
+ * `monitoring/start` address forwards there too.
  */
 export default function MonitoringTranscriptsPage() {
   const { projectId } = useParams<{ projectId: string }>();

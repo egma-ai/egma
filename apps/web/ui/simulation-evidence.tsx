@@ -99,7 +99,7 @@ function durationOf(evidence: SimulationEvidence): number | null {
 }
 
 function shownDuration(milliseconds: number | null): string {
-  if (milliseconds === null) return "Not recorded";
+  if (milliseconds === null) return "-";
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   if (seconds < 60) return `${String(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
@@ -211,7 +211,7 @@ export function SimulationMetrics({
 }
 
 function scoreText(score: number | null): string {
-  return score === null ? "Not available" : score.toFixed(2);
+  return score === null ? "-" : score.toFixed(2);
 }
 
 function p90TurnLatency(metrics: readonly Measured[]): string {
@@ -221,7 +221,7 @@ function p90TurnLatency(metrics: readonly Measured[]): string {
       metric.unit === "milliseconds",
   );
   if (latency === undefined || !Number.isFinite(latency.p90)) {
-    return "Not recorded";
+    return "-";
   }
 
   /*
@@ -230,6 +230,17 @@ function p90TurnLatency(metrics: readonly Measured[]): string {
    */
   const rounded = Number(latency.p90.toPrecision(3));
   return `${String(rounded)} ms${latency.partial ? " · partial" : ""}`;
+}
+
+/** Keep the compact visual dash while announcing what it means. */
+function summaryValue(value: string) {
+  if (value !== "-") return value;
+  return (
+    <>
+      <span aria-hidden="true">-</span>
+      <span className="sr-only">Not recorded</span>
+    </>
+  );
 }
 
 /** The four simulation-level facts required before reading grader output. */
@@ -249,27 +260,27 @@ export function SimulationEvidenceSummary({
       aria-label="Simulation summary"
     >
       <div className={SUMMARY_STRIP_CELL}>
-        <span className={SUMMARY_STRIP_LABEL}>Combined score</span>
+        <span className={SUMMARY_STRIP_LABEL}>Total avg score</span>
         <strong className={SUMMARY_VALUE}>
-          {scoreText(evidence.combinedScore)}
+          {summaryValue(scoreText(evidence.combinedScore))}
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>
         <span className={SUMMARY_STRIP_LABEL}>Duration</span>
         <strong className={SUMMARY_VALUE}>
-          {shownDuration(durationOf(evidence))}
+          {summaryValue(shownDuration(durationOf(evidence)))}
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>
         <span className={SUMMARY_STRIP_LABEL}>Total turns</span>
         <strong className={SUMMARY_VALUE}>
-          {turns === null ? "Not recorded" : String(turns)}
+          {summaryValue(turns === null ? "-" : String(turns))}
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>
         <span className={SUMMARY_STRIP_LABEL}>P90 turn latency</span>
         <strong className={SUMMARY_VALUE}>
-          {p90TurnLatency(evidence.metrics)}
+          {summaryValue(p90TurnLatency(evidence.metrics))}
         </strong>
       </div>
     </section>
@@ -1659,9 +1670,23 @@ const DEFAULT_TRANSCRIPT_SPEAKERS: TranscriptSpeakerLabels = {
 };
 
 const DEFAULT_TRANSCRIPT_EMPTY_STATE: TranscriptEmptyState = {
-  title: "Nothing was said",
-  description: "Egma filed no spoken turns for this simulation.",
+  title: "-",
+  description: "No conversation recorded",
 };
+
+/** The same quiet absence whether no trace or an empty trace came back. */
+export function TranscriptEmpty({
+  emptyState = DEFAULT_TRANSCRIPT_EMPTY_STATE,
+}: {
+  readonly emptyState?: TranscriptEmptyState;
+}) {
+  return (
+    <div className={EMPTY_STATE}>
+      <strong className={EMPTY_STATE_TITLE}>{emptyState.title}</strong>
+      <p className={EMPTY_STATE_LEAD}>{emptyState.description}</p>
+    </div>
+  );
+}
 
 /**
  * Readable speech and tool calls on one time rail. A recording-backed row is a
@@ -1699,12 +1724,7 @@ export function ChatTranscript({
     [onSeek],
   );
   if (events.length === 0) {
-    return (
-      <div className={EMPTY_STATE}>
-        <strong className={EMPTY_STATE_TITLE}>{emptyState.title}</strong>
-        <p className={EMPTY_STATE_LEAD}>{emptyState.description}</p>
-      </div>
-    );
+    return <TranscriptEmpty emptyState={emptyState} />;
   }
 
   return (

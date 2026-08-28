@@ -1,18 +1,22 @@
 "use client";
 
-import { ChevronDownIcon } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   addConnection,
   discoverAgents,
   getAgent,
   listConnectionOptions,
   registerAgent,
+  startMonitoring,
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  RadioCardIndicator,
+  RadioGroup,
+  RadioGroupItem,
+} from "@/components/ui/radio-group";
 import { Select } from "@/components/ui/select";
 import {
   Sheet,
@@ -22,593 +26,349 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
 import type { Answer, Refusal } from "@/lib/api.ts";
-import type { ListedAgent, ListedAgentWithConnections } from "@/lib/agents.ts";
-import { agentPlatformText } from "@/lib/agents.ts";
+import type { ListedAgentWithConnections } from "@/lib/agents.ts";
 import {
-  agentPlatformChoices,
-  agentsForOption,
+  optionNamed,
   optionsForPlatform,
   type ConnectionOption,
   type ConnectionOptionCatalog,
   type DiscoveredAgent,
 } from "@/lib/connection-options.ts";
+import {
+  agentSetupPlan,
+  previousAgentSetupStep,
+  retellAgentsForPlan,
+  retellCandidateValue,
+  retellCandidatesForPlan,
+  stepAfterPlatform,
+  stepAfterRetellAgent,
+  type AgentSetupGoal,
+  type AgentSetupPlatform,
+  type AgentSetupStep,
+  type RetellConnectionCandidate,
+} from "@/lib/agent-setup-flow.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
-import { agentPlatformLabel } from "@/lib/transcripts.ts";
-import { Field, Help, Problem } from "@/ui/form.tsx";
-import { Menu, MenuItem } from "@/ui/menu.tsx";
+import { cn } from "@/lib/utils";
+import {
+  Field,
+  Help,
+  Problem,
+  Refused as FormRefused,
+} from "@/ui/form.tsx";
+import { useDraftNavigation } from "@/ui/draft-navigation.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
-import { modalityLabel } from "./connection-facts.tsx";
-import { ConnectionFields, type Draft } from "./[agentId]/connections/fields.tsx";
+import { LiveKitMonitoringInstructions } from "./livekit-monitoring-instructions.tsx";
 import {
-  configForLiveKitDispatch,
-  liveKitDispatchForm,
-  LiveKitDispatchSetup,
-  newLiveKitDispatch,
-  type LiveKitDispatch,
-} from "./[agentId]/connections/livekit-dispatch.tsx";
-import { AgentOnboardingProgress } from "./onboarding-progress.tsx";
-
-/**
- * Connecting an agent: one panel, over the list, one save.
- *
- * **It used to be two ideas.** Register the agent, then add a connection — and
- * the Retell half asked a person to copy an agent id out of another product by
- * hand, behind a "Load Retell agents" button they had to know to press. The
- * boards of 2026-08-24 (`I79-0`, `ICT-0`, `II3-0`) draw one sheet: the agent
- * at the top, the way in under it, one submit, and no step anywhere that Egma
- * could have taken itself.
- *
- * **The key loads the account the moment it looks like a key.** No button:
- * pasting a key is the person saying "this is my account", and asking them to
- * confirm it by pressing something is asking twice. The agents come back by
- * name and the pick is by name; the id never appears in the flow.
- *
- * **One paste per agent, ever.** The save seals the key on the agent, so a
- * second connection onto the same agent shows no key field at all — the sheet
- * says which key the agent holds and lists the account with it.
- *
- * **"Connect a new agent" is last.** Reuse is the ordinary case and creation is
- * the fallback, so the picker reads as a list of agents with a way to make one
- * under it rather than a create form with a list attached.
- *
- * **Modality is a control on Retell and a sentence on LiveKit**, because that
- * is what the catalog says. Retell offers a chat option and a voice option, so
- * the segmented control chooses between two real connection shapes. LiveKit
- * offers voice and nothing else, so a two-way control there would offer a
- * choice that does not exist.
- */
+  ConnectionFields,
+  type Draft,
+} from "./[agentId]/connections/fields.tsx";
 
 export type ConnectSheetResult = {
   readonly agentId: string;
   readonly connectionId: string | null;
-  /** Whether this registration made the agent, rather than only a way in. */
   readonly created: boolean;
 };
 
-/** What "Connect a new agent" is, as a value the select can hold. */
-const NEW_AGENT = "";
+export type ConnectAgentGoal = AgentSetupGoal;
+export type ConnectAgentPlatform = AgentSetupPlatform;
 
-/**
- * Shorter than any key Retell issues, so the account is not read for it.
- *
- * It is a floor rather than a format: the server is what decides whether a key
- * works, and a browser inventing a stricter shape would refuse a key that does.
- */
-const SHORTEST_KEY = 8;
+type ConnectionBody = NonNullable<
+  Parameters<typeof registerAgent>[0]["connection"]
+>;
 
-/**
- * The platforms an agent can be connected on — LiveKit first, then Retell,
- * and no third one (founder ruling, 2026-08-24; the order is the developer's,
- * 2026-08-26). This list is the select's order as well as its filter, so the
- * dropdown reads it top to bottom rather than reading the catalog's own
- * ordering.
- *
- * **The catalog carries one more.** A phone number belongs to no platform in
- * particular, so the registry lists it under a platform-less option labelled
- * "Any or unknown" — which is a true thing about a connection type and a
- * meaningless answer to "what runs your agent". Offering it let somebody
- * register an agent bound to nothing, which nothing downstream can monitor.
- * The catalog is not changed; this sheet chooses what it offers from it.
- */
-const OFFERED_PLATFORMS: readonly string[] = ["livekit", "retell"];
-
-/**
- * The connection half of the write, typed from the operation that carries it.
- *
- * Both writes take the same object — `registerAgent` nests it under
- * `connection`, `addConnection` sends it as the whole body — so it is built
- * once and named from the generated client rather than re-declared here, where
- * it could fall out of step with the contract without anything failing.
- */
-type ConnectionBody = NonNullable<Parameters<typeof registerAgent>[0]["connection"]>;
-
-/** Voice or chat, named from the catalog rather than spelled out again here. */
-type Modality = ConnectionOption["modality"];
-
-export function ConnectAgentSheet({
-  projectId,
-  agents,
-  agentId,
-  onboarding = false,
-  mayAuthor,
-  role,
-  onClose,
-  onConnected,
-}: {
+type ConnectAgentSheetProps = {
   readonly projectId: string;
-  /** The page of agents already on screen, offered as the picker's options. */
   readonly agents: readonly ListedAgentWithConnections[];
-  /** The agent this sheet was opened for, or nothing to make a new one. */
   readonly agentId?: string;
-  /** The two-stage deep link, which is the one place a progress bar is true. */
+  readonly goal?: ConnectAgentGoal;
+  readonly platform?: ConnectAgentPlatform;
   readonly onboarding?: boolean;
   readonly mayAuthor: boolean;
-  /** Null while the session read is in flight, so nothing is claimed yet. */
   readonly role: string | null;
   readonly onClose: () => void;
   readonly onConnected: (result: ConnectSheetResult) => void;
-}) {
-  const [chosenAgent, setChosenAgent] = useState<string>(agentId ?? NEW_AGENT);
+};
 
-  /* A deep link naming an agent chooses it, and changing deep link re-chooses. */
-  useEffect(() => {
-    setChosenAgent(agentId ?? NEW_AGENT);
-  }, [agentId]);
+const NEW_AGENT = "";
+const SHORTEST_KEY = 8;
+const PROJECT_CREDENTIALS = "livekit_room.project_credentials";
+const TOKEN_ENDPOINT = "livekit_room.customer_token_endpoint";
 
-  const [agentName, setAgentName] = useState("");
-  const [agentNameProblem, setAgentNameProblem] = useState<string | null>(null);
+function firstStep(
+  goal: AgentSetupGoal | undefined,
+  platform: AgentSetupPlatform | undefined,
+): AgentSetupStep {
+  if (goal !== undefined && platform !== undefined) {
+    return stepAfterPlatform(goal, platform);
+  }
+  return "goal";
+}
+
+function retellModality(
+  agent: DiscoveredAgent | undefined,
+): "chat" | "voice" | null {
+  return agent?.modality ?? null;
+}
+
+export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
+  const {
+    projectId,
+    agents,
+    agentId,
+    goal: initialGoal,
+    platform: initialPlatform,
+    mayAuthor,
+    role,
+    onClose,
+    onConnected,
+  } = props;
+  const draftNavigation = useDraftNavigation();
+
+  const [step, setStep] = useState<AgentSetupStep>(() =>
+    firstStep(initialGoal, initialPlatform),
+  );
+  const [goal, setGoal] = useState<AgentSetupGoal | "">(initialGoal ?? "");
+  const [platform, setPlatform] = useState<AgentSetupPlatform | "">(
+    initialPlatform ?? "",
+  );
 
   const [catalog, setCatalog] = useState<ConnectionOptionCatalog | null>(null);
   const [catalogRefused, setCatalogRefused] = useState<Refusal | null>(null);
-  const [attempt, setAttempt] = useState(0);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const listedKnown =
+    agentId === undefined || agentId === NEW_AGENT
+      ? undefined
+      : agents.find((one) => one.id === agentId);
+  const [known, setKnown] = useState<
+    Omit<ListedAgentWithConnections, "connections"> | null
+  >(() => listedKnown ?? null);
+  const [knownStatus, setKnownStatus] = useState<
+    "loading" | "ready" | "missing" | "failed"
+  >(() =>
+    agentId !== undefined && agentId !== NEW_AGENT && listedKnown === undefined
+      ? "loading"
+      : "ready",
+  );
+  const [knownRefused, setKnownRefused] = useState<Refusal | null>(null);
+  const [knownAttempt, setKnownAttempt] = useState(0);
 
-  const [platformValue, setPlatformValue] = useState("");
-  const [modality, setModality] = useState<Modality | "">("");
-  const [accessVariant, setAccessVariant] = useState("");
-  const [name, setName] = useState("");
-  const [draft, setDraft] = useState<Draft>({ config: {}, credentials: {} });
-  const [livekitDispatch, setLivekitDispatch] =
-    useState<LiveKitDispatch>(newLiveKitDispatch);
-
-  const [discoveryKey, setDiscoveryKey] = useState("");
-  const [discoveredAgents, setDiscoveredAgents] = useState<
+  const [apiKey, setApiKey] = useState("");
+  const [retellAgents, setRetellAgents] = useState<
     readonly DiscoveredAgent[] | null
   >(null);
-  const [discoveredAgentId, setDiscoveredAgentId] = useState("");
+  const [retellAgentId, setRetellAgentId] = useState("");
+  const [retellRoute, setRetellRoute] = useState("");
   const [discovering, setDiscovering] = useState(false);
-  const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
-  /** Whether this save also starts pulling the agent's production calls. */
-  const [pullCalls, setPullCalls] = useState(false);
-  /**
-   * The Retell agent the person chose themselves, if they have chosen one.
-   *
-   * **It is the id, not a flag.** The picker's *value* is what the current
-   * modality can show, and a modality that cannot reach the chosen agent has
-   * to show something else — so the value is not a record of what was chosen.
-   * Kept apart, the choice survives the trip through a modality that does not
-   * have it, and the way back restores it.
-   */
-  const [handPicked, setHandPicked] = useState<string | null>(null);
+
+  const [livekitAccess, setLivekitAccess] = useState(PROJECT_CREDENTIALS);
+  const [livekitAgentName, setLivekitAgentName] = useState("");
+  const [livekitConfig, setLivekitConfig] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const [livekitCredentials, setLivekitCredentials] = useState<
+    Readonly<Record<string, string>>
+  >({});
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
-  /**
-   * Where the reason a submit is not ready is written.
-   *
-   * **It is a line of the panel, not a line of the footer.** `Button`'s own
-   * `why` draws the sentence beside the control, which is right in a toolbar
-   * and wrong in a 440px footer: the sentence takes the whole row and pushes
-   * the way out onto a third line. Here it belongs under the fields it is
-   * about anyway. The control still names it, and still carries it as a
-   * `title`, so a pointer, a keyboard and a screen reader all reach it.
-   */
-  const whySaid = useId();
+  const [completed, setCompleted] = useState<ConnectSheetResult | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
 
-  /**
-   * The chosen agent, read from the server rather than from the page behind.
-   *
-   * The list on screen is one page of agents. A deep link can name an agent on
-   * none of them, and the picker would then show a chosen option that is not
-   * in its own list. This read is also the only thing that knows whether the
-   * agent already has a platform, which is what decides where the Platform
-   * select is drawn — and that is a fact about the agent, not about the row.
-   */
-  const [known, setKnown] = useState<ListedAgent | null>(null);
   useEffect(() => {
-    if (chosenAgent === NEW_AGENT) {
+    setGoal(initialGoal ?? "");
+    setPlatform(initialPlatform ?? "");
+    setStep(firstStep(initialGoal, initialPlatform));
+    setApiKey("");
+    setRetellAgents(null);
+    setRetellAgentId("");
+    setRetellRoute("");
+    setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitAgentName("");
+    setLivekitConfig({});
+    setLivekitCredentials({});
+    setCompleted(null);
+    setRefused(null);
+  }, [agentId, initialGoal, initialPlatform]);
+
+  useEffect(() => {
+    if (agentId === undefined || agentId === NEW_AGENT) {
       setKnown(null);
+      setKnownStatus("ready");
+      setKnownRefused(null);
+      return undefined;
+    }
+    if (listedKnown !== undefined) {
+      setKnown(listedKnown);
+      setKnownStatus("ready");
+      setKnownRefused(null);
       return undefined;
     }
     let current = true;
     setKnown(null);
+    setKnownStatus("loading");
+    setKnownRefused(null);
     void platformAnswer(
-      getAgent({ agentId: chosenAgent, projectId }, { client: platformClient }),
-    ).then((read) => {
+      getAgent({ agentId, projectId }, { client: platformClient }),
+    ).then((answer) => {
       if (!current) return;
-      if (read.status === "signed-out") window.location.replace("/sign-in");
-      else if (read.status === "ready") setKnown(read.value.agent);
+      if (answer.status === "signed-out") window.location.replace("/sign-in");
+      else if (answer.status === "ready") {
+        setKnown(answer.value.agent);
+        setKnownStatus("ready");
+      } else {
+        setKnownStatus(answer.status);
+        setKnownRefused(answer.refusal);
+      }
     });
     return () => {
       current = false;
     };
-  }, [chosenAgent, projectId]);
+  }, [agentId, knownAttempt, listedKnown, projectId]);
 
   useEffect(() => {
     let current = true;
     setCatalog(null);
     setCatalogRefused(null);
     void platformAnswer(listConnectionOptions({ client: platformClient })).then(
-      (read) => {
+      (answer) => {
         if (!current) return;
-        if (read.status === "signed-out") {
+        if (answer.status === "signed-out") {
           window.location.replace("/sign-in");
-        } else if (read.status === "ready") {
-          /*
-           * **The catalog arrives and no platform is chosen for anybody.**
-           * The select opens on "Choose a platform" and the connection's own
-           * fields follow the answer (developer decision, 2026-08-26). This
-           * used to pre-choose the catalog's first offered platform, which
-           * put a Retell form in front of every person — a LiveKit owner had
-           * to notice a filled-in answer was wrong before they could give
-           * the right one.
-           */
-          setCatalog(read.value);
+        } else if (answer.status === "ready") {
+          setCatalog(answer.value);
         } else {
-          setCatalogRefused(read.refusal);
+          setCatalogRefused(answer.refusal);
         }
       },
     );
     return () => {
       current = false;
     };
-  }, [attempt]);
+  }, [catalogAttempt]);
 
-  const creating = chosenAgent === NEW_AGENT;
-  /*
-   * An agent that is already bound to a platform decides the connection's
-   * platform; nothing else can. Otherwise the select does, and it is drawn in
-   * whichever block the person is working in.
-   */
-  const boundPlatform = known?.agentPlatform ?? null;
-  const platformFixed = !creating && boundPlatform !== null;
-  const selectedPlatform = platformFixed
-    ? boundPlatform
-    : platformValue === ""
-      ? null
-      : platformValue;
+  useEffect(() => {
+    const target =
+      bodyRef.current?.querySelector<HTMLElement>("[data-setup-heading]") ??
+      bodyRef.current?.querySelector<HTMLElement>(
+        "#livekit-monitoring-title",
+      );
+    target?.focus();
+  }, [step]);
 
-  /*
-   * **An unanswered platform offers no options at all.** `null` is also how
-   * the catalog spells its platform-less entry — the public phone number —
-   * so passing the unanswered state through `optionsForPlatform` would offer
-   * exactly the option this sheet exists to keep out: an agent bound to
-   * nothing, which nothing downstream can monitor.
-   */
-  const platformOptions =
-    selectedPlatform === null
-      ? []
-      : optionsForPlatform(catalog, selectedPlatform);
-  const modalities = [...new Set(platformOptions.map((one) => one.modality))];
-  const chooseableModality = modalities.length > 1;
-  const shownModality = modalities.find((one) => one === modality) ?? modalities[0];
-  const modalityOptions = platformOptions.filter(
-    (one) => one.modality === shownModality,
+  const plan =
+    goal === "" || platform === "" ? null : agentSetupPlan(goal, platform);
+  const plannedRetellAgents =
+    plan === null ? [] : retellAgentsForPlan(plan, retellAgents);
+  const boundRetellPlatformAgentId =
+    agentId !== undefined && agentId !== NEW_AGENT
+      ? (known?.platformAgentId ?? null)
+      : null;
+  const visibleRetellAgents =
+    boundRetellPlatformAgentId === null
+      ? plannedRetellAgents
+      : plannedRetellAgents.filter(
+          (one) => one.platformAgentId === boundRetellPlatformAgentId,
+        );
+  const selectedRetellAgent = visibleRetellAgents.find(
+    (one) => one.platformAgentId === retellAgentId,
   );
-  const option =
-    modalityOptions.find((one) => one.accessVariant === accessVariant) ??
-    modalityOptions[0];
+  const selectedModality = retellModality(selectedRetellAgent);
+  const selectedRoutes =
+    plan === null ? [] : retellCandidatesForPlan(plan, selectedRetellAgent);
+  const voiceRoutes = selectedRoutes.filter((one) => one.modality === "voice");
+  const chatRoute = selectedRoutes.find((one) => one.modality === "chat");
+  const selectedVoiceRoute = voiceRoutes.find(
+    (one) => retellCandidateValue(one) === retellRoute,
+  );
 
-  const usesAgentDiscovery = option?.agentPlatform === "retell";
-  const matchingAgents = agentsForOption(discoveredAgents, option);
-  /**
-   * The key this flow will use, and where it came from.
-   *
-   * An agent that already holds one is never asked again (`ICT-0`): the sheet
-   * says which key it holds and every listing spends the sealed copy, which
-   * the server reads for itself. Otherwise the paste is the key, and it is the
-   * paste that will be sealed by this save.
-   */
-  const sealedKeyHint = known?.monitoringKeyPresent === true
-    ? known.monitoringApiKeyHint
-    : null;
-  /** The platform agent this egma agent is already bound to, or nothing. */
-  const boundPlatformAgentId = known?.platformAgentId ?? null;
-  const asksForKey = usesAgentDiscovery && sealedKeyHint === null;
-  const pasted = discoveryKey.trim();
-  /** Long enough to be a key at all, which is when the account is read. */
-  const keyLooksReal = pasted.length >= SHORTEST_KEY;
-  /** Which agent this connection will be made on, for the words that name it. */
-  const namedAgent = creating
-    ? agentName.trim() === ""
-      ? "this agent"
-      : agentName.trim()
-    : (known?.name ?? "this agent");
-  const phoneNumber = draft.config["phoneNumber"]?.trim() ?? "";
-  const needsPhoneNumber =
-    usesAgentDiscovery && option?.connectionType === "phone_number";
-  const liveKitForm = liveKitDispatchForm({
-    connectionType: option?.connectionType,
-    option,
-    config: draft.config,
-    mode: livekitDispatch,
-  });
+  const livekitOptions =
+    platform === "livekit"
+      ? optionsForPlatform(catalog, "livekit").filter(
+          (one) => one.connectionType === "livekit_room",
+        )
+      : [];
+  const livekitOption = livekitOptions.find(
+    (one) => one.accessVariant === livekitAccess,
+  );
+  const livekitFieldValue = (key: string): string =>
+    key === "agentName"
+      ? livekitAgentName
+      : (livekitConfig[key] ?? "");
+  const storedRetellKey =
+    agentId !== undefined &&
+    known?.monitoringKeyPresent === true;
+  const keyReady = storedRetellKey || apiKey.trim().length >= SHORTEST_KEY;
+  const livekitReady =
+    livekitOption !== undefined &&
+    livekitOption.fields
+      .filter((field) => field.required)
+      .every((field) => livekitFieldValue(field.key).trim() !== "") &&
+    livekitOption.credentialFields
+      .filter((field) => field.required)
+      .every(
+        (field) => (livekitCredentials[field.field]?.trim() ?? "") !== "",
+      ) &&
+    livekitAgentName.trim() !== "";
 
   const changed =
-    agentName !== "" ||
-    name !== "" ||
-    livekitDispatch !== newLiveKitDispatch() ||
-    discoveryKey !== "" ||
-    discoveredAgents !== null ||
-    Object.values(draft.config).some((value) => value !== "") ||
-    Object.values(draft.credentials).some((value) => value !== "");
+    apiKey !== "" ||
+    retellAgents !== null ||
+    livekitAgentName !== "" ||
+    Object.values(livekitConfig).some((value) => value !== "") ||
+    Object.values(livekitCredentials).some((value) => value !== "");
   useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
 
-  /**
-   * Forget what was typed for one connection shape, and keep the account.
-   *
-   * **The account is not part of the draft.** `discoverAgents` answers the
-   * whole Retell account and this sheet filters it by the chosen option, so
-   * switching Chat↔Voice is a different view of the same answer rather than a
-   * reason to ask again. Clearing it here left the person stranded: the
-   * listing's own effect watches the key and the agent, neither of which a
-   * modality switch touches, so nothing re-ran and the picker stayed empty
-   * with Connect disabled until they retyped the key.
-   *
-   * The pick is kept too. It survives a switch that has it on both sides, and
-   * the effect below corrects it when the new modality cannot reach it — so
-   * Voice → Chat → Voice comes back to the agent it started on.
-   *
-   * The account is dropped where the account genuinely changes: a new key, or
-   * a different agent whose sealed key opens a different one.
-   */
-  function forgetConnectionDraft(): void {
-    setDraft({ config: {}, credentials: {} });
-    setLivekitDispatch(newLiveKitDispatch());
-    setDiscoverRefused(null);
+  function transition(next: AgentSetupStep): void {
     setRefused(null);
+    setStep(next);
   }
 
-  /** Drop the account listing itself, and everything read out of it. */
-  function forgetDiscoveredAccount(): void {
-    setDiscoveredAgents(null);
-    setDiscoveredAgentId("");
-    setHandPicked(null);
-  }
-
-  function choosePlatform(next: string): void {
-    const forPlatform = optionsForPlatform(catalog, next);
-    const first = forPlatform[0];
-    setPlatformValue(next);
-    setModality(first?.modality ?? "");
-    setAccessVariant(first?.accessVariant ?? "");
-    forgetConnectionDraft();
-  }
-
-  function chooseModality(next: Modality): void {
-    const first = platformOptions.find((one) => one.modality === next);
-    setModality(next);
-    setAccessVariant(first?.accessVariant ?? "");
-    forgetConnectionDraft();
-  }
-
-  function chooseOption(next: string): void {
-    setAccessVariant(next);
-    forgetConnectionDraft();
-  }
-
-  function chooseAgent(next: string): void {
-    setChosenAgent(next);
-    setAgentNameProblem(null);
-    setRefused(null);
-    /*
-     * The key belongs to the agent, so changing agent drops the paste and the
-     * account it opened. Keeping them would leave one agent's list on screen
-     * under another agent's name.
-     */
-    setDiscoveryKey("");
-    setPullCalls(false);
-    forgetDiscoveredAccount();
-    forgetConnectionDraft();
-  }
-
-  function chooseLiveKitDispatch(next: LiveKitDispatch): void {
-    setLivekitDispatch(next);
-    setDraft((current) => ({
-      ...current,
-      config: configForLiveKitDispatch(current.config, next),
-    }));
-  }
-
-  /**
-   * Read the Retell account, by itself.
-   *
-   * **There is no button.** The listing runs when the key looks like a key, or
-   * at once for an agent that already holds one — pressing something to
-   * confirm a paste is asking the same question twice. It is debounced so that
-   * a paste is one request rather than one per keystroke, and every answer
-   * that lands after the question changed is dropped.
-   */
-  useEffect(() => {
-    if (!usesAgentDiscovery) return undefined;
-    const spending: { readonly credentials: { readonly apiKey: string } } | { readonly agentId: string } | null =
-      asksForKey
-        ? keyLooksReal
-          ? { credentials: { apiKey: pasted } }
-          : null
-        : chosenAgent === NEW_AGENT
-          ? null
-          : { agentId: chosenAgent };
-    if (spending === null) {
-      setDiscoveredAgents(null);
-      setDiscoveredAgentId("");
-      setDiscoverRefused(null);
-      return undefined;
-    }
-
-    let current = true;
-    setDiscoverRefused(null);
-    setDiscovering(true);
-    const settle = setTimeout(() => {
-      void platformAnswer(
-        discoverAgents(
-          { projectId, agentPlatform: "retell", ...spending },
-          { client: platformClient },
-        ),
-      ).then((answer) => {
-        if (!current) return;
-        setDiscovering(false);
-        if (answer.status === "signed-out") {
-          window.location.replace("/sign-in");
-          return;
-        }
-        if (answer.status !== "ready") {
-          setDiscoveredAgents(null);
-          setDiscoveredAgentId("");
-          setDiscoverRefused(answer.refusal);
-          return;
-        }
-        // Discovery never returns a credential. The paste stays in its field
-        // until the save seals it on the agent.
-        setDiscoveredAgents(answer.value.agents);
-      });
-    }, 350);
-
-    return () => {
-      current = false;
-      clearTimeout(settle);
-      setDiscovering(false);
-    };
-  }, [usesAgentDiscovery, asksForKey, keyLooksReal, pasted, chosenAgent, projectId]);
-
-  /**
-   * The picked agent, kept true to the list under it — and pre-selected on the
-   * one this egma agent is already bound to.
-   *
-   * **One egma agent binds to one platform agent.** An agent Egma already
-   * knows as `agent_voice_1` is offered that agent, so the ordinary second
-   * connection is right without anybody choosing again. Picking another one is
-   * still allowed to be attempted: the server holds the rule and answers in
-   * place, and a control that refused locally would be a second opinion able
-   * to disagree with it.
-   *
-   * **Changing modality changes what can be reached, not what was chosen.**
-   * An account's chat agents and its voice agents are different sets, so a
-   * modality that cannot reach the chosen agent shows something else — and the
-   * choice is remembered beside the value rather than replacing it, so coming
-   * back restores it. A pick is only forgotten when the account itself is.
-   */
-  useEffect(() => {
-    if (matchingAgents.length === 0) {
-      if (discoveredAgentId !== "") setDiscoveredAgentId("");
+  function leave(): void {
+    if (completed !== null) {
+      onConnected(completed);
       return;
     }
-    /*
-     * **Nothing is pre-selected until Egma knows what this agent is bound
-     * to.** The account listing and the agent read race, and picking the
-     * list's first entry while the read is still in flight would show one
-     * agent and then swap it for another under the person's eyes.
-     */
-    if (chosenAgent !== NEW_AGENT && known === null) return;
-
-    const reachable = (id: string | null): boolean =>
-      id !== null && matchingAgents.some((one) => one.platformAgentId === id);
-
-    /*
-     * What this modality should show, in the order the answers outrank one
-     * another:
-     *
-     * 1. **The choice, whenever this modality can reach it.** A person who
-     *    picked an agent has said which agent this is about, and a switch to
-     *    Chat and back is not them changing their mind. The correction below
-     *    used to overwrite the pick itself, so the round trip quietly landed
-     *    them on the account's first agent — the wrong provider agent, saved
-     *    without anything having said so.
-     * 2. **The binding, while nobody has chosen.** One egma agent binds to one
-     *    platform agent, so the ordinary second connection is right without
-     *    anybody choosing again.
-     * 3. **What is already showing**, when this modality can still reach it.
-     * 4. **The first agent it can reach**, which is the only answer left.
-     */
-    const wanted = reachable(handPicked)
-      ? (handPicked ?? "")
-      : handPicked === null && reachable(boundPlatformAgentId)
-        ? (boundPlatformAgentId ?? "")
-        : reachable(discoveredAgentId)
-          ? discoveredAgentId
-          : (matchingAgents[0]?.platformAgentId ?? "");
-
-    if (discoveredAgentId !== wanted) setDiscoveredAgentId(wanted);
-  }, [
-    matchingAgents,
-    discoveredAgentId,
-    boundPlatformAgentId,
-    handPicked,
-    chosenAgent,
-    known,
-  ]);
-
-  /** Everything the connection half of this panel is about to send. */
-  function connectionBody(chosen: ConnectionOption): ConnectionBody {
-    const common = { ...(name.trim() === "" ? {} : { name: name.trim() }) };
-    const config: Record<string, string> = {};
-    for (const field of chosen.fields) {
-      const written = draft.config[field.key]?.trim() ?? "";
-      if (written !== "") config[field.key] = written;
-    }
-    const credentials: Record<string, string> = {};
-    for (const field of chosen.credentialFields) {
-      const written = draft.credentials[field.field]?.trim() ?? "";
-      if (written !== "") credentials[field.field] = written;
-    }
-
-    /*
-     * **Retell names the picked agent and hands over the paste.** The server
-     * confirms the id against the account immediately before the write, seals
-     * the key on the agent, and — when the box is ticked — starts the pull in
-     * the same save. Nothing here sends an id somebody typed: the id came from
-     * the account listing and the person picked a name.
-     */
-    if (usesAgentDiscovery) {
-      return {
-        ...common,
-        agentPlatform: chosen.agentPlatform,
-        connectionType: chosen.connectionType,
-        accessVariant: chosen.accessVariant,
-        modality: chosen.modality,
-        config,
-        platformAgentId: discoveredAgentId,
-        ...(asksForKey ? { credentials: { apiKey: pasted } } : {}),
-        ...(pullCalls ? { pullProductionCalls: true } : {}),
-      };
-    }
-
-    return {
-      ...common,
-      agentPlatform: chosen.agentPlatform,
-      connectionType: chosen.connectionType,
-      accessVariant: chosen.accessVariant,
-      modality: chosen.modality,
-      config,
-      ...(chosen.credentialRule === "forbidden" ||
-      Object.keys(credentials).length === 0
-        ? {}
-        : { credentials }),
-    };
+    draftNavigation.request(onClose);
   }
 
-  /**
-   * Whether the write landed, and what happens when it did not.
-   *
-   * A refusal is kept on screen with everything that was typed still in the
-   * fields; an expired session leaves for sign-in rather than showing a panel
-   * that can no longer write anything. Both answer `false`, and the caller
-   * stops.
-   */
-  function finished<T>(answer: Answer<T>): answer is Extract<Answer<T>, { status: "ready" }> {
+  function clearProviderAnswers(): void {
+    setApiKey("");
+    setRetellAgents(null);
+    setRetellAgentId("");
+    setRetellRoute("");
+    setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitAgentName("");
+    setLivekitConfig({});
+    setLivekitCredentials({});
+    setCompleted(null);
+    setRefused(null);
+  }
+
+  function chooseGoal(next: AgentSetupGoal): void {
+    if (next !== goal) clearProviderAnswers();
+    setGoal(next);
+  }
+
+  function choosePlatform(next: AgentSetupPlatform): void {
+    if (next !== platform) clearProviderAnswers();
+    setPlatform(next);
+  }
+
+  function back(): void {
+    const previous = previousAgentSetupStep({ step, goal });
+    if (previous === null) {
+      leave();
+      return;
+    }
+    transition(previous);
+  }
+
+  function finishAnswer<T>(
+    answer: Answer<T>,
+  ): answer is Extract<Answer<T>, { status: "ready" }> {
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return false;
@@ -617,502 +377,694 @@ export function ConnectAgentSheet({
       setRefused(answer.refusal);
       return false;
     }
-    if (usesAgentDiscovery) setDiscoveryKey("");
     return true;
   }
 
-  async function connect(): Promise<void> {
-    if (!mayAuthor || saving || option === undefined) return;
-    const newAgentPlatform = option.agentPlatform;
-
-    if (creating && agentName.trim() === "") {
-      // Checked here so nobody waits for a round trip to learn a field is
-      // empty. The server checks it again, and the server is what decides.
-      setAgentNameProblem("An agent needs a name, so that a list can tell it apart.");
-      return;
-    }
-
-    if (usesAgentDiscovery && !retellReady) {
-      setRefused({ error: "unprocessable", message: whyNotYet ?? "" });
-      return;
-    }
-
-    const body = connectionBody(option);
-    setAgentNameProblem(null);
+  async function findRetellAgents(): Promise<void> {
+    if (discovering || !keyReady) return;
+    setDiscovering(true);
     setRefused(null);
-    setSaving(true);
+    const credentials = apiKey.trim();
+    const answer = await platformAnswer(
+      discoverAgents(
+        {
+          projectId,
+          agentPlatform: "retell",
+          ...(storedRetellKey && agentId !== undefined
+            ? { agentId }
+            : { credentials: { apiKey: credentials } }),
+        },
+        { client: platformClient },
+      ),
+    );
+    setDiscovering(false);
+    if (!finishAnswer(answer)) return;
+    setRetellAgents(answer.value.agents);
+    setRetellAgentId("");
+    setRetellRoute("");
+    transition("retell-agent");
+  }
 
-    if (creating) {
-      /*
-       * The platform-less option is never offered, so this cannot be reached
-       * by anything a person can press. It stays because `agentPlatform` is
-       * nullable on a connection option and `creating` is not a TypeScript
-       * discriminant for it — the narrowing has to happen somewhere, and
-       * silently is better than a sentence nobody can produce.
-       */
-      if (newAgentPlatform === null) {
-        setSaving(false);
-        return;
-      }
+  function connectionBody(
+    option: ConnectionOption,
+    candidate?: RetellConnectionCandidate,
+    pullProductionCalls = false,
+  ): ConnectionBody {
+    if (candidate !== undefined) {
+      return {
+        agentPlatform: option.agentPlatform,
+        connectionType: option.connectionType,
+        accessVariant: option.accessVariant,
+        modality: option.modality,
+        config: candidate.config,
+        platformAgentId: retellAgentId,
+        ...(storedRetellKey
+          ? {}
+          : { credentials: { apiKey: apiKey.trim() } }),
+        ...(pullProductionCalls ? { pullProductionCalls: true } : {}),
+      };
+    }
+
+    const config: Record<string, string> = {};
+    for (const field of option.fields) {
+      const value = livekitFieldValue(field.key).trim();
+      if (value !== "") config[field.key] = value;
+    }
+    const credentials: Record<string, string> = {};
+    for (const field of option.credentialFields) {
+      const value = livekitCredentials[field.field]?.trim() ?? "";
+      if (value !== "") credentials[field.field] = value;
+    }
+    return {
+      agentPlatform: option.agentPlatform,
+      connectionType: option.connectionType,
+      accessVariant: option.accessVariant,
+      modality: option.modality,
+      config,
+      ...(Object.keys(credentials).length === 0 ? {} : { credentials }),
+    };
+  }
+
+  async function saveConnection(
+    name: string,
+    body: ConnectionBody,
+  ): Promise<ConnectSheetResult | null> {
+    setSaving(true);
+    setRefused(null);
+
+    if (agentId === undefined || agentId === NEW_AGENT) {
       const answer = await platformAnswer(
         registerAgent(
           {
             projectId,
-            name: agentName.trim(),
-            agentPlatform: newAgentPlatform,
+            name,
+            agentPlatform:
+              body.agentPlatform === "retell" ? "retell" : "livekit",
             connection: body,
           },
           { client: platformClient },
         ),
       );
       setSaving(false);
-      if (!finished(answer)) return;
-      onConnected({
+      if (!finishAnswer(answer)) return null;
+      return {
         agentId: answer.value.agent.id,
         connectionId: answer.value.connection?.id ?? null,
         created: true,
-      });
-      return;
+      };
     }
 
     const answer = await platformAnswer(
       addConnection(
-        { agentId: chosenAgent, projectId, ...body },
+        { agentId, projectId, ...body },
         { client: platformClient },
       ),
     );
     setSaving(false);
-    if (!finished(answer)) return;
-    onConnected({
-      agentId: chosenAgent,
+    if (!finishAnswer(answer)) return null;
+    return {
+      agentId,
       connectionId: answer.value.connection.id,
       created: false,
-    });
+    };
   }
 
-  /**
-   * What is still missing, said in one sentence and never in a list.
-   *
-   * The order is the order of the fields, so the sentence changes as somebody
-   * fills them in and always names the next thing rather than the last one.
-   */
-  const whyNotYet: string | undefined = !usesAgentDiscovery
-    ? undefined
-    : asksForKey && !keyLooksReal
-      ? "Paste your Retell API key."
-      : discoveredAgentId === ""
-        ? discovering
-          ? "Egma is reading your Retell account."
-          : `Choose the Retell ${modalityLabel(shownModality ?? "voice").toLowerCase()} agent this connection reaches.`
-        : needsPhoneNumber && phoneNumber === ""
-          ? "Type the phone number Egma calls in a simulation."
-          : undefined;
-  const retellReady = !usesAgentDiscovery || whyNotYet === undefined;
-  /*
-   * **An unanswered platform is the first missing thing.** Without it there
-   * is no option, and `liveKitForm.ready` is then vacuously true — a submit
-   * gated on readiness alone would sit enabled in front of a form that has
-   * not asked its questions yet, and press into a silent return.
-   */
-  const canSubmit = option !== undefined && retellReady && liveKitForm.ready;
-  const submitWhy =
-    option === undefined
-      ? "Choose the platform this agent runs on."
-      : (whyNotYet ??
-        (liveKitForm.ready
-          ? undefined
-          : "Enter the exact LiveKit agent name, or choose automatic dispatch."));
+  async function resumeRetellMonitoring(): Promise<ConnectSheetResult | null> {
+    if (
+      agentId === undefined ||
+      agentId === NEW_AGENT ||
+      known?.platformAgentId === null ||
+      known?.platformAgentId === undefined
+    ) {
+      return null;
+    }
 
-  /**
-   * The picker's options: making one, plus every agent this screen has read.
-   *
-   * The chosen agent is added when the page behind does not hold it, so a deep
-   * link into an agent on the fourth page of the list still shows its own name
-   * rather than falling back to "Connect a new agent".
-   */
-  const choices: readonly AgentChoice[] = [
-    ...agents.map((one) => ({
-      id: one.id,
-      name: one.name,
-      platform: agentPlatformText(one),
-    })),
-    ...(chosenAgent !== NEW_AGENT && !agents.some((one) => one.id === chosenAgent)
-      ? [
-          known === null
-            ? { id: chosenAgent, name: "This agent", platform: null }
-            : {
-                id: chosenAgent,
-                name: known.name,
-                platform: agentPlatformLabel(known.agentPlatform),
-              },
-        ]
-      : []),
-  ];
-  const chosen = choices.find((one) => one.id === chosenAgent);
+    setSaving(true);
+    setRefused(null);
+    const answer = await platformAnswer(
+      startMonitoring(
+        {
+          projectId,
+          agentPlatform: "retell",
+          watch: [
+            {
+              agentId,
+              platformAgentId: known.platformAgentId,
+            },
+          ],
+        },
+        { client: platformClient },
+      ),
+    );
+    setSaving(false);
+    if (!finishAnswer(answer)) return null;
+
+    const watching = answer.value.watching.find(
+      (one) => one.agentId === agentId,
+    );
+    if (watching === undefined) {
+      const refusal = answer.value.refused.find(
+        (one) => one.platformAgentId === known.platformAgentId,
+      );
+      setRefused({
+        error: "monitoring_not_started",
+        message:
+          refusal?.message ??
+          "Egma did not start monitoring this agent. Try again.",
+      });
+      return null;
+    }
+
+    return { agentId, connectionId: null, created: false };
+  }
+
+  async function finishRetellVoice(): Promise<void> {
+    if (
+      goal === "" ||
+      selectedRetellAgent === undefined ||
+      selectedVoiceRoute === undefined
+    ) {
+      return;
+    }
+
+    const option = optionNamed(catalog, selectedVoiceRoute);
+    if (option === undefined) return;
+    const resumesStoredMonitoring =
+      goal === "monitoring" &&
+      storedRetellKey &&
+      agentId !== undefined &&
+      agentId !== NEW_AGENT &&
+      known?.platformAgentId === selectedRetellAgent.platformAgentId;
+    const result = resumesStoredMonitoring
+      ? await resumeRetellMonitoring()
+      : await saveConnection(
+          selectedRetellAgent.name,
+          connectionBody(
+            option,
+            selectedVoiceRoute,
+            plan?.pullWithConnection === true,
+          ),
+        );
+    if (result !== null) onConnected(result);
+  }
+
+  async function finishRetellChat(): Promise<void> {
+    if (
+      goal === "" ||
+      selectedRetellAgent === undefined ||
+      chatRoute === undefined
+    ) {
+      return;
+    }
+    const option = optionNamed(catalog, chatRoute);
+    if (option === undefined) return;
+    const result = await saveConnection(
+      selectedRetellAgent.name,
+      connectionBody(option, chatRoute, false),
+    );
+    if (result !== null) onConnected(result);
+  }
+
+  async function finishLiveKit(): Promise<void> {
+    if (goal === "" || livekitOption === undefined || !livekitReady) return;
+    if (completed !== null) {
+      transition("livekit-monitoring");
+      return;
+    }
+    const displayName = livekitAgentName.trim();
+    const result = await saveConnection(
+      displayName,
+      connectionBody(livekitOption),
+    );
+    if (result === null) return;
+    if (plan?.monitoringInstructions === true) {
+      setCompleted(result);
+      transition("livekit-monitoring");
+    } else {
+      onConnected(result);
+    }
+  }
+
+  async function continueFlow(): Promise<void> {
+    switch (step) {
+      case "goal":
+        if (goal !== "") transition("platform");
+        return;
+      case "platform":
+        if (goal !== "" && platform !== "") {
+          transition(stepAfterPlatform(goal, platform));
+        }
+        return;
+      case "retell-key":
+        await findRetellAgents();
+        return;
+      case "retell-agent":
+        if (selectedModality === null) return;
+        if (selectedModality === "voice") {
+          const first = voiceRoutes[0];
+          setRetellRoute(first === undefined ? "" : retellCandidateValue(first));
+        }
+        transition(stepAfterRetellAgent(selectedModality));
+        return;
+      case "retell-phone":
+        await finishRetellVoice();
+        return;
+      case "retell-chat":
+        if (goal === "monitoring") {
+          onClose();
+        } else {
+          await finishRetellChat();
+        }
+        return;
+      case "livekit-simulation":
+        await finishLiveKit();
+        return;
+      case "livekit-monitoring":
+        if (completed === null) onClose();
+        else onConnected(completed);
+        return;
+    }
+  }
 
   function body(): ReactNode {
-    /*
-     * **While the role is unknown there is no form.** A deep link opens this
-     * panel before the session read has answered, and a form drawn then is an
-     * enabled credential field in front of somebody Egma has not identified —
-     * who may turn out to be a viewer, and be told so only after they had
-     * pasted a key into it. The list gates its own Connect control the same
-     * way, for the same reason.
-     */
     if (role === null) return <Loading what="what you can do here" />;
     if (!mayAuthor) {
       return (
         <NotFound
-          message={`Your ${role} role cannot connect agents. Ask an organization admin to change your role, then try again.`}
+          message={
+            "Your " +
+            role +
+            " role cannot connect agents. Ask an organization admin to change your role, then try again."
+          }
         />
       );
     }
-    if (catalogRefused !== null) {
+
+    const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
+    if (needsKnown && knownStatus === "loading") {
+      return <Loading what="this agent's saved setup" />;
+    }
+    if (needsKnown && knownStatus === "missing" && knownRefused !== null) {
+      return <NotFound message={knownRefused.message} />;
+    }
+    if (needsKnown && knownStatus === "failed" && knownRefused !== null) {
+      return (
+        <Failure
+          title="Egma could not load this agent's saved setup."
+          message={knownRefused.message}
+          onRetry={() => setKnownAttempt((current) => current + 1)}
+        />
+      );
+    }
+
+    const needsCatalog =
+      step === "livekit-simulation" ||
+      step === "retell-phone" ||
+      (step === "retell-chat" && goal !== "monitoring");
+    if (needsCatalog && catalogRefused !== null) {
       return (
         <Failure
           title="Egma could not describe the connection options."
           message={catalogRefused.message}
-          onRetry={() => setAttempt((current) => current + 1)}
+          onRetry={() => setCatalogAttempt((current) => current + 1)}
         />
       );
     }
-    if (catalog === null) {
-      return <Loading what="the connection options" />;
-    }
-    /*
-     * A platform that is decided — bound to the agent, or chosen in the
-     * select — names its options. A decided platform whose options have not
-     * arrived is the loading state it always was; an undecided one is a form
-     * waiting on its first answer, and the sheet below draws that.
-     */
-    if (
-      selectedPlatform !== null &&
-      (option === undefined || liveKitForm.option === undefined)
-    ) {
+    if (needsCatalog && catalog === null) {
       return <Loading what="the connection options" />;
     }
 
-    return (
-      <>
-        {onboarding ? <AgentOnboardingProgress current="connection" /> : null}
-
-          {/*
-          * **Creation is last.** Reuse is the ordinary case, so the list reads
-          * as the agents this project already has with a way to make one under
-          * them (`I79-0`). Putting it first made a new agent the default answer
-          * to "which agent is this", which is how one vendor agent ends up
-          * registered twice.
-          */}
-        <Field label="Agent*" htmlFor="agent-choice">
-          <Menu
-            label="Agent*"
-            triggerId="agent-choice"
-            disabled={saving}
-            placement="below-start"
-            panelClassName="w-(--radix-popover-trigger-width) max-w-none"
-            triggerClassName={cn(
-              "flex min-h-(--control-lg) w-full min-w-0 cursor-pointer items-center gap-2 px-3",
-              "rounded-input border border-input bg-surface text-left text-base text-foreground",
-              "pointer-coarse:min-h-(--tap-target)",
-              "disabled:cursor-not-allowed disabled:opacity-60",
-            )}
-            trigger={
-              <>
-                {chosen === undefined ? (
-                  <span className="min-w-0 flex-1">Connect a new agent</span>
-                ) : (
-                  <AgentChoiceLabel name={chosen.name} platform={chosen.platform} />
-                )}
-                <ChevronDownIcon
-                  className="size-4 flex-none text-faint"
-                  aria-hidden="true"
-                  strokeWidth={1.75}
-                />
-              </>
-            }
-          >
-            {(close) => (
-              <>
-                {choices.map((one) => (
-                  <MenuItem
-                    key={one.id}
-                    selected={one.id === chosenAgent}
-                    onClick={() => {
-                      chooseAgent(one.id);
-                      close();
-                    }}
-                  >
-                    <AgentChoiceLabel name={one.name} platform={one.platform} />
-                  </MenuItem>
-                ))}
-                <MenuItem
-                  selected={chosenAgent === NEW_AGENT}
-                  onClick={() => {
-                    chooseAgent(NEW_AGENT);
-                    close();
-                  }}
-                >
-                  Connect a new agent
-                </MenuItem>
-              </>
-            )}
-          </Menu>
-        </Field>
-
-        {creating ? (
-          <SheetGroup eyebrow="New agent">
-            <Field label="Name*" htmlFor="agent-name">
-              <Input
-                aria-required="true"
-                id="agent-name"
-                value={agentName}
-                placeholder="Front desk"
-                aria-invalid={agentNameProblem !== null ? true : undefined}
-                aria-describedby={
-                  agentNameProblem === null ? undefined : "agent-name-problem"
-                }
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => {
-                  setAgentName(event.target.value);
-                  if (agentNameProblem !== null) setAgentNameProblem(null);
-                }}
+    switch (step) {
+      case "goal":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="What do you want Egma to do?"
+              description={
+                initialGoal === "monitoring"
+                  ? "Production monitoring is selected because you started from Traces. You can still change the goal."
+                  : undefined
+              }
+            />
+            <RadioGroup
+              className="gap-6"
+              aria-label="Setup goal"
+              value={goal}
+              onValueChange={(value) =>
+                chooseGoal(value as AgentSetupGoal)
+              }
+            >
+              <ChoiceCard
+                value="simulation"
+                title="Run simulations"
+                description="Test how the agent responds before production."
               />
-              {agentNameProblem === null ? null : (
-                <Problem id="agent-name-problem">{agentNameProblem}</Problem>
-              )}
-              <Help>Its name in Egma, and nowhere else.</Help>
-            </Field>
-            {platformField()}
-          </SheetGroup>
-        ) : null}
-
-        {/*
-          * **The Connection block exists once there is a platform question to
-          * hold.** While a new agent's platform is unanswered, the block would
-          * be an eyebrow over nothing — the select lives in the NEW AGENT
-          * group, and everything else here follows the answer.
-          */}
-        {creating && option === undefined ? null : (
-          <SheetGroup eyebrow="Connection">
-            {creating ? null : platformField()}
-            {configuration()}
-          </SheetGroup>
-        )}
-
-        {refused === null ? null : <Problem>{refused.message}</Problem>}
-        {submitWhy === undefined ? null : <Help id={whySaid}>{submitWhy}</Help>}
-        {onboarding ? (
-          <Help>
-            Without a connection, Egma cannot run a simulation against this
-            agent. You can add one later from Configuration.
-          </Help>
-        ) : null}
-      </>
-    );
-  }
-
-  /**
-   * Everything under the platform question, drawn once it has an answer.
-   *
-   * **The fields follow the platform** (developer decision, 2026-08-26):
-   * choosing Retell draws the key, the account's agents and the number;
-   * choosing LiveKit draws the room, the dispatch contract and the key pair.
-   * Before the answer there is nothing here — not a disabled copy of one
-   * platform's form, which is a set of questions Egma is not asking.
-   */
-  function configuration(): ReactNode {
-    const chosen = option;
-    const shape = liveKitForm.option;
-    if (chosen === undefined || shape === undefined) return null;
-    return (
-      <>
-          {chooseableModality ? (
-            <ModalityChoice
-              value={shownModality}
-              modalities={modalities}
-              disabled={saving}
-              onChange={chooseModality}
+              <ChoiceCard
+                value="monitoring"
+                title="Monitor production"
+                description="Monitor an agent in production"
+              />
+              <ChoiceCard
+                value="both"
+                title="Set up both"
+                description="Configure an agent for both testing and monitoring"
+              />
+            </RadioGroup>
+          </div>
+        );
+      case "platform":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro title="Choose your agent platform" />
+            <RadioGroup
+              className="gap-4"
+              aria-label="Agent platform"
+              value={platform}
+              onValueChange={(value) =>
+                choosePlatform(value as AgentSetupPlatform)
+              }
+            >
+              <ChoiceCard compact value="retell" title="Retell" />
+              <ChoiceCard compact value="livekit" title="LiveKit" />
+            </RadioGroup>
+          </div>
+        );
+      case "retell-key":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="Connect your Retell account"
+              description="Enter your Retell API key. Egma uses it to find the agents in this account."
             />
-          ) : (
-            <ModalityLine
-              modality={shownModality}
-              platform={selectedPlatform}
+            {storedRetellKey ? (
+              <InfoBox>
+                {"This agent already holds its Retell key (ending " +
+                  String(known?.monitoringApiKeyHint ?? "") +
+                  "). Egma will use it to find the account's agents."}
+              </InfoBox>
+            ) : (
+              <Field label="Retell API key*" htmlFor="retell-api-key">
+                <Input
+                  id="retell-api-key"
+                  aria-required="true"
+                  type="password"
+                  value={apiKey}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setApiKey(event.target.value);
+                    setRefused(null);
+                  }}
+                />
+              </Field>
+            )}
+          </div>
+        );
+      case "retell-agent":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="Choose a Retell agent"
+              description="Egma found these agents in your Retell account."
             />
-          )}
-
-          {modalityOptions.length > 1 ? (
-            <Field label="Access" htmlFor="access-variant">
-              <Select
-                id="access-variant"
-                value={chosen.accessVariant}
-                disabled={saving}
-                onChange={(event) => chooseOption(event.target.value)}
+            {retellAgents !== null && visibleRetellAgents.length === 0 ? (
+              <Empty
+                title={
+                  boundRetellPlatformAgentId === null
+                    ? "No Retell agents found"
+                    : "Connected Retell agent not found"
+                }
+                lead={
+                  boundRetellPlatformAgentId === null
+                    ? "This Retell account does not contain a voice or chat agent."
+                    : "Egma could not find the Retell agent already connected here in this account."
+                }
+              />
+            ) : (
+              <RadioGroup
+                aria-label="Retell agent"
+                value={retellAgentId}
+                onValueChange={(value) => {
+                  setRetellAgentId(value);
+                  setRetellRoute("");
+                }}
               >
-                {modalityOptions.map((one) => (
-                  <option key={one.accessVariant} value={one.accessVariant}>
-                    {one.accessVariantLabel}
+                {visibleRetellAgents.map((one) => {
+                  const modality = retellModality(one);
+                  const phones = one.connectionCandidates.filter(
+                    (candidate) => candidate.modality === "voice",
+                  ).length;
+                  const description =
+                    modality === "voice"
+                      ? "Voice agent · " +
+                        (phones === 0
+                          ? "no phone numbers available"
+                          : phones +
+                            (phones === 1
+                              ? " phone number available"
+                              : " phone numbers available"))
+                      : modality === "chat"
+                        ? "Chat agent · available for simulations"
+                        : "No supported connection available";
+                  return (
+                    <ChoiceCard
+                      key={one.platformAgentId}
+                      value={one.platformAgentId}
+                      title={one.name || one.platformAgentId}
+                      description={description}
+                      disabled={one.connectionCandidates.length === 0}
+                    />
+                  );
+                })}
+              </RadioGroup>
+            )}
+            <InfoBox>
+              Voice agents use a phone number. Chat agents connect through the
+              Retell Chat API.
+            </InfoBox>
+          </div>
+        );
+      case "retell-phone":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="Choose a phone number"
+              description={
+                "Retell already routes these numbers to " +
+                String(selectedRetellAgent?.name ?? "this agent") +
+                ". Choose the one Egma should use."
+              }
+            />
+            <Field label="Phone number*" htmlFor="retell-phone-number">
+              <Select
+                id="retell-phone-number"
+                aria-required="true"
+                value={retellRoute}
+                onChange={(event) => setRetellRoute(event.target.value)}
+              >
+                {voiceRoutes.map((candidate) => (
+                  <option
+                    key={retellCandidateValue(candidate)}
+                    value={retellCandidateValue(candidate)}
+                  >
+                    {candidate.config.phoneNumber}
                   </option>
                 ))}
               </Select>
             </Field>
-          ) : null}
-
-          <Field label="Connection name [optional]" htmlFor="connection-name">
-            <Input
-              id="connection-name"
-              value={name}
-              placeholder="A name for this connection"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => setName(event.target.value)}
+            <SummaryRows
+              rows={[
+                ["Retell agent", selectedRetellAgent?.name ?? ""],
+                [
+                  "Phone number",
+                  selectedVoiceRoute?.config.phoneNumber ?? "",
+                ],
+              ]}
             />
-            <Help>The label shown for this connection in Egma.</Help>
-          </Field>
-
-          {usesAgentDiscovery ? (
-            <RetellSetup
-              apiKey={discoveryKey}
-              asksForKey={asksForKey}
-              sealedKeyHint={sealedKeyHint}
-              agents={matchingAgents}
-              loaded={discoveredAgents !== null}
-              selectedAgent={discoveredAgentId}
-              modality={shownModality ?? "voice"}
-              discovering={discovering}
-              refusal={discoverRefused}
-              phoneNumber={draft.config["phoneNumber"] ?? ""}
-              needsPhoneNumber={needsPhoneNumber}
-              pullCalls={pullCalls}
-              agentName={namedAgent}
-              disabled={saving}
-              onKeyChange={(value) => {
-                setDiscoveryKey(value);
-                forgetDiscoveredAccount();
-                setDiscoverRefused(null);
-              }}
-              onAgentChange={(next) => {
-                setHandPicked(next);
-                setDiscoveredAgentId(next);
-              }}
-              onPhoneNumberChange={(phoneNumber) =>
-                setDraft((current) => ({
-                  ...current,
-                  config: { ...current.config, phoneNumber },
-                }))
-              }
-              onPullChange={setPullCalls}
-            />
-          ) : (
-            <ConnectionFields
-              option={shape}
-              draft={draft}
-              onChange={setDraft}
-              credentialsEditable
-              beforeCredentialFields={
-                !liveKitForm.enabled ? undefined : (
-                  <LiveKitDispatchSetup
-                    mode={liveKitForm.mode}
-                    agentName={liveKitForm.agentName}
-                    onModeChange={chooseLiveKitDispatch}
-                    onAgentNameChange={(agentName) =>
-                      setDraft((current) => ({
-                        ...current,
-                        config: { ...current.config, agentName },
-                      }))
-                    }
-                  />
-                )
+            <Help>
+              Egma reads this number from Retell. It does not change your Retell
+              routing.
+            </Help>
+          </div>
+        );
+      case "retell-chat":
+        if (goal === "simulation") {
+          return (
+            <div className="flex flex-col gap-5">
+              <StepIntro
+                title="Connect this chat agent for simulations"
+                description={
+                  "Egma can run simulations with " +
+                  String(selectedRetellAgent?.name ?? "this agent") +
+                  " through the Retell Chat API."
+                }
+              />
+              <SummaryRows
+                rows={[
+                  ["Retell agent", selectedRetellAgent?.name ?? ""],
+                  ["Connection", "Chat"],
+                ]}
+              />
+              <InfoBox>This connection is ready for simulation setup.</InfoBox>
+            </div>
+          );
+        }
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="Production monitoring needs a voice agent"
+              description={
+                String(selectedRetellAgent?.name ?? "This agent") +
+                " is a chat agent. Retell chat agents do not produce calls that Egma can monitor."
               }
             />
-          )}
-      </>
-    );
+            <SummaryRows
+              rows={[
+                ["Retell agent", selectedRetellAgent?.name ?? ""],
+                ["Connection", "Chat"],
+              ]}
+            />
+            <InfoBox title="Production monitoring needs a voice agent.">
+              {boundRetellPlatformAgentId !== null
+                ? goal === "both"
+                  ? "Set up simulations for this chat agent, then return to Agents and connect a Retell voice agent for monitoring."
+                  : "Return to Agents and connect a Retell voice agent to monitor production calls."
+                : goal === "both"
+                  ? "Choose a voice agent to set up monitoring, or continue with simulations only."
+                  : "Choose a Retell voice agent to monitor production calls."}
+            </InfoBox>
+            {boundRetellPlatformAgentId === null ? (
+              <Button
+                type="button"
+                size="lg"
+                variant="secondary"
+                onClick={() => {
+                  setRetellAgentId("");
+                  setRetellRoute("");
+                  transition("retell-agent");
+                }}
+              >
+                Choose a voice agent
+              </Button>
+            ) : null}
+          </div>
+        );
+      case "livekit-simulation":
+        return (
+          <LiveKitSimulationStep
+            option={livekitOption}
+            access={livekitAccess}
+            agentName={livekitAgentName}
+            draft={{
+              config: livekitConfig,
+              credentials: livekitCredentials,
+            }}
+            disabled={completed !== null}
+            onAccessChange={(value) => {
+              setLivekitAccess(value);
+              setLivekitConfig({});
+              setLivekitCredentials({});
+            }}
+            onAgentNameChange={setLivekitAgentName}
+            onDraftChange={(next) => {
+              setLivekitConfig(next.config);
+              setLivekitCredentials(next.credentials);
+            }}
+          />
+        );
+      case "livekit-monitoring":
+        return <LiveKitMonitoringInstructions projectId={projectId} />;
+    }
   }
 
-  /**
-   * The one select, drawn in whichever block owns the platform question.
-   *
-   * **Its first item is the question.** The select opens on "Choose a
-   * platform" and the connection's fields follow the answer, so nobody is
-   * shown one platform's questions before saying which platform they are on.
-   * The item is disabled because it is a question rather than an answer:
-   * once a platform is chosen, "none" is not a state a connection can hold.
-   * The label carries the `*` and the control carries `aria-required`, which
-   * is the label grammar every mandatory field in the product uses.
-   */
-  function platformField(): ReactNode {
-    if (platformFixed) return null;
-    return (
-      <Field label="Platform*" htmlFor="agent-platform">
-        <Select
-          aria-required="true"
-          id="agent-platform"
-          value={platformValue}
-          disabled={saving}
-          onChange={(event) => choosePlatform(event.target.value)}
-        >
-          <option value="" disabled>
-            Choose a platform
-          </option>
-          {OFFERED_PLATFORMS.flatMap((offered) => {
-            const one = agentPlatformChoices(catalog).find(
-              (choice) => choice.value === offered,
-            );
-            return one === undefined ? [] : [one];
-          }).map((one) => (
-            <option key={one.value} value={one.value}>
-              {one.label}
-            </option>
-          ))}
-        </Select>
-      </Field>
-    );
-  }
+  const primaryLabel =
+    step === "goal" || step === "platform" || step === "retell-agent"
+      ? "Continue"
+      : step === "retell-key"
+        ? discovering
+          ? "Finding agents…"
+          : "Find agents"
+        : step === "retell-phone"
+          ? saving
+            ? "Finishing…"
+            : goal === "simulation"
+              ? "Set up simulation"
+              : goal === "monitoring"
+                ? "Start monitoring"
+                : "Set up both"
+          : step === "retell-chat"
+            ? goal === "monitoring"
+              ? "Return to agents"
+              : saving
+                ? "Setting up…"
+                : "Set up simulation"
+            : step === "livekit-simulation"
+              ? saving
+                ? "Saving…"
+                : goal === "both"
+                  ? "Continue to monitoring"
+                  : "Save connection"
+              : "Return to agents";
 
-  /** The submit exists once Egma knows whose it would be, and not before. */
-  const usable = role !== null && mayAuthor;
+  const primaryDisabled =
+    saving ||
+    discovering ||
+    (step === "goal" && goal === "") ||
+    (step === "platform" && platform === "") ||
+    (step === "retell-key" && !keyReady) ||
+    (step === "retell-agent" && selectedModality === null) ||
+    (step === "retell-phone" &&
+      (selectedVoiceRoute === undefined || catalog === null)) ||
+    (step === "retell-chat" && goal !== "monitoring" && catalog === null) ||
+    (step === "livekit-simulation" && !livekitReady);
+
+  const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
+  const usable =
+    role !== null && mayAuthor && (!needsKnown || knownStatus === "ready");
 
   return (
     <Sheet
       open
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (next) return;
+        leave();
       }}
     >
       <SheetContent aria-describedby={undefined}>
-        {/*
-         * One `<form>` around the head, the fields and the footer, drawn as
-         * `display: contents` so the three keep their places as the panel's own
-         * flex children. It has to be one element: the submit is pinned to the
-         * bottom and the fields scroll above it, and a button outside the form
-         * is not the form's submit — Enter in a field would then do nothing.
-         */}
         <form
           className="contents"
-          data-slot="form"
           onSubmit={(event) => {
             event.preventDefault();
-            void connect();
+            void continueFlow();
           }}
         >
           <SheetHeader>
-            <SheetTitle>Connect an agent</SheetTitle>
+            <SheetTitle>Set up an agent</SheetTitle>
           </SheetHeader>
-          <SheetBody>{body()}</SheetBody>
+          <SheetBody ref={bodyRef}>
+            {refused === null ? null : (
+              <FormRefused message={refused.message} />
+            )}
+            {body()}
+          </SheetBody>
           {usable ? (
-            <SheetFooter>
+            <SheetFooter className="border-t border-border pt-5 [&>div:first-child]:w-full [&>div:first-child]:justify-between">
+              <Button
+                type="button"
+                size="lg"
+                variant="secondary"
+                disabled={saving || discovering}
+                onClick={step === "goal" ? leave : back}
+              >
+                {step === "goal" ? "Cancel" : "Back"}
+              </Button>
               <Button
                 type="submit"
                 size="lg"
-                disabled={saving || !canSubmit || catalog === null}
-                title={submitWhy}
-                aria-describedby={submitWhy === undefined ? undefined : whySaid}
+                disabled={primaryDisabled}
+                busy={saving || discovering}
               >
-                {saving ? "Connecting…" : "Connect agent"}
-              </Button>
-              <Button type="button" size="lg" variant="secondary" onClick={onClose}>
-                {onboarding ? "Finish without a connection" : "Cancel"}
+                {primaryLabel}
               </Button>
             </SheetFooter>
           ) : null}
@@ -1122,352 +1074,220 @@ export function ConnectAgentSheet({
   );
 }
 
-/** One agent the picker offers: its name, and where it already lives. */
-type AgentChoice = {
-  readonly id: string;
-  readonly name: string;
-  readonly platform: string | null;
-};
-
-/**
- * "remedy phase 1" in the product's text colour, then "Retell" faint beside it.
- *
- * The name is the answer to "which agent is this" and the platform is context
- * for it, so they are not drawn at the same weight. The row used to read
- * "remedy phase 1 · Retell" in one colour, where the platform argued with the
- * name for the first read of every option.
- *
- * **The name truncates and the platform does not.** A long name that pushed the
- * platform off the end would leave two agents of the same family looking
- * identical, which is the one thing the platform is there to prevent.
- *
- * The platform arrives already in a person's words, because an agent on two
- * platforms is named with both of them and the list column and this picker
- * must not word that answer differently.
- */
-function AgentChoiceLabel({
-  name,
-  platform,
+function StepIntro({
+  title,
+  description,
 }: {
-  readonly name: string;
-  readonly platform: string | null;
+  readonly title: string;
+  readonly description?: string;
 }) {
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-        {name}
-      </span>
-      {platform === null ? null : (
-        <span className="flex-none text-faint">{platform}</span>
+    <div className="flex flex-col gap-2">
+      <h3
+        className="m-0 text-lg leading-(--line-tight) font-medium text-foreground"
+        data-setup-heading
+        tabIndex={-1}
+      >
+        {title}
+      </h3>
+      {description === undefined ? null : (
+        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+          {description}
+        </p>
       )}
-    </span>
+    </div>
   );
 }
 
-/**
- * A named group of fields inside the sheet, under a letter-spaced eyebrow.
- *
- * **The grey box is gone.** The NEW AGENT block used to be drawn on the canvas
- * colour inside a hairline; the 2026-08-24 boards put its fields flush with
- * the rest of the panel (`I79-0`), so a group is now an eyebrow and the fields
- * under it, and nothing else.
- */
-function SheetGroup({
-  eyebrow,
+function ChoiceCard({
+  value,
+  title,
+  description,
+  disabled = false,
+  compact = false,
+}: {
+  readonly value: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly disabled?: boolean;
+  readonly compact?: boolean;
+}) {
+  return (
+    <RadioGroupItem
+      className={
+        compact
+          ? "group min-h-(--control-lg) items-center px-4 py-2"
+          : "group"
+      }
+      shape="card"
+      value={value}
+      disabled={disabled}
+    >
+      <RadioCardIndicator className={cn(!compact && "mt-1")} />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="text-base leading-(--line-normal) text-foreground">
+          {title}
+        </span>
+        {description === undefined ? null : (
+          <span className="text-sm leading-(--line-normal) text-faint">
+            {description}
+          </span>
+        )}
+      </span>
+    </RadioGroupItem>
+  );
+}
+
+function InfoBox({
+  title,
   children,
 }: {
-  readonly eyebrow: string;
+  readonly title?: string;
   readonly children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-3">
-      <p className="m-0 text-2xs tracking-(--tracking-label) text-faint uppercase">
-        {eyebrow}
+    <div className="flex flex-col gap-2 border-l-(length:--active-edge-width) border-brand bg-surface-soft p-4">
+      {title === undefined ? null : (
+        <p className="m-0 text-sm font-medium text-foreground">{title}</p>
+      )}
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        {children}
       </p>
-      <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
 }
 
-/**
- * Chat or Voice, when the platform genuinely offers both.
- *
- * **It is a radio group, not two buttons.** One of these is true and the other
- * is not, which is what a radio group means and what a screen reader announces;
- * two toggle buttons would let a reader believe both could be pressed. The
- * arrow keys move between the segments and only the chosen one is a tab stop,
- * which is the behaviour every operating system gives a radio group.
- *
- * **The chosen segment carries a two-pixel Ember line on its top edge**, over
- * a plain fill, plus weight 500 so the state is not colour alone (`DESIGN.md`,
- * developer decision 2026-08-24). The Ember Wash fill it used to wear is the
- * primary action's own surface, and a segment wearing it read as a button to
- * press rather than as the choice already made.
- */
-function ModalityChoice({
-  value,
-  modalities,
-  disabled,
-  onChange,
+function SummaryRows({
+  rows,
 }: {
-  readonly value: Modality | undefined;
-  readonly modalities: readonly Modality[];
-  readonly disabled: boolean;
-  readonly onChange: (next: Modality) => void;
+  readonly rows: readonly (readonly [string, string])[];
 }) {
-  function step(by: number): void {
-    const here = value === undefined ? 0 : modalities.indexOf(value);
-    const next = modalities[(here + by + modalities.length) % modalities.length];
-    if (next !== undefined) onChange(next);
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <p className="m-0 text-sm text-faint" id="modality-label">
-        Modality
-      </p>
-      <div
-        aria-labelledby="modality-label"
-        className="flex w-fit border border-border"
-        role="radiogroup"
-      >
-        {modalities.map((one, index) => (
-          <button
-            aria-checked={one === value}
-            className={cn(
-              "relative flex min-h-(--control-md) cursor-pointer items-center justify-center px-6",
-              "border-0 bg-transparent text-sm",
-              "transition-colors duration-(--duration-hover) ease-out",
-              "disabled:cursor-not-allowed disabled:opacity-55",
-              index > 0 && "border-l border-border",
-              /*
-               * The line is drawn by the segment rather than added as an
-               * element, so switching segments moves one painted edge instead
-               * of mounting and unmounting a bar.
-               */
-              "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:content-['']",
-              /*
-               * `bg-brand`, which is Ember. `accent` is the neutral quiet
-               * surface in this theme, so `bg-accent` drew the founder's
-               * two-pixel Ember line in grey — the state was there and the
-               * brand signal was not.
-               */
-              "before:origin-left before:bg-brand before:transition-[opacity,transform]",
-              "before:duration-(--duration-hover) before:ease-out",
-              "motion-reduce:before:transition-none",
-              one === value
-                ? "font-medium text-foreground before:scale-x-100 before:opacity-100"
-                : "text-muted-foreground before:scale-x-0 before:opacity-0 pointer-hover:text-foreground",
-            )}
-            disabled={disabled}
-            key={one}
-            onClick={() => onChange(one)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-                event.preventDefault();
-                step(1);
-              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-                event.preventDefault();
-                step(-1);
-              }
-            }}
-            role="radio"
-            tabIndex={one === value ? 0 : -1}
-            type="button"
-          >
-            {modalityLabel(one)}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The modality, said rather than offered, where the platform has only one.
- *
- * LiveKit is voice and nothing else. A two-way control there would offer a
- * choice the catalog does not hold, and a person who pressed the other half
- * would be told afterwards that it does not exist.
- */
-function ModalityLine({
-  modality,
-  platform,
-}: {
-  readonly modality: Modality | undefined;
-  readonly platform: string | null;
-}) {
-  if (modality === undefined) return null;
-  return (
-    <p className="m-0 flex flex-wrap items-baseline gap-2 text-sm">
-      <span className="text-faint">Modality</span>
-      <span className="text-foreground">{modalityLabel(modality)}</span>
-      {platform === null ? null : (
-        <span className="text-muted-foreground">
-          {`— ${modalityLabel(modality).toLowerCase()} by default on ${agentPlatformLabel(platform)}`}
-        </span>
-      )}
-    </p>
-  );
-}
-
-/**
- * The Retell half of the sheet: the key, the account it opens, the number Egma
- * dials, and whether this save also starts pulling production calls.
- *
- * **The key is asked for once per agent, ever.** An agent that already holds
- * one shows a line saying which key it holds and no field at all (`ICT-0`);
- * the account listing spends the sealed copy, which never leaves the server.
- *
- * **The listing is not a step.** It runs from the key, and the person picks
- * their agent by name. The Retell agent id is not typed anywhere and is not
- * shown anywhere: what a person knows their agent by is its name.
- */
-function RetellSetup({
-  apiKey,
-  asksForKey,
-  sealedKeyHint,
-  agents,
-  loaded,
-  selectedAgent,
-  modality,
-  discovering,
-  refusal,
-  phoneNumber,
-  needsPhoneNumber,
-  pullCalls,
-  agentName,
-  disabled,
-  onKeyChange,
-  onAgentChange,
-  onPhoneNumberChange,
-  onPullChange,
-}: {
-  readonly apiKey: string;
-  readonly asksForKey: boolean;
-  /** The last characters of the key this agent already holds, or null. */
-  readonly sealedKeyHint: string | null;
-  readonly agents: readonly DiscoveredAgent[];
-  readonly loaded: boolean;
-  readonly selectedAgent: string;
-  readonly modality: Modality;
-  readonly discovering: boolean;
-  readonly refusal: Refusal | null;
-  readonly phoneNumber: string;
-  readonly needsPhoneNumber: boolean;
-  readonly pullCalls: boolean;
-  /** Whose calls the checkbox would pull, named in its own label. */
-  readonly agentName: string;
-  readonly disabled: boolean;
-  readonly onKeyChange: (value: string) => void;
-  readonly onAgentChange: (value: string) => void;
-  readonly onPhoneNumberChange: (value: string) => void;
-  readonly onPullChange: (value: boolean) => void;
-}) {
-  const pulls = useId();
-  const spoken = modalityLabel(modality).toLowerCase();
-
-  return (
-    <>
-      {asksForKey ? (
-        <Field label="Retell API key*" htmlFor="retell-api-key">
-          <Input
-            aria-required="true"
-            id="retell-api-key"
-            value={apiKey}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={disabled}
-            onChange={(event) => onKeyChange(event.target.value)}
-          />
-        </Field>
-      ) : sealedKeyHint === null ? null : (
-        <p className="m-0 text-sm leading-(--line-normal) text-faint">
-          {`This agent already holds its Retell key (…${sealedKeyHint}). No key is asked again.`}
-        </p>
-      )}
-      {refusal === null ? null : <Problem>{refusal.message}</Problem>}
-
-      {/*
-       * The account, once it answers — and the panel travels in rather than
-       * appearing, so a section that was not there a moment ago explains where
-       * it came from. `DESIGN.md`'s popover pair is the shortest one that
-       * still explains an arrival.
-       */}
-      {!loaded ? null : agents.length === 0 ? (
-        <Empty
-          title={`No Retell ${spoken} agents on this account`}
-          lead="Switch the modality above, or use a key for the account that holds the agent you want to test."
-        />
-      ) : (
+    <dl className="m-0 flex flex-col border border-border">
+      {rows.map(([term, detail]) => (
         <div
-          className="flex flex-col gap-3"
-          data-slot="retell-account"
+          className="flex items-center justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0"
+          key={term}
         >
-          <Field
-            label={`Retell ${spoken} agent*`}
-            htmlFor="retell-agent"
-            hint={
-              asksForKey
-                ? "Loaded from your account with the key above."
-                : "Loaded from your account with the stored key."
-            }
-          >
-            <Select
-              aria-required="true"
-              id="retell-agent"
-              value={selectedAgent}
-              disabled={disabled}
-              onChange={(event) => onAgentChange(event.target.value)}
-            >
-              {agents.map((one) => (
-                <option key={one.platformAgentId} value={one.platformAgentId}>
-                  {one.name === "" ? one.platformAgentId : one.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          {!needsPhoneNumber ? null : (
-            <Field
-              label="Phone number*"
-              htmlFor="retell-phone-number"
-              hint="The number Egma calls in a simulation, like +15551234567."
-            >
-              <Input
-                aria-required="true"
-                className="font-mono"
-                id="retell-phone-number"
-                inputMode="tel"
-                value={phoneNumber}
-                placeholder="+15551234567"
-                autoComplete="off"
-                spellCheck={false}
-                disabled={disabled}
-                onChange={(event) => onPhoneNumberChange(event.target.value)}
-              />
-            </Field>
-          )}
-
-          {/*
-           * **Off by default, and it starts on this save.** Monitoring begins
-           * where the connection is made rather than on a screen of its own;
-           * the first switch-on brings the last 30 days with it.
-           */}
-          <div className="flex items-center gap-2.5">
-            <Checkbox
-              checked={pullCalls}
-              disabled={disabled}
-              id={pulls}
-              onChange={(event) => onPullChange(event.target.checked)}
-            />
-            <label className="cursor-pointer text-sm text-foreground" htmlFor={pulls}>
-              {`Pull production calls for ${agentName}`}
-            </label>
-          </div>
+          <dt className="text-sm text-faint">{term}</dt>
+          <dd className="m-0 text-sm text-foreground">{detail}</dd>
         </div>
+      ))}
+    </dl>
+  );
+}
+
+function LiveKitSimulationStep({
+  option,
+  access,
+  agentName,
+  draft,
+  disabled,
+  onAccessChange,
+  onAgentNameChange,
+  onDraftChange,
+}: {
+  readonly option: ConnectionOption | undefined;
+  readonly access: string;
+  readonly agentName: string;
+  readonly draft: Draft;
+  readonly disabled: boolean;
+  readonly onAccessChange: (value: string) => void;
+  readonly onAgentNameChange: (value: string) => void;
+  readonly onDraftChange: (draft: Draft) => void;
+}) {
+  const endpoint = access === TOKEN_ENDPOINT;
+  const presentedOption =
+    option === undefined
+      ? undefined
+      : {
+          ...option,
+          fields: option.fields
+            .filter((field) => field.key !== "agentName")
+            .map((field) =>
+              field.key === "url"
+                ? { ...field, label: "WebSocket URL" }
+                : field,
+            ),
+          credentialFields: option.credentialFields.map((field) => {
+            if (field.field === "apiKey") {
+              return { ...field, label: "API key" };
+            }
+            if (field.field === "apiSecret") {
+              return { ...field, label: "API secret" };
+            }
+            if (field.field === "headers") {
+              return {
+                ...field,
+                help:
+                  "Enter a non-empty JSON object that maps each header name to a non-empty string value.",
+              };
+            }
+            return field;
+          }),
+        };
+  return (
+    <div className="flex flex-col gap-5">
+      <StepIntro
+        title="Connect LiveKit for simulations"
+        description={
+          endpoint
+            ? "Egma requests a short-lived room token from your endpoint for every simulation."
+            : undefined
+        }
+      />
+      <Field label="Connection type*" htmlFor="livekit-connection-type">
+        <Select
+          id="livekit-connection-type"
+          aria-required="true"
+          value={access}
+          disabled={disabled}
+          onChange={(event) => onAccessChange(event.target.value)}
+        >
+          <option value={PROJECT_CREDENTIALS}>Project credentials</option>
+          <option value={TOKEN_ENDPOINT}>Token endpoint</option>
+        </Select>
+      </Field>
+
+      <Field
+        label="LiveKit agent name*"
+        htmlFor="livekit-agent-name"
+        hint={
+          endpoint
+            ? "This names the agent in Egma. Your token endpoint decides which deployed worker joins the room."
+            : "Enter the exact agent name shown in your LiveKit Cloud dashboard."
+        }
+      >
+        <Input
+          id="livekit-agent-name"
+          aria-required="true"
+          value={agentName}
+          placeholder="your-livekit-agent-name"
+          disabled={disabled}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => onAgentNameChange(event.target.value)}
+        />
+      </Field>
+      {presentedOption === undefined ? (
+        <Problem>Egma could not find this LiveKit connection method.</Problem>
+      ) : (
+        <ConnectionFields
+          option={presentedOption}
+          draft={draft}
+          onChange={onDraftChange}
+          credentialsEditable
+          disabled={disabled}
+          configPlaceholders={{
+            url: "wss://your-project.livekit.cloud",
+            tokenEndpoint: "https://api.example.com/livekit/token",
+            metadata: '{"tenant":"acme"}',
+          }}
+          credentialPlaceholders={{
+            headers: '{"Authorization":"Bearer your-token"}',
+          }}
+        />
       )}
-    </>
+    </div>
   );
 }

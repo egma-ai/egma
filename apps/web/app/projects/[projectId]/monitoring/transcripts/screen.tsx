@@ -14,7 +14,6 @@ import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
 import {
   AGENT_PARAMETER,
   MONITOR_SHEET,
-  monitorAgentPath,
   SHEET_PARAMETER,
 } from "../../../../../lib/monitoring.ts";
 import {
@@ -64,7 +63,7 @@ import {
   useShellSession,
 } from "../../../../../ui/shell.tsx";
 import { RowMenu } from "../../../../../ui/row-menu.tsx";
-import { MonitorAgentSheet } from "../monitor-sheet.tsx";
+import { monitoringSetupPath } from "../setup-path.ts";
 import { TraceSheet, type OpenTrace } from "./trace-sheet.tsx";
 
 /**
@@ -154,17 +153,13 @@ function traceFreeAddress(address: URL): string {
  * a page file — and the convention it was breaking is the reason there is a
  * convention.
  *
- * Two addresses render it: the transcripts list, and the retired
- * Start-monitoring address, which passes `forced` because the address it *is*
- * names the panel outright.
+ * The retired Start-monitoring address now forwards to the Agents-owned setup
+ * flow. This screen keeps no second setup panel.
  */
 export function TranscriptsScreen({
   projectId,
-  forced,
 }: {
   readonly projectId: string;
-  /** The picker a route insists on, whatever the query string says. */
-  readonly forced?: { readonly agentId: string | null };
 }) {
   const router = useRouter();
   const query = useSearchParams();
@@ -550,65 +545,46 @@ export function TranscriptsScreen({
     </Select>
   );
 
-  /**
-   * Whether the picker is open, and which agent a link named for it.
-   *
-   * **Which panel is open is in the address, and nowhere else.** That is the
-   * whole of the blanket rule here: the action is a link to this same path with
-   * `sheet=monitor` on it, so opening reloads nothing, Back closes it, and a
-   * copied link reopens it. A route that names the panel outright — the retired
-   * Start-monitoring address — wins over the query, because that address *is*
-   * the panel.
+  /*
+   * A copied legacy `sheet=monitor` link cannot reopen the retired picker.
+   * It forwards to the same Agents-owned flow as the visible action and keeps
+   * an agent the old link named.
    */
-  const monitoring =
-    forced !== undefined || query.get(SHEET_PARAMETER) === MONITOR_SHEET;
-  const askedFor = forced?.agentId ?? query.get(AGENT_PARAMETER);
-
-  /**
-   * Close by taking the sheet out of the address and leaving everything else in
-   * it — the chosen window above all, which this page keeps in the address of
-   * its own accord. Replaced rather than pushed, so Back still means the page
-   * before this one rather than the sheet again.
-   */
-  function closeSheet(): void {
-    const asked = new URLSearchParams(globalThis.location.search);
-    asked.delete(SHEET_PARAMETER);
-    asked.delete(AGENT_PARAMETER);
-    const rest = asked.toString();
-    const home = transcriptsPath(projectId);
-    router.replace(rest === "" ? home : `${home}?${rest}`);
-  }
-
-  /**
-   * The address the action points at: **this one, whole.**
-   *
-   * The router's query plus the window this page keeps in the address itself.
-   * The window is written with `history.replaceState`, which the router's own
-   * hook never sees, so merging the page's settled choice back in is what stops
-   * the sheet from throwing away a widened window on its way open.
-   */
-  const here = new URLSearchParams(query.toString());
-  if (choice !== null) here.set(WINDOW_PARAMETER, choice);
+  const legacySetup = query.get(SHEET_PARAMETER) === MONITOR_SHEET;
+  const legacyAgentId = query.get(AGENT_PARAMETER);
+  const replace = router.replace;
+  useEffect(() => {
+    if (!legacySetup) return;
+    replace(
+      monitoringSetupPath(
+        projectId,
+        legacyAgentId === null ? undefined : legacyAgentId,
+      ),
+    );
+  }, [legacyAgentId, legacySetup, projectId, replace]);
 
   /**
    * The one action this screen offers, and the same control wherever it sits.
    *
+   * **Agents owns setup.** This page only states the user's goal. The address
+   * opens Connect agent on Agents with Monitoring selected, so first setup and
+   * later setup use one provider-specific flow instead of two forms that can
+   * disagree.
+   *
    * **One page for every role, and the control that changes data is disabled
-   * rather than removed.** Starting monitoring is `configure_monitoring`, which
-   * a viewer does not have — the server refuses them either way, and that is
-   * where the boundary actually is, but finding out after typing a Retell key
-   * into a form is a poor way to be told. So a viewer sees what egma can do
-   * here and is told plainly that this part is not theirs.
+   * rather than removed.** Setup requires `configure_monitoring`, which a
+   * viewer does not have. A viewer sees what egma can do here and is told
+   * plainly that this part is not theirs.
    *
    * **While the role is unknown there is no control at all.** A disabled one
    * would have to say why, and every sentence it could say would be a claim
    * about somebody egma has not identified yet.
    */
-  const whyNotMonitor = `Your ${String(role)} role cannot start monitoring. Ask an organization admin to change your role.`;
-  const monitorAnAgent =
+  const whyNotMonitor = `Your ${String(role)} role cannot set up monitoring. Ask an organization admin to change your role.`;
+  const setUpMonitoring =
     role === null ? undefined : mayAuthor ? (
       <Button asChild>
-        <Link href={monitorAgentPath(projectId, here)}>{LIST.monitorAgent}</Link>
+        <Link href={monitoringSetupPath(projectId)}>{LIST.monitorAgent}</Link>
       </Button>
     ) : (
       <Button type="button" disabled why={whyNotMonitor}>
@@ -625,7 +601,11 @@ export function TranscriptsScreen({
         which project it belongs to, and the table under it says what it holds.
         The purpose sentence stays where a form needs one.
       */}
-      <PageHeader title={LIST.title} toolbar={filters} action={monitorAnAgent} />
+      <PageHeader
+        title={LIST.title}
+        toolbar={filters}
+        action={quiet === "set-up-capture" ? undefined : setUpMonitoring}
+      />
       <PageBody>
         {state.status === "failed" ? (
           <Failure
@@ -648,7 +628,7 @@ export function TranscriptsScreen({
           />
         ) : null}
 
-        {quiet === "set-up-capture" ? <SetUp action={monitorAnAgent} /> : null}
+        {quiet === "set-up-capture" ? <SetUp action={setUpMonitoring} /> : null}
 
         {quiet === "key-names-the-organization" ? (
           <Empty
@@ -698,29 +678,6 @@ export function TranscriptsScreen({
           </>
         ) : null}
       </PageBody>
-
-      {monitoring ? (
-        <MonitorAgentSheet
-          projectId={projectId}
-          askedFor={askedFor}
-          /*
-           * The gate travels with the panel. A viewer who opens the address
-           * directly — a copied link, a bookmark — reaches the sheet, so the
-           * sheet has to be the thing that refuses rather than the button that
-           * usually opens it.
-           */
-          role={role}
-          mayAuthor={mayAuthor}
-          whyNot={whyNotMonitor}
-          onClose={closeSheet}
-          /*
-           * Something started pulling, so this list is stale: the thirty-day
-           * import the first switch-on runs lands behind it. Asking again is
-           * the whole of the refresh — the read is the page.
-           */
-          onStarted={() => setAttempt((one) => one + 1)}
-        />
-      ) : null}
 
       {openedTrace === null ? null : (
         <TraceSheet

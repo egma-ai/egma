@@ -750,7 +750,7 @@ function GradeSummary({
         />
         <Fact
           className={GRADE_FACT}
-          label="Combined score"
+          label="Total avg score"
           value={shownScore(combinedScore)}
         />
         <Fact
@@ -760,7 +760,7 @@ function GradeSummary({
         />
       </div>
       <p className="mt-3 mb-0 max-w-[72ch] text-sm text-muted-foreground">
-        The combined score is the arithmetic mean of all selected grader scores.
+        Total avg score is the arithmetic mean of all selected grader scores.
         It is not a pass or fail result.
       </p>
       {grades.length === 0 ? (

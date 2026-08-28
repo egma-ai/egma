@@ -67,7 +67,7 @@ export type DiscoverAgentsErrors = {
     /**
      * The request was refused.
      */
-    500: Refusal;
+    503: Refusal;
 };
 
 export type DiscoverAgentsError = DiscoverAgentsErrors[keyof DiscoverAgentsErrors];
@@ -80,6 +80,10 @@ export type DiscoverAgentsResponses = {
         agents: Array<{
             platformAgentId: string;
             name: string;
+            /**
+             * The modality Retell reports for this agent, including when no supported connection candidate is available yet.
+             */
+            modality: 'chat' | 'voice';
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
                 connectionType: 'retell_chat_api' | 'phone_number';
@@ -203,9 +207,11 @@ export type ListAgentsResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -332,9 +338,11 @@ export type RegisterAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -375,9 +383,11 @@ export type RegisterAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -459,9 +469,11 @@ export type GetAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -556,9 +568,11 @@ export type UpdateAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -741,9 +755,11 @@ export type ArchiveAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -818,9 +834,11 @@ export type RestoreAgentResponses = {
             name: string;
             agentPlatform: 'retell' | 'livekit';
             platformAgentId: string | null;
+            retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
@@ -2566,7 +2584,10 @@ export type DiscoverRetellVoiceAgentsResponse = DiscoverRetellVoiceAgentsRespons
 export type StartMonitoringData = {
     body: {
         agentPlatform: 'retell';
-        apiKey: string;
+        /**
+         * A Retell key for new agents. It may be omitted only when every watch entry names an existing agent that already stores its monitoring key.
+         */
+        apiKey?: string;
         watch: Array<{
             platformAgentId: string;
             name?: string;

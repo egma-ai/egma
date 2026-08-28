@@ -6,6 +6,7 @@ import {
   createAgent,
   archiveAgent,
   enablePullProductionCalls,
+  getAgent,
   getConnection,
   listAgents,
   listConnections,
@@ -432,6 +433,50 @@ describe("which platform a connection belongs to", () => {
       agentPlatform: "retell",
       productLabel: "Retell phone",
     });
+  });
+});
+
+describe("the agent's durable Retell modality", () => {
+  it("keeps archived Chat history and lets Voice win", async () => {
+    const agentId = await agentNamed("Retell history");
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBeNull();
+
+    const chat = await addConnection(
+      actingAsAcme(),
+      agentId,
+      retellConnection({ name: "chat" }),
+    );
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("chat");
+
+    await archiveConnection(actingAsAcme(), agentId, chat?.id ?? "");
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("chat");
+
+    const voice = await addConnection(actingAsAcme(), agentId, {
+      name: "phone",
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("voice");
+
+    await archiveConnection(actingAsAcme(), agentId, voice?.id ?? "");
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("voice");
+  });
+
+  it("does not treat a LiveKit phone path as Retell Voice", async () => {
+    const agentId = await agentNamed("LiveKit phone history", "livekit");
+    await addConnection(actingAsAcme(), agentId, {
+      name: "phone",
+      agentPlatform: "livekit",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234568" },
+    });
+
+    expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBeNull();
   });
 });
 

@@ -21,8 +21,8 @@ export const RETELL_API = "https://api.retellai.com";
 /** How many agents one listing request asks for. */
 const PAGE_SIZE = 1000;
 
-/** Where following pagination stops, so a bad answer cannot loop forever. */
-const MAX_PAGES = 20;
+/** A provider must finish a listing before it can hold this process forever. */
+const MAX_PAGES = 100;
 
 /** Where Retell is, and what talks to it. */
 export type RetellReach = {
@@ -221,6 +221,7 @@ function agentFrom(row: unknown): RetellAgent | null {
 export async function listAgents(key: RetellCredential, reach: RetellReach = {}): Promise<ListedAgents> {
   const agents: RetellAgent[] = [];
   let paginationKey: string | undefined;
+  const seenPaginationKeys = new Set<string>();
 
   try {
     for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -239,14 +240,30 @@ export async function listAgents(key: RetellCredential, reach: RetellReach = {})
       }
 
       const held = parsed(answer);
-      const items = Array.isArray(held["items"]) ? (held["items"] as unknown[]) : [];
-      for (const row of items) {
+      const rows = held["items"];
+      const hasMore = held["has_more"];
+      if (!Array.isArray(rows) || typeof hasMore !== "boolean") {
+        return {
+          kind: "refused",
+          reason: "Retell answered a malformed agent page.",
+        };
+      }
+      for (const row of rows) {
         const agent = agentFrom(row);
         if (agent !== null) agents.push(agent);
       }
 
       const next = plain(held["pagination_key"]);
-      if (held["has_more"] !== true || next === "") break;
+      if (!hasMore) {
+        return { kind: "agents", agents };
+      }
+      if (next === "" || seenPaginationKeys.has(next)) {
+        return {
+          kind: "refused",
+          reason: "Retell answered an agent page without a new cursor.",
+        };
+      }
+      seenPaginationKeys.add(next);
       paginationKey = next;
     }
   } catch (cause) {
@@ -256,7 +273,10 @@ export async function listAgents(key: RetellCredential, reach: RetellReach = {})
     throw cause;
   }
 
-  return { kind: "agents", agents };
+  return {
+    kind: "refused",
+    reason: "Retell answered too many agent pages.",
+  };
 }
 
 /** A listed number, or `null` for a row that is not one. */
@@ -294,7 +314,6 @@ export async function listNumbers(
   const numbers: RetellNumber[] = [];
   let paginationKey: string | undefined;
   const seenPaginationKeys = new Set<string>();
-  let complete = false;
 
   try {
     for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -333,8 +352,7 @@ export async function listNumbers(
 
       const next = plain(held["pagination_key"]);
       if (!hasMore) {
-        complete = true;
-        break;
+        return { kind: "numbers", numbers };
       }
       if (next === "" || seenPaginationKeys.has(next)) {
         return {
@@ -352,14 +370,10 @@ export async function listNumbers(
     throw cause;
   }
 
-  if (!complete) {
-    return {
-      kind: "refused",
-      reason: "Retell answered too many phone-number pages.",
-    };
-  }
-
-  return { kind: "numbers", numbers };
+  return {
+    kind: "refused",
+    reason: "Retell answered too many phone-number pages.",
+  };
 }
 
 /**

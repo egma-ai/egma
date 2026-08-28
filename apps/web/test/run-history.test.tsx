@@ -526,14 +526,18 @@ describe("one run after suites", () => {
       name: "Simulation summary",
     });
     for (const label of [
-      "Combined score",
+      "Total avg score",
       "Duration",
       "Total turns",
       "P90 turn latency",
     ]) {
       expect(within(simulationSummary).getByText(label)).toBeTruthy();
     }
-    expect(within(simulationSummary).getByText("Not recorded")).toBeTruthy();
+    expect(within(simulationSummary).getByText("-")).toBeTruthy();
+    expect(within(simulationSummary).queryByText("Not available")).toBeNull();
+    expect(within(simulationSummary).getByText("Not recorded").className).toContain(
+      "sr-only",
+    );
     expect(
       simulationSummary.compareDocumentPosition(expected) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -586,7 +590,9 @@ describe("one run after suites", () => {
     expect(within(table).getByText("Finds and confirms the appointment")).toBeTruthy();
     expect(within(table).getByText("Waiting for the grader.")).toBeTruthy();
     expect(within(table).getByRole("columnheader", { name: "Total Score" })).toBeTruthy();
-    expect(within(expected).getByText("Total Score —")).toBeTruthy();
+    expect(within(table).getByText("-")).toBeTruthy();
+    expect(within(expected).getByText("Total Score -")).toBeTruthy();
+    expect(within(expected).queryAllByText(/—/u)).toHaveLength(0);
   });
 
   it("shows partial-transcript disclosure before the recorded conversation", async () => {
@@ -622,7 +628,7 @@ describe("one run after suites", () => {
     const read = simulationEvidence();
     const older = {
       ...read.grades[0],
-      score: 0.5,
+      score: null,
       result: "failed",
       gradedAt: "2026-08-21T09:01:00.000Z",
     };
@@ -669,7 +675,9 @@ describe("one run after suites", () => {
     expect(screen.queryByRole("region", { name: "Frozen grading plan" })).toBeNull();
     const history = screen.getByText("1 earlier grade");
     fireEvent.click(history);
-    expect(within(history.closest("details")!).getByText(/score 0.5/iu)).toBeTruthy();
+    const historyDetails = within(history.closest("details")!);
+    expect(historyDetails.getByText(/score -$/iu)).toBeTruthy();
+    expect(historyDetails.queryAllByText(/—/u)).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Regrade" }));
     const dialog = screen.getByRole("dialog", { name: "Regrade “Books service”?" });
@@ -805,6 +813,27 @@ describe("one run after suites", () => {
     expect(await screen.findByText("No grading was requested")).toBeTruthy();
     expect(screen.queryByText("No score")).toBeNull();
     expect(screen.queryByText(/capabilit/u)).toBeNull();
+
+    const summary = screen.getByRole("region", { name: "Simulation summary" });
+    expect(within(summary).getAllByText("-")).toHaveLength(2);
+    expect(within(summary).queryByText("Not available")).toBeNull();
+    expect(within(summary).getAllByText("Not recorded")).toHaveLength(2);
+    for (const meaning of within(summary).getAllByText("Not recorded")) {
+      expect(meaning.className).toContain("sr-only");
+    }
+
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript & audio" }));
+    const conversationHeading = await screen.findByRole("heading", {
+      name: "Conversation",
+    });
+    const conversation = conversationHeading.closest("section");
+    expect(conversation).not.toBeNull();
+    expect(within(conversation!).getByText("-")).toBeTruthy();
+    expect(within(conversation!).getByText("No conversation recorded")).toBeTruthy();
+    expect(within(conversation!).queryByText("Nothing was said")).toBeNull();
+    expect(
+      within(conversation!).queryByText("Egma filed no spoken turns for this simulation."),
+    ).toBeNull();
   });
 
   it("does not expose a raw failure reason when older evidence has no detail", async () => {
