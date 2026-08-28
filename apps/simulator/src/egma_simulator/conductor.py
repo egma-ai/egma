@@ -217,6 +217,24 @@ class _EvidenceRecorder(AudioBufferProcessor):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        # Pipecat's recorder clears its resampler after 0.2s of *wall-clock*
+        # quiet, to keep stale history out of audio that really did pause.
+        # This recorder must not: the map from a turn's source time to its
+        # place in the recording is read out of that same resampler's
+        # `delay()`, and a clear discards samples the delay had accounted
+        # for. The map then carries a hole, and a turn boundary landing in
+        # it cannot be placed at all — which is a SpeechFault and a failed
+        # simulation, over audio the recording actually holds.
+        #
+        # The trigger is wall-clock, not conversation: a loaded machine
+        # deschedules this process past 0.2s between two frames of one
+        # continuous utterance. Nothing paused; only the CPU did.
+        #
+        # `None` is Pipecat's own documented answer — its docstring
+        # recommends it "for telephony providers that have irregular gaps
+        # between chunks", which is this case exactly, and the artefact it
+        # protects against needs a real silence to appear across.
+        self._input_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
         self._recording_ready = asyncio.Condition()
         self._resampled_input: dict[int, tuple[int, float]] = {}
         self._processed_source_end = Fraction(0)
