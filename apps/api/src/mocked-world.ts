@@ -1,6 +1,7 @@
 import {
   agentMonitoringKey,
   cancelRun,
+  claimMockedWorldFor,
   connectionTypeTakesMockedWorld,
   getAgent,
   outstandingMockedWorlds,
@@ -72,29 +73,17 @@ export type MockedWorldReach = {
  */
 const STALE_BUILD_MILLISECONDS = 15 * 60 * 1000;
 
-/**
- * The world a run wears while it is still building one.
- *
- * Written before the first read so a run that dies mid-build is visible to the
- * sweep. `servingVersion` is not known yet — the build reads it — and the build's
- * own first record replaces this whole marker within a moment. Its null draft
- * keeps the claim gate shut and marks it "nothing branched, nothing pinned", so
- * a sweep of a crashed one has nothing to tear down and only a stuck run to
- * cancel.
- */
-const BUILDING_MARKER: MockedWorld = {
-  servingVersion: 0,
-  draftVersion: null,
-  engine: { type: "", engineId: "", version: null },
-  numbers: [],
-  coverage: { mocked: [], notInterceptable: [], notInThisVersion: [] },
-};
-
 export type MockedWorldOutcome =
   | { readonly kind: "built" }
   /** This run mocks nothing, which is what most runs do. */
   | { readonly kind: "not-mocked" }
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string }
+  /**
+   * Another run of this agent already holds its one mocked world. Its own
+   * refusal, because the next move is different from every other one here:
+   * nothing is misconfigured and nothing needs fixing — wait for that run.
+   */
+  | { readonly kind: "in-use"; readonly reason: string };
 
 function credential(apiKey: string): RetellCredential {
   return { reveal: () => apiKey };
@@ -174,19 +163,36 @@ export async function buildRunMockedWorld(
   }
   const key = credential(apiKey);
 
-  // A marker, written before the first read.
+  // **This agent's one mocked world, claimed — or refused because another run
+  // holds it.**
   //
-  // A run that dies here — between being created and the build's first record —
-  // would otherwise leave a null `mockedWorld` that the sweep never sees, so its
-  // simulations, which are unclaimable until a draft exists, would sit queued
-  // forever. The marker makes the run visible: the next sweep finds it pending
-  // with no draft and cancels it. It keeps the claim gate shut (its
-  // `draftVersion` is null), and the build's own first record overwrites it a
-  // moment later.
-  await recordMockedWorld(auth, run.id, BUILDING_MARKER);
+  // Two mocked runs of one agent overlapping is a hijack rather than a queue:
+  // one run's teardown restores a `latest` binding it captured, while the
+  // other's freshly branched draft is what `latest` now resolves to, and real
+  // callers reach a mocked agent. Delete-before-restore protects a run from its
+  // own draft and cannot see another's, so the overlap itself is what is
+  // refused. `claimMockedWorldFor` decides it under an advisory lock keyed on
+  // the agent, so two runs starting together serialize and exactly one builds.
+  //
+  // The claim writes the building marker, which is also what makes this run
+  // visible to a later sweep: a run that dies between here and the build's
+  // first record would otherwise leave a null `mockedWorld` no sweep ever sees,
+  // and its simulations — unclaimable until a draft exists — would sit queued
+  // forever.
+  const claim = await claimMockedWorldFor(auth, {
+    runId: run.id,
+    agentId: run.agentId,
+    staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
+  });
+  if (claim.kind === "taken") {
+    return await refuseInUse(auth, run, claim.byRunId, log);
+  }
 
-  // The sweep, before anything new is made. Litter from a crashed run is
-  // cleared while it is still only litter.
+  // The sweep, before anything new is made. Litter from a crashed or finished
+  // run is cleared while it is still only litter — and, critically, **before
+  // this run branches**: a finished run's outstanding pin is restored while no
+  // draft of this run's exists yet, so that restore can never resolve `latest`
+  // onto something this run minted.
   await settleMockedWorlds(auth, run.agentId, reach, log, { exceptRunId: run.id });
 
   const built = await buildMockedWorld(
@@ -360,4 +366,44 @@ async function refuseRun(
   // forever looking like a slow queue.
   await cancelRun(auth, run.id).catch(() => undefined);
   return { kind: "refused", reason };
+}
+
+/**
+ * Another run of this agent holds its one mocked world.
+ *
+ * **Nothing was written to the platform**: the claim is refused before the
+ * builder reaches Retell, so this run branched nothing, pinned nothing, and
+ * leaves nothing behind. Its own sentence, because the next move is not a fix —
+ * it is to wait for the other run and start again.
+ */
+async function refuseInUse(
+  auth: AuthContext,
+  run: Run,
+  byRunId: string,
+  log: { error: (payload: unknown, message?: string) => void },
+): Promise<MockedWorldOutcome> {
+  const reason =
+    `Run ${byRunId} is already running against this agent with mock tools on, ` +
+    "and Egma builds one mocked world per agent at a time. Two at once cannot " +
+    "be made safe: each run puts the agent's phone routing back as it found " +
+    "it, and the other run's temporary version would be what that routing " +
+    "then points at — so a real caller would reach a test version. Wait for " +
+    `run ${byRunId} to finish, then start this one again.`;
+  log.error(
+    platformEvent(
+      "egma.mocked_world.agent_in_use",
+      "a mocked run was refused because another run holds the agent's mocked world",
+      {
+        "egma.run_id": run.id,
+        "egma.agent_id": run.agentId,
+        "egma.holding_run_id": byRunId,
+        "error.type": "mocked_world_in_use",
+      },
+    ),
+    reason,
+  );
+  // Canceled for the same reason a build failure is: its simulations are
+  // unclaimable, so a run left alone would wait forever looking like a queue.
+  await cancelRun(auth, run.id).catch(() => undefined);
+  return { kind: "in-use", reason };
 }

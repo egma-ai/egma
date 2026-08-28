@@ -61,6 +61,7 @@ import {
   type ToolCoverageClasses,
 } from "../mock-tools/coverage.ts";
 import {
+  MOCKED_WORLD_BUILDING,
   mockedWorldFrom,
   mockedWorldRow,
   type MockedWorld,
@@ -1106,6 +1107,113 @@ export async function recordMockedWorld(
     .returning({ id: run.id });
   if (updated === undefined) return undefined;
   return getRun(auth, runId);
+}
+
+export type MockedWorldClaim =
+  | { readonly kind: "claimed" }
+  /** Another run of this agent holds the one mocked world. */
+  | { readonly kind: "taken"; readonly byRunId: string };
+
+/**
+ * Claim this agent's **one** mocked world for this run, or say who holds it.
+ *
+ * ## Why one at a time
+ *
+ * Two mocked runs of one agent overlapping is not a slow path — it is a hijack.
+ * Run one pins a number riding `latest` to numeric version V and records the
+ * verbatim `latest` binding it must put back. Run two then starts, reads that
+ * number as *numeric* — a safe verdict, no pin needed — and branches its own
+ * draft. Run one finishes and restores `latest`, exactly as it promised. But
+ * run two's draft still exists and, being the most recently minted version, is
+ * what `latest` now resolves to: every real caller reaches a mocked agent.
+ *
+ * Delete-before-restore protects a run from **its own** draft and cannot see
+ * another run's. So the overlap itself is what is refused, and this is the one
+ * place that decides it.
+ *
+ * ## What blocks, and what does not
+ *
+ * A run of this agent blocks while it holds a mocked world **and has not
+ * finished and is not stale**: still building (the marker), built (a draft), or
+ * torn down but for a pin still outstanding.
+ *
+ * A **finished** run never blocks, whatever it left behind — its litter is the
+ * sweep's job, and the caller sweeps before it branches, so a finished run's
+ * pin is restored before this run mints anything. A **stale** run — pending,
+ * still holding no draft, and older than the build window — never blocks
+ * either: its process died mid-build and it is swept, not waited for. The
+ * caller owns that window and passes it, so the sweep and this check cannot
+ * disagree about which runs are alive.
+ *
+ * ## The lock
+ *
+ * A check without a lock is a time-of-check-to-time-of-use race: two runs
+ * starting together would both read "nobody holds it" and both build. So the
+ * whole check-and-claim is one transaction behind a Postgres advisory lock
+ * keyed on this agent — the same mechanism, and the same reasoning, as the
+ * vendor-agent lock `registerAgent` takes. The second run waits, then reads the
+ * first run's committed claim and is refused. Exactly one builds.
+ *
+ * The claim itself is the building marker written onto the run, so the winner
+ * is visible to a later sweep from the instant it wins — including if the
+ * process building it dies immediately after.
+ */
+export async function claimMockedWorldFor(
+  auth: AuthContext,
+  input: {
+    readonly runId: string;
+    readonly agentId: string;
+    /**
+     * How long a run may sit pending with no draft before it counts as a build
+     * that died. The caller's own sweep window, passed in so the two agree.
+     */
+    readonly staleBuildMilliseconds: number;
+  },
+): Promise<MockedWorldClaim> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const staleSeconds = Math.max(0, input.staleBuildMilliseconds) / 1000;
+  // This one agent, of this one customer. Nothing else waits behind it.
+  const racing = `egma-mocked-world:${auth.organizationId}:${input.agentId}`;
+
+  return db().transaction(async (tx): Promise<MockedWorldClaim> => {
+    // Taken before anything is read, and let go when the transaction ends.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${racing}::text, 0))`,
+    );
+
+    const [held] = await tx
+      .select({ id: run.id })
+      .from(run)
+      .where(
+        within(
+          auth,
+          run,
+          and(
+            eq(run.agentId, input.agentId),
+            sql`${run.id} <> ${input.runId}`,
+            isNotNull(run.mockedWorld),
+            // A finished run never blocks: its litter is the sweep's.
+            isNull(run.finishedAt),
+            // Nor does a build that died — pending, no draft, past the window.
+            sql`not (
+              ${run.status} = 'pending'
+              and ${run.mockedWorld}->>'draftVersion' is null
+              and ${run.createdAt} < now() - make_interval(secs => ${staleSeconds})
+            )`,
+          ),
+        ),
+      )
+      .orderBy(asc(run.id))
+      .limit(1);
+
+    if (held !== undefined) return { kind: "taken", byRunId: held.id };
+
+    await tx
+      .update(run)
+      .set({ mockedWorld: mockedWorldRow(MOCKED_WORLD_BUILDING) })
+      .where(theRun(auth, input.runId));
+    return { kind: "claimed" };
+  });
 }
 
 /** One run's outstanding obligation to somebody's Retell account. */

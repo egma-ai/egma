@@ -334,6 +334,11 @@ const CONTEXT_REQUIRING = [
   // to put it back and readable by the landing that stamps a simulation's
   // coverage from it.
   "recordMockedWorld",
+  // The one mocked world an agent has at a time, claimed under that agent's own
+  // advisory lock. Two mocked runs overlapping is a hijack — one run's teardown
+  // restores routing onto the other's temporary version — so the second run is
+  // refused here rather than queued.
+  "claimMockedWorldFor",
   // What one agent's runs still owe somebody's platform account: a temporary
   // version that was never deleted, a pinned number that was never put back.
   // The sweep's whole input, read inside the project like any other run read.

@@ -48,6 +48,31 @@
  * restore that writes the bindings back exactly as they already are — a no-op.
  * The other order would leave a real pin that nothing knows to undo.
  *
+ * ## One mocked world per agent at a time
+ *
+ * **Two of these lifecycles may never overlap on one agent**, and the control
+ * plane refuses the second run rather than queueing it (`claimMockedWorldFor`,
+ * under an advisory lock keyed on the agent).
+ *
+ * The reason is this teardown. Delete-before-restore protects a run from **its
+ * own** draft and can see no other. Let run one pin a number riding `latest` to
+ * numeric version V and record the verbatim `latest` it owes back. Run two then
+ * starts, reads that number as *numeric* — a safe verdict, no pin needed — and
+ * branches its own draft. Run one finishes, deletes its draft, and restores
+ * `latest` exactly as promised. But run two's draft still exists and, being the
+ * most recently minted version, is what `latest` now resolves to: every real
+ * caller reaches a mocked agent. The restore was correct and the outcome is the
+ * exact hijack this whole design exists to prevent.
+ *
+ * No ordering inside one lifecycle can fix that, because the hazard is a
+ * relationship between two of them. So the overlap is what is forbidden, and
+ * the run that arrives second is refused before it writes anything.
+ *
+ * The sweep is the one thing that still crosses runs, and deliberately: it
+ * settles only worlds whose runs have **finished or died**, and it runs before
+ * the sweeping run branches — so a restore it performs can never resolve
+ * `latest` onto a draft that does not exist yet.
+ *
  * ## One draft per run, and the fallback if that ever stops being true
  *
  * A run is one suite against one agent over one connection, so its simulations

@@ -112,6 +112,17 @@ export const CODES = {
    * caller is told, with the platform's own reason in the sentence.
    */
   mocked_world_unbuildable: 422,
+  /**
+   * A second mocked run asked for while another run of the same agent still
+   * holds its one mocked world.
+   *
+   * **Its own code, and a conflict rather than an unprocessable one**, because
+   * nothing about the request is wrong: the same request will work once the
+   * other run finishes. Two mocked runs of one agent cannot overlap — each puts
+   * the agent's phone routing back as it found it, and the other's temporary
+   * version would be what that routing then points at.
+   */
+  mocked_world_in_use: 409,
   too_many_requests: 429,
   /**
    * A fault, answered without relaying whatever the fault said.

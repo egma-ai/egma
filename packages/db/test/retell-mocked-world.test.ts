@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addConnection,
   AgentWriteRefusedError,
+  claimMockedWorldFor,
   claimSimulations,
   coverageFromClasses,
   createAgent,
@@ -609,6 +610,242 @@ describe("the gate that keeps a mocked run honest", () => {
     // The draft lands, and now the real claim takes it.
     await recordMockedWorld(acting(), runId, WORLD);
     expect(await claimedOur()).toBe(true);
+  });
+});
+
+/**
+ * One mocked world per agent at a time.
+ *
+ * Two of these lifecycles overlapping on one agent is a hijack, not a queue:
+ * one run's teardown restores a `latest` binding it captured while the other's
+ * freshly branched draft is what `latest` then resolves to, and real callers
+ * reach a mocked agent. Delete-before-restore protects a run from its own draft
+ * and can see no other, so the overlap itself is refused.
+ */
+describe("the one mocked world an agent has at a time", () => {
+  const STALE = 15 * 60 * 1000;
+
+  /**
+   * Walk a run to `completed`, one legal move at a time.
+   *
+   * The record's own trigger refuses `pending` straight to `completed`, so this
+   * goes through `running` exactly as a real run does.
+   */
+  async function finishRun(runId: string): Promise<void> {
+    await database.sql(
+      "update run set status = 'running', started_at = now() where id = $1",
+      [runId],
+    );
+    // The three counts land together with the finish, as the record insists.
+    await database.sql(
+      `update run
+          set status = 'completed', finished_at = now(),
+              completed_count = 0, failed_count = 0, canceled_count = 0
+        where id = $1`,
+      [runId],
+    );
+  }
+
+  /** A ticked agent with a web-call connection, ready to hold a world. */
+  async function aTickedAgent(
+    name: string,
+  ): Promise<{ agentId: string; connectionId: string }> {
+    const created = await createAgent(acting(), {
+      name,
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+    return { agentId: created.id, connectionId: connection!.id };
+  }
+
+  it("refuses a second run while a live run holds the world, and names it", async () => {
+    const created = await createAgent(acting(), {
+      name: "Held agent",
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+
+    // Run one builds its world and is conducting.
+    const first = await seedRun(created.id, connection!.id);
+    expect(
+      await claimMockedWorldFor(acting(), {
+        runId: first.runId,
+        agentId: created.id,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).toEqual({ kind: "claimed" });
+    await recordMockedWorld(acting(), first.runId, WORLD);
+
+    // Run two arrives while run one still holds it.
+    const second = await seedRun(created.id, connection!.id);
+    const taken = await claimMockedWorldFor(acting(), {
+      runId: second.runId,
+      agentId: created.id,
+      staleBuildMilliseconds: STALE,
+    });
+
+    expect(taken).toEqual({ kind: "taken", byRunId: first.runId });
+    // And nothing was written onto the loser: it holds no world at all, so it
+    // branched nothing and owes the account nothing.
+    expect((await getRun(acting(), second.runId))?.mockedWorld).toBeNull();
+  });
+
+  it("lets exactly one of two simultaneous starts through", async () => {
+    const { agentId, connectionId } = await aTickedAgent("Raced agent");
+
+    const first = await seedRun(agentId, connectionId);
+    const second = await seedRun(agentId, connectionId);
+
+    // Started together, so the check-and-claim of each overlaps the other's.
+    // Without the advisory lock both would read "nobody holds it" and build.
+    const [one, two] = await Promise.all([
+      claimMockedWorldFor(acting(), {
+        runId: first.runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+      claimMockedWorldFor(acting(), {
+        runId: second.runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ]);
+
+    const winners = [one, two].filter((answer) => answer.kind === "claimed");
+    const losers = [one, two].filter((answer) => answer.kind === "taken");
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    // The loser names the winner, so its refusal can say which run to wait for.
+    expect(losers[0]).toEqual({
+      kind: "taken",
+      byRunId: one.kind === "claimed" ? first.runId : second.runId,
+    });
+  });
+
+  it("lets the next run build once the first has finished and settled", async () => {
+    const { agentId, connectionId } = await aTickedAgent("Sequential agent");
+    const first = await seedRun(agentId, connectionId);
+    await claimMockedWorldFor(acting(), {
+      runId: first.runId,
+      agentId,
+      staleBuildMilliseconds: STALE,
+    });
+    await recordMockedWorld(acting(), first.runId, WORLD);
+
+    // It finishes and its teardown settles the world it owed.
+    await finishRun(first.runId);
+    await recordMockedWorld(acting(), first.runId, {
+      ...WORLD,
+      draftVersion: null,
+      numbers: WORLD.numbers.map((one) => ({ ...one, pinned: false })),
+    });
+
+    const next = await seedRun(agentId, connectionId);
+    expect(
+      await claimMockedWorldFor(acting(), {
+        runId: next.runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).toEqual({ kind: "claimed" });
+  });
+
+  it("is not blocked by a finished run that never settled, nor by a dead build", async () => {
+    const { agentId, connectionId } = await aTickedAgent("Littered agent");
+
+    // A run that finished and left its draft behind: the sweep's job, never a
+    // reason to refuse the next run.
+    const crashed = await seedRun(agentId, connectionId);
+    await recordMockedWorld(acting(), crashed.runId, WORLD);
+    await finishRun(crashed.runId);
+
+    // And a build whose process died: pending, no draft, older than the window.
+    const dead = await seedRun(agentId, connectionId);
+    await recordMockedWorld(acting(), dead.runId, {
+      ...WORLD,
+      draftVersion: null,
+      numbers: [],
+    });
+    await database.sql(
+      `update run set created_at = now() - interval '30 minutes' where id = $1`,
+      [dead.runId],
+    );
+
+    const next = await seedRun(agentId, connectionId);
+    expect(
+      await claimMockedWorldFor(acting(), {
+        runId: next.runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).toEqual({ kind: "claimed" });
+  });
+
+  it("blocks on a run still inside its build window, which is not dead yet", async () => {
+    const { agentId, connectionId } = await aTickedAgent("Building agent");
+
+    // Pending, no draft, but young: a build in flight, not a dead one.
+    const building = await seedRun(agentId, connectionId);
+    await claimMockedWorldFor(acting(), {
+      runId: building.runId,
+      agentId,
+      staleBuildMilliseconds: STALE,
+    });
+
+    const next = await seedRun(agentId, connectionId);
+    expect(
+      await claimMockedWorldFor(acting(), {
+        runId: next.runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).toEqual({ kind: "taken", byRunId: building.runId });
+  });
+
+  it("does not let one agent's world block another agent's run", async () => {
+    const busy = await aTickedAgent("Busy agent");
+    const held = await seedRun(busy.agentId, busy.connectionId);
+    await claimMockedWorldFor(acting(), {
+      runId: held.runId,
+      agentId: busy.agentId,
+      staleBuildMilliseconds: STALE,
+    });
+    await recordMockedWorld(acting(), held.runId, WORLD);
+
+    // A different agent entirely: the lock is per agent, so this one is free.
+    const free = await aTickedAgent("Free agent");
+    const other = await seedRun(free.agentId, free.connectionId);
+    expect(
+      await claimMockedWorldFor(acting(), {
+        runId: other.runId,
+        agentId: free.agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).toEqual({ kind: "claimed" });
   });
 });
 

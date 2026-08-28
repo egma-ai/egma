@@ -138,6 +138,26 @@ export function mockedWorldFrom(
   };
 }
 
+/**
+ * The world a run wears while it is still building one — and the claim that
+ * says this agent's one mocked world is taken.
+ *
+ * Written by `claimMockedWorldFor` under the agent's lock, before the builder
+ * reaches the platform, so two things are true at once: the run is visible to a
+ * later sweep if the process building it dies, and a second run for the same
+ * agent finds this agent already claimed and refuses. `servingVersion` is not
+ * known yet — the build reads it — and the build's own first record replaces
+ * this whole marker within a moment. Its null draft keeps the claim gate shut,
+ * so nothing is conducted against it.
+ */
+export const MOCKED_WORLD_BUILDING: MockedWorld = {
+  servingVersion: 0,
+  draftVersion: null,
+  engine: { type: "", engineId: "", version: null },
+  numbers: [],
+  coverage: { mocked: [], notInterceptable: [], notInThisVersion: [] },
+};
+
 /** The world as a row stores it. Copied, so no caller holds the stored value. */
 export function mockedWorldRow(world: MockedWorld): Record<string, unknown> {
   return {

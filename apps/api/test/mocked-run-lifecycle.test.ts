@@ -501,3 +501,111 @@ describe("a run whose world cannot be built", () => {
     ]);
   });
 });
+
+/**
+ * Two mocked runs of one agent overlapping is a hijack, not a queue.
+ *
+ * The first run pins a number riding `latest` and owes that binding back. If a
+ * second run branched its own draft in the meantime, the first run's teardown
+ * would restore `latest` onto the second run's draft — the newest version — and
+ * real callers would reach a mocked agent. So the second run is refused.
+ */
+describe("a second mocked run on an agent already holding its world", () => {
+  it("is refused with the reason, and writes nothing to the platform", async () => {
+    const ready = await aTickedAgent("mocked_run_second_refused");
+
+    const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+    const firstRunId = String(first.body.id);
+    // The first run holds the world: its draft exists and the number is pinned.
+    expect(ready.state.versions.has(106)).toBe(true);
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+    ]);
+
+    const before = {
+      versions: new Set(ready.state.versions),
+      bindings: JSON.stringify([...ready.state.bindings]),
+    };
+
+    const second = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+
+    // Refused as a conflict, naming the run to wait for.
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(409);
+    expect(second.body.error).toBe("mocked_world_in_use");
+    expect(String(second.body.message)).toContain(firstRunId);
+    expect(String(second.body.message)).toContain("one mocked world per agent");
+
+    // **Nothing reached the platform**: no second draft was branched, and the
+    // first run's pin is exactly as it was.
+    expect([...ready.state.versions].sort()).toEqual([...before.versions].sort());
+    expect(JSON.stringify([...ready.state.bindings])).toBe(before.bindings);
+
+    // And the first run's own world is untouched, still holding its draft.
+    const header = await ask(api.app, "GET", `/v1/runs/${firstRunId}`, ready.key);
+    expect(
+      (header.body.mockedWorld as { draftVersion: number }).draftVersion,
+    ).toBe(106);
+
+    // The refused run conducts nothing: only the first run's simulation is
+    // ever claimable.
+    const specs = await claim();
+    expect(specs).toHaveLength(1);
+    expect(String(specs[0]?.["agent_version"])).toBe("106");
+  });
+
+  it("lets the next run build once the first has finished and given the account back", async () => {
+    const ready = await aTickedAgent("mocked_run_second_after_teardown");
+
+    const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+
+    // Conduct the first run to its end, which tears its world down.
+    const specs = await claim();
+    const simulationId = String(specs[0]?.["simulation_id"]);
+    await report(simulationId, "running");
+    await report(simulationId, "completed");
+    expect(ready.state.versions.has(106)).toBe(false);
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
+    ]);
+
+    // Now the agent is free, and the next run builds its own world normally.
+    const second = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
+    const header = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${String(second.body.id)}`,
+      ready.key,
+    );
+    // A fresh draft of its own, branched from the same serving version.
+    const world = header.body.mockedWorld as {
+      servingVersion: number;
+      draftVersion: number;
+    };
+    expect(world.servingVersion).toBe(105);
+    expect(world.draftVersion).toBeGreaterThan(105);
+    expect(ready.state.versions.has(world.draftVersion)).toBe(true);
+  });
+});
