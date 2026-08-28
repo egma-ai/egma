@@ -490,7 +490,7 @@ describe("the gate that keeps a mocked run honest", () => {
     await updateAgent(acting(), created.id, {
       mockToolsDuringSimulations: true,
     });
-    const { runId, simulationId } = await seedRun(created.id, connection.id);
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
 
     const claimable = async (): Promise<readonly string[]> => {
       const rows = await database.sql<{ id: string }>(
@@ -541,7 +541,7 @@ describe("the gate that keeps a mocked run honest", () => {
       config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
-    const { runId, simulationId } = await seedRun(created.id, connection.id);
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
 
     const rows = await database.sql<{ id: string }>(
       `select s.id
@@ -588,7 +588,7 @@ describe("the gate that keeps a mocked run honest", () => {
     await updateAgent(acting(), created.id, {
       mockToolsDuringSimulations: true,
     });
-    const { runId, simulationId } = await seedRun(created.id, connection.id);
+    const { runId, simulationId } = await seedRun(created.id, connection!.id);
 
     const claimedOur = async (): Promise<boolean> => {
       // A claimant of this test's own, and a capacity large enough that its
