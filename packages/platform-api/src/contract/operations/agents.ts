@@ -401,11 +401,11 @@ export const agentOperations = {
                 connectionType: {
                   type: "string",
                   enum: [
-        "retell_chat_api",
-        "retell_web_call",
-        "phone_number",
-        "livekit_room",
-      ],
+                    "retell_chat_api",
+                    "retell_web_call",
+                    "phone_number",
+                    "livekit_room",
+                  ],
                 },
                 accessVariant: {
                   type: "string",

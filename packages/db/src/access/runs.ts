@@ -332,11 +332,17 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   const malformed = () => new Error(`run ${runId} holds a malformed mock-tool snapshot`);
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw malformed();
   const { defaults, overrides } = value as Record<string, unknown>;
+  // The header freezes the project's answers and **only** those. What a pinned
+  // test version overrode lives on that version, which is immutable, so there
+  // is nothing about it to freeze — it is merged in per simulation at the
+  // moment a call is served. A stored override would be a second copy of an
+  // immutable thing, free to disagree with it, so the shape refuses one.
   if (
     !Array.isArray(defaults) ||
     typeof overrides !== "object" ||
     overrides === null ||
-    Array.isArray(overrides)
+    Array.isArray(overrides) ||
+    Object.keys(overrides).length !== 0
   ) {
     throw malformed();
   }
@@ -350,25 +356,13 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
       : { answer: held.answer };
     return { toolName, delayMilliseconds, answer: read } as SnapshotEntry;
   };
-  // Read rather than assumed empty. What a pinned test version overrode is the
-  // branching mechanism — "the calendar has no free slots" is the same test
-  // with one answer changed — and the mock endpoint resolves it per simulation
-  // at serve time, so the run's frozen world has to be able to carry it.
-  const read: Record<string, readonly SnapshotEntry[]> = {};
-  for (const [testVersionId, entries] of Object.entries(
-    overrides as Record<string, unknown>,
-  )) {
-    if (!Array.isArray(entries)) throw malformed();
-    read[testVersionId] = entries.map(entryFromRow);
-  }
-
   return {
     defaults: defaults.map((entry): SnapshotDefault => {
       const mockToolId = (entry as Record<string, unknown>).mockToolId;
       if (typeof mockToolId !== "string") throw malformed();
       return { ...entryFromRow(entry), mockToolId };
     }),
-    overrides: read,
+    overrides: {},
   };
 }
 
@@ -1627,7 +1621,23 @@ export async function resolveMockToolCall(
     .where(and(eq(simulation.id, simulationId), eq(simulation.runId, runId)))
     .limit(1);
 
-  const snapshot = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
+  const frozen = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
+  const auth = conductingContext(header.organizationId, header.projectId);
+
+  // The run header freezes the **project's** answers and nothing else. What a
+  // pinned test version overrode is on that version, which is immutable — so
+  // there is nothing to freeze and nothing that can move underneath a run, and
+  // the two are merged here, per simulation, at the moment a call is served.
+  // That is what makes a per-test branch cost the draft nothing: one temporary
+  // version carries URLs, never answers, so it serves every override.
+  //
+  // The same merge `getSimulationExecutionEvidence` performs for the simulator,
+  // performed for the endpoint — one resolution, one answer to "what was this
+  // simulation served".
+  const answers =
+    row === undefined
+      ? []
+      : await answersFor(auth, frozen, row.testVersionId, simulationId);
 
   return {
     runId: header.id,
@@ -1647,12 +1657,42 @@ export async function resolveMockToolCall(
             testVersionId: row.testVersionId,
             personaVersionId: row.personaVersionId,
             status: row.status as SimulationStatus,
-            answers: resolveMockTools(snapshot, row.testVersionId),
+            answers,
           },
-    auth: conductingContext(header.organizationId, header.projectId),
+    auth,
     signingKey:
       header.signingKey === null ? null : openedApiKey(header.signingKey),
   };
+}
+
+/**
+ * The run's frozen defaults merged with what this simulation's pinned test
+ * version overrode.
+ *
+ * A version that cannot be read is a refusal rather than a silent fall back to
+ * the project's defaults: serving the default where a test authored a branch
+ * would answer the wrong world and put it on the record as though it were
+ * asked for.
+ */
+async function answersFor(
+  auth: AuthContext,
+  frozen: MockToolSnapshot,
+  testVersionId: string,
+  simulationId: string,
+): Promise<readonly ResolvedMockTool[]> {
+  const version = await getTestVersionExecutionContent(auth, testVersionId);
+  if (version === undefined) {
+    throw new Error(
+      `simulation ${simulationId} pins unreadable test version ${testVersionId}`,
+    );
+  }
+  return resolveMockTools(
+    {
+      defaults: frozen.defaults,
+      overrides: { [testVersionId]: version.mockOverrides },
+    },
+    testVersionId,
+  );
 }
 
 /** The plaintext key inside a sealed `{ apiKey }` envelope, or null. */
@@ -1713,12 +1753,19 @@ export async function simulationMockedWorld(
     row.mockedWorld,
     () => new Error(`run ${row.runId} holds a malformed mocked world`),
   );
-  const snapshot = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
+  const frozen = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
+  // The same merge the endpoint serves from, so the stamp's `covered` list and
+  // the answers actually served can never disagree — including for a tool only
+  // this test version answers for.
+  const answers = await answersFor(
+    auth,
+    frozen,
+    row.testVersionId,
+    simulationId,
+  );
   return {
     world,
-    answeredFor: resolveMockTools(snapshot, row.testVersionId).map(
-      (resolved) => resolved.toolName,
-    ),
+    answeredFor: answers.map((resolved) => resolved.toolName),
   };
 }
 

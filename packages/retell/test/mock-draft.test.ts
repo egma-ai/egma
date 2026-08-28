@@ -192,6 +192,86 @@ describe("the mocked draft's transform", () => {
     ]);
   });
 
+  /**
+   * The flow lane's whole-object comparison, applied to the lane that needs it
+   * more.
+   *
+   * A Retell LLM's states go back whole — Retell has no per-state patch — so
+   * this walks every tool in both arrays and asserts that nothing but `url` and
+   * `headers` moved on an intercepted one, that a built-in is the same object it
+   * arrived as, and that every state's own non-tool fields survive the trip.
+   */
+  it("changes nothing but URLs and headers anywhere in a Retell LLM", () => {
+    const { tools } = mockedToolsFor(llm, TARGET);
+    const strip = (one: Record<string, unknown>) => {
+      const { url, headers, ...rest } = one;
+      void url;
+      void headers;
+      return rest;
+    };
+
+    const sameToolArray = (
+      written: readonly unknown[],
+      original: readonly unknown[],
+      where: string,
+    ): void => {
+      expect(written, where).toHaveLength(original.length);
+      for (const [index, before] of original.entries()) {
+        const was = before as Record<string, unknown>;
+        const after = written[index] as Record<string, unknown>;
+        if (was["type"] !== "custom") {
+          // Not intercepted: the same object, not a copy of it.
+          expect(after, `${where}[${index}]`).toBe(before);
+          continue;
+        }
+        expect(after["url"], `${where}[${index}] url`).toBe(
+          mockToolUrl(TARGET, was["name"] as string),
+        );
+        expect(after["headers"], `${where}[${index}] headers`).toEqual({});
+        expect(JSON.stringify(strip(after)), `${where}[${index}]`).toBe(
+          JSON.stringify(strip(was)),
+        );
+      }
+    };
+
+    sameToolArray(
+      tools["general_tools"] as readonly unknown[],
+      llm.document["general_tools"] as readonly unknown[],
+      "general_tools",
+    );
+
+    const writtenStates = tools["states"] as readonly Record<
+      string,
+      unknown
+    >[];
+    const originalStates = llm.document["states"] as readonly Record<
+      string,
+      unknown
+    >[];
+    expect(writtenStates).toHaveLength(originalStates.length);
+    for (const [index, before] of originalStates.entries()) {
+      const after = writtenStates[index] as Record<string, unknown>;
+      sameToolArray(
+        (after["tools"] ?? []) as readonly unknown[],
+        (before["tools"] ?? []) as readonly unknown[],
+        `states[${index}].tools`,
+      );
+      // Everything a state is besides its tools — its name, its prompt, its
+      // edges — goes back exactly as it was read. This is the lane where that
+      // has to be proved rather than assumed, because this is the lane where
+      // those fields are resent at all.
+      const withoutTools = (one: Record<string, unknown>) => {
+        const { tools: held, ...rest } = one;
+        void held;
+        return rest;
+      };
+      expect(
+        JSON.stringify(withoutTools(after)),
+        `states[${index}] non-tool fields`,
+      ).toBe(JSON.stringify(withoutTools(before)));
+    }
+  });
+
   it("reports every tool it did not intercept, by class", () => {
     const coverage = toolCoverageOf(toolsOf(flow));
 

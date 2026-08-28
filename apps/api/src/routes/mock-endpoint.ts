@@ -53,17 +53,29 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * run, a foreign simulation, an uncovered tool and a bad signature are four
  * different things and are never collapsed into one.
  *
- * ## The signature
+ * ## The signature, and the guess inside it
  *
- * Where the platform signs one of these requests, it is verified with the key
- * egma holds for the agent, over the raw bytes that arrived. **Which key signs
- * a custom-function call is not assumed** — the platform's webhooks are signed
- * with a different key from the management one, a fact that cost a day to
- * learn — so the check is conditional in the honest direction: a signature that
- * is present must verify, and a request that carries none is admitted on the
- * strength of the two unguessable identifiers and the liveness gate. When the
- * empirical answer lands, the only thing that changes is that the header
- * becomes required.
+ * Where the platform signs one of these requests, it is verified over the raw
+ * bytes that arrived with **the agent's own sealed platform key** — the key the
+ * customer stored for this agent.
+ *
+ * **That choice is a guess, and it is written down as one.** Retell's *webhook*
+ * signatures are made with a dedicated webhook-signing key, which is a
+ * different value from every management key on the same account — proven by
+ * hand on 2026-08-27, after the management key failed to verify a real webhook.
+ * Whether a **custom-function** call is signed with that same webhook key, with
+ * the management key, or not signed at all is not known, and nothing here may
+ * pretend otherwise.
+ *
+ * So the check is conditional in the direction that fails safe for the product:
+ * a signature that is present must verify, and a request that carries none is
+ * admitted on the strength of the two unguessable identifiers and the liveness
+ * gate. If the guess is wrong, the symptom is a wall of `bad_signature`
+ * refusals rather than a silent hole — and the refusal names which key was
+ * tried and which one to try instead, so whoever sees that wall knows what they
+ * are looking at. The question is on the developer's live checklist beside the
+ * fork check, in `packages/retell/README.md`; when it is answered, either this
+ * reads a different key or the header becomes required.
  *
  * ## The record
  *
@@ -114,6 +126,22 @@ export const MOCK_TOOL_REFUSALS = [
   "bad_signature",
 ] as const;
 export type MockToolRefusal = (typeof MOCK_TOOL_REFUSALS)[number];
+
+/**
+ * What a badly signed request is told.
+ *
+ * It names the key Egma tried and the one to try instead, because the failure
+ * this sentence most likely describes is not an attack: it is Egma having
+ * guessed wrong about which key Retell signs a custom-function call with. A
+ * developer meeting a wall of these needs to know that in the first sentence,
+ * not after reading the source.
+ */
+const WRONG_SIGNING_KEY =
+  "this request's signature was not made with the Retell API key stored for " +
+  "this agent, which is the key Egma checks against. If every mocked tool " +
+  "call is failing this way, Retell is probably signing these requests with " +
+  "the account's separate webhook-signing key — the one carrying the Webhook " +
+  "badge in the Retell dashboard's API Keys page — which is a different value.";
 
 export type MockEndpointOptions = {
   /**
@@ -202,7 +230,8 @@ function exchangeSpan(input: {
   readonly target: MockToolCallTarget;
   readonly simulation: NonNullable<MockToolCallTarget["simulation"]>;
   readonly toolName: string;
-  readonly rawBody: string;
+  /** What the agent asked with, in the JSON form every reader parses. */
+  readonly heardArguments: string;
   readonly served: ResolvedMockTool | undefined;
   readonly answer: string | undefined;
   readonly beganAtMicroseconds: bigint;
@@ -234,7 +263,7 @@ function exchangeSpan(input: {
     text: "",
     audioUrl: "",
     toolName: input.toolName,
-    toolArguments: input.rawBody,
+    toolArguments: input.heardArguments,
     toolResult: input.answer ?? "",
     providerCallId: "",
     agentPlatform: "retell",
@@ -249,7 +278,7 @@ function exchangeSpan(input: {
     personaVersionId: input.simulation.personaVersionId,
     payload: JSON.stringify({
       "egma.tool.name": input.toolName,
-      "egma.tool.arguments": input.rawBody,
+      "egma.tool.arguments": input.heardArguments,
       ...(refused
         ? { "egma.tool.provenance": "refused" }
         : {
@@ -328,10 +357,36 @@ export async function mockEndpointRoutes(
     },
   );
 
-  app.post(MOCK_TOOL_PATH, async (request, reply) => {
+  /**
+   * **Both methods, because the transform keeps the tool's own.**
+   *
+   * A custom tool declares its `method`, and the draft leaves it byte-identical
+   * along with the rest of the contract — so a tool the customer wrote as a GET
+   * arrives here as a GET. A POST-only door would answer those with a 404 that
+   * looks exactly like an uncovered tool, and a developer would go looking for
+   * a mock tool they had already authored.
+   */
+  app.route({
+    method: ["GET", "POST"],
+    url: MOCK_TOOL_PATH,
+    handler: async (request, reply) => {
     const beganAtMicroseconds = nowMicroseconds();
     const params = request.params as Params;
     const rawBody = typeof request.body === "string" ? request.body : "";
+    // What the agent asked with, in the one shape the record is read in.
+    //
+    // A POST carries its arguments as the body's own bytes and they are kept
+    // exactly as they arrived. A GET carries them in the query string, and they
+    // are written down as the JSON object they are — because every reader of a
+    // tool call's arguments parses this column as JSON, and one row that was a
+    // query string instead would be the row that breaks them. The **signature**
+    // is a separate matter and is still checked over the raw body, which on a
+    // GET is empty; conflating the two would be checking a signature over bytes
+    // that never travelled.
+    const heardArguments =
+      request.method === "GET"
+        ? JSON.stringify(request.query ?? {})
+        : rawBody;
     // Decoded here, and matched byte-exactly against the authored name from
     // here on. Fastify decodes a path segment for us; a segment that is not
     // valid percent-encoding arrives as it was sent and simply matches nothing.
@@ -361,43 +416,20 @@ export async function mockEndpointRoutes(
       );
     }
 
-    // Gate three. From here on there is a simulation to answer to, so every
-    // refusal below lands on its record.
-    const served = simulation.answers.find(
-      (candidate) => candidate.toolName === toolName,
-    );
-
-    const landRefusal = async (): Promise<void> => {
-      await record(
-        request,
-        target,
-        exchangeSpan({
-          target,
-          simulation,
-          toolName,
-          rawBody,
-          served: undefined,
-          answer: undefined,
-          beganAtMicroseconds,
-          endedAtMicroseconds: nowMicroseconds(),
-        }),
-      );
-    };
-
-    if (served === undefined) {
-      await landRefusal();
-      return refuse(
-        reply,
-        404,
-        "tool_not_mocked",
-        "this simulation has no answer for that tool.",
-      );
-    }
-
-    // The signature, where the platform sent one. A request with none is
-    // admitted on the two unguessable identifiers and the liveness gate; a
-    // request with one that does not verify is refused, and refused as its own
-    // thing rather than as an uncovered tool.
+    // The signature, **before** the tool is looked up, and before anything is
+    // written down.
+    //
+    // Both halves of that order are load-bearing. Checking it after gate three
+    // would answer a badly signed call about an uncovered tool with
+    // `tool_not_mocked`, which is a sentence about the mocked world sent to
+    // somebody who has not authenticated. And writing the record first would
+    // let anyone holding the two identifiers spray `refused` spans carrying any
+    // tool name they liked, by sending a signature that was never going to
+    // verify.
+    //
+    // A request carrying no signature at all is admitted on the two unguessable
+    // identifiers and the liveness gate — see the note at the top of this file
+    // for why the check is conditional rather than required.
     const signature = request.headers[SIGNATURE_HEADER];
     if (typeof signature === "string" && signature.trim() !== "") {
       const key = target.signingKey;
@@ -405,15 +437,37 @@ export async function mockEndpointRoutes(
         key === null ||
         !signatureIsValid(signature, rawBody, key, Date.now())
       ) {
-        await landRefusal();
-        return refuse(
-          reply,
-          401,
-          "bad_signature",
-          "this request's signature was not made with the key Egma holds for " +
-            "this agent.",
-        );
+        return refuse(reply, 401, "bad_signature", WRONG_SIGNING_KEY);
       }
+    }
+
+    // Gate three. From here on the caller has got past every gate there is, so
+    // a refusal here is about the mocked world and lands on the record.
+    const served = simulation.answers.find(
+      (candidate) => candidate.toolName === toolName,
+    );
+
+    if (served === undefined) {
+      await record(
+        request,
+        target,
+        exchangeSpan({
+          target,
+          simulation,
+          toolName,
+          heardArguments,
+          served: undefined,
+          answer: undefined,
+          beganAtMicroseconds,
+          endedAtMicroseconds: nowMicroseconds(),
+        }),
+      );
+      return refuse(
+        reply,
+        404,
+        "tool_not_mocked",
+        "this simulation has no answer for that tool.",
+      );
     }
 
     // The delay, and the market gap: a mocked backend takes as long as a real
@@ -423,7 +477,13 @@ export async function mockEndpointRoutes(
 
     const failing = isErrorAnswer(served.answer);
     const body = failing ? { error: served.answer.error } : served.answer.answer;
-    const answer = JSON.stringify(body) ?? "null";
+    // Serialized once, and the one string is both what goes on the wire and
+    // what goes on the record. Handing the value to `reply.send` instead would
+    // send a bare scalar — a number, a string, `true` — as `text/plain`, while
+    // the record stored its JSON form, so the agent and the record would
+    // disagree about what was served for exactly the answers most easily got
+    // wrong.
+    const answer = JSON.stringify(body ?? null) ?? "null";
 
     await record(
       request,
@@ -432,7 +492,7 @@ export async function mockEndpointRoutes(
         target,
         simulation,
         toolName,
-        rawBody,
+        heardArguments,
         served,
         answer,
         beganAtMicroseconds,
@@ -444,6 +504,10 @@ export async function mockEndpointRoutes(
     // under test would read it as a successful call that returned an error
     // object — and proving the agent apologises instead of claiming success is
     // the whole reason an answer may be an error.
-    return reply.code(failing ? 500 : 200).send(body ?? null);
+    return reply
+      .code(failing ? 500 : 200)
+      .header("content-type", "application/json; charset=utf-8")
+      .send(answer);
+    },
   });
 }

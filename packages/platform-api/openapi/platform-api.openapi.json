@@ -14409,122 +14409,6 @@
                         }
                       ]
                     },
-                    "mockedWorld": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "servingVersion": {
-                              "type": "integer"
-                            },
-                            "draftVersion": {
-                              "anyOf": [
-                                {
-                                  "type": "integer"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "engine": {
-                              "type": "object",
-                              "properties": {
-                                "type": {
-                                  "type": "string"
-                                },
-                                "engineId": {
-                                  "type": "string"
-                                },
-                                "version": {
-                                  "anyOf": [
-                                    {
-                                      "type": "integer"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "type",
-                                "engineId",
-                                "version"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "numbers": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "number": {
-                                    "type": "string"
-                                  },
-                                  "pinned": {
-                                    "type": "boolean"
-                                  },
-                                  "bindings": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "additionalProperties": true
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "number",
-                                  "pinned",
-                                  "bindings"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "coverage": {
-                              "type": "object",
-                              "properties": {
-                                "mocked": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInterceptable": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInThisVersion": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "required": [
-                                "mocked",
-                                "notInterceptable",
-                                "notInThisVersion"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "servingVersion",
-                            "draftVersion",
-                            "engine",
-                            "numbers",
-                            "coverage"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -14645,7 +14529,6 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -14951,122 +14834,6 @@
                               }
                             ]
                           },
-                          "mockedWorld": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "servingVersion": {
-                                    "type": "integer"
-                                  },
-                                  "draftVersion": {
-                                    "anyOf": [
-                                      {
-                                        "type": "integer"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ]
-                                  },
-                                  "engine": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string"
-                                      },
-                                      "engineId": {
-                                        "type": "string"
-                                      },
-                                      "version": {
-                                        "anyOf": [
-                                          {
-                                            "type": "integer"
-                                          },
-                                          {
-                                            "type": "null"
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "type",
-                                      "engineId",
-                                      "version"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  "numbers": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "number": {
-                                          "type": "string"
-                                        },
-                                        "pinned": {
-                                          "type": "boolean"
-                                        },
-                                        "bindings": {
-                                          "type": "array",
-                                          "items": {
-                                            "type": "object",
-                                            "additionalProperties": true
-                                          }
-                                        }
-                                      },
-                                      "required": [
-                                        "number",
-                                        "pinned",
-                                        "bindings"
-                                      ],
-                                      "additionalProperties": false
-                                    }
-                                  },
-                                  "coverage": {
-                                    "type": "object",
-                                    "properties": {
-                                      "mocked": {
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      },
-                                      "notInterceptable": {
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      },
-                                      "notInThisVersion": {
-                                        "type": "array",
-                                        "items": {
-                                          "type": "string"
-                                        }
-                                      }
-                                    },
-                                    "required": [
-                                      "mocked",
-                                      "notInterceptable",
-                                      "notInThisVersion"
-                                    ],
-                                    "additionalProperties": false
-                                  }
-                                },
-                                "required": [
-                                  "servingVersion",
-                                  "draftVersion",
-                                  "engine",
-                                  "numbers",
-                                  "coverage"
-                                ],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
                           "expectedSimulationCount": {
                             "type": "integer"
                           },
@@ -15187,7 +14954,6 @@
                           "modality",
                           "productLabel",
                           "environment",
-                          "mockedWorld",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15421,6 +15187,109 @@
                         }
                       ]
                     },
+                    "expectedSimulationCount": {
+                      "type": "integer"
+                    },
+                    "completedCount": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "failedCount": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "canceledCount": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "simulationCounts": {
+                      "type": "object",
+                      "properties": {
+                        "queued": {
+                          "type": "integer"
+                        },
+                        "claimed": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "completed": {
+                          "type": "integer"
+                        },
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "canceled": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "queued",
+                        "claimed",
+                        "running",
+                        "completed",
+                        "failed",
+                        "canceled"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "finishedCount": {
+                      "type": "integer"
+                    },
+                    "gradableCount": {
+                      "type": "integer"
+                    },
+                    "gradedCount": {
+                      "type": "integer"
+                    },
+                    "resultsUrl": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "startedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "finishedAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "mockedWorld": {
                       "anyOf": [
                         {
@@ -15531,109 +15400,6 @@
                             "coverage"
                           ],
                           "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "expectedSimulationCount": {
-                      "type": "integer"
-                    },
-                    "completedCount": {
-                      "anyOf": [
-                        {
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "failedCount": {
-                      "anyOf": [
-                        {
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "canceledCount": {
-                      "anyOf": [
-                        {
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "simulationCounts": {
-                      "type": "object",
-                      "properties": {
-                        "queued": {
-                          "type": "integer"
-                        },
-                        "claimed": {
-                          "type": "integer"
-                        },
-                        "running": {
-                          "type": "integer"
-                        },
-                        "completed": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "canceled": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "queued",
-                        "claimed",
-                        "running",
-                        "completed",
-                        "failed",
-                        "canceled"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "finishedCount": {
-                      "type": "integer"
-                    },
-                    "gradableCount": {
-                      "type": "integer"
-                    },
-                    "gradedCount": {
-                      "type": "integer"
-                    },
-                    "resultsUrl": {
-                      "type": "string"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "startedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "finishedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
                         },
                         {
                           "type": "null"
@@ -15769,7 +15535,6 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15782,6 +15547,7 @@
                     "createdAt",
                     "startedAt",
                     "finishedAt",
+                    "mockedWorld",
                     "connectionSnapshot",
                     "agent",
                     "connection"
@@ -16608,122 +16374,6 @@
                         }
                       ]
                     },
-                    "mockedWorld": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "servingVersion": {
-                              "type": "integer"
-                            },
-                            "draftVersion": {
-                              "anyOf": [
-                                {
-                                  "type": "integer"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "engine": {
-                              "type": "object",
-                              "properties": {
-                                "type": {
-                                  "type": "string"
-                                },
-                                "engineId": {
-                                  "type": "string"
-                                },
-                                "version": {
-                                  "anyOf": [
-                                    {
-                                      "type": "integer"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "type",
-                                "engineId",
-                                "version"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "numbers": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "number": {
-                                    "type": "string"
-                                  },
-                                  "pinned": {
-                                    "type": "boolean"
-                                  },
-                                  "bindings": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "additionalProperties": true
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "number",
-                                  "pinned",
-                                  "bindings"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "coverage": {
-                              "type": "object",
-                              "properties": {
-                                "mocked": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInterceptable": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInThisVersion": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "required": [
-                                "mocked",
-                                "notInterceptable",
-                                "notInThisVersion"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "servingVersion",
-                            "draftVersion",
-                            "engine",
-                            "numbers",
-                            "coverage"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -16844,7 +16494,6 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "mockedWorld",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",

@@ -47,3 +47,35 @@ there.
 Its finding is informational either way. The run builder's fork guard refuses a
 branch whose engine reference still matches the serving version's, before any
 write, so no lane depends on the answer.
+
+## The live checklist
+
+Two questions can only be answered against a real Retell account, and both are
+the developer's to answer by hand. Each finding lands, dated, in
+`.scratch/mock-tools/research/retell-mocking-surface.md`.
+
+**1. Does branching fork a Retell LLM?** — the command above.
+
+**2. Which key signs a custom-function call?** This one is not yet answered, and
+Egma is currently guessing. The mock endpoint verifies a request's
+`X-Retell-Signature` with **the agent's own Retell API key**, the one stored on
+the agent. But Retell's *webhook* signatures are known to use a separate
+webhook-signing key — the one wearing the **Webhook** badge in the dashboard's
+API Keys page — which is a different value from every management key on the
+same account. Whether a custom-function call uses that key, the management key,
+or is not signed at all is unknown.
+
+To answer it, run one mocked simulation and look at what arrives:
+
+- **No `X-Retell-Signature` header at all** — Retell does not sign these. Egma
+  already admits such requests; nothing to change.
+- **A header that verifies** — the guess was right. Make the header required.
+- **A header that does not verify** — every mocked tool call refuses with
+  `bad_signature`, and the refusal says so. Point the check at the
+  webhook-signing key instead: it is read in `resolveMockToolCall`
+  (`packages/db/src/access/runs.ts`), which today selects the agent's stored
+  Retell key.
+
+Until it is answered the endpoint fails safe rather than open: a signature that
+is present must verify, and a request carrying none is admitted on the two
+unguessable identifiers and the live-run gate.

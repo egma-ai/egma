@@ -13,10 +13,12 @@ import {
   getSimulation,
   recordMockedWorld,
   simulationMockedWorld,
+  TOOL_COVERAGE_CLASSES as RECORD_CLASSES,
   updateAgent,
   type AuthContext,
   type MockedWorld,
 } from "@egma/db";
+import { TOOL_COVERAGE_CLASSES as RETELL_CLASSES } from "@egma/retell";
 
 import {
   createConnectedDatabase,
@@ -220,6 +222,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await database.drop();
+});
+
+describe("the coverage stamp's vocabulary", () => {
+  /**
+   * The three class names are written down twice on purpose — once where a
+   * platform configuration is classified (`@egma/retell`) and once where the
+   * record stores the result (`@egma/db`) — because the record must not depend
+   * on a provider package. Two definitions can drift; this is the one line that
+   * makes drift a failed build rather than a stamp whose two halves disagree
+   * about what they are counting.
+   */
+  it("is the same three words in the package that classifies and the one that stores", () => {
+    expect([...RECORD_CLASSES]).toEqual([...RETELL_CLASSES]);
+  });
 });
 
 describe("the mock-tools tick", () => {

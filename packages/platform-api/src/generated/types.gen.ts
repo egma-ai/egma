@@ -4046,27 +4046,6 @@ export type ListRunsResponses = {
             modality: 'voice' | 'chat';
             productLabel: string;
             environment: string | null;
-            mockedWorld: {
-                servingVersion: number;
-                draftVersion: number | null;
-                engine: {
-                    type: string;
-                    engineId: string;
-                    version: number | null;
-                };
-                numbers: Array<{
-                    number: string;
-                    pinned: boolean;
-                    bindings: Array<{
-                        [key: string]: unknown;
-                    }>;
-                }>;
-                coverage: {
-                    mocked: Array<string>;
-                    notInterceptable: Array<string>;
-                    notInThisVersion: Array<string>;
-                };
-            } | null;
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
@@ -4165,27 +4144,6 @@ export type CreateRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
-        mockedWorld: {
-            servingVersion: number;
-            draftVersion: number | null;
-            engine: {
-                type: string;
-                engineId: string;
-                version: number | null;
-            };
-            numbers: Array<{
-                number: string;
-                pinned: boolean;
-                bindings: Array<{
-                    [key: string]: unknown;
-                }>;
-            }>;
-            coverage: {
-                mocked: Array<string>;
-                notInterceptable: Array<string>;
-                notInThisVersion: Array<string>;
-            };
-        } | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4270,6 +4228,25 @@ export type GetRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
+        expectedSimulationCount: number;
+        completedCount: number | null;
+        failedCount: number | null;
+        canceledCount: number | null;
+        simulationCounts: {
+            queued: number;
+            claimed: number;
+            running: number;
+            completed: number;
+            failed: number;
+            canceled: number;
+        };
+        finishedCount: number;
+        gradableCount: number;
+        gradedCount: number;
+        resultsUrl: string;
+        createdAt: string;
+        startedAt: string | null;
+        finishedAt: string | null;
         mockedWorld: {
             servingVersion: number;
             draftVersion: number | null;
@@ -4291,25 +4268,6 @@ export type GetRunResponses = {
                 notInThisVersion: Array<string>;
             };
         } | null;
-        expectedSimulationCount: number;
-        completedCount: number | null;
-        failedCount: number | null;
-        canceledCount: number | null;
-        simulationCounts: {
-            queued: number;
-            claimed: number;
-            running: number;
-            completed: number;
-            failed: number;
-            canceled: number;
-        };
-        finishedCount: number;
-        gradableCount: number;
-        gradedCount: number;
-        resultsUrl: string;
-        createdAt: string;
-        startedAt: string | null;
-        finishedAt: string | null;
         connectionSnapshot: {
             agentPlatform: string | null;
             connectionType: string;
@@ -4545,27 +4503,6 @@ export type CancelRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
-        mockedWorld: {
-            servingVersion: number;
-            draftVersion: number | null;
-            engine: {
-                type: string;
-                engineId: string;
-                version: number | null;
-            };
-            numbers: Array<{
-                number: string;
-                pinned: boolean;
-                bindings: Array<{
-                    [key: string]: unknown;
-                }>;
-            }>;
-            coverage: {
-                mocked: Array<string>;
-                notInterceptable: Array<string>;
-                notInThisVersion: Array<string>;
-            };
-        } | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;

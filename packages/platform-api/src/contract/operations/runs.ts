@@ -216,8 +216,6 @@ const runHeaderSchema = {
     modality: modalitySchema,
     productLabel: stringSchema,
     environment: nullable(stringSchema),
-    /** The temporary platform world this run built, or null when it built none. */
-    mockedWorld: nullable(mockedWorldSchema),
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -247,7 +245,6 @@ const runHeaderSchema = {
     "modality",
     "productLabel",
     "environment",
-    "mockedWorld",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -264,10 +261,20 @@ const runHeaderSchema = {
   additionalProperties: false,
 } as const;
 
+/**
+ * One run asked for by name, which is where the temporary platform world is
+ * answered.
+ *
+ * It is on the detail read and on no list, deliberately: the world carries every
+ * touched number's inbound routing verbatim, and repeating all of it once per
+ * row of a two-hundred-run page would put somebody's telephone routing in front
+ * of a reader who asked for a list of runs.
+ */
 const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
+    mockedWorld: nullable(mockedWorldSchema),
     connectionSnapshot: connectionSnapshotSchema,
     agent: nullable(identitySchema),
     connection: nullable({
@@ -281,6 +288,7 @@ const runDetailSchema = {
   },
   required: [
     ...runHeaderSchema.required,
+    "mockedWorld",
     "connectionSnapshot",
     "agent",
     "connection",

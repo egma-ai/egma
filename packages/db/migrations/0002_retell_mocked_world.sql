@@ -70,6 +70,10 @@ CREATE OR REPLACE FUNCTION public.guard_run_lifecycle()
  LANGUAGE plpgsql
 AS $function$
 BEGIN
+  -- The counts and finished_at land together, once; after that the header is
+  -- frozen and a retry is a new run. The one carve-out below is the mocked
+  -- world, which is bookkeeping about somebody's Retell account rather than
+  -- about this run's numbers.
   IF OLD.finished_at IS NOT NULL THEN
     IF NEW.mocked_world IS DISTINCT FROM OLD.mocked_world
        AND (to_jsonb(NEW) - 'mocked_world') = (to_jsonb(OLD) - 'mocked_world')

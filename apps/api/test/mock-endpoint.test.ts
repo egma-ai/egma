@@ -110,6 +110,8 @@ async function aRunningSimulation(
     answer: { slots: ["Tuesday 14:00"] },
     delayMs: 1500,
   },
+  /** What this test's own version overrides, as the test write takes it. */
+  overrides: readonly Record<string, unknown>[] = [],
 ): Promise<Ready> {
   await anInstance(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -145,6 +147,7 @@ async function aRunningSimulation(
     expectedBehaviors: ["confirms the time back before finishing"],
     suiteId: String(suite.body.id),
     personas: ["Impatient Rita"],
+    ...(overrides.length === 0 ? {} : { mockTools: overrides }),
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -223,22 +226,27 @@ async function call(
   options: {
     readonly body?: string;
     readonly signature?: string;
+    /** A GET tool's arguments ride the query string, so a GET sends no body. */
+    readonly method?: "GET" | "POST";
+    readonly query?: string;
   } = {},
 ): Promise<{ statusCode: number; raw: string; json: unknown }> {
+  const method = options.method ?? "POST";
   const body = options.body ?? JSON.stringify({ service: "facial", date: "2026-09-01" });
+  const path =
+    `${MOCK_TOOL_PREFIX}/${encodeURIComponent(where.runId)}` +
+    `/${encodeURIComponent(where.simulationId)}` +
+    `/${encodeURIComponent(where.toolName)}`;
   const response = await api.app.inject({
-    method: "POST",
-    url:
-      `${MOCK_TOOL_PREFIX}/${encodeURIComponent(where.runId)}` +
-      `/${encodeURIComponent(where.simulationId)}` +
-      `/${encodeURIComponent(where.toolName)}`,
+    method,
+    url: options.query === undefined ? path : `${path}?${options.query}`,
     headers: {
-      "content-type": "application/json",
+      ...(method === "GET" ? {} : { "content-type": "application/json" }),
       ...(options.signature === undefined
         ? {}
         : { [SIGNATURE_HEADER]: options.signature }),
     },
-    payload: body,
+    ...(method === "GET" ? {} : { payload: body }),
   });
   let json: unknown;
   try {
@@ -421,6 +429,110 @@ describe("the three gates", () => {
   });
 });
 
+describe("a tool the customer wrote as a GET", () => {
+  /**
+   * The transform keeps every tool's declared `method` byte-identical, so a GET
+   * tool arrives here as a GET. A door that took only POST would answer those
+   * with a 404 indistinguishable from an uncovered tool, and a developer would
+   * go looking for a mock tool they had already authored.
+   */
+  it("is answered, with its arguments read off the query string", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_get_tool", {
+      answer: { slots: ["Tuesday 14:00"] },
+      delayMs: 300,
+    });
+
+    const answered = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "get_availability",
+      },
+      { method: "GET", query: "service=facial&date=2026-09-01" },
+    );
+
+    expect(answered.statusCode, answered.raw).toBe(200);
+    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
+    expect(waited).toEqual([300]);
+
+    const spans = await toolSpansOf(ready.simulationId);
+    expect(spans).toHaveLength(1);
+    // The arguments land in the one shape every reader of this column parses.
+    expect(JSON.parse(spans[0]!.tool_arguments)).toEqual({
+      service: "facial",
+      date: "2026-09-01",
+    });
+    const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
+    expect(payload["egma.tool.provenance"]).toBe("mocked");
+  });
+
+  it("keeps every refusal distinct on a GET too", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_get_refusals", {
+      answer: { ok: true },
+      delayMs: 0,
+    });
+    const asGet = { method: "GET" as const };
+
+    const dead = await call(
+      {
+        runId: newId("run"),
+        simulationId: ready.simulationId,
+        toolName: "get_availability",
+      },
+      asGet,
+    );
+    expect((dead.json as { refusal: string }).refusal).toBe("no_live_run");
+
+    const foreign = await call(
+      {
+        runId: ready.runId,
+        simulationId: newId("sim"),
+        toolName: "get_availability",
+      },
+      asGet,
+    );
+    expect((foreign.json as { refusal: string }).refusal).toBe(
+      "simulation_not_in_run",
+    );
+
+    const uncovered = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "charge_card",
+      },
+      asGet,
+    );
+    expect((uncovered.json as { refusal: string }).refusal).toBe(
+      "tool_not_mocked",
+    );
+
+    // A GET carries no body, so the platform signs the timestamp alone — and a
+    // signature made with the wrong key still refuses as its own thing.
+    const badly = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "get_availability",
+      },
+      { ...asGet, signature: signatureFor("", "not-the-agents-key", Date.now()) },
+    );
+    expect(badly.statusCode).toBe(401);
+    expect((badly.json as { refusal: string }).refusal).toBe("bad_signature");
+
+    // And one made with the right key over that same empty body is admitted.
+    const properly = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "get_availability",
+      },
+      { ...asGet, signature: signatureFor("", PLATFORM_KEY, Date.now()) },
+    );
+    expect(properly.statusCode, properly.raw).toBe(200);
+  });
+});
+
 describe("the signature", () => {
   it("admits a request signed with the key egma holds for the agent", async () => {
     const ready = await aRunningSimulation("mock_endpoint_signed");
@@ -437,7 +549,7 @@ describe("the signature", () => {
     expect(answered.statusCode).toBe(200);
   });
 
-  it("refuses one signed with another key, distinctly, and lands it", async () => {
+  it("refuses one signed with another key, distinctly, and writes nothing", async () => {
     const ready = await aRunningSimulation("mock_endpoint_bad_signature");
     const body = JSON.stringify({ service: "facial" });
 
@@ -451,11 +563,37 @@ describe("the signature", () => {
     );
     expect(refused.statusCode).toBe(401);
     expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
-    // The refusal never repeats the key it checked against.
+    // The refusal never repeats the key it checked against — and it names which
+    // key that was, because the likeliest cause of a wall of these is Egma
+    // having guessed the wrong one rather than anybody attacking anything.
     expect(refused.raw).not.toContain(PLATFORM_KEY);
+    expect(refused.raw).toContain("webhook-signing key");
 
-    const spans = await toolSpansOf(ready.simulationId);
-    expect(JSON.parse(spans[0]!.payload)["egma.tool.provenance"]).toBe("refused");
+    // **Nothing is written.** A caller who cannot authenticate must not be able
+    // to put rows on somebody's record: two identifiers plus a garbage
+    // signature would otherwise spray `refused` spans carrying any tool name
+    // the sender liked.
+    expect(await toolSpansOf(ready.simulationId)).toHaveLength(0);
+  });
+
+  it("is checked before the tool is looked up, so the two never blur", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_signature_first");
+    const body = "{}";
+
+    // A badly signed call about a tool this simulation does not cover is a
+    // signature failure, not a sentence about the mocked world: telling an
+    // unauthenticated caller which tools are covered would be answering a
+    // question they have not earned.
+    const refused = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "charge_card",
+      },
+      { body, signature: signatureFor(body, "not-the-agents-key", Date.now()) },
+    );
+    expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
+    expect(await toolSpansOf(ready.simulationId)).toHaveLength(0);
   });
 
   it("refuses a signature over different bytes than arrived", async () => {
@@ -577,44 +715,14 @@ describe("an authored failure", () => {
 
 describe("a test's own override", () => {
   it("beats the project default of the same name", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_override");
-
-    // The run's frozen world, with this simulation's pinned test version
-    // answering `get_availability` its own way. Written here rather than
-    // authored through a test, because freezing a version's overrides into a
-    // run is not yet wired — what is proved is the endpoint's resolution,
-    // which is where a per-test branch is actually served.
-    const { rows } = await api.database.sql<{ test_version_id: string }>(
-      "select test_version_id from simulation where id = $1",
-      [ready.simulationId],
-    );
-    const testVersionId = rows[0]?.test_version_id;
-    expect(testVersionId).toBeDefined();
-
-    const snapshot = await api.database.sql<{ mock_tool_snapshot: unknown }>(
-      "select mock_tool_snapshot from run where id = $1",
-      [ready.runId],
-    );
-    const frozen = snapshot.rows[0]?.mock_tool_snapshot as {
-      defaults: unknown[];
-    };
-    await api.database.sql(
-      "update run set mock_tool_snapshot = $2::jsonb where id = $1",
-      [
-        ready.runId,
-        JSON.stringify({
-          defaults: frozen.defaults,
-          overrides: {
-            [testVersionId!]: [
-              {
-                toolName: "get_availability",
-                answer: { answer: { slots: [] } },
-                delayMilliseconds: 250,
-              },
-            ],
-          },
-        }),
-      ],
+    // Authored the way a developer authors one: the project answers
+    // `get_availability` with a free slot, and this test's own version answers
+    // it with none. Nothing here writes to the database — the whole path from
+    // the authored override to the answer the agent receives is the real one.
+    const ready = await aRunningSimulation(
+      "mock_endpoint_override",
+      { answer: { slots: ["Tuesday 14:00"] }, delayMs: 1500 },
+      [{ tool: "get_availability", answer: { slots: [] }, delayMs: 250 }],
     );
 
     const answered = await call({
@@ -626,6 +734,7 @@ describe("a test's own override", () => {
     expect(answered.statusCode).toBe(200);
     // "The calendar has no free slots" — the same test with one answer changed.
     expect(answered.json).toEqual({ slots: [] });
+    // The override's delay, not the project default's.
     expect(waited).toEqual([250]);
 
     const spans = await toolSpansOf(ready.simulationId);
@@ -634,5 +743,42 @@ describe("a test's own override", () => {
     // Null exactly when a test's own override answered: an override is the
     // test's content and has no row of its own to name.
     expect(payload["egma.tool.mock_tool"]).toBeNull();
+  });
+
+  it("answers for a tool the project does not cover at all", async () => {
+    const ready = await aRunningSimulation(
+      "mock_endpoint_override_only",
+      { answer: { slots: ["Tuesday 14:00"] }, delayMs: 0 },
+      [{ tool: "charge_card", error: "the card was declined", delayMs: 0 }],
+    );
+
+    const answered = await call({
+      runId: ready.runId,
+      simulationId: ready.simulationId,
+      toolName: "charge_card",
+    });
+
+    // An override for a tool no default covers is an answer in its own right.
+    expect(answered.statusCode).toBe(500);
+    expect(answered.json).toEqual({ error: "the card was declined" });
+  });
+
+  it("leaves the project default standing where a test overrides nothing", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_no_override", {
+      answer: { slots: ["Tuesday 14:00"] },
+      delayMs: 0,
+    });
+
+    const answered = await call({
+      runId: ready.runId,
+      simulationId: ready.simulationId,
+      toolName: "get_availability",
+    });
+
+    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
+    const spans = await toolSpansOf(ready.simulationId);
+    const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
+    // The project's own row answered, and the record names it.
+    expect(String(payload["egma.tool.mock_tool"])).toMatch(/^mck_/u);
   });
 });

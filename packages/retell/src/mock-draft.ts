@@ -52,9 +52,24 @@ export type MockEndpointTarget = {
 /** What a mocked draft is written from. */
 export type MockedTools = {
   /**
-   * The body to write onto the draft's engine version, holding **only** the
-   * tool arrays that changed. Everything else on the version is left alone,
-   * because a PATCH that resent a field would be a chance to send it wrong.
+   * The body to write onto the draft's engine version. It carries the smallest
+   * set of top-level keys the engine's own update endpoint can express, and
+   * **that set is not the same for both engines**:
+   *
+   * - **A conversation flow** keeps its tools in one top-level `tools` array,
+   *   so the body is that array and nothing else. Prompts, nodes, the MCP list
+   *   and every other key are never resent, and therefore cannot be resent
+   *   wrong.
+   * - **A Retell LLM** keeps per-state tools inside its `states` array, and
+   *   Retell offers no way to patch one state. So the body carries `states`
+   *   **whole** — every state's prompt, edges and remaining fields travel back
+   *   exactly as they were read, alongside its rewritten tool array. Nothing is
+   *   altered, but more than the tools is resent, and that is a real difference
+   *   worth knowing when a write is being reviewed.
+   *
+   * Under both, every value that goes back came from the version that was read
+   * moments earlier and is byte-identical to it except for the two fields each
+   * intercepted tool is allowed to change.
    */
   readonly tools: Readonly<Record<string, unknown>>;
   /** What the transform did and did not stand in front of. */
