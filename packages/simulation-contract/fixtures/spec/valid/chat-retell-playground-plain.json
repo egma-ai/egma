@@ -1,0 +1,48 @@
+{
+  "contract_version": 5,
+  "simulation_id": "sim_01K5T4RB9F0C2XKQNZ7MVD4HTA",
+  "modality": "chat",
+  "connection": {
+    "agent_platform": "retell",
+    "connection_type": "retell_playground",
+    "access_variant": "retell_playground.api_key",
+    "config": {
+      "retellAgentId": "agent_b0e2e9cb267c47e7e7026cd8e8"
+    },
+    "credentials": {
+      "apiKey": "fixture-not-a-real-secret-0000000000000000"
+    }
+  },
+  "persona": {
+    "name": "Eleanor",
+    "personality": "Retired teacher, 68, typing carefully. Polite, thorough, repeats details back to be sure she has them right.",
+    "language": "en-US"
+  },
+  "scenario": {
+    "instructions": "You want to know whether the practice is open on Saturday mornings. Conclude once you have been told."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 60
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "adapter": "cartesia",
+      "voice_id": "measured-alto-3",
+      "speed": 0.95
+    }
+  }
+}
