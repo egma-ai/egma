@@ -1421,15 +1421,26 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
     monkeypatch.setattr(soxr_stream_resampler, "time", Descheduled)
 
     recorder = conductor_module._EvidenceRecorder(sample_rate=24_000)
-    resampler = recorder._input_resampler
     frame = b"\x00\x01" * 320  # 20 ms at 16 kHz
 
-    emitted = len(await resampler.resample(frame, 16_000, 24_000)) // 2
-    # Long enough that Pipecat's own default would have cleared, and far
-    # longer than any real machine takes for one frame.
-    clock[0] += 5.0
-    emitted += len(await resampler.resample(frame, 16_000, 24_000)) // 2
-    held = float(resampler._soxr_stream.delay())
+    # Both channels, because the two fail differently and only one of them
+    # says so. A clear on the agent's side breaks the map and raises; a
+    # clear on the persona's side raises nothing, because `bot_position`
+    # counts the buffer rather than reading a delay — it just drops the
+    # tail of an utterance out of the recording and stays quiet about it.
+    for channel, resampler in (
+        ("agent", recorder._input_resampler),
+        ("persona", recorder._output_resampler),
+    ):
+        clock[0] = 1000.0
+        emitted = len(await resampler.resample(frame, 16_000, 24_000)) // 2
+        # Long enough that Pipecat's own default would have cleared, and far
+        # longer than any real machine takes for one frame.
+        clock[0] += 5.0
+        emitted += len(await resampler.resample(frame, 16_000, 24_000)) // 2
+        held = float(resampler._soxr_stream.delay())
 
-    fed = 2 * 320
-    assert emitted + held == pytest.approx(fed * 24_000 / 16_000, abs=1.0)
+        fed = 2 * 320
+        assert emitted + held == pytest.approx(
+            fed * 24_000 / 16_000, abs=1.0
+        ), channel

@@ -235,6 +235,13 @@ class _EvidenceRecorder(AudioBufferProcessor):
         # between chunks", which is this case exactly, and the artefact it
         # protects against needs a real silence to appear across.
         self._input_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
+        # The persona's channel, for the same reason and with a different
+        # symptom. Nothing reads a delay on this side — `bot_position` counts
+        # the buffer — so a clear here raises nothing at all. It simply drops
+        # the tail of an utterance out of the recording a customer plays
+        # back, on any machine, at any load, and says nothing about it. The
+        # agent's side at least failed loudly.
+        self._output_resampler = SOXRStreamAudioResampler(clear_after_secs=None)
         self._recording_ready = asyncio.Condition()
         self._resampled_input: dict[int, tuple[int, float]] = {}
         self._processed_source_end = Fraction(0)
