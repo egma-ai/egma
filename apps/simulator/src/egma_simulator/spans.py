@@ -51,6 +51,7 @@ simulation goes through it.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from contextvars import Token
@@ -88,6 +89,18 @@ TURN_SPAN_OF = {"human": "human_turn", "agent": "agent_turn"}
 so there is no second field free to disagree with it."""
 
 TURN_TEXT_ATTRIBUTE = "egma.turn.text"
+TURN_PLATFORM_NOTES_ATTRIBUTE = "egma.turn.platform_notes"
+"""What the platform said about one turn that nobody said in it.
+
+A node transition announced mid-answer, a message in a role egma has never
+seen. It is agent-side content and it is not speech, so it rides beside
+the words instead of inside them: the persona is handed the words back,
+and one scenario's chat and voice transcripts are only comparable while
+neither carries something nobody spoke.
+
+Carried as a JSON array of strings, in the order the platform said them.
+Absent for every turn that has none, which is nearly all of them.
+"""
 TOOL_NAME_ATTRIBUTE = "egma.tool.name"
 TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
 TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
@@ -203,24 +216,38 @@ class SpanEmitter:
             self._active_token = None
             raise
 
-    def turn(self, speaker: str, text: str) -> None:
+    def turn(
+        self, speaker: str, text: str, platform_notes: tuple[str, ...] = ()
+    ) -> None:
         """One transcript turn, by whichever of the two speakers took it.
 
         One instant, which is the whole truth about a message: chat is
         where this is used and a message has no duration. A turn that was
         *spoken* has two ends read off the audio, and it comes through
         :meth:`spoken_turn` instead.
+
+        ``platform_notes`` is what the platform said about the turn that
+        nobody said in it, and it rides its own attribute rather than the
+        words for the reason :data:`TURN_PLATFORM_NOTES_ATTRIBUTE` gives.
         """
         name = TURN_SPAN_OF.get(speaker)
         if name is None:
             raise ValueError(f"a turn was taken by {speaker!r}, who is not a speaker")
 
+        attributes: dict[str, str | bool] = {TURN_TEXT_ATTRIBUTE: text}
+        if platform_notes:
+            # Only ever when there is something to say. An empty list on
+            # every other turn would be a field a reader learns nothing
+            # from finding.
+            attributes[TURN_PLATFORM_NOTES_ATTRIBUTE] = json.dumps(
+                list(platform_notes), separators=(",", ":"), ensure_ascii=False
+            )
         now = self._clock()
         self._author(
             name,
             started_unix_nano=now,
             ended_unix_nano=now,
-            attributes={TURN_TEXT_ATTRIBUTE: text},
+            attributes=attributes,
         )
 
     def spoken_turn(
