@@ -327,14 +327,21 @@ def dispatch_metadata(
         "egmaIdentity": egma_identity,
         "protocolVersion": PROTOCOL_VERSION,
     }
-    # ``ensure_ascii=False`` on both writes below, because the room and the
-    # dispatch are promised to carry the same bytes and the room copy is the
-    # configured string untouched. Escaping here would hand ``{"tenant":
-    # "café"}`` to the dispatch as ``caf\u00e9``, so an agent
-    # reading its own key would get a different value out of the two channels
-    # it is told are the same one. LiveKit carries UTF-8 on both.
+    # ``ensure_ascii=True`` on both writes below, and it is a correctness
+    # rule rather than a style one. A configured value may hold a lone
+    # surrogate: ``{"label":"\ud800"}`` is legal JSON, the control plane
+    # admits it, and the room's copy carries it as the six ASCII characters
+    # the customer wrote. Parsed, it is a character with no UTF-8 form at
+    # all, so writing it out raw would put a string on this request that
+    # cannot be encoded onto the wire, and the simulation would die at
+    # dispatch over a value the room carried without complaint.
+    #
+    # What escaping costs is bytes, and only on egma's copy: an agent
+    # reading its own key parses it back to the same value either way.
+    # That is why the room is what promises the string byte for byte, and
+    # the dispatch promises the keys.
     if not written:
-        return json.dumps(context, separators=(",", ":"), ensure_ascii=False)
+        return json.dumps(context, separators=(",", ":"), ensure_ascii=True)
 
     try:
         held = json.loads(written)
@@ -355,7 +362,7 @@ def dispatch_metadata(
             collided,
         )
         return written
-    return json.dumps({**held, **context}, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps({**held, **context}, separators=(",", ":"), ensure_ascii=True)
 
 
 def platform_refusal(what_failed: str, code: str, told: str) -> MediaBackendError:

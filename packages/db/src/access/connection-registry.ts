@@ -1002,8 +1002,10 @@ export const CONNECTION_REGISTRY: Readonly<
           // string byte for byte, always. The dispatch's metadata is these
           // keys and values written out again, beside a small block of egma's
           // own, wherever `agentName` above names a worker to dispatch:
-          // whitespace the customer wrote is not preserved there, and no key
-          // of theirs is touched. Automatic dispatch creates no dispatch for
+          // whitespace the customer wrote is not preserved there, anything
+          // outside ASCII is escaped so that a value with no UTF-8 form of
+          // its own can still go on the wire, and no key of theirs is
+          // touched. Automatic dispatch creates no dispatch for
           // it to ride on, so there the room is the only channel and this key
           // reaches the agent at `ctx.room.metadata` alone.
           metadata: optional(jsonObjectText),

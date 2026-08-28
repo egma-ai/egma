@@ -1081,6 +1081,37 @@ async def test_the_dispatch_carries_the_customers_own_keys_untouched(
     assert carried["locale"] == "en-GB"
 
 
+async def test_the_dispatch_survives_a_value_with_no_utf_8_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A lone surrogate is legal JSON, so the door admits it and the room
+    carries it. The dispatch has to survive it too.
+
+    ``{"label":"\\ud800"}`` is a valid JSON object whose parsed value is a
+    character that has no UTF-8 encoding at all. The room's copy never meets
+    that problem, because it rides as the ASCII the customer wrote. egma's
+    copy is written out again, and written out raw it would be a string that
+    cannot go on the wire — a simulation dead at dispatch over a value the
+    other channel carried without complaint.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    await room_walk(
+        tmp_path,
+        stub,
+        monkeypatch,
+        agent_name="front-desk",
+        metadata='{"label":"\\ud800"}',
+        scenario="One point.",
+    )
+
+    carried = stub.dispatches[0].metadata
+    # The whole of the claim: it goes on the wire, and it still reads back
+    # as the value the customer configured.
+    carried.encode("utf-8")
+    assert json.loads(carried)["label"] == "\ud800"
+    assert json.loads(carried)["simulationId"]
+
+
 async def test_the_dispatch_carries_none_of_the_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1163,23 +1194,28 @@ def test_a_customers_own_key_wins_over_the_retiring_context(configured: str):
     )
 
 
-def test_the_two_channels_carry_the_same_characters():
-    """One value, two channels, and the same text out of both.
+def test_the_two_channels_carry_the_same_value():
+    """One value, two channels, and the same thing read out of both.
 
-    The room carries the configured string untouched, so the dispatch has
-    to say the same thing rather than an escaped spelling of it: an agent
-    reading ``ctx.room.metadata`` and one reading ``ctx.job.metadata`` are
-    promised the same value, and a customer comparing the two, or hashing
-    one, must not find them different. LiveKit carries UTF-8 on both.
+    The room carries the configured string untouched and the dispatch
+    carries egma's own writing of it, so the promise the two share is the
+    value rather than the bytes: an agent reading ``ctx.room.metadata`` and
+    one reading ``ctx.job.metadata`` parse their way to the same object.
+
+    egma's copy is escaped on the way out, and it has to be. A configured
+    value may hold a character with no UTF-8 form, and the room never meets
+    that because it rides as the ASCII the customer wrote; written out raw,
+    egma's copy would be a string that cannot go on the wire at all. So the
+    spelling may differ and the value may not, and what is pinned here is
+    the second of those.
     """
-    configured = '{"tenant":"café","city":"東京"}'
+    configured = '{"tenant":"caf\u00e9","city":"\u6771\u4eac"}'
     carried = dispatch_metadata(configured, "sim_01ABC", egma_identity="egma-persona")
 
-    assert "café" in carried
-    assert "東京" in carried
-    assert "\\u" not in carried
-    assert json.loads(carried)["tenant"] == "café"
-    assert json.loads(carried)["city"] == "東京"
+    assert json.loads(carried)["tenant"] == json.loads(configured)["tenant"]
+    assert json.loads(carried)["city"] == json.loads(configured)["city"]
+    # The property the spelling buys, and the reason it is not the room's.
+    carried.encode("utf-8")
 
 
 def test_metadata_that_is_not_an_object_rides_exactly_as_configured():
