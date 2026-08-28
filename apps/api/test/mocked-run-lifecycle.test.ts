@@ -75,6 +75,9 @@ type Account = {
     versions: Set<number>;
     engines: Map<number, Record<string, unknown>>;
     bindings: Map<string, readonly Record<string, unknown>[]>;
+    /** Flipped by a test to make every delete fail — a teardown that cannot
+     * finish, which is what leaves a world owed. */
+    refuseDeletes: boolean;
   };
 };
 
@@ -88,6 +91,7 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
     bindings: new Map([
       ["+12567332874", [{ agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 }]],
     ]),
+    refuseDeletes: false,
   };
   const branching = options.branching ?? "fork";
 
@@ -183,6 +187,7 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       return json(document);
     }
     if (method === "DELETE" && path.startsWith("/delete-agent-version/")) {
+      if (state.refuseDeletes) return json({ error: "not today" }, 500);
       const asked = Number(path.split("/").at(-1));
       if (!state.versions.has(asked)) return json({ error: "gone" }, 404);
       state.versions.delete(asked);
@@ -607,5 +612,80 @@ describe("a second mocked run on an agent already holding its world", () => {
     expect(world.servingVersion).toBe(105);
     expect(world.draftVersion).toBeGreaterThan(105);
     expect(ready.state.versions.has(world.draftVersion)).toBe(true);
+  });
+});
+
+/**
+ * The claim refuses two *live* worlds; this is the other half. A world whose
+ * teardown failed belongs to a finished run — nothing blocks the claim — but
+ * its restore is still owed, and it retries on a later terminal report. If the
+ * next run branched first, that retry would put the number's `latest` binding
+ * back while the new draft is the latest version, and real callers would reach
+ * a mocked agent. So the build refuses while anything on the agent is owed,
+ * which is what lets the retried restore always land on an account with no
+ * temporary version standing.
+ */
+describe("a mocked run after a predecessor's teardown failed", () => {
+  it("is refused until the debt settles, and the retried restore finds no draft", async () => {
+    const ready = await aTickedAgent("mocked_run_owed_refuses");
+
+    const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+    const firstRunId = String(first.body.id);
+
+    // The account stops honouring deletes, then the run is conducted to its
+    // end: its teardown cannot delete the draft, and delete-before-restore
+    // then keeps the pin in place — the draft stands, the world stays owed.
+    ready.state.refuseDeletes = true;
+    const specs = await claim();
+    const simulationId = String(specs[0]?.["simulation_id"]);
+    await report(simulationId, "running");
+    await report(simulationId, "completed");
+    expect(ready.state.versions.has(106)).toBe(true);
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+    ]);
+
+    // The next run is refused with the debt named, **before branching
+    // anything**: no new version was minted and the pin is exactly as it was.
+    const second = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(second.statusCode, JSON.stringify(second.body)).toBe(422);
+    expect(second.body.error).toBe("mocked_world_unbuildable");
+    expect(String(second.body.message)).toContain(firstRunId);
+    expect(String(second.body.message)).toContain("could not be fully given back");
+    expect([...ready.state.versions].sort()).toEqual([105, 106]);
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+    ]);
+
+    // The account honours deletes again, and the cleanup retries on the
+    // predecessor's next terminal report. The retried restore finds **no
+    // draft standing** — the refusal above is what guaranteed that — so
+    // `latest` resolves to the real serving version and nothing else.
+    ready.state.refuseDeletes = false;
+    await report(simulationId, "completed");
+    expect(ready.state.versions.has(106)).toBe(false);
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
+    ]);
+
+    // The agent is clean, and the next run builds normally.
+    const third = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(third.statusCode, JSON.stringify(third.body)).toBe(201);
   });
 });

@@ -1139,7 +1139,9 @@ export type MockedWorldClaim =
  *
  * A **finished** run never blocks, whatever it left behind — its litter is the
  * sweep's job, and the caller sweeps before it branches, so a finished run's
- * pin is restored before this run mints anything. A **stale** run — pending,
+ * pin is restored before this run mints anything. When the sweep cannot
+ * restore it, the caller refuses to branch at all rather than mint the draft
+ * a later retry of that restore would route real callers to. A **stale** run — pending,
  * still holding no draft, and older than the build window — never blocks
  * either: its process died mid-build and it is swept, not waited for. The
  * caller owns that window and passes it, so the sweep and this check cannot

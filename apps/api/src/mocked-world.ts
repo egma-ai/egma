@@ -193,7 +193,30 @@ export async function buildRunMockedWorld(
   // this run branches**: a finished run's outstanding pin is restored while no
   // draft of this run's exists yet, so that restore can never resolve `latest`
   // onto something this run minted.
-  await settleMockedWorlds(auth, run.agentId, reach, log, { exceptRunId: run.id });
+  //
+  // And when the sweep could not clear it, nothing new is made at all. An
+  // unsettled world still owes a restore, and that restore retries on a later
+  // terminal report; a draft branched now is exactly what the agent's restored
+  // `latest` binding would then resolve to. Refusing here is what makes the
+  // retry safe: a restore only ever runs while no temporary version of this
+  // agent exists.
+  const swept = await settleMockedWorlds(auth, run.agentId, reach, log, {
+    exceptRunId: run.id,
+  });
+  if (swept.kind === "unsettled") {
+    return await refuseRun(
+      auth,
+      run,
+      "An earlier mocked run of this agent could not be fully given back to " +
+        `Retell: ${swept.reason}. Egma does not branch a new temporary ` +
+        "version while that cleanup is owed — the moment the cleanup lands, " +
+        "it would point the agent's restored routing at this run's draft. " +
+        "The cleanup retries on the earlier run's next terminal report and " +
+        "before the next mocked run; settle it (a revoked platform key is " +
+        "the usual cause), then start this run again.",
+      log,
+    );
+  }
 
   const built = await buildMockedWorld(
     key,
@@ -233,13 +256,26 @@ export async function buildRunMockedWorld(
   return await refuseRun(auth, run, built.reason, log);
 }
 
+/** What the sweep left behind: nothing owed, or a debt it could not clear. */
+export type SweptMockedWorlds =
+  | { readonly kind: "settled" }
+  /** Something is still owed to the account, and the one-sentence why. */
+  | { readonly kind: "unsettled"; readonly reason: string };
+
 /**
- * Settle every world this agent's runs still owe the account.
+ * Settle every world this agent's runs still owe the account, and answer
+ * whether anything is still owed.
  *
  * The teardown and the sweep, which are the same act: a run that has finished
  * owes nothing, so whatever it recorded is given back. A run that could still
  * be conducting is left alone — two runs of one agent at once must not tear
  * each other's world down.
+ *
+ * The answer is load-bearing for exactly one caller: the build refuses to
+ * branch over an `unsettled` agent, because an unsettled world's restore
+ * retries later and must never find a draft to route `latest` onto. Anything
+ * that keeps this sweep from *knowing* the agent is clean — the read failing,
+ * the platform key gone — is therefore `unsettled` too, never a shrug.
  */
 export async function settleMockedWorlds(
   auth: AuthContext,
@@ -247,7 +283,7 @@ export async function settleMockedWorlds(
   reach: MockedWorldReach,
   log: { error: (payload: unknown, message?: string) => void },
   options: { readonly exceptRunId?: string } = {},
-): Promise<void> {
+): Promise<SweptMockedWorlds> {
   let outstanding;
   try {
     outstanding = await outstandingMockedWorlds(auth, agentId, options);
@@ -263,16 +299,27 @@ export async function settleMockedWorlds(
         },
       ),
     );
-    return;
+    return {
+      kind: "unsettled",
+      reason: "what this agent's runs still owe could not be read",
+    };
   }
-  if (outstanding.length === 0) return;
+  if (outstanding.length === 0) return { kind: "settled" };
 
   const agent = await getAgent(auth, agentId);
   const platformAgentId = agent?.platformAgentId ?? "";
   const apiKey = await agentMonitoringKey(auth, agentId).catch(() => undefined);
-  if (platformAgentId === "" || apiKey === undefined) return;
+  if (platformAgentId === "" || apiKey === undefined) {
+    return {
+      kind: "unsettled",
+      reason:
+        "an outstanding mocked world cannot be given back without the " +
+        "agent's platform agent id and platform key",
+    };
+  }
   const key = credential(apiKey);
   const now = Date.now();
+  const owed: string[] = [];
 
   for (const held of outstanding) {
     const finished = held.finishedAt !== null;
@@ -287,7 +334,13 @@ export async function settleMockedWorlds(
       held.status === "pending" &&
       !worldBuilt &&
       now - held.createdAt.getTime() > STALE_BUILD_MILLISECONDS;
-    if (!finished && !stale) continue;
+    if (!finished && !stale) {
+      // Alive, so its world is its own to settle — but the agent is not clean
+      // while it stands. The build path never sees this arm: the claim it just
+      // won is what proves no such run exists.
+      owed.push(`run ${held.runId} still holds this agent's mocked world`);
+      continue;
+    }
 
     if (stale) {
       // Its process died before it could make its simulations claimable, so
@@ -324,8 +377,13 @@ export async function settleMockedWorlds(
         ),
         settled.unfinished.join("; "),
       );
+      owed.push(`run ${held.runId} still owes ${settled.unfinished.join("; ")}`);
     }
   }
+
+  return owed.length === 0
+    ? { kind: "settled" }
+    : { kind: "unsettled", reason: owed.join("; ") };
 }
 
 /** Whether a world still owes the platform anything. */

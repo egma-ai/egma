@@ -128,12 +128,14 @@ async function aTickedAgent(label: string): Promise<Ready> {
 
 /**
  * A run and one queued simulation, written straight into the store with a
- * chosen world and a chosen age.
+ * chosen world, a chosen age, and — for a run whose teardown is the thing
+ * under test — a finished status.
  */
 async function seedRun(
   ready: Ready,
   world: Record<string, unknown> | null,
   minutesOld: number,
+  status: "pending" | "completed" = "pending",
 ): Promise<{ runId: string; simulationId: string }> {
   const runId = newId("run");
   const simulationId = newId("sim");
@@ -142,9 +144,15 @@ async function seedRun(
     `insert into run
        (id, organization_id, project_id, suite_id, agent_id, connection_id,
         status, triggered_via, connection_snapshot, mock_tool_snapshot,
-        mocked_world, expected_simulation_count, created_at)
-     values ($1,$2,$3,$4,$5,$6,'pending','manual',$7::jsonb,$8::jsonb,$9::jsonb,1,
-        now() - ($10 || ' minutes')::interval)`,
+        mocked_world, expected_simulation_count, created_at, started_at,
+        finished_at, completed_count, failed_count, canceled_count)
+     values ($1,$2,$3,$4,$5,$6,$11,'manual',$7::jsonb,$8::jsonb,$9::jsonb,1,
+        now() - ($10 || ' minutes')::interval,
+        case when $11 = 'completed' then now() - ($10 || ' minutes')::interval end,
+        case when $11 = 'completed' then now() - interval '1 minute' end,
+        case when $11 = 'completed' then 1 end,
+        case when $11 = 'completed' then 0 end,
+        case when $11 = 'completed' then 0 end)`,
     [
       runId,
       organizationId,
@@ -164,6 +172,7 @@ async function seedRun(
       JSON.stringify({ defaults: [], overrides: {} }),
       world === null ? null : JSON.stringify(world),
       String(minutesOld),
+      status,
     ],
   );
   await api.database.sql(
@@ -187,6 +196,19 @@ async function seedRun(
   );
   return { runId, simulationId };
 }
+
+/** The same account, refusing every delete — a teardown that cannot finish. */
+const RETELL_DELETE_REFUSED: typeof fetch = (async (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => {
+  if ((init?.method ?? "GET") === "DELETE") {
+    return new Response(JSON.stringify({ error: "not today" }), {
+      status: 500,
+    });
+  }
+  return RETELL(input as string, init);
+}) as typeof fetch;
 
 const MARKER = {
   servingVersion: 0,
@@ -247,5 +269,56 @@ describe("the sweep, over a run that is pending", () => {
     await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     expect((await getRun(auth, runId))?.status).toBe("pending");
+  });
+});
+
+/**
+ * What the sweep answers, which one caller's safety hangs on: the build
+ * refuses to branch over an `unsettled` agent, because an unsettled world's
+ * restore retries later and must never find a draft to route `latest` onto.
+ */
+describe("what the sweep answers", () => {
+  it("answers settled over an agent that owes nothing", async () => {
+    const ready = await aTickedAgent("sweep_answers_clean");
+    const auth = contextFor(ready.ada, "member");
+
+    const swept = await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+
+    expect(swept).toEqual({ kind: "settled" });
+  });
+
+  it("answers settled once a finished run's world is given back", async () => {
+    const ready = await aTickedAgent("sweep_answers_settled");
+    // A finished run still holding its draft — ordinary litter, and the
+    // account honours the delete.
+    const { runId } = await seedRun(ready, BUILT, 20, "completed");
+    const auth = contextFor(ready.ada, "member");
+
+    const swept = await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+
+    expect(swept).toEqual({ kind: "settled" });
+    expect((await getRun(auth, runId))?.mockedWorld?.draftVersion).toBe(null);
+  });
+
+  it("answers unsettled while a finished run's draft cannot be deleted", async () => {
+    const ready = await aTickedAgent("sweep_answers_unsettled");
+    const { runId } = await seedRun(ready, BUILT, 20, "completed");
+    const auth = contextFor(ready.ada, "member");
+
+    const swept = await settleMockedWorlds(
+      auth,
+      ready.agentId,
+      { baseUrl: "https://egma.test", retellFetch: RETELL_DELETE_REFUSED },
+      SWEEP_LOG,
+    );
+
+    // Still owed, named by run — and the world still honestly holds its
+    // draft, so the retry knows exactly what to give back.
+    expect(swept.kind).toBe("unsettled");
+    if (swept.kind === "unsettled") {
+      expect(swept.reason).toContain(runId);
+      expect(swept.reason).toContain("still owes");
+    }
+    expect((await getRun(auth, runId))?.mockedWorld?.draftVersion).toBe(106);
   });
 });
