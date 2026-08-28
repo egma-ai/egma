@@ -21,6 +21,14 @@ was sent.
 - **The mocked-draft transform** — a pure function that points an engine's
   custom tools at Egma's mock endpoint, and the three-class coverage stamp
   saying what it could not stand in front of.
+- **The mocked world's lifecycle** — the order a run builds its temporary
+  version in and the order it gives the account back, with every guard between
+  the steps: `bindingDecisionsFor`, `buildMockedWorld`, `finishMockedWorld`.
+  `finishMockedWorld` is both the teardown and the sweep, because they are the
+  same act.
+- **Discovery** — what ticking the mock-tools box finds: every tool in its
+  honest class, the deterministic answer Egma would seed for each one it can
+  intercept, and the tools that act outside the call and will really act.
 
 Every write names its version explicitly. Retell's own default is "the latest
 version", and after a branch the latest version is the branch, so a write that
@@ -48,10 +56,32 @@ Its finding is informational either way. The run builder's fork guard refuses a
 branch whose engine reference still matches the serving version's, before any
 write, so no lane depends on the answer.
 
+## The live proof of the whole seam
+
+Beside the fork check there is a second live suite, and it is the one the
+founder asked for: **one mocked suite against the real Remedy agent, with the
+record showing Egma answered while production served the customer's own
+backend.** It lives in `apps/api/test/live-remedy.test.ts`, because it drives
+Egma's own platform API as well as reading the Retell account, and its own
+header carries the command, everything it needs, and what to bank when it
+passes.
+
+It is the 2026-08-27 hand-run turned into a script: capture the account, start
+a mocked run, check mid-run that the temporary version points at Egma while the
+serving version is byte-identical to the capture and a tagged number is
+untouched, wait for the run, then check the temporary version is deleted, the
+routing restored, and every simulation's three-class stamp truthful.
+
+Like the fork check, **it is run by hand and never by CI or by an agent**, and
+without its environment every check is skipped visibly. It needs three things
+CI has none of: a Retell API key, a public tunnel in front of the deployment so
+Retell can reach the mock endpoint, and funded model keys for the real voice
+conversations it conducts.
+
 ## The live checklist
 
-Two questions can only be answered against a real Retell account, and both are
-the developer's to answer by hand. Each finding lands, dated, in
+Three questions can only be answered against a real Retell account, and all
+three are the developer's to answer by hand. Each finding lands, dated, in
 `.scratch/mock-tools/research/retell-mocking-surface.md`.
 
 **1. Does branching fork a Retell LLM?** — the command above.
@@ -79,3 +109,18 @@ To answer it, run one mocked simulation and look at what arrives:
 Until it is answered the endpoint fails safe rather than open: a signature that
 is present must verify, and a request carrying none is admitted on the two
 unguessable identifiers and the live-run gate.
+
+**3. Does `{{egma_simulation}}` render into a tool URL on a live *voice*
+call?** Per-call rendering into a custom-function URL is proven on a real agent
+in text mode (2026-08-27), and rendering happens in the response engine, so
+voice is expected to behave identically — but expected is not proven. The live
+proof above answers it for free: a mock request arriving at
+`/mock-tools/{run}/{simulation}/{tool}` with a real simulation identifier in the
+middle segment **is** the evidence.
+
+If it ever says no, the fallback is already designed and costs the lifecycle
+nothing: write the simulation's identifier into the URL at transform time
+instead of as a variable, and branch one temporary version per simulation
+rather than one per run. Every step and every guard keeps its exact shape —
+`packages/retell/src/mocked-world.ts` says so at the top, beside the order it
+would keep.

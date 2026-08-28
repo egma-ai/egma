@@ -47,6 +47,31 @@
  * crash between "egma says it pinned this number" and the pin itself leaves a
  * restore that writes the bindings back exactly as they already are — a no-op.
  * The other order would leave a real pin that nothing knows to undo.
+ *
+ * ## One draft per run, and the fallback if that ever stops being true
+ *
+ * A run is one suite against one agent over one connection, so its simulations
+ * share one temporary version and the run's frozen snapshot is the one world
+ * they all see. What tells them apart is the URL: the transform writes
+ * `{{egma_simulation}}` into the path, and Retell renders it per call from the
+ * variables call creation was given.
+ *
+ * **The one empirical check left is the developer's**, and it is that same
+ * rendering on a live *voice* call. Per-call rendering into a custom-function
+ * URL is proven on a real agent in text mode (2026-08-27); the response engine
+ * is what renders, so voice is expected to be identical, and a mock request
+ * arriving at the simulation-id path during the live proof is the whole of the
+ * evidence needed.
+ *
+ * **If it ever says no, the fallback costs this file nothing.** Write the
+ * simulation's identifier into the URL at transform time rather than as a
+ * variable, and branch one draft per simulation instead of one per run. Every
+ * step above keeps its exact shape and its exact order — capture, branch, fork
+ * guard, swap, verify, delete-before-restore — with `buildMockedWorld` called
+ * once per simulation instead of once per run, and the record growing a list of
+ * temporary versions where it holds one. It is written down here rather than
+ * built, because building it would be paying for a branch nobody expects to
+ * take.
  */
 
 import {
