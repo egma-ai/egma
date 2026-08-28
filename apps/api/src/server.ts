@@ -464,6 +464,15 @@ export function buildApi(options: ServerOptions): Api {
   // conversation a document may land.
   void app.register(reportRoutes, {
     serviceToken: config.simulatorServiceToken,
+    // A landing that finished a mocked run gives the account back: the
+    // temporary version deleted, then any pin restored. The next run's sweep
+    // is the same act and finishes whatever this one could not.
+    mockedWorldReach: {
+      baseUrl: config.baseUrl,
+      ...(options.retellFetch === undefined
+        ? {}
+        : { retellFetch: options.retellFetch }),
+    },
   });
 
   // The mock endpoint: the seam's one new public surface. Registered without

@@ -177,9 +177,9 @@ describe("the retell_web_call connection, through the API", () => {
     // Sealed: a read gives back the last four characters and never the key.
     expect(connection.credentialsHint).toBe("WXYZ");
 
-    // And the catalog a form is drawn from offers it, with the two adapter
-    // facts said out loud: this lane can be registered today and cannot be
-    // conducted until the plug that places the call ships.
+    // And the catalog a form is drawn from offers it, conductable: the plug
+    // places the call, and the control plane hands it the version to place it
+    // against.
     const options = await ask(api.app, "GET", "/v1/connection-options", key);
     expect(options.statusCode, JSON.stringify(options.body)).toBe(200);
     const offered = (
@@ -192,7 +192,7 @@ describe("the retell_web_call connection, through the API", () => {
     ).find((one) => one.connectionType === "retell_web_call");
     expect(offered?.productLabel).toBe("Retell web call");
     expect(offered?.modality).toBe("voice");
-    expect(offered?.simulatorAdapter).toBe(false);
+    expect(offered?.simulatorAdapter).toBe(true);
   });
 });
 

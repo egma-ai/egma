@@ -156,14 +156,47 @@ export type MockedWorldRecord = {
 /** How the caller is told what egma currently owes the account. */
 export type RecordMockedWorld = (world: MockedWorldRecord) => Promise<void>;
 
+/**
+ * Which version a run over this agent should be testing.
+ *
+ * The one a real caller reaches: the first binding on a routed number that
+ * names a version — a number or a tag. A number riding `latest` names none, so
+ * it is passed over here and answered by `latest` below, which is the same
+ * thing it resolves to.
+ *
+ * `latest` where the agent has no number at all, which is the ordinary case for
+ * a chat agent and the right answer for it: a conversation created against no
+ * named version gets the platform's own default, and this makes the run test
+ * what that default is.
+ */
+export function versionReferenceIn(
+  decisions: readonly BindingDecision[],
+): VersionReference {
+  for (const decision of decisions) {
+    for (const binding of decision.bindings) {
+      if (typeof binding.agentVersion === "number") return binding.agentVersion;
+      if (
+        typeof binding.agentVersion === "string" &&
+        bindingVerdictOf(binding) === "environment-tag"
+      ) {
+        return binding.agentVersion;
+      }
+    }
+  }
+  return "latest";
+}
+
 export type MockedWorldBuild = {
   readonly agentId: string;
   /**
    * Which version the run tests: a number, an environment tag, or `latest`.
    * Whatever it is, it is resolved once and every later step names the number
    * it resolved to — so a tag reassigned mid-run cannot move what is running.
+   *
+   * Absent means "whatever a real caller reaches", worked out from the numbers
+   * by `versionReferenceIn` above.
    */
-  readonly versionReference: VersionReference;
+  readonly versionReference?: VersionReference | undefined;
   /** Where the swapped tool URLs point. */
   readonly target: MockEndpointTarget;
   readonly record: RecordMockedWorld;
@@ -285,7 +318,7 @@ export async function buildMockedWorld(
   const serving = await resolveAgentVersion(
     key,
     agentId,
-    build.versionReference,
+    build.versionReference ?? versionReferenceIn(decisions),
     reach,
   );
   if (serving.kind !== "version") {
@@ -341,27 +374,48 @@ export async function buildMockedWorld(
   // 3d. The pins themselves. A number already pinned, riding a tag, or riding
   // the published pointer is recorded and never touched — the tag assignment
   // in particular is the customer's and egma has no business in it.
-  for (const decision of decisions) {
-    if (!decision.pin) continue;
-    const pinned = await pinNumberBinding(
-      key,
-      {
-        number: decision.number,
-        agentId,
-        version: servingVersion,
-        bindings: decision.bindings,
-      },
-      reach,
-    );
-    if (pinned.kind !== "written") {
+  //
+  // **A pin preserves today's behaviour and never changes it**, so the version
+  // it pins to is the one that binding resolves to *now* — which for `latest`
+  // and for an unset binding is whatever `latest` names at this moment. It is
+  // deliberately not the run's serving version: an agent whose tagged number
+  // serves 105 while its `latest` number serves 110 would otherwise have its
+  // second number quietly moved back five versions for the length of a run.
+  if (decisions.some((decision) => decision.pin)) {
+    const newest = await resolveAgentVersion(key, agentId, "latest", reach);
+    if (newest.kind !== "version") {
       return {
         kind: "refused",
         reason: sentenceOf(
-          pinned,
-          `pinning ${decision.number} to version ${servingVersion}`,
+          newest,
+          "resolving the version a number riding `latest` reaches right now",
         ),
         world,
       };
+    }
+    const pinVersion = newest.agentVersion.version;
+    for (const decision of decisions) {
+      if (!decision.pin) continue;
+      const pinned = await pinNumberBinding(
+        key,
+        {
+          number: decision.number,
+          agentId,
+          version: pinVersion,
+          bindings: decision.bindings,
+        },
+        reach,
+      );
+      if (pinned.kind !== "written") {
+        return {
+          kind: "refused",
+          reason: sentenceOf(
+            pinned,
+            `pinning ${decision.number} to version ${pinVersion}`,
+          ),
+          world,
+        };
+      }
     }
   }
 

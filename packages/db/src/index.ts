@@ -102,6 +102,16 @@ export {
   type MockedWorldEngine,
   type MockedWorldNumber,
 } from "./mock-tools/world.ts";
+/**
+ * Which connection lanes a mocked world is built for. The gate beside them is
+ * not exported: it is a condition inside the claim, and nothing outside this
+ * package has a query to put it in.
+ */
+export {
+  connectionTypeTakesMockedWorld,
+  MOCKABLE_CONNECTION_TYPES,
+  type MockableConnectionType,
+} from "./mock-tools/lanes.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,

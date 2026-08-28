@@ -54,6 +54,7 @@ import {
   sendRefusal,
   unprocessable,
 } from "../http/refusals.ts";
+import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
 
 export type RunRoutesOptions = {
@@ -61,6 +62,12 @@ export type RunRoutesOptions = {
   readonly rateLimit: RateLimit;
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
+  /**
+   * Test seam for the platform writes a mocked run's world is built with. The
+   * real one is `fetch`, and nothing in this route reaches a platform for a run
+   * that mocks nothing.
+   */
+  readonly retellFetch?: typeof fetch | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -446,6 +453,29 @@ export async function runRoutes(
       }
 
       const started = await startRun(acting.auth, input);
+
+      // The mocked world, built before the run can conduct anything.
+      //
+      // It happens after the run exists because the temporary version's tool
+      // URLs carry this run's identifier, and nothing races it: a mocked run's
+      // simulations are unclaimable until the record names a temporary version,
+      // from the instant they are written. A world that cannot be built cancels
+      // the run and is answered as itself — never as a run that started.
+      const world = await buildRunMockedWorld(
+        acting.auth,
+        started,
+        {
+          baseUrl: options.baseUrl,
+          ...(options.retellFetch === undefined
+            ? {}
+            : { retellFetch: options.retellFetch }),
+        },
+        request.log,
+      );
+      if (world.kind === "refused") {
+        return sendRefusal(reply, "mocked_world_unbuildable", world.reason);
+      }
+
       const described = await headerOf(
         acting.auth,
         started.id,

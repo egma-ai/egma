@@ -119,6 +119,11 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
+    // The platform writes a mocked run builds its world with. Reached only for
+    // a run whose agent carries the tick.
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
   void app.register(simulationRoutes, credentialed);
   void app.register(recordingRoutes, { ...credentialed, blob: options.blob });

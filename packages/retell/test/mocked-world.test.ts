@@ -54,6 +54,8 @@ type AccountOptions = {
   readonly numbers?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   /** Environment tags this account resolves, by name. */
   readonly tags?: Readonly<Record<string, number>>;
+  /** Versions beyond the serving one, for an account with a newer draft on it. */
+  readonly alsoVersions?: readonly number[];
   /**
    * What branching does to the engine reference. `fork` is the observed
    * behaviour for a conversation flow; `share` is the case the fork guard
@@ -106,6 +108,19 @@ function account(options: AccountOptions = {}): Account {
         ? { type: "conversation-flow", conversation_flow_id: engineId, version: 105 }
         : { type: "retell-llm", llm_id: engineId, version: 105 },
   });
+
+  for (const extra of options.alsoVersions ?? []) {
+    engines.set(engineKey(engineId, extra), structuredClone(source));
+    versions.set(extra, {
+      agent_id: AGENT,
+      version: extra,
+      is_published: false,
+      response_engine:
+        kind === "conversation-flow"
+          ? { type: "conversation-flow", conversation_flow_id: engineId, version: extra }
+          : { type: "retell-llm", llm_id: engineId, version: extra },
+    });
+  }
 
   for (const [number, bindings] of Object.entries(options.numbers ?? {})) {
     numbers.set(number, {
@@ -531,6 +546,34 @@ describe("the pin, and the routing it promises to put back", () => {
     expect(
       retell.seen.filter((one) => one.url.includes("/update-phone-number/")),
     ).toEqual([]);
+    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
+  });
+
+  it("pins to what that number reaches now, not to the version the run tests", async () => {
+    // The customer's tagged number serves 105. A second number rides `latest`,
+    // which is 110 today. Pinning the second number to 105 would quietly move
+    // its callers back five versions for the length of a run.
+    const retell = account({
+      alsoVersions: [110],
+      tags: { prod: 105 },
+      numbers: {
+        "+12567332874": RIDES_TAG,
+        "+12567332875": RIDES_LATEST,
+      },
+    });
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    // The run tests what a real caller reaches, worked out from the numbers.
+    expect(built.world.servingVersion).toBe(105);
+    // And the pin preserves the other number's behaviour exactly.
+    expect(retell.bindingsOf("+12567332875")[0]?.["agent_version"]).toBe(110);
     expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
   });
 

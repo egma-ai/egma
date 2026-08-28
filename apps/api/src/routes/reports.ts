@@ -25,6 +25,10 @@ import {
   notTheService,
   unprocessable,
 } from "../http/refusals.ts";
+import {
+  settleMockedWorlds,
+  type MockedWorldReach,
+} from "../mocked-world.ts";
 
 /**
  * The report door: `POST /v1/simulations/:simulationId/reports`, where the
@@ -64,6 +68,12 @@ import {
 export type ReportRoutesOptions = {
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
+  /**
+   * What a run's mocked world is torn down through, when a landing was the last
+   * one its run was waiting for. Absent leaves the teardown to the next run's
+   * sweep, which is the same act.
+   */
+  readonly mockedWorldReach?: MockedWorldReach | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -314,6 +324,31 @@ export async function reportRoutes(
       const applied = await applyStatusEvent(reply, simulationId, event);
       if (typeof applied !== "string") return applied;
       lastKnownStatus = applied;
+    }
+
+    // The teardown, when this document may have been the last thing a mocked
+    // run was waiting for.
+    //
+    // It settles only runs that have **finished**, so this is a cheap read for
+    // every landing and a delete plus a restore exactly once per mocked run.
+    // Nothing depends on it happening here: a run whose teardown never ran —
+    // because this deployment restarted, or because the platform was away — is
+    // finished by the next run's sweep, which is the same act in the same
+    // order. That is why a failure here is logged rather than answered: the
+    // simulator is waiting on a report about a conversation, and what Egma owes
+    // somebody's Retell account is not that conversation's problem.
+    if (
+      options.mockedWorldReach !== undefined &&
+      (lastKnownStatus === "completed" ||
+        lastKnownStatus === "failed" ||
+        lastKnownStatus === "canceled")
+    ) {
+      await settleMockedWorlds(
+        standing.auth,
+        standing.agentId,
+        options.mockedWorldReach,
+        request.log,
+      ).catch(() => undefined);
     }
 
     return landedOn(reply, simulationId, lastKnownStatus);

@@ -64,6 +64,7 @@ import {
   mockedWorldRow,
   type MockedWorld,
 } from "../mock-tools/world.ts";
+import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -857,6 +858,83 @@ export async function recordMockedWorld(
   return getRun(auth, runId);
 }
 
+/** One run's outstanding obligation to somebody's Retell account. */
+export type OutstandingMockedWorld = {
+  readonly runId: string;
+  readonly world: MockedWorld;
+  readonly status: RunStatus;
+  readonly createdAt: Date;
+  /** Null while the run could still be conducting something. */
+  readonly finishedAt: Date | null;
+};
+
+/**
+ * Every world this agent's runs still owe the account.
+ *
+ * The sweep's whole input. A world is outstanding while it names a temporary
+ * version that has not been deleted, or a number whose binding has not been put
+ * back — the two things a crashed run leaves behind. Teardown clears each as it
+ * lands, so a run that finished cleanly answers nothing here.
+ *
+ * Ordered oldest first, because the oldest litter is the litter most likely to
+ * be a crash rather than a run still in flight.
+ */
+export async function outstandingMockedWorlds(
+  auth: AuthContext,
+  agentId: string,
+  options: { readonly exceptRunId?: string } = {},
+): Promise<readonly OutstandingMockedWorld[]> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const rows = await db()
+    .select({
+      id: run.id,
+      mockedWorld: run.mockedWorld,
+      status: run.status,
+      createdAt: run.createdAt,
+      finishedAt: run.finishedAt,
+    })
+    .from(run)
+    .where(
+      within(
+        auth,
+        run,
+        and(
+          eq(run.agentId, agentId),
+          isNotNull(run.mockedWorld),
+          options.exceptRunId === undefined
+            ? undefined
+            : sql`${run.id} <> ${options.exceptRunId}`,
+          sql`(
+            ${run.mockedWorld}->>'draftVersion' is not null
+            or exists (
+              select 1
+              from jsonb_array_elements(${run.mockedWorld}->'numbers') as one
+              where one->>'pinned' = 'true'
+            )
+          )`,
+        ),
+      ),
+    )
+    .orderBy(asc(run.id));
+
+  const outstanding: OutstandingMockedWorld[] = [];
+  for (const row of rows) {
+    const world = mockedWorldFrom(
+      row.mockedWorld,
+      () => new Error(`run ${row.id} holds a malformed mocked world`),
+    );
+    if (world === null) continue;
+    outstanding.push({
+      runId: row.id,
+      world,
+      status: row.status as RunStatus,
+      createdAt: row.createdAt,
+      finishedAt: row.finishedAt,
+    });
+  }
+  return outstanding;
+}
+
 export type SimulationExecutionEvidence = {
   readonly testVersion: TestExecutionContent;
   readonly mockToolSnapshot: MockToolSnapshot;
@@ -1404,7 +1482,14 @@ export async function claimSimulations(
     const candidates = await tx
       .select({ id: simulation.id })
       .from(simulation)
-      .where(eq(simulation.status, "queued"))
+      // Queued, **and** its run is ready to be conducted. For every run that
+      // mocks nothing the second condition is true by construction; for a run
+      // that owes itself a mocked world it stays false until the temporary
+      // version exists, so a run that cannot build its world never has a
+      // simulation conducted against the real tools. See `mock-tools/lanes.ts`.
+      .where(
+        and(eq(simulation.status, "queued"), runIsReadyToConduct(simulation.runId)),
+      )
       .orderBy(asc(simulation.id))
       .limit(capacity)
       .for("update", { skipLocked: true });

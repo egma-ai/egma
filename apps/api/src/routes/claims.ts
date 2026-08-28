@@ -22,6 +22,7 @@ import {
   credentialFor,
   type ProviderCredentialSource,
 } from "@egma/provider-credentials";
+import { SIMULATION_VARIABLE } from "@egma/retell";
 import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
@@ -219,6 +220,61 @@ async function modelsBlock(
       ...speechKey(models.tts.provider),
     },
   };
+}
+
+/**
+ * The two fields a simulation of a mocked run carries, or nothing at all.
+ *
+ * **The version** is the temporary one the run branched, named explicitly. The
+ * platform's own default is "the newest version", which after a branch is
+ * whatever was minted most recently anywhere on the account — so a spec that
+ * left this out would be a conversation placed against a version nobody chose.
+ *
+ * **The variables** are what the platform renders per call, and Egma passes
+ * only its own: the attribution variable that carries this simulation's
+ * identifier into the tool URL. Everything else falls back to the flow's own
+ * declared defaults, which is the documented scope of this version.
+ *
+ * The attribution variable is **asserted rather than assumed**. The whole tool
+ * record of a mocked simulation rides on it: the swapped URL carries
+ * `{{egma_simulation}}` as a path segment, and a spec that omitted it would send
+ * every tool call to a path naming no simulation — which the endpoint refuses,
+ * silently losing every tool fact the run exists to collect. Nothing else
+ * catches that, so it is caught here, where the value is put in.
+ */
+function mockedWorldSpecOf(
+  run: Run,
+  simulationId: string,
+): Record<string, unknown> {
+  const world = run.mockedWorld;
+  if (world === null || world.draftVersion === null) return {};
+
+  const variables = dynamicVariablesFor(simulationId);
+  if (variables[SIMULATION_VARIABLE] !== simulationId) {
+    throw new Error(
+      `simulation ${simulationId} would be conducted in a mocked world whose ` +
+        `variables do not carry ${SIMULATION_VARIABLE}, so no tool call it ` +
+        "made could be traced back to it",
+    );
+  }
+
+  return {
+    agent_version: world.draftVersion,
+    dynamic_variables: variables,
+  };
+}
+
+/**
+ * The variables one simulation is conducted with.
+ *
+ * One entry today, and the assertion above is on its answer rather than inside
+ * it deliberately: authored caller-context variables are a named later chapter,
+ * and the day this function merges a second source is the day it could drop the
+ * first. The check is placed where it will still be looking at the whole answer
+ * when that happens.
+ */
+function dynamicVariablesFor(simulationId: string): Record<string, string> {
+  return { [SIMULATION_VARIABLE]: simulationId };
 }
 
 /** What a claim request said, once every field has been read and refused for itself. */
@@ -442,6 +498,11 @@ async function assembledSpec(
     throw fault;
   }
 
+  // The mocked world this simulation is conducted in, where the run built one.
+  // Two fields, and both are the platform's own vocabulary: which version to
+  // place the conversation against, and the variables it renders per call.
+  const mockedWorld = mockedWorldSpecOf(run, claim.id);
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -453,6 +514,7 @@ async function assembledSpec(
       config: connection.config,
       credentials: connection.credentials,
     },
+    ...mockedWorld,
     // Flat and whole, straight off the pinned version: the name this person
     // gives the agent, who they are, and the language the roleplay runs in.
     // The identity name is the authored one — never the team's label for the
