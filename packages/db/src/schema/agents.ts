@@ -53,6 +53,7 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 /** The direct paths Egma's simulator can select to reach an agent. */
 export const CONNECTION_TYPES = [
   "retell_chat_api",
+  "retell_web_call",
   "phone_number",
   "livekit_room",
 ] as const;
@@ -61,6 +62,7 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",
+  "retell_web_call.api_key",
   "phone_number.public_e164",
   "livekit_room.project_credentials",
   "livekit_room.customer_token_endpoint",
@@ -104,14 +106,27 @@ export const agent = pgTable(
     agentPlatform: text("agent_platform").notNull(),
     platformAgentId: text("platform_agent_id"),
     /**
-     * The platform key egma pulls this agent's production conversations with,
-     * sealed in the same envelope a connection's credentials use and opened
-     * by the same one opener. **A monitoring-only credential**: a customer who
-     * chat-tests and pull-monitors one Retell account pastes the key twice,
-     * once per job, so the two custodies never entangle. Custody is per agent
-     * and duplication across agents of one account is accepted knowingly —
-     * sealing is randomized, so the copies are not even recognizable as the
-     * same key.
+     * The agent's sealed **platform key**, in the same envelope a connection's
+     * credentials use and opened by the same one opener.
+     *
+     * **Its role is wider than its column name.** It was a monitoring-only
+     * credential — the key egma pulls this agent's finished production
+     * conversations with — and it is now also the key that does the platform
+     * writes the mock-tools tick consents to: branching a temporary version at
+     * run start, writing the mocked tools onto it, deleting it at run end, and
+     * pinning and restoring a number's binding around the run. Nothing else
+     * widened: a connection's own key keeps its own job, which is opening the
+     * calls.
+     *
+     * The column keeps its name because renaming a shipped column is an add
+     * and a remove rather than one statement, and the name is not where the
+     * rule lives. The glossary carries the widened role.
+     *
+     * A customer who chat-tests and pull-monitors one Retell account pastes the
+     * key twice, once per job, so the two custodies never entangle. Custody is
+     * per agent and duplication across agents of one account is accepted
+     * knowingly — sealing is randomized, so the copies are not even
+     * recognizable as the same key.
      */
     monitoringApiKey: text("monitoring_api_key"),
     /** The last characters of the key, kept so a person can tell keys apart. */
@@ -123,6 +138,26 @@ export const agent = pgTable(
      * declared.
      */
     pullProductionCalls: boolean("pull_production_calls")
+      .notNull()
+      .default(false),
+    /**
+     * The tick: every simulation against this agent runs in a mocked world.
+     *
+     * **Standing consent, and that is why it is stored here rather than on a
+     * connection.** Ticking it says egma may create a temporary version of the
+     * agent at the start of each run, point its tools at egma, delete it at the
+     * end, and — where a number follows `latest` — pin that number to the
+     * version it already resolves to for the length of the run and put the
+     * binding back afterwards. Those are acts against the agent's platform
+     * record, which is where platform identity and the sealed platform key
+     * already live (ADR-0015); a connection could not consent to them.
+     *
+     * Off by default, and constrained: it can only be on when there is a
+     * platform agent to branch and a sealed key to branch it with. A tick with
+     * nothing behind it would be a box promising isolation that no run could
+     * keep.
+     */
+    mockToolsDuringSimulations: boolean("mock_tools_during_simulations")
       .notNull()
       .default(false),
     /**
@@ -156,6 +191,15 @@ export const agent = pgTable(
     check(
       "agent_pull_needs_binding",
       sql`${table.pullProductionCalls} = false or (${table.agentPlatform} is not null and ${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
+    ),
+    // The same promise the pull switch is held to, for the same reason: the
+    // tick can only be on when there is a platform agent to branch a version
+    // of and a sealed key to branch it with. A ticked agent egma could not
+    // build a world for would be a run that failed at the start, or worse, one
+    // that quietly reached the real tools.
+    check(
+      "agent_mock_tools_need_platform_key",
+      sql`${table.mockToolsDuringSimulations} = false or (${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
     ),
     // The pairing, not each column on its own: an agent cannot name one
     // organization and another organization's project.

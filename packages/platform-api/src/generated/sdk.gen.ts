@@ -104,8 +104,8 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
     connection?: {
         name?: string;
         agentPlatform: 'retell' | 'livekit' | null;
-        connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-        accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
         config?: {
@@ -188,11 +188,13 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
     name?: string;
+    mockToolsDuringSimulations?: boolean;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'name' }
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'mockToolsDuringSimulations' }
             ] }]);
     return (options?.client ?? client).patch<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -219,8 +221,8 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name?: string;
     agentPlatform: 'retell' | 'livekit' | null;
-    connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-    accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+    connectionType: 'retell_chat_api' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+    accessVariant: 'retell_chat_api.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
     modality: 'voice' | 'chat';
     environment?: string;
     config?: {

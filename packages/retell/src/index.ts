@@ -7,30 +7,36 @@
  */
 export { safeRetellProviderData } from "./provider-data.ts";
 
-/** The one thing this client needs from the world, so tests can stand in. */
-export type Fetch = typeof fetch;
+import {
+  ask,
+  parsed,
+  plain,
+  refusalIn,
+  RetellUnreachableError,
+  type Answer,
+  type RetellCredential,
+  type RetellReach,
+} from "./transport.ts";
 
-/** A credential holder. The CLI masked RetellKey satisfies this interface. */
-export type RetellCredential = {
-  reveal(): string;
-};
+export {
+  RETELL_API,
+  RetellUnreachableError,
+  type Fetch,
+  type RetellCredential,
+  type RetellFailure,
+  type RetellReach,
+} from "./transport.ts";
 
-/** Retell's own address. `RetellReach.url` points somewhere else in a check. */
-export const RETELL_API = "https://api.retellai.com";
+export * from "./numbers.ts";
+export * from "./versions.ts";
+export * from "./tools.ts";
+export * from "./mock-draft.ts";
 
 /** How many agents one listing request asks for. */
 const PAGE_SIZE = 1000;
 
 /** A provider must finish a listing before it can hold this process forever. */
 const MAX_PAGES = 100;
-
-/** Where Retell is, and what talks to it. */
-export type RetellReach = {
-  /** Retell's API. Retell's own address when omitted. */
-  readonly url?: string | undefined;
-  readonly fetchImpl?: Fetch | undefined;
-  readonly signal?: AbortSignal | undefined;
-};
 
 /** One agent on the account, as a listing names it. */
 export type RetellAgent = {
@@ -120,83 +126,6 @@ export type PulledConfig =
   | { readonly kind: "gone" }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
-
-/**
- * A string off the wire with nothing in it a terminal would obey.
- *
- * An agent's name is drawn on a screen, and a terminal reads a control
- * character as an instruction rather than as text. They come out at the one
- * edge that reads the wire, so nothing below here has to remember.
- */
-function plain(value: unknown): string {
-  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
-}
-
-/** What a developer is told when Retell never answered. */
-export class RetellUnreachableError extends Error {
-  constructor(url: string, cause: unknown) {
-    super(`Retell at ${url} did not answer. Check this machine's network, then try again.`, {
-      cause,
-    });
-    this.name = "RetellUnreachableError";
-  }
-}
-
-type Answer = {
-  readonly status: number;
-  /** The transient body as it arrived. It does not cross this client. */
-  readonly body: string;
-};
-
-function base(reach: RetellReach): string {
-  return (reach.url ?? RETELL_API).replace(/\/+$/u, "");
-}
-
-/**
- * One request, with the key in the header and nowhere else.
- *
- * The key is read here and only here on the way out to Retell. Nothing about
- * the request is logged, and nothing about a failure repeats what was sent.
- */
-async function ask(
-  key: RetellCredential,
-  reach: RetellReach,
-  request: { readonly method: "GET" | "POST"; readonly path: string; readonly body?: unknown },
-): Promise<Answer> {
-  const url = `${base(reach)}${request.path}`;
-  const fetchImpl = reach.fetchImpl ?? fetch;
-
-  try {
-    const response = await fetchImpl(url, {
-      method: request.method,
-      headers: {
-        authorization: `Bearer ${key.reveal()}`,
-        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-      ...(reach.signal === undefined ? {} : { signal: reach.signal }),
-    });
-    return { status: response.status, body: await response.text() };
-  } catch (cause) {
-    throw new RetellUnreachableError(base(reach), cause);
-  }
-}
-
-/** A safe refusal. Retell's raw error body never leaves this client. */
-function refusalIn(answer: Answer): string {
-  if (answer.status === 429) return "Retell is busy. Try again shortly.";
-  if (answer.status >= 500) return "Retell is unavailable. Try again.";
-  return `Retell refused the request (${answer.status}).`;
-}
-
-function parsed(answer: Answer): Record<string, unknown> {
-  try {
-    const held = JSON.parse(answer.body) as unknown;
-    return typeof held === "object" && held !== null ? (held as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 /** A listed agent, or `null` for a row that is not one. */
 function agentFrom(row: unknown): RetellAgent | null {

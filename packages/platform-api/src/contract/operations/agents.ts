@@ -24,6 +24,18 @@ const agent = {
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
     pullProductionCalls: { type: "boolean" },
+    /**
+     * The tick: every simulation against this agent runs in a mocked world.
+     *
+     * Standing consent. Egma creates a temporary version of the agent on its
+     * platform at the start of each run, points every tool it can intercept at
+     * its own mock endpoint, deletes the version when the run ends, and — where
+     * a telephone number follows the platform's `latest` pointer — pins that
+     * number to the version it already resolves to for the length of the run
+     * and puts the binding back afterwards. It can only be on for an agent that
+     * has its platform identity and key.
+     */
+    mockToolsDuringSimulations: { type: "boolean" },
     /** Whether pull monitoring has ever been started for this agent. */
     monitoringConfigured: { type: "boolean" },
     /**
@@ -48,6 +60,7 @@ const agent = {
     "monitoringKeyPresent",
     "monitoringApiKeyHint",
     "pullProductionCalls",
+    "mockToolsDuringSimulations",
     "monitoringConfigured",
     "lastReceivedAt",
     "archived",
@@ -71,12 +84,18 @@ const connection = {
     },
     connectionType: {
       type: "string",
-      enum: ["retell_chat_api", "phone_number", "livekit_room"],
+      enum: [
+        "retell_chat_api",
+        "retell_web_call",
+        "phone_number",
+        "livekit_room",
+      ],
     },
     accessVariant: {
       type: "string",
       enum: [
         "retell_chat_api.api_key",
+        "retell_web_call.api_key",
         "phone_number.public_e164",
         "livekit_room.project_credentials",
         "livekit_room.customer_token_endpoint",
@@ -166,12 +185,18 @@ const connectionInput = {
     }),
     connectionType: {
       type: "string",
-      enum: ["retell_chat_api", "phone_number", "livekit_room"],
+      enum: [
+        "retell_chat_api",
+        "retell_web_call",
+        "phone_number",
+        "livekit_room",
+      ],
     },
     accessVariant: {
       type: "string",
       enum: [
         "retell_chat_api.api_key",
+        "retell_web_call.api_key",
         "phone_number.public_e164",
         "livekit_room.project_credentials",
         "livekit_room.customer_token_endpoint",
@@ -375,12 +400,18 @@ export const agentOperations = {
                 agentPlatformLabel: { type: "string" },
                 connectionType: {
                   type: "string",
-                  enum: ["retell_chat_api", "phone_number", "livekit_room"],
+                  enum: [
+                    "retell_chat_api",
+                    "retell_web_call",
+                    "phone_number",
+                    "livekit_room",
+                  ],
                 },
                 accessVariant: {
                   type: "string",
                   enum: [
                     "retell_chat_api.api_key",
+                    "retell_web_call.api_key",
                     "phone_number.public_e164",
                     "livekit_room.project_credentials",
                     "livekit_room.customer_token_endpoint",
@@ -595,6 +626,15 @@ export const agentOperations = {
         type: "object",
         properties: {
           name: { type: "string" },
+          mockToolsDuringSimulations: {
+            type: "boolean",
+            description:
+              "Turn the mocked world on or off for every simulation against " +
+              "this agent. Refused for an agent with no platform identity and " +
+              "key, because Egma builds the world by creating a temporary " +
+              "version of the agent on its platform and would have nothing to " +
+              "create one with. Absent leaves it as it is.",
+          },
         },
         additionalProperties: false,
       },

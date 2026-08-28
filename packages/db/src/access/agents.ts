@@ -184,6 +184,12 @@ export type Agent = {
   readonly monitoringApiKeyHint: string | null;
   /** The declared pull switch. Off until somebody turns it on. */
   readonly pullProductionCalls: boolean;
+  /**
+   * The tick: every simulation against this agent runs in a mocked world. Off
+   * until somebody turns it on, and it cannot be on without a platform agent
+   * and a sealed platform key.
+   */
+  readonly mockToolsDuringSimulations: boolean;
   /** Whether pull monitoring has ever been started for this agent. */
   readonly monitoringConfigured: boolean;
   /**
@@ -216,6 +222,11 @@ export type CreatedAgent = Agent & {
  */
 export type AgentChanges = {
   readonly name?: string | undefined;
+  /**
+   * The mock-tools tick. Absent means keep — a rename must never turn a mocked
+   * world on or off as a side effect.
+   */
+  readonly mockToolsDuringSimulations?: boolean | undefined;
 };
 
 /**
@@ -262,6 +273,7 @@ type AgentRow = {
   readonly retellModality: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
+  readonly mockToolsDuringSimulations: boolean;
   readonly monitoringConfigured: boolean;
   readonly lastReceivedAt: Date | null;
   readonly archivedAt: Date | null;
@@ -354,6 +366,7 @@ const COLUMNS = {
   retellModality: RETELL_MODALITY,
   monitoringApiKeyHint: agent.monitoringApiKeyHint,
   pullProductionCalls: agent.pullProductionCalls,
+  mockToolsDuringSimulations: agent.mockToolsDuringSimulations,
   monitoringConfigured: MONITORING_CONFIGURED,
   lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,
@@ -1313,20 +1326,57 @@ export async function updateAgent(
     changes.name === undefined
       ? undefined
       : validName(changes.name, "an agent");
+  const tick = changes.mockToolsDuringSimulations;
 
-  if (name === undefined) {
+  if (name === undefined && tick === undefined) {
     return getAgent(auth, id);
   }
 
   const [updated] = await db()
     .update(agent)
-    .set({ name, updatedAt: new Date() })
+    .set({
+      ...(name === undefined ? {} : { name }),
+      ...(tick === undefined ? {} : { mockToolsDuringSimulations: tick }),
+      updatedAt: new Date(),
+    })
     .where(theAgent(auth, id))
     .returning(COLUMNS)
-    .catch(refusingHeldAgentName(name));
+    .catch((error: unknown) => {
+      refuseUntickableAgent(error);
+      if (name !== undefined) refusingHeldAgentName(name)(error);
+      throw error;
+    });
 
   if (updated !== undefined) return agentFromRow(updated);
   return undefined;
+}
+
+/**
+ * What somebody is told when they tick the box on an agent that has no
+ * platform key.
+ *
+ * The database refuses it, and the sentence has to say what to do about it
+ * rather than name a constraint: mocking works by egma creating a temporary
+ * version of the agent on the platform, and there is nothing to create it with
+ * until the agent's platform identity and key are set.
+ *
+ * **It returns when the error is not its own**, and that is the whole contract
+ * of a recogniser sitting in a chain of them: an edit can break two rules, so
+ * each recogniser answers for the one it knows and leaves the rest alone. One
+ * that rethrew instead would be the last word on every failure, and the
+ * recognisers after it — the duplicate-name refusal among them — would never
+ * run.
+ */
+function refuseUntickableAgent(error: unknown): void {
+  if (lostToConstraint(error, "agent_mock_tools_need_platform_key")) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      "mock tools during simulations needs this agent's platform identity " +
+        "and key: Egma builds the mocked world by creating a temporary " +
+        "version of the agent on its own platform, and it has nothing to " +
+        "create one with. Connect the agent to its platform first.",
+    );
+  }
 }
 
 /**

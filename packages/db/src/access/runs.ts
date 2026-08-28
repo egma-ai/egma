@@ -48,10 +48,22 @@ import {
 import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
 import { openCredentials } from "../sealing.ts";
 import {
+  resolveMockTools,
   type MockToolSnapshot,
+  type ResolvedMockTool,
   type SnapshotDefault,
   type SnapshotEntry,
 } from "../mock-tools/resolve.ts";
+import {
+  mockToolCoverageFrom,
+  mockToolCoverageRow,
+  type MockToolCoverage,
+} from "../mock-tools/coverage.ts";
+import {
+  mockedWorldFrom,
+  mockedWorldRow,
+  type MockedWorld,
+} from "../mock-tools/world.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -116,6 +128,8 @@ export type Run = {
   readonly triggeredVia: RunTrigger;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: ConnectionSnapshot;
+  /** The temporary platform world this run built, or null when it built none. */
+  readonly mockedWorld: MockedWorld | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -127,11 +141,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type MockToolCoverage = {
-  readonly discovered: readonly string[];
-  readonly covered: readonly string[];
-  readonly uncovered: readonly string[];
-};
+export type { MockToolCoverage, MockedWorld };
 
 export type Simulation = {
   readonly id: string;
@@ -196,6 +206,7 @@ const RUN_COLUMNS = {
   triggeredVia: run.triggeredVia,
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
+  mockedWorld: run.mockedWorld,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -243,6 +254,7 @@ type RunRow = {
   readonly triggeredVia: string;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
+  readonly mockedWorld: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -283,11 +295,7 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
     write.recordingReference = facts.recordingReference.trim() || null;
   }
   if (facts.mockToolCoverage !== undefined) {
-    write.mockToolCoverage = {
-      discovered: [...facts.mockToolCoverage.discovered],
-      covered: [...facts.mockToolCoverage.covered],
-      uncovered: [...facts.mockToolCoverage.uncovered],
-    };
+    write.mockToolCoverage = mockToolCoverageRow(facts.mockToolCoverage);
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
@@ -324,6 +332,11 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   const malformed = () => new Error(`run ${runId} holds a malformed mock-tool snapshot`);
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw malformed();
   const { defaults, overrides } = value as Record<string, unknown>;
+  // The header freezes the project's answers and **only** those. What a pinned
+  // test version overrode lives on that version, which is immutable, so there
+  // is nothing about it to freeze — it is merged in per simulation at the
+  // moment a call is served. A stored override would be a second copy of an
+  // immutable thing, free to disagree with it, so the shape refuses one.
   if (
     !Array.isArray(defaults) ||
     typeof overrides !== "object" ||
@@ -353,20 +366,15 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   };
 }
 
-function mockToolCoverageFromRow(value: unknown, simulationId: string): MockToolCoverage | null {
-  if (value === null) return null;
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-  }
-  const row = value as Record<string, unknown>;
-  const list = (key: string): readonly string[] => {
-    const held = row[key];
-    if (!Array.isArray(held) || held.some((one) => typeof one !== "string")) {
-      throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-    }
-    return held as string[];
-  };
-  return { discovered: list("discovered"), covered: list("covered"), uncovered: list("uncovered") };
+function mockToolCoverageFromRow(
+  value: unknown,
+  simulationId: string,
+): MockToolCoverage | null {
+  return mockToolCoverageFrom(
+    value,
+    () =>
+      new Error(`simulation ${simulationId} holds malformed mock-tool coverage`),
+  );
 }
 
 function runFromRow(
@@ -374,7 +382,7 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const { status, triggeredVia, connectionSnapshot, ...rest } = row;
+  const { status, triggeredVia, connectionSnapshot, mockedWorld, ...rest } = row;
   return {
     ...rest,
     suiteName,
@@ -382,6 +390,10 @@ function runFromRow(
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
+    mockedWorld: mockedWorldFrom(
+      mockedWorld,
+      () => new Error(`run ${row.id} holds a malformed mocked world`),
+    ),
   };
 }
 
@@ -813,6 +825,36 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
   if (row === undefined) return undefined;
   const { suiteName, suiteDeletedAt, ...header } = row;
   return runFromRow(header, suiteName, suiteDeletedAt !== null);
+}
+
+/**
+ * Write down the temporary world this run built on the agent's platform.
+ *
+ * Called several times across one run, and deliberately: once when the numbers
+ * have been read and before anything is branched, again when the branch lands,
+ * and once more when teardown has put everything back. Each call replaces the
+ * record whole, because a half-written world is worse than a stale one — the
+ * teardown reads what is here and acts on it.
+ *
+ * **It is the one thing a finished run may still be told.** A run's header
+ * freezes when its counts land, and this column is carved out of that freeze:
+ * the record is bookkeeping about somebody's Retell account, not about this
+ * run's numbers, and a crashed run's litter is cleared after the run is over by
+ * definition. The migration's guard permits a change to this column alone.
+ */
+export async function recordMockedWorld(
+  auth: AuthContext,
+  runId: string,
+  world: MockedWorld | null,
+): Promise<Run | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const [updated] = await db()
+    .update(run)
+    .set({ mockedWorld: world === null ? null : mockedWorldRow(world) })
+    .where(theRun(auth, runId))
+    .returning({ id: run.id });
+  if (updated === undefined) return undefined;
+  return getRun(auth, runId);
 }
 
 export type SimulationExecutionEvidence = {
@@ -1507,6 +1549,223 @@ export async function resolveSimulationStanding(
     claimedBy: row.claimedBy,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
+  };
+}
+
+/**
+ * Everything the mock endpoint needs to answer one tool call, in one read.
+ *
+ * The request arrives from the agent's platform with no credential of egma's,
+ * so this read carries the whole of what the three gates ask: whether the run
+ * named is still live, whether the simulation named is that run's, and what
+ * that simulation's answers are. It takes no `AuthContext` for the same reason
+ * `resolveSimulationStanding` beside it takes none — there is no caller to
+ * resolve, and the row is the authority.
+ *
+ * `signingKey` is the agent's sealed platform key, opened. It is used to
+ * **verify** a signature the platform put on the request and for nothing else:
+ * nothing on this path spends it, and it never reaches an answer, a log, or a
+ * refusal.
+ *
+ * `undefined` means no such run, which is the first gate's answer.
+ */
+export type MockToolCallTarget = {
+  readonly runId: string;
+  /** Whether the run can still be conducting simulations. */
+  readonly runIsLive: boolean;
+  /** The simulation named, or `undefined` when it is not this run's. */
+  readonly simulation:
+    | {
+        readonly id: string;
+        readonly agentId: string;
+        readonly testVersionId: string;
+        readonly personaVersionId: string;
+        readonly status: SimulationStatus;
+        /** What this simulation is answered, project defaults and overrides merged. */
+        readonly answers: readonly ResolvedMockTool[];
+      }
+    | undefined;
+  readonly auth: AuthContext;
+  readonly signingKey: string | null;
+};
+
+export async function resolveMockToolCall(
+  runId: string,
+  simulationId: string,
+): Promise<MockToolCallTarget | undefined> {
+  const [header] = await db()
+    .select({
+      id: run.id,
+      organizationId: run.organizationId,
+      projectId: run.projectId,
+      status: run.status,
+      finishedAt: run.finishedAt,
+      mockToolSnapshot: run.mockToolSnapshot,
+      signingKey: agent.monitoringApiKey,
+    })
+    .from(run)
+    .innerJoin(agent, eq(run.agentId, agent.id))
+    .where(eq(run.id, runId))
+    .limit(1);
+  if (header === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      id: simulation.id,
+      agentId: simulation.agentId,
+      testVersionId: simulation.testVersionId,
+      personaVersionId: simulation.personaVersionId,
+      status: simulation.status,
+    })
+    .from(simulation)
+    .where(and(eq(simulation.id, simulationId), eq(simulation.runId, runId)))
+    .limit(1);
+
+  const frozen = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
+  const auth = conductingContext(header.organizationId, header.projectId);
+
+  // The run header freezes the **project's** answers and nothing else. What a
+  // pinned test version overrode is on that version, which is immutable — so
+  // there is nothing to freeze and nothing that can move underneath a run, and
+  // the two are merged here, per simulation, at the moment a call is served.
+  // That is what makes a per-test branch cost the draft nothing: one temporary
+  // version carries URLs, never answers, so it serves every override.
+  //
+  // The same merge `getSimulationExecutionEvidence` performs for the simulator,
+  // performed for the endpoint — one resolution, one answer to "what was this
+  // simulation served".
+  const answers =
+    row === undefined
+      ? []
+      : await answersFor(auth, frozen, row.testVersionId, simulationId);
+
+  return {
+    runId: header.id,
+    // Live means the run can still be conducting: it has not been finished,
+    // and it has not been canceled. A finished run's world has been torn down,
+    // so an answer served after it would be an answer from a world that no
+    // longer exists.
+    runIsLive:
+      header.finishedAt === null &&
+      (header.status === "pending" || header.status === "running"),
+    simulation:
+      row === undefined
+        ? undefined
+        : {
+            id: row.id,
+            agentId: row.agentId,
+            testVersionId: row.testVersionId,
+            personaVersionId: row.personaVersionId,
+            status: row.status as SimulationStatus,
+            answers,
+          },
+    auth,
+    signingKey:
+      header.signingKey === null ? null : openedApiKey(header.signingKey),
+  };
+}
+
+/**
+ * The run's frozen defaults merged with what this simulation's pinned test
+ * version overrode.
+ *
+ * A version that cannot be read is a refusal rather than a silent fall back to
+ * the project's defaults: serving the default where a test authored a branch
+ * would answer the wrong world and put it on the record as though it were
+ * asked for.
+ */
+async function answersFor(
+  auth: AuthContext,
+  frozen: MockToolSnapshot,
+  testVersionId: string,
+  simulationId: string,
+): Promise<readonly ResolvedMockTool[]> {
+  const version = await getTestVersionExecutionContent(auth, testVersionId);
+  if (version === undefined) {
+    throw new Error(
+      `simulation ${simulationId} pins unreadable test version ${testVersionId}`,
+    );
+  }
+  return resolveMockTools(
+    {
+      defaults: frozen.defaults,
+      overrides: { [testVersionId]: version.mockOverrides },
+    },
+    testVersionId,
+  );
+}
+
+/** The plaintext key inside a sealed `{ apiKey }` envelope, or null. */
+function openedApiKey(envelope: string): string | null {
+  try {
+    const opened = openCredentials(envelope);
+    if (
+      typeof opened === "object" &&
+      opened !== null &&
+      !Array.isArray(opened) &&
+      typeof (opened as { apiKey?: unknown }).apiKey === "string"
+    ) {
+      return (opened as { apiKey: string }).apiKey;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * The mocked world one simulation ran in, and which of its tools egma had an
+ * answer for.
+ *
+ * One query, under the context the row's own standing produced — the report
+ * door already holds it, so this read is scoped rather than exempt.
+ *
+ * `answeredFor` is the run's frozen world resolved for **this** simulation's
+ * pinned test version, so a per-test override that answers for a tool the
+ * project does not is counted, and the shared resolution is the one everything
+ * else uses.
+ */
+export type SimulationMockedWorld = {
+  readonly world: MockedWorld | null;
+  readonly answeredFor: readonly string[];
+};
+
+export async function simulationMockedWorld(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<SimulationMockedWorld | undefined> {
+  authorize(auth, "read", here(auth));
+  const [row] = await db()
+    .select({
+      mockedWorld: run.mockedWorld,
+      mockToolSnapshot: run.mockToolSnapshot,
+      runId: run.id,
+      testVersionId: simulation.testVersionId,
+    })
+    .from(simulation)
+    .innerJoin(run, eq(simulation.runId, run.id))
+    .where(within(auth, simulation, eq(simulation.id, simulationId)))
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  const world = mockedWorldFrom(
+    row.mockedWorld,
+    () => new Error(`run ${row.runId} holds a malformed mocked world`),
+  );
+  const frozen = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
+  // The same merge the endpoint serves from, so the stamp's `covered` list and
+  // the answers actually served can never disagree — including for a tool only
+  // this test version answers for.
+  const answers = await answersFor(
+    auth,
+    frozen,
+    row.testVersionId,
+    simulationId,
+  );
+  return {
+    world,
+    answeredFor: answers.map((resolved) => resolved.toolName),
   };
 }
 

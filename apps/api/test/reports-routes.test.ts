@@ -586,10 +586,16 @@ describe("the lifecycle lands", () => {
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    // The two class lists are empty because this run built no mocked world on
+    // a platform: the conductor stands inside the agent's own process, where
+    // every tool the agent declares is reachable, so there is nothing that
+    // could not have been intercepted. Empty is that seam's honest answer.
     expect(row?.mockToolCoverage).toEqual({
       discovered: ["check_calendar", "send_confirmation"],
       covered: ["check_calendar"],
       uncovered: ["send_confirmation"],
+      notInterceptable: [],
+      notInThisVersion: [],
     });
 
     // And readable by whoever asks for the run — the different-units rule
@@ -608,6 +614,8 @@ describe("the lifecycle lands", () => {
       discovered: ["check_calendar", "send_confirmation"],
       covered: ["check_calendar"],
       uncovered: ["send_confirmation"],
+      notInterceptable: [],
+      notInThisVersion: [],
     });
   });
 
@@ -645,7 +653,13 @@ describe("the lifecycle lands", () => {
     expect(
       (await getSimulation(contextFor(ada, "member"), asked.simulationId))
         ?.mockToolCoverage,
-    ).toEqual({ discovered: [], covered: [], uncovered: [] });
+    ).toEqual({
+      discovered: [],
+      covered: [],
+      uncovered: [],
+      notInterceptable: [],
+      notInThisVersion: [],
+    });
   });
 
   it("refuses recording facts for a chat conversation", async () => {

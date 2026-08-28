@@ -9,6 +9,8 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
+  mockedWorldRow,
+  mockToolCoverageRow,
   NotPermittedError,
   productLabelOf,
   ProjectOutsideOrganizationError,
@@ -147,11 +149,22 @@ function completeStatusCounts(counts?: StatusCounts): Record<SimulationStatus, n
   };
 }
 
+/**
+ * One run's header.
+ *
+ * `whole` is the single-run read and is the only caller that gets the temporary
+ * platform world. That world carries every touched number's inbound routing
+ * verbatim — a page of two hundred runs would repeat all of it two hundred
+ * times, for a reader who asked for a list of runs and not for anybody's
+ * telephone routing. It is a fact about one run, so it is answered when one run
+ * is asked for.
+ */
 function describedHeader(
   run: Run,
   counts: StatusCounts | undefined,
   grading: RunGradingProgress | undefined,
   baseUrl: string,
+  whole: boolean,
 ): Record<string, unknown> {
   const simulations = completeStatusCounts(counts);
   return {
@@ -175,6 +188,16 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
+    // The temporary world, whole: the version branched from, the version
+    // minted, the engine it runs on, and each touched number's routing exactly
+    // as it was read. A reader sees what Egma promised to put back. Absent from
+    // a list, on purpose — see the note above.
+    ...(whole
+      ? {
+          mockedWorld:
+            run.mockedWorld === null ? null : mockedWorldRow(run.mockedWorld),
+        }
+      : {}),
     expectedSimulationCount: run.expectedSimulationCount,
     completedCount: run.completedCount,
     failedCount: run.failedCount,
@@ -195,6 +218,7 @@ async function headersOf(
   auth: AuthContext,
   runs: readonly Run[],
   baseUrl: string,
+  whole = false,
 ): Promise<readonly Record<string, unknown>[]> {
   const ids = runs.map((run) => run.id);
   const progressBatches: string[][] = [];
@@ -216,6 +240,7 @@ async function headersOf(
       statusCounts.get(run.id),
       gradingProgress.get(run.id),
       baseUrl,
+      whole,
     ),
   );
 }
@@ -255,11 +280,7 @@ function describedSimulation(
     mockToolCoverage:
       simulation.mockToolCoverage === null
         ? null
-        : {
-            discovered: [...simulation.mockToolCoverage.discovered],
-            covered: [...simulation.mockToolCoverage.covered],
-            uncovered: [...simulation.mockToolCoverage.uncovered],
-          },
+        : mockToolCoverageRow(simulation.mockToolCoverage),
   };
 }
 
@@ -499,7 +520,11 @@ export async function runRoutes(
       const run = await getRun(acting.auth, runId);
       if (run === undefined) return noSuchRun(reply, runId);
       const [header, agent, connection] = await Promise.all([
-        headersOf(acting.auth, [run], options.baseUrl).then((items) => items[0]),
+        // The one read that asked for this run in particular, and the only one
+        // answered with the temporary platform world.
+        headersOf(acting.auth, [run], options.baseUrl, true).then(
+          (items) => items[0],
+        ),
         getAgent(acting.auth, run.agentId),
         getConnection(acting.auth, run.agentId, run.connectionId),
       ]);

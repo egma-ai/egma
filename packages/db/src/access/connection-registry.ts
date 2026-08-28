@@ -455,6 +455,13 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
   {
     agentPlatform: "retell",
+    connectionType: "retell_web_call",
+    accessVariant: "retell_web_call.api_key",
+    modality: "voice",
+    productLabel: "Retell web call",
+  },
+  {
+    agentPlatform: "retell",
     connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
@@ -843,6 +850,68 @@ export const CONNECTION_REGISTRY: Readonly<
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
+    usesPlatformCarrier: false,
+  },
+  retell_web_call: {
+    label: "Retell web call",
+    agentPlatforms: ["retell"],
+    /**
+     * Voice, and a different voice from the phone lane's.
+     *
+     * A web call is WebRTC: Egma asks Retell to create the call, and joins the
+     * room Retell answers with. There is no carrier and no 8 kHz band, so under
+     * the connection-band rule a simulation over this kind is **a different
+     * unit** from a phone simulation of the same agent, and the recorded
+     * connection is what keeps the two from being compared by accident.
+     *
+     * This is the lane a mocked run uses. The agent's published number is never
+     * dialled for one, so a real caller ringing mid-run reaches the real agent
+     * with real tools.
+     */
+    modalities: ["voice"],
+    // Egma asks Retell to create the call and joins what Retell hands back.
+    // Retell brokers it, exactly as it brokers a chat session.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_web_call.api_key",
+        label: "Retell API key",
+        named: "a Retell web-call connection",
+        config: { retellAgentId: nonEmptyString },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the web calls this connection places. A read gives back " +
+          "its last four characters, so you can tell two keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
+      },
+    ],
+    reuseKey: "retellAgentId",
+    // No plug yet. The registry may not claim what no code can run, so this
+    // flips to `true` in the same commit as the simulator adapter that places
+    // the call and joins the room. Until then a connection of this kind can be
+    // registered — a customer may describe how Egma will reach their agent —
+    // and a run over it is refused at creation rather than queued forever.
+    simulatorAdapter: false,
     usesPlatformCarrier: false,
   },
   phone_number: {
