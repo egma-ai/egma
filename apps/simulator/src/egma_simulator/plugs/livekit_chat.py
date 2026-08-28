@@ -91,6 +91,31 @@ that greets nobody lands the persona's opening rather than
 first.
 """
 
+REPLY_SECONDS = 30.0
+"""How long the agent has to begin answering a persona turn.
+
+Separate from the quiet period below, and much larger, because the two
+measure different things: this is a whole model round trip and whatever
+the agent does inside it, where the quiet period is only the gap between
+two utterances of a turn already under way. An agent that thinks for eight
+seconds before its first word is thinking, not silent, and a budget that
+called it silent would file its answer against the persona's *next*
+question.
+
+Thirty seconds because a tool call can sit inside that round trip, and a
+mock tool's delay is the customer's to declare: a test that makes a
+backend take three seconds is exactly the kind this lane exists to run,
+and the budget has to clear the slowest declared delay plus the model on
+either side of it. It matches the join wait for the same reason that one
+is what it is — long enough that reaching it means something is wrong,
+rather than something is slow.
+
+The cost of it being too long is a stalled turn on an agent that has
+stopped answering, which a simulation's own duration limit still ends. The
+cost of it being too short is a transcript that reads as though the agent
+answered the wrong question. The second is worse, so this errs long.
+"""
+
 TURN_QUIET_SECONDS = 5.0
 """How long the room stays quiet before the agent's turn is over.
 
@@ -230,7 +255,9 @@ class LiveKitChat:
         """Type the persona's turn in, and read the agent's answer back."""
         try:
             answer = await self._backend.deliver(
-                text, quiet_seconds=TURN_QUIET_SECONDS
+                text,
+                reply_seconds=REPLY_SECONDS,
+                quiet_seconds=TURN_QUIET_SECONDS,
             )
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused

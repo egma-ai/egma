@@ -53,6 +53,7 @@ from egma_simulator.media.livekit_room import (
     TRANSCRIPTION_TOPIC,
     LiveKitChatRoomBackend,
     RoomSettings,
+    Utterance,
 )
 from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX
 from egma_simulator.mock_tools import PROTOCOL_VERSION
@@ -153,6 +154,7 @@ def hurry(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "GREETING_SECONDS", QUIET_SECONDS)
+    monkeypatch.setattr(chat_plug, "REPLY_SECONDS", QUIET_SECONDS)
     monkeypatch.setattr(chat_plug, "AGENT_JOIN_SECONDS", 1.0)
 
 
@@ -548,6 +550,38 @@ async def test_a_tool_call_pause_inside_a_turn_does_not_end_it(
         "agent",
         "One moment while I check.\nThursday at 2:15 is free.",
     )
+
+
+async def test_an_utterance_left_over_from_the_last_turn_is_never_this_one_s(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A late answer is dropped rather than filed under the next question.
+
+    The wire carries no marker saying which persona turn an utterance
+    answers, so one that arrives after egma stopped waiting for it cannot
+    be told from a prompt answer to the question asked next. Filed that
+    way it would put the agent's words against a question it never
+    answered, on the record a grader reads.
+
+    So whatever is still queued when the next turn goes out is taken off
+    first. That is the half of the problem a rule can settle; the other
+    half — an utterance still in flight at that moment — is why
+    :data:`REPLY_SECONDS` is sized to make running out of budget
+    exceptional rather than routine.
+    """
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=["The second answer."])
+    plug = chat_room(stub)
+    await plug.open()
+
+    room = plug.backend._room
+    assert room is not None
+    room.utterances.put_nowait(Utterance(text="The first answer, late.", spoken=False))
+
+    answered = await plug.deliver("The second question.")
+
+    assert answered.text == "The second answer."
+    await plug.close()
 
 
 async def test_a_turn_that_produced_nothing_is_an_answer_without_words(

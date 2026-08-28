@@ -1383,6 +1383,22 @@ class TextRoom:
                 ending=ERROR,
             ) from unsent
 
+    def abandon_utterances(self) -> list[Utterance]:
+        """Take whatever is still queued, so it cannot cross a turn.
+
+        Anything sitting here when the next persona turn goes out arrived
+        after egma stopped waiting for the last one, which makes it the
+        *previous* turn's answer arriving late. Read as the next turn's, it
+        would put the agent's words against the wrong question on a record
+        a grader reads — so it is taken off the queue instead, and the
+        caller says on the record that it happened. Losing a late answer is
+        a smaller lie than filing it under the wrong turn.
+        """
+        stale: list[Utterance] = []
+        while not self.utterances.empty():
+            stale.append(self.utterances.get_nowait())
+        return stale
+
     async def next_utterance(self, *, within: float) -> Utterance | None:
         """The next finished utterance, or nothing inside the budget.
 
@@ -1543,14 +1559,36 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         """
         return await self._assembled(first_within=seconds, quiet=quiet_seconds)
 
-    async def deliver(self, text: str, *, quiet_seconds: float) -> AgentTurn:
-        """Type one persona turn in, and read the agent's answer back."""
+    async def deliver(
+        self, text: str, *, reply_seconds: float, quiet_seconds: float
+    ) -> AgentTurn:
+        """Type one persona turn in, and read the agent's answer back.
+
+        Two budgets, because they measure two different things. Waiting for
+        the answer to *start* is waiting on a whole model round trip, and
+        possibly a tool call inside it; waiting for the answer to *continue*
+        is the gap between two utterances of one turn that is already under
+        way. Giving the first the second's budget would call a thinking
+        agent silent.
+
+        Anything still queued before the turn goes out belongs to the last
+        one and is taken off rather than read as this one's answer. It
+        should be nothing: a turn that ran out of budget is the only way to
+        get here with something waiting, and the record says so.
+        """
         room = self._room
         if room is None:
             raise MediaBackendError("a persona turn was delivered before a room")
+        for late in room.abandon_utterances():
+            logger.warning(
+                "an utterance arrived after its turn was over and was left off "
+                "the record: %d characters in room %s",
+                len(late.text),
+                self._room_name,
+            )
         await room.send(text)
         return await self._assembled(
-            first_within=quiet_seconds, quiet=quiet_seconds
+            first_within=reply_seconds, quiet=quiet_seconds
         )
 
     async def _assembled(self, *, first_within: float, quiet: float) -> AgentTurn:
