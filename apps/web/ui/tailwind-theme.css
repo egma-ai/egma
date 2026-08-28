@@ -1285,18 +1285,29 @@
     }
   }
 
-  /* The arriving section, and the still form of it. */
-  [data-slot="retell-account"] {
+  /*
+   * The arriving section, and the still form of it.
+   *
+   * Two sections use it, for the same reason: a piece of a panel that a person
+   * did not put there — a Retell account read back from a pasted key, and what
+   * a mocked run would cover, read back from the agent's own account — travels
+   * a few pixels while it fades, so the arrival is explained rather than
+   * decorated.
+   */
+  [data-slot="retell-account"],
+  [data-slot="mock-tools-arrival"] {
     animation: egma-section-arrive var(--duration-popover-in) var(--ease-out);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="retell-account"] {
+    [data-slot="retell-account"],
+    [data-slot="mock-tools-arrival"] {
       animation: egma-fade-in var(--duration-hover) linear;
     }
   }
 
-  [data-preview="reduced-motion"] [data-slot="retell-account"] {
+  [data-preview="reduced-motion"] [data-slot="retell-account"],
+  [data-preview="reduced-motion"] [data-slot="mock-tools-arrival"] {
     animation: egma-fade-in var(--duration-hover) linear;
   }
 
