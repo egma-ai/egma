@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addConnection,
   AgentWriteRefusedError,
+  claimSimulations,
   coverageFromClasses,
   createAgent,
   failSimulation,
@@ -563,6 +564,51 @@ describe("the gate that keeps a mocked run honest", () => {
     // Which is every run in the product but a handful: the condition costs a
     // run that mocks nothing exactly nothing.
     expect(rows.rows.map((row) => row.id)).toEqual([simulationId]);
+  });
+
+  it("holds the gate through the real claim, not only a copy of its SQL", async () => {
+    // The proof above reads a hand-written copy of the predicate. This one goes
+    // through `claimSimulations` itself, so dropping `runIsReadyToConduct` from
+    // the claim — the one line that closes the gate — fails a test rather than
+    // passing quietly.
+    const created = await createAgent(acting(), {
+      name: "Claim-gated agent",
+      agentPlatform: "retell",
+    });
+    await sealPlatformKeyOn(created.id);
+    const connection = await addConnection(acting(), created.id, {
+      name: "Web call",
+      agentPlatform: "retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      modality: "voice",
+      config: { retellAgentId: "agent_b0e2e9cb267c47e7e7026cd8e8" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    await updateAgent(acting(), created.id, {
+      mockToolsDuringSimulations: true,
+    });
+    const { runId, simulationId } = await seedRun(created.id, connection.id);
+
+    const claimedOur = async (): Promise<boolean> => {
+      // A claimant of this test's own, and a capacity large enough that its
+      // simulation is reached if it is eligible at all. Whatever else the queue
+      // holds is claimed too and does not change this answer.
+      const claims = await claimSimulations({
+        claimant: `gate-proof-${runId}`,
+        capacity: 50,
+      });
+      return claims.some((claim) => claim.id === simulationId);
+    };
+
+    // Ticked, mockable lane, no draft recorded: the real claim passes it over.
+    expect(await claimedOur()).toBe(false);
+    // The run stays pending, because nothing of its was claimed.
+    expect((await getRun(acting(), runId))?.status).toBe("pending");
+
+    // The draft lands, and now the real claim takes it.
+    await recordMockedWorld(acting(), runId, WORLD);
+    expect(await claimedOur()).toBe(true);
   });
 });
 
