@@ -61,6 +61,23 @@ const VOICE_AGENT: FakeRetellScript = {
   agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
 };
 
+/** A voice agent whose brain is a custom LLM, out of the playground's reach. */
+const CUSTOM_LLM_VOICE_AGENT: FakeRetellScript = {
+  keys: [KEY],
+  agents: [
+    {
+      agent_id: "agent_0001",
+      agent_name: "order-line",
+      channel: "voice",
+      voice_id: "11labs-Adrian",
+      response_engine: {
+        type: "custom-llm",
+        llm_websocket_url: "wss://example.invalid/llm",
+      },
+    },
+  ],
+};
+
 const TWO_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
@@ -402,17 +419,21 @@ describe("egma connect", () => {
  * dial somebody's telephone.
  */
 describe("which connection egma creates", () => {
-  it("refuses an explicit reach that the Retell agent does not support before writing", async () => {
-    retell = await startFakeRetell(VOICE_AGENT);
+  it("refuses an explicit reach the Retell agent does not support before writing", async () => {
+    // A chat agent has no phone line to dial, so phone is the wrong door. The
+    // voice-over-text refusal that used to sit here retired: text now mints a
+    // playground for a voice agent, so the remaining mismatch is a chat agent
+    // asked for by phone.
+    retell = await startFakeRetell(ONE_AGENT);
 
-    const result = await egma(["connect", "--reach", "text"], { stdin: KEY });
+    const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
     expect(facts(result.stdout).status).toBe("incompatible-reach");
-    expect(result.stdout).toContain("reach_option: phone");
-    expect(result.stdout).not.toContain("reach_option: text");
+    expect(result.stdout).toContain("reach_option: text");
+    expect(result.stdout).not.toContain("reach_option: phone");
     expect(result.stderr).toContain(
-      "Voice agents require a Phone connection. Choose --reach phone and try again.",
+      "Chat agents require a Chat connection. Choose --reach text and try again.",
     );
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -459,8 +480,9 @@ describe("which connection egma creates", () => {
 
     expect(result.code).toBe(CONNECT_EXIT.unchosen);
     expect(facts(result.stdout).status).toBe("unchosen-reach");
-    // Only the compatible way was put on the screen, and it was not taken.
-    expect(result.stdout).not.toContain("reach_option: text");
+    // Both ways a voice agent supports were put on the screen, and neither was
+    // taken.
+    expect(result.stdout).toContain("reach_option: text");
     expect(result.stdout).toContain("reach_option: phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -535,8 +557,12 @@ describe("which connection egma creates", () => {
 });
 
 describe("the whole walk, headless", () => {
-  it("prints the compatible Retell reach and stops before writing on a mismatch", async () => {
-    retell = await startFakeRetell(VOICE_AGENT);
+  it("prints the compatible Retell reach and stops before writing on a custom-LLM mismatch", async () => {
+    // The playground reaches a voice agent's words and tools through Retell, and
+    // a custom LLM keeps both on its own socket. So text is offered — every
+    // voice agent has it — but the engine is refused at the door, with phone
+    // named as the way that does reach it.
+    retell = await startFakeRetell(CUSTOM_LLM_VOICE_AGENT);
     const script = await workspace.script({
       steps: [
         { kind: "say", text: "egma:found framework retell-sdk\n" },
@@ -560,13 +586,13 @@ describe("the whole walk, headless", () => {
     );
 
     expect(result.code).toBe(1);
+    // A voice agent offers both ways; the engine, not the reach, is what fails.
+    expect(result.stdout).toContain("reach_option: text");
     expect(result.stdout).toContain("reach_option: phone");
-    expect(result.stdout).not.toContain("reach_option: text");
-    expect(result.stdout).toContain(
-      "Egma could not finish: Retell says this is a voice agent. " +
-        "Voice agents require a Phone connection. Choose --reach phone and try again. " +
-        "Nothing was written.",
-    );
+    expect(result.stdout).toContain("Egma could not finish: ");
+    expect(result.stdout).toContain("custom LLM");
+    expect(result.stdout).toContain("Choose --reach phone");
+    expect(result.stdout).toContain("Nothing was written.");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
     await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({

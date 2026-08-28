@@ -288,21 +288,29 @@ describe("choosing the phone", () => {
 });
 
 describe("choosing text", () => {
-  it("refuses text for a Retell voice agent before it writes anything", async () => {
+  it("creates one Retell playground connection for a Retell voice agent", async () => {
+    // A voice agent tested in text is conducted over the playground. The
+    // refusal that used to stand here retired with this lane, the agent being
+    // on a Retell LLM the playground can reach.
     retell = await startFakeRetell(ACCOUNT);
 
     const { report, connected } = await run({ reach: "text" });
 
-    expect(connected).toBeNull();
-    expect(report).toEqual({
-      kind: "failed",
-      reason:
-        "Retell says this is a voice agent. Voice agents require a Phone connection. " +
-        "Choose --reach phone and try again. Nothing was written.",
-    });
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    expect(await wroteAnEgmaFolder()).toBe(false);
+    expect(connected?.reach).toBe("text");
+    expect(connected?.number).toBeNull();
+    expect(report.kind).toBe("connected");
+
+    expect(platform.registered.connections).toHaveLength(1);
+    const [connection] = platform.registered.connections;
+    expect(connection?.agentPlatform).toBe("retell");
+    expect(connection?.connectionType).toBe("retell_playground");
+    expect(connection?.accessVariant).toBe("retell_playground.api_key");
+    // A chat simulation of a voice agent: the connection speaks chat and names
+    // the voice agent it conducts against.
+    expect(connection?.modality).toBe("chat");
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });
+    expect(connection?.credentialsHint).toBe(KEY.slice(-4));
+    expect(platform.registered.sealed).toEqual([KEY]);
   });
 
   it("creates one Retell chat connection for the selected chat agent", async () => {
@@ -337,13 +345,15 @@ describe("choosing text", () => {
 });
 
 describe("choosing neither", () => {
-  it("offers only phone for a Retell voice agent", async () => {
+  it("offers both text and phone for a Retell voice agent", async () => {
+    // The modality question leads for a voice agent: chat over the playground,
+    // or voice down a line. Both are offered, and neither is chosen here.
     retell = await startFakeRetell(ACCOUNT);
 
     const { lines } = await run({ reach: null });
 
+    expect(lines).toContainEqual(expect.stringContaining("reach_option: text"));
     expect(lines).toContainEqual(expect.stringContaining("reach_option: phone"));
-    expect(lines).not.toContainEqual(expect.stringContaining("reach_option: text"));
   });
 
   it("offers only text for a Retell chat agent", async () => {
@@ -363,7 +373,7 @@ describe("choosing neither", () => {
     expect(ui.record.reachOffered).toBe(true);
     expect(report).toEqual({
       kind: "failed",
-      reason: "nobody chose phone, so nothing was created.",
+      reason: "nobody chose text or phone, so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);

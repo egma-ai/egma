@@ -385,14 +385,16 @@ describe("the choice between text and phone", () => {
     const offered = await showing(
       run,
       "How should Egma reach this agent?",
+      "Chat — Egma exchanges messages with the agent",
       "Phone — Egma dials one of the agent's numbers",
       "Egma creates this connection only after you confirm it.",
     );
-    // Retell voice agents support only phone. It is the only row, and the
-    // developer must still confirm before Egma can dial it.
-    expect(offered).toContain("\u203a Phone");
-    expect(offered).not.toContain("Chat —");
-
+    // A voice agent supports both ways: chat over the playground and voice down
+    // a line. Text is the row the cursor rests on first because it dials
+    // nothing; the developer moves to phone and confirms it before Egma dials.
+    expect(offered).toContain("\u203a Chat");
+    run.write("\u001B[B");
+    await showing(run, "› Phone");
     run.write("\r");
 
     await chooseNoExistingTests(run);
@@ -435,6 +437,9 @@ describe("the choice between text and phone", () => {
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
     await showing(run, "How should Egma reach this agent?");
+    // A voice agent offers text first; move to phone, the lane that dials.
+    run.write("\u001B[B");
+    await showing(run, "› Phone");
     run.write("\r");
 
     // Two numbers reach this agent, so there is a real choice and the wizard
@@ -481,7 +486,9 @@ describe("the choice between text and phone", () => {
     run.write("\u001B");
 
     expect(await run.exited).toBe(1);
-    expect(run.scrollback()).toContain("nobody chose phone, so nothing was created");
+    expect(run.scrollback()).toContain(
+      "nobody chose text or phone, so nothing was created",
+    );
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });

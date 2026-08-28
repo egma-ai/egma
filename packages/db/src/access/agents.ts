@@ -27,6 +27,7 @@ import {
 import { monitoringState } from "../schema/production.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
+  connectionTypesSharingReuseKey,
   credentialRedirectingConfigKey,
   credentialRuleOf,
   descriptorOf,
@@ -980,29 +981,42 @@ export type Registration = {
  * failure. Minting a second identity for one vendor agent splits a team's
  * results history in half, which is the one thing that must not happen quietly.
  *
- * So the connection type's reuse key decides (`connection-registry.ts`), and a living
- * connection in the project naming the same vendor agent decides the outcome:
+ * So the connection type's reuse key decides (`connection-registry.ts`), and a
+ * living connection in the project naming the same vendor agent — **through any
+ * door of the same reuse family** — decides the outcome:
  *
- * - **same modality** → that agent and that connection answer, with the
- *   supplied credential replacing the stored one **whole**. Rotation never
- *   asks for the old secret and never merges into it, so plaintext has no
- *   reason to travel back out. `reused`.
- * - **a different modality** → the same agent gains a new connection, because
- *   a chat endpoint and a voice endpoint on one vendor agent are two ways to
- *   reach one thing. `connection_added`.
+ * - **the same door** (same connection type and access variant) → that agent
+ *   and that connection answer, with the supplied credential replacing the
+ *   stored one **whole**. Rotation never asks for the old secret and never
+ *   merges into it, so plaintext has no reason to travel back out. `reused`.
+ * - **a different door on the same vendor agent** → the same agent gains a new
+ *   connection, because a chat lane and a voice lane on one Retell agent are
+ *   two ways to reach one thing. This is the whole of one-agent-two-connections
+ *   on **every** surface: the CLI's `connect`, and the web's fresh connect flow
+ *   which has no name-clash fallback of its own. `connection_added`.
  * - **no match, or a kind with no reuse key at all** → both rows, exactly as
  *   `createAgent` writes them. `created`.
+ *
+ * **The reuse family is the types that share a reuse key**, and today that is
+ * exactly Retell's three vendor-id lanes — the chat API, the playground, and
+ * the web call, all keyed on `retellAgentId`. A phone number and a LiveKit room
+ * carry no reuse key and so are in no family: a phone number is where Egma
+ * dials, not who answers, and two agents may share one. So this widening
+ * touches only the three lanes that already mean "one Retell agent = one Egma
+ * agent", and no other platform's behaviour moves.
  *
  * The reused and extended paths answer the agent as it stands and leave its
  * name alone: the registration named an identity that already
  * exists, and quietly renaming somebody's agent because a second machine typed
  * it differently would be a change nobody asked for.
  *
- * **Racing registrations settle to one agent.** Two identical creates arriving
- * together would both find nothing, both insert, and one would lose to the
- * name index — an error where a retry-safe path must answer. The transaction
- * takes an advisory lock on the vendor agent first, so the second one reads
- * the first one's committed work and reuses it.
+ * **Racing registrations settle to one agent.** Two creates of the same vendor
+ * agent arriving together — even through two different doors of its family —
+ * would both find nothing, both insert, and one would lose to the name index,
+ * an error where a retry-safe path must answer. The transaction takes an
+ * advisory lock on the vendor agent under its reuse key first, so every door of
+ * one agent waits behind one lock and the second reads the first's committed
+ * work.
  */
 export async function registerAgent(
   auth: AuthContext,
@@ -1047,9 +1061,16 @@ export async function registerAgent(
     return db().transaction(bothRows);
   }
 
-  // What the lock is taken on: this one vendor agent, in this one project, of
-  // this one customer. Nothing else waits behind it.
-  const racing = `${auth.organizationId}:${projectId}:${inline.connectionType}:${vendorAgent}`;
+  // Every connection type that reuses on this same key — the vendor-id family
+  // this registration belongs to. A living connection through any of these
+  // doors on the same vendor agent is the same Egma agent.
+  const family = connectionTypesSharingReuseKey(reuseKey);
+
+  // What the lock is taken on: this one vendor agent under its reuse key, in
+  // this one project, of this one customer. Every door of one agent shares it,
+  // so two doors racing on one agent settle to one rather than one losing to
+  // the name index. Nothing else waits behind it.
+  const racing = `${auth.organizationId}:${projectId}:${reuseKey}:${vendorAgent}`;
 
   return db().transaction(async (tx): Promise<Registration> => {
     // Taken before anything is read, and let go when the transaction ends.
@@ -1070,8 +1091,7 @@ export async function registerAgent(
           connection,
           and(
             eq(connection.projectId, projectId),
-            eq(connection.connectionType, inline.connectionType),
-            eq(connection.accessVariant, inline.accessVariant),
+            inArray(connection.connectionType, [...family]),
             sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
             connectionNotArchived,
             notArchived,
@@ -1080,11 +1100,18 @@ export async function registerAgent(
       )
       .orderBy(asc(connection.id));
 
-    const sameModality = living.find(
-      (row) => row.reached.modality === inline.modality,
+    // The exact same door — same connection type and access variant — is a
+    // re-registration of this connection, and it rotates the key. A door that
+    // only shares the modality is a different lane on the same agent and must
+    // not be rotated onto: a playground and a chat API are both chat, and one
+    // is not the other.
+    const sameDoor = living.find(
+      (row) =>
+        row.reached.connectionType === inline.connectionType &&
+        row.reached.accessVariant === inline.accessVariant,
     );
 
-    if (sameModality !== undefined) {
+    if (sameDoor !== undefined) {
       const [rotated] = await tx
         .update(connection)
         .set({
@@ -1095,7 +1122,7 @@ export async function registerAgent(
           credentialsHint: inline.credentialsHint,
           updatedAt: new Date(),
         })
-        .where(eq(connection.id, sameModality.reached.id))
+        .where(eq(connection.id, sameDoor.reached.id))
         .returning(CONNECTION_COLUMNS);
 
       if (rotated === undefined) {
@@ -1103,16 +1130,16 @@ export async function registerAgent(
       }
       return {
         result: "reused",
-        agent: agentFromRow(sameModality.identity),
+        agent: agentFromRow(sameDoor.identity),
         connection: connectionFromRow(
           rotated,
-          sameModality.identity.agentPlatform as AgentPlatform,
+          sameDoor.identity.agentPlatform as AgentPlatform,
         ),
       };
     }
 
-    // The same vendor agent reached a different way. Oldest first, so which
-    // agent gains the connection is the same answer every time.
+    // The same vendor agent reached through a different door. Oldest first, so
+    // which agent gains the connection is the same answer every time.
     const known = living[0];
     if (known !== undefined) {
       const home = agentFromRow(known.identity);
