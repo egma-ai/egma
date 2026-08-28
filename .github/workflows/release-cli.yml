@@ -61,17 +61,45 @@ jobs:
         # Root build is lint + tsc -b over every project the CLI is built from.
         run: pnpm build
 
-      - name: Prove the tarball runs
-        # The same check a person would do by hand: pack it, install it
-        # somewhere clean, and run the command. Catches a missing runtime
-        # dependency or a broken bin entry before it reaches anyone.
+      - name: Pack the public CLI
+        id: pack
+        # pnpm rewrites workspace dependency ranges to publishable versions.
+        # npm does not. npm still performs the final publish for trusted OIDC.
         run: |
           set -e
           dir="$(mktemp -d)"
-          (cd apps/cli && npm pack --pack-destination "$dir")
-          tarball="$(ls "$dir"/*.tgz)"
-          cd "$dir"
+          pnpm --config.node-linker=hoisted --filter @egma/cli pack --pack-destination "$dir"
+          echo "tarball=$(ls "$dir"/*.tgz)" >> "$GITHUB_OUTPUT"
+
+      - name: Prove new and upgraded installs
+        # Pack once, then prove both user paths: a clean install and an upgrade
+        # from the current public version. The upgrade proof catches invalid
+        # registry metadata that a clean install of bundled files can hide.
+        run: |
+          set -e
+          tarball="${{ steps.pack.outputs.tarball }}"
+          dir="$(dirname "$tarball")"
+          tar -xOf "$tarball" package/package.json > "$dir/packed-package.json"
+          node -e '
+            const manifest = require(process.argv[1]);
+            const invalid = Object.entries(manifest.dependencies ?? {})
+              .filter(([, spec]) => String(spec).startsWith("workspace:"));
+            if (invalid.length > 0) {
+              const names = invalid.map(([name]) => name).join(", ");
+              console.error(`Published dependencies use workspace protocol: ${names}`);
+              process.exit(1);
+            }
+          ' "$dir/packed-package.json"
+          mkdir "$dir/clean"
+          cd "$dir/clean"
           npm init -y > /dev/null
+          npm install "$tarball" --no-audit --no-fund
+          ./node_modules/.bin/egma --version
+          mkdir "$dir/upgrade"
+          cd "$dir/upgrade"
+          npm init -y > /dev/null
+          previous="$(npm view @egma/cli version)"
+          npm install "@egma/cli@$previous" --no-audit --no-fund
           npm install "$tarball" --no-audit --no-fund
           ./node_modules/.bin/egma --version
 
@@ -83,16 +111,16 @@ jobs:
         # The dry run is the only place this shows up. Treat it as fatal.
         run: |
           set -e
-          out="$(npm publish --dry-run 2>&1)"
+          status=0
+          out="$(npm publish --dry-run "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
           echo "$out"
           if echo "$out" | grep -qi "auto-corrected some errors"; then
-            echo "::error::npm would rewrite apps/cli/package.json before publishing. Fix it rather than shipping the rewrite." >&2
+            echo "::error::npm would rewrite the packed manifest before publishing. Fix it rather than shipping the rewrite." >&2
             exit 1
           fi
-        working-directory: apps/cli
+          exit "$status"
 
       - name: Publish to npm
         # npm, not pnpm: OIDC trusted publishing lives in the npm CLI.
         # No NODE_AUTH_TOKEN — the OIDC exchange is the credential.
-        run: npm publish
-        working-directory: apps/cli
+        run: npm publish "${{ steps.pack.outputs.tarball }}"
