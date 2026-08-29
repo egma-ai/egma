@@ -110,7 +110,7 @@ async function walk(generated: readonly FakeStep[], howManyTests: number) {
     ],
   });
   const ui = new HeadlessUI({
-    answers: { "retell-key": KEY, reach: "text" },
+    answers: { "retell-key": KEY, lanes: "text" },
   });
   const grading = gradeEveryRun(platform);
   try {

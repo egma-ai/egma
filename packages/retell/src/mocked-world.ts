@@ -208,6 +208,19 @@ export type MockEngineNote = {
   readonly type: string;
   readonly engineId: string;
   readonly version: number | null;
+  /**
+   * The tools that engine declared when this run captured it, in the one
+   * spelling a comparison uses (`toolPrint` below).
+   *
+   * Written down rather than kept in memory so that the comparison outlives
+   * the process that made it: a teardown resumed by anybody else can still
+   * read the serving version back and say whether it moved — one of the four
+   * promises — instead of deleting the copy and hoping. A difference is
+   * reported and never repaired: putting the tools back would need the
+   * captured document, and this note holds what to put back, not a copy of the
+   * customer's configuration.
+   */
+  readonly toolPrint?: string;
 };
 
 /** The put-it-back note, and nothing else lives in it. */
@@ -375,6 +388,8 @@ function toolPrint(engine: EngineConfiguration): string {
 function stateOf(
   tempMockAgentVersion: number | null,
   engine: EngineReference,
+  /** What that engine declared when this run captured it. */
+  toolPrint: string,
   numbers: readonly MockNumberNote[],
 ): MockRunRecord {
   return {
@@ -388,6 +403,7 @@ function stateOf(
         type: engine.type,
         engineId: engine.engineId,
         version: engine.version,
+        toolPrint,
       },
       numbers: numbers.map((one) => ({ ...one })),
     },
@@ -508,7 +524,7 @@ export async function buildMockedWorld(
   // restore that finds the binding untouched and leaves it alone, and an
   // unclaimed pin that did happen is a number nobody puts back.
   let numbers: MockNumberNote[] = [];
-  let state = stateOf(null, servingEngine, numbers);
+  let state = stateOf(null, servingEngine, before, numbers);
   await record(state);
 
   // 3d. The pins themselves. A number already pinned, riding a tag, or riding
@@ -540,7 +556,7 @@ export async function buildMockedWorld(
       was: hijackableBindingOf(decision),
       pinnedTo: pinVersion,
     }));
-    state = stateOf(null, servingEngine, numbers);
+    state = stateOf(null, servingEngine, before, numbers);
     await record(state);
 
     for (const decision of pinning) {
@@ -581,7 +597,7 @@ export async function buildMockedWorld(
     };
   }
   const draft = branched.agentVersion;
-  state = stateOf(draft.version, servingEngine, numbers);
+  state = stateOf(draft.version, servingEngine, before, numbers);
   await record(state);
 
   // 5. **The fork guard**, before any write.
@@ -767,6 +783,59 @@ export async function finishMockedWorld(
   const unfinished: string[] = [];
   const leftAlone: string[] = [];
   let state = input.state;
+
+  // **The promise, proved again before anything is undone.** A run's own build
+  // read the serving version back and compared it to the capture, but that
+  // comparison lived in the process that made it — so a teardown that somebody
+  // else resumed, days later, could delete the copy and say the account was
+  // back without ever having looked at the version real callers are served
+  // from. The note carries the comparison value for exactly this, and the read
+  // is here — **before the delete** — so what it reads is the account as this
+  // run left it.
+  //
+  // A difference is reported and never repaired. Repairing would mean writing
+  // the captured tools back, and the note holds what the tools *looked like*,
+  // not the document they came from; a repair out of a print would be a guess
+  // at the customer's own configuration. So the sentence says what stands
+  // there now, and the world stays unsettled — which is what keeps a resumed
+  // teardown's answer honest and stops the next run branching over it.
+  const captured = state.mockMetadata?.engine;
+  if (captured?.toolPrint !== undefined) {
+    const serving = await readEngineConfiguration(
+      key,
+      {
+        type: engineTypeOf(captured.type),
+        engineId: captured.engineId,
+        version: captured.version,
+      },
+      reach,
+    );
+    const naming =
+      `${captured.type} ${captured.engineId} v${String(captured.version)}`;
+    if (serving.kind === "engine" && toolPrint(serving.engine) !== captured.toolPrint) {
+      const names = toolsOf(serving.engine).map((tool) => tool.name);
+      unfinished.push(
+        `the version this agent serves no longer declares the tools Egma ` +
+          `captured before the run (${naming}); it declares ` +
+          `${String(names.length)} now: ${names.join(", ")}. Egma changed ` +
+          "nothing back — the note says what the tools looked like, not what " +
+          "the document held, so a repair would be a guess.",
+      );
+    } else if (serving.kind === "not-held") {
+      unfinished.push(
+        `${naming} could not be read back to prove the version this agent ` +
+          `serves never moved: ${serving.reason}`,
+      );
+    } else if (serving.kind !== "engine") {
+      unfinished.push(
+        sentenceOf(
+          serving,
+          `reading ${naming} back to prove the version this agent serves ` +
+            "never moved",
+        ),
+      );
+    }
+  }
 
   if (state.tempMockAgentVersion !== null) {
     const deleted = await deleteAgentVersion(

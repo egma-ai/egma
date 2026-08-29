@@ -133,7 +133,7 @@ async function walk(
   const ui = new HeadlessUI({
     answers: {
       "retell-key": KEY,
-      reach: "text",
+      lanes: "text",
       ...(goal === undefined ? {} : { goal }),
     },
   });

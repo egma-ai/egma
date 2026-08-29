@@ -810,9 +810,8 @@ async function confirmRetellAgent(
   })();
   if (candidate === undefined) {
     return invalid(
-      "a Retell connection is the chat API, text mode, a web call, or a " +
-        "phone number, and a phone connection carries the number Egma dials in " +
-        "config.phoneNumber",
+      "a Retell connection is text mode, a web call, or a phone number, and " +
+        "a phone connection carries the number Egma dials in config.phoneNumber",
     );
   }
 

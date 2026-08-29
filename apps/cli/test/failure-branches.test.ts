@@ -110,7 +110,7 @@ async function walkWith(options: {
 }) {
   // Text unless a check says otherwise: every branch here is about a way the
   // walk can fail before or after the choice, not about the choice itself.
-  const ui = new HeadlessUI({ answers: { reach: "text", ...(options.answers ?? {}) } });
+  const ui = new HeadlessUI({ answers: { lanes: "text", ...(options.answers ?? {}) } });
 
   // A walk that gets as far as a suite ends in a run, and a run ends when
   // trace results arrive. Nothing here conducts a simulation, so the fixture is
@@ -288,17 +288,17 @@ describe("a connection egma has no adapter for", () => {
     // before it is untouched — the agent is registered, the tests are written
     // and pushed — and the wizard's whole job here is to hand that one
     // sentence on untouched.
-    platform.running.noAdapterFor("retell_chat_api");
+    platform.running.noAdapterFor("retell_text_mode");
 
     const script = await workspace.script({ steps: FOUND, stepsByTask: [WRITES_ONE_TEST] });
     const { ui, report } = await walkWith({ script, answers: { "retell-key": KEY } });
 
-    const refusal = platform.running.noAdapterMessage("retell_chat_api");
+    const refusal = platform.running.noAdapterMessage("retell_text_mode");
     expect(report).toEqual({ kind: "failed", reason: refusal });
     expect(buildExitLine(report)).toBe(`Egma could not finish: ${refusal}`);
     // Verbatim: not summarised, not softened, not swallowed.
     expect(buildExitLine(report)).toContain(
-      "no simulator adapter for a retell_chat_api connection yet",
+      "no simulator adapter for a retell_text_mode connection yet",
     );
     expect(ui.record.statuses.join("\n")).toContain(refusal);
 

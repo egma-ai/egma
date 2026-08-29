@@ -108,7 +108,13 @@ export const CUSTOM_LLM_HAS_NO_CONFIGURATION =
   "words or tools: they run in your own service, behind the websocket URL " +
   "the agent points at.";
 
-function engineTypeOf(value: unknown): EngineType {
+/**
+ * Retell's word for an engine kind, read back into egma's union — with
+ * `retell-llm` as the answer for anything unrecognized, which is Retell's own
+ * default engine. Exported so a note that stored the word can be read back into
+ * a reference without a second opinion about what the words are.
+ */
+export function engineTypeOf(value: unknown): EngineType {
   const named = plain(value);
   if (named === "custom-llm") return "custom-llm";
   if (named === "conversation-flow") return "conversation-flow";

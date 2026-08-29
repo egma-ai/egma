@@ -6,8 +6,10 @@
  * somebody else. Two things live in it, both written before the thing they
  * describe is changed:
  *
- * - `engine` — the serving engine capture, which is what the verify step reads
- *   back and compares against once the mocked tools are on the copy.
+ * - `engine` — the serving engine capture: which document it is, and what its
+ *   tools looked like, which is what the verify step reads back and compares
+ *   against once the mocked tools are on the copy — and what a teardown
+ *   resumed by somebody else compares against before it deletes anything.
  * - `numbers` — one entry per number Egma actually pinned: where this agent's
  *   binding pointed before (`was`), and the numeric version Egma pinned it to
  *   (`pinned_to`).
@@ -29,6 +31,26 @@ export type MockEngineNote = {
   readonly engineId: string;
   /** The engine version the serving agent version points at. */
   readonly version: number | null;
+  /**
+   * The tools that engine declared when this run captured it, in the one
+   * spelling a comparison uses.
+   *
+   * **The comparison value, written down rather than held in memory.** The
+   * run's own verify step compares what the serving version declares after the
+   * swap against what it declared before, and a run that crashes between the
+   * two takes that "before" with it — so a teardown resumed by anybody else
+   * could not say whether the serving version had moved, which is one of the
+   * four promises the consent screen makes. With it here, the resumed teardown
+   * reads the engine at the reference above and answers honestly.
+   *
+   * **A difference is reported, never repaired.** Putting the tools back would
+   * need the captured document itself, which this note deliberately does not
+   * hold — it is a note about what to put back, not a copy of the customer's
+   * configuration — so a mismatch is said out loud and the world stays
+   * unsettled. Absent on a note written before the print existed, and on one
+   * whose run never got as far as reading the engine.
+   */
+  readonly toolPrint?: string;
 };
 
 /** One number Egma pinned, and everything it takes to put it back. */
@@ -71,10 +93,12 @@ export function mockMetadataFrom(
   }
   const held = engine as Record<string, unknown>;
   const engineVersion = held["version"];
+  const print = held["tool_print"];
   if (
     typeof held["type"] !== "string" ||
     typeof held["engine_id"] !== "string" ||
-    (engineVersion !== null && typeof engineVersion !== "number")
+    (engineVersion !== null && typeof engineVersion !== "number") ||
+    (print !== undefined && print !== null && typeof print !== "string")
   ) {
     throw malformed();
   }
@@ -84,6 +108,7 @@ export function mockMetadataFrom(
       type: held["type"],
       engineId: held["engine_id"],
       version: engineVersion,
+      ...(typeof print === "string" ? { toolPrint: print } : {}),
     },
     numbers: numbers.map((entry) => {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
@@ -112,6 +137,10 @@ export function mockMetadataRow(
       type: metadata.engine.type,
       engine_id: metadata.engine.engineId,
       version: metadata.engine.version,
+      // The row's own spelling, beside `engine_id` and `pinned_to`.
+      ...(metadata.engine.toolPrint === undefined
+        ? {}
+        : { tool_print: metadata.engine.toolPrint }),
     },
     numbers: metadata.numbers.map((one) => ({
       number: one.number,

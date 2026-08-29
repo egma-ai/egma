@@ -342,6 +342,7 @@ describe("the refusals the enable-time read carries", () => {
       mockable: boolean;
       refusal: { reason: string; message: string } | null;
       numbers: { number: string; pin: boolean }[];
+      tools: { name: string; coverage: string }[];
     };
   }
 

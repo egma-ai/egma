@@ -151,7 +151,7 @@ describe("a whole run, swept afterwards", () => {
     const printed: string[] = [];
     const ui = new HeadlessUI({
       write: (line) => printed.push(line),
-      answers: { "retell-key": KEY, reach: "text" },
+      answers: { "retell-key": KEY, lanes: "text" },
     });
 
     // The walk ends in a run, and a result is ready when grading is terminal. The sweep
