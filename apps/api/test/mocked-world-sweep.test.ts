@@ -32,6 +32,7 @@ afterEach(async () => {
 
 const RETELL_AGENT = "agent_b0e2e9cb267c47e7e7026cd8e8";
 const KEY = "retell-secret-A1B2C3D4WXYZ";
+const PINNED_NUMBER = "+15550100";
 
 /** A Retell that only ever has to answer the delete a teardown might send. */
 const RETELL: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -52,6 +53,50 @@ const RETELL: typeof fetch = (async (input: string | URL | Request, init?: Reque
   if (method === "DELETE") return json({ deleted: true });
   throw new Error(`the sweep test's Retell was asked something unexpected: ${method} ${url}`);
 }) as typeof fetch;
+
+/**
+ * The same account with one pinned number on it, and a count of every binding
+ * it was asked to write.
+ *
+ * A restore is the one write a duplicated settle must not make twice: the
+ * second one would be putting a `latest` binding back that somebody else has
+ * already put back, over an account that may since have grown a newer run's
+ * temporary version.
+ */
+function anAccountHoldingAPin(): {
+  readonly fetchImpl: typeof fetch;
+  readonly restores: { count: number };
+} {
+  const restores = { count: 0 };
+  let bindings: readonly Record<string, unknown>[] = [
+    { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+  ];
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const path = new URL(url).pathname;
+    const json = (value: unknown) =>
+      new Response(JSON.stringify(value), { status: 200 });
+    if (method === "GET" && path.startsWith("/get-phone-number/")) {
+      return json({
+        phone_number: PINNED_NUMBER,
+        nickname: "Front desk",
+        inbound_agents: bindings,
+      });
+    }
+    if (method === "PATCH" && path.startsWith("/update-phone-number/")) {
+      restores.count += 1;
+      bindings = (init?.body === undefined
+        ? []
+        : (JSON.parse(String(init.body)) as Record<string, unknown>)[
+            "inbound_agents"
+          ]) as readonly Record<string, unknown>[];
+      return json({ phone_number: PINNED_NUMBER });
+    }
+    return RETELL(input as string, init);
+  }) as typeof fetch;
+  return { fetchImpl, restores };
+}
 
 const SWEEP_LOG = { error: () => undefined };
 
@@ -136,6 +181,8 @@ async function seedRun(
   copy: { readonly version: number | null } | null,
   minutesOld: number,
   status: "pending" | "completed" = "pending",
+  /** The numbers this run's note says it pinned, if it pinned any. */
+  numbers: readonly Record<string, unknown>[] = [],
 ): Promise<{ runId: string; simulationId: string }> {
   const runId = newId("run");
   const simulationId = newId("sim");
@@ -149,9 +196,7 @@ async function seedRun(
         finished_at, completed_count, failed_count, canceled_count)
      values ($1,$2,$3,$4,$5,$6,$11,'manual',$7::jsonb,$8::jsonb,$9::integer,
         case when $12 = 'no' then null else false end,
-        case when $12 = 'no' then null else
-          '{"engine": {"type": "conversation-flow", "engine_id": "flow_1", "version": 105}, "numbers": []}'::jsonb
-        end,1,
+        case when $12 = 'no' then null else $13::jsonb end,1,
         now() - ($10 || ' minutes')::interval,
         case when $11 = 'completed' then now() - ($10 || ' minutes')::interval end,
         case when $11 = 'completed' then now() - interval '1 minute' end,
@@ -180,6 +225,14 @@ async function seedRun(
       String(minutesOld),
       status,
       copy === null ? "no" : "yes",
+      JSON.stringify({
+        engine: {
+          type: "conversation-flow",
+          engine_id: "flow_1",
+          version: 105,
+        },
+        numbers,
+      }),
     ],
   );
   await api.database.sql(
@@ -320,5 +373,57 @@ describe("what the sweep answers", () => {
     }
     expect((await getRun(auth, runId))?.tempMockAgentVersion).toBe(106);
     expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(false);
+  });
+});
+
+/**
+ * Two settles of one agent, and the rule that makes the second one harmless.
+ *
+ * A terminal report lands the settle, and so does the next run's claim — so two
+ * of them meeting is ordinary, not exotic. They take turns behind the agent's
+ * mocked-world fence, and the one that arrives second re-reads the cleanup flag
+ * inside it: a run somebody else has already put back is not in its list, so it
+ * writes nothing. Without that re-read the second one would restore a `latest`
+ * binding a moment after the first did — over an account that by then may hold
+ * a newer run's temporary version, which is the hijack itself.
+ */
+describe("a settle that arrives after somebody else settled the run", () => {
+  const PINNED = [{ number: PINNED_NUMBER, was: "latest", pinned_to: 105 }];
+
+  it("restores nothing, and still answers settled", async () => {
+    const ready = await aTickedAgent("sweep_settles_once");
+    const account = anAccountHoldingAPin();
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed", PINNED);
+    const auth = contextFor(ready.ada, "member");
+    const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
+
+    const first = await settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG);
+    const second = await settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG);
+
+    expect(first).toEqual({ kind: "settled" });
+    expect(second).toEqual({ kind: "settled" });
+    // One restore, not two. The second settle found the flag already true.
+    expect(account.restores.count).toBe(1);
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
+  });
+
+  it("settles once when two of them run at the same time", async () => {
+    const ready = await aTickedAgent("sweep_settles_once_racing");
+    const account = anAccountHoldingAPin();
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed", PINNED);
+    const auth = contextFor(ready.ada, "member");
+    const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
+
+    // The real shape of it: a terminal report landing while the next run's
+    // sweep is already inside the teardown. The fence makes them take turns,
+    // and the loser's re-read is what makes its turn a no-op.
+    const both = await Promise.all([
+      settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG),
+      settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG),
+    ]);
+
+    expect(both).toEqual([{ kind: "settled" }, { kind: "settled" }]);
+    expect(account.restores.count).toBe(1);
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
   });
 });

@@ -1404,9 +1404,8 @@ export async function owedMockCleanups<T>(
     const hint = await owedMockCleanupRows(auth, agentId, options);
     if (hint.length === 0) return await whileHeld([]);
   }
-  return await withMockDraftFence(mockDraftFenceKey(auth, agentId), async () =>
-    whileHeld(await owedMockCleanupRows(auth, agentId, options)),
-  );
+  heldMockDraftFences.add(mockDraftFenceKey(auth, agentId));
+  return await whileHeld(await owedMockCleanupRows(auth, agentId, options));
 }
 
 /** The indexed read itself. Only ever called with the fence decided above. */
