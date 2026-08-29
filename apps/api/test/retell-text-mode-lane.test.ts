@@ -5,7 +5,6 @@ import {
   resolveRunStartReach,
   startRun,
   updateConnection,
-  type ConductedWorld,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -420,14 +419,11 @@ describe("the run-start read", () => {
 
     expect(read.kind).toBe("world");
     if (read.kind !== "world") return;
-    expect(read.world.agentVersion).toBe(SERVING_VERSION);
-    expect(read.world.engine).toEqual({
-      type: "conversation-flow",
-      engineId: FLOW.conversation_flow_id,
-      version: SERVING_VERSION,
-    });
+    expect(read.agentVersion).toBe(SERVING_VERSION);
     // One tool of each class, from the configuration and not from a guess.
-    expect(read.world.coverage).toEqual({
+    // Answered to the caller and stored nowhere: it is what an enable-time
+    // screen shows, computed live.
+    expect(read.coverage).toEqual({
       mocked: ["check_availability"],
       notInterceptable: ["transfer_to_front_desk"],
       notInThisVersion: ["inventory"],
@@ -551,7 +547,7 @@ describe("a run over a Retell text mode connection", () => {
     expect(rows[0]?.count).toBe("0");
   });
 
-  it("stamps the version it resolved, on the run and on every conversation", async () => {
+  it("stamps the version it resolved, once, on the run", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "text_mode_run_stamp",
       TEXT_MODE,
@@ -564,38 +560,17 @@ describe("a run over a Retell text mode connection", () => {
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.conductedAgentVersion).toBe(SERVING_VERSION);
+    expect(started.body.agentVersion).toBe(SERVING_VERSION);
 
+    // **Once, and on the run.** The run resolves the version before its first
+    // simulation exists, so every conversation of it shares one value — and
+    // two copies of a fact that cannot differ within a run is one too many.
     const runId = String(started.body.id);
     const detail = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
-    expect(detail.body.conductedWorld).toEqual({
-      agentVersion: SERVING_VERSION,
-      engine: {
-        type: "conversation-flow",
-        engineId: FLOW.conversation_flow_id,
-        version: SERVING_VERSION,
-      },
-      coverage: {
-        mocked: ["check_availability"],
-        notInterceptable: ["transfer_to_front_desk"],
-        notInThisVersion: ["inventory"],
-      },
-    });
-
-    // And at the evidence grain, off the rows themselves.
-    const listed = await ask(
-      api.app,
-      "GET",
-      `/v1/runs/${runId}/simulations`,
-      key,
-    );
-    const simulations = listed.body.simulations as {
-      conductedAgentVersion: number | null;
-    }[];
-    expect(simulations.length).toBeGreaterThan(0);
-    for (const one of simulations) {
-      expect(one.conductedAgentVersion).toBe(SERVING_VERSION);
-    }
+    expect(detail.body.agentVersion).toBe(SERVING_VERSION);
+    expect(detail.body.tempMockAgentVersion).toBeNull();
+    expect(detail.body.tempMockAgentVersionCleanup).toBeNull();
+    expect(detail.body.mockMetadata).toBeNull();
   });
 });
 
@@ -614,19 +589,6 @@ describe("a run over a Retell text mode connection", () => {
  * because a lane that pins nothing is exactly where a stray stamp would be
  * hardest to notice.
  */
-const A_CONDUCTED_WORLD: ConductedWorld = {
-  agentVersion: SERVING_VERSION,
-  engine: {
-    type: "conversation-flow",
-    engineId: FLOW.conversation_flow_id,
-    version: SERVING_VERSION,
-  },
-  coverage: {
-    mocked: ["check_availability"],
-    notInterceptable: ["transfer_to_front_desk"],
-    notInThisVersion: ["inventory"],
-  },
-};
 
 describe("the sentinel Retell key", () => {
   it("reaches Retell and nothing else, on a run that starts and one that fails", async () => {
@@ -682,39 +644,26 @@ describe("the version a run resolved, on the record", () => {
       agentId,
       connectionId,
       idempotencyKey: newId("run"),
-      conductedWorld: A_CONDUCTED_WORLD,
+      agentVersion: SERVING_VERSION,
     });
 
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
     expect(header.statusCode, JSON.stringify(header.body)).toBe(200);
-    expect(header.body.conductedAgentVersion).toBe(SERVING_VERSION);
-    expect(header.body.conductedWorld).toEqual(A_CONDUCTED_WORLD);
+    expect(header.body.agentVersion).toBe(SERVING_VERSION);
 
-    // And at the evidence grain, which is the read a result is actually
-    // looked at through: a simulation answers for itself.
+    // The simulations of one run carry no copy of it: the run resolves the
+    // version once and every conversation of it shares that one value.
     const listed = await ask(
       api.app,
       "GET",
       `/v1/runs/${started.id}/simulations`,
       key,
     );
-    const simulations = listed.body.simulations as {
-      id: string;
-      conductedAgentVersion: number | null;
-    }[];
+    const simulations = listed.body.simulations as Record<string, unknown>[];
     expect(simulations.length).toBeGreaterThan(0);
     for (const one of simulations) {
-      expect(one.conductedAgentVersion).toBe(SERVING_VERSION);
+      expect(Object.hasOwn(one, "conductedAgentVersion")).toBe(false);
     }
-
-    const alone = await ask(
-      api.app,
-      "GET",
-      `/v1/simulations/${simulations[0]?.id}`,
-      key,
-    );
-    expect(alone.statusCode, JSON.stringify(alone.body)).toBe(200);
-    expect(alone.body.conductedAgentVersion).toBe(SERVING_VERSION);
   });
 
   it("refuses to write a run whose world was never read", async () => {
@@ -755,8 +704,7 @@ describe("the version a run resolved, on the record", () => {
     });
 
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
-    expect(header.body.conductedAgentVersion).toBeNull();
-    expect(header.body.conductedWorld).toBeNull();
+    expect(header.body.agentVersion).toBeNull();
   });
 
   it("refuses a run whose connection was edited between the read and the write", async () => {
@@ -778,10 +726,7 @@ describe("the version a run resolved, on the record", () => {
     // The edit lands after the world was read: the agent, the address and the
     // key all move.
     await updateConnection(who, agentId, connectionId, {
-      config: {
-        retellAgentId: "agent_moved_elsewhere",
-        baseUrl: "https://acme-proxy.example",
-      },
+      config: { retellAgentId: "agent_moved_elsewhere" },
       credentials: { apiKey: "retell-secret-ROTATED-4321" },
     });
 
@@ -791,7 +736,7 @@ describe("the version a run resolved, on the record", () => {
         agentId,
         connectionId,
         idempotencyKey: newId("run"),
-        conductedWorld: A_CONDUCTED_WORLD,
+        agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
     ).rejects.toThrow(/was edited while Egma was reading the agent's platform/u);
@@ -844,7 +789,7 @@ describe("the version a run resolved, on the record", () => {
         agentId,
         connectionId,
         idempotencyKey: newId("run"),
-        conductedWorld: A_CONDUCTED_WORLD,
+        agentVersion: SERVING_VERSION,
         conductedConnectionIdentity: reach.connectionIdentity,
       }),
     ).rejects.toThrow(/was edited while Egma was reading the agent's platform/u);
@@ -872,15 +817,15 @@ describe("the version a run resolved, on the record", () => {
       agentId,
       connectionId,
       idempotencyKey: newId("run"),
-      conductedWorld: A_CONDUCTED_WORLD,
+      agentVersion: SERVING_VERSION,
       conductedConnectionIdentity: reach.connectionIdentity,
     });
-    expect(started.conductedWorld).toEqual(A_CONDUCTED_WORLD);
+    expect(started.agentVersion).toBe(SERVING_VERSION);
   });
 });
 
-describe("the coverage stamp a version-pinned run puts on its record", () => {
-  it("is built from the version Egma read, and tolerates a plug with no provider reference", async () => {
+describe("what a version-pinned run's landing records", () => {
+  it("leaves the coverage stamp to the seam that owns it, and takes no provider reference", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun(
         "text_mode_stamp_coverage",
@@ -901,7 +846,7 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
       agentId,
       connectionId,
       idempotencyKey: newId("run"),
-      conductedWorld: A_CONDUCTED_WORLD,
+      agentVersion: SERVING_VERSION,
     });
 
     const claimed = await api.app.inject({
@@ -961,33 +906,30 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
     expect(landed.statusCode, landed.body).toBe(200);
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    // Built from the run alone, and nothing about it was late: the tool list
-    // came from the version Egma resolved before the first persona turn.
-    expect(row?.mockToolCoverage).toEqual({
-      discovered: [
-        "check_availability",
-        "transfer_to_front_desk",
-        "inventory",
-      ],
-      covered: ["check_availability"],
-      uncovered: ["transfer_to_front_desk", "inventory"],
-      notInterceptable: ["transfer_to_front_desk"],
-      notInThisVersion: ["inventory"],
-    });
+    // **No stamp, and that is the settled answer.** The coverage stamp is the
+    // LiveKit in-room seam's, where the agent declares its tools per
+    // conversation and two simulations of one run can honestly differ. This
+    // lane decides what it answers for once per run and marks each answered
+    // call on the transcript, so a per-simulation copy would be a second
+    // version of a fact that cannot differ. Absent is the report saying nobody
+    // was ever asked — a different sentence from three empty lists.
+    expect(row?.mockToolCoverage).toBeNull();
     expect(row?.providerReference).toBeNull();
-    expect(row?.conductedAgentVersion).toBe(SERVING_VERSION);
+
+    // What the run conducted against lives on the run, once.
+    const header = await ask(api.app, "GET", `/v1/runs/${row?.runId}`, key);
+    expect(header.body.agentVersion).toBe(SERVING_VERSION);
   });
 });
 
 describe("the work order a version-pinned run hands over", () => {
-  it("carries the version, this simulation's variables, and only the answers it may serve", async () => {
+  it("carries the version, this simulation's variables, and what the run resolved", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "text_mode_claim",
       TEXT_MODE,
     );
 
-    // One answer per class of tool the agent has. Only the first is a name
-    // this lane may honestly stand in front of.
+    // One answer per class of tool the agent has.
     for (const [toolName, delay] of [
       ["check_availability", 250],
       ["transfer_to_front_desk", 0],
@@ -1042,15 +984,28 @@ describe("the work order a version-pinned run hands over", () => {
       egma_simulation: spec.simulation_id,
     });
 
-    // One entry per covered name only. A tool Egma classed *not interceptable
-    // by construction* or *not in this version* gets none, so its calls reach
-    // the real world and the record says which class it fell in.
+    // **What the run resolved, unfiltered.** The three-class read is computed
+    // live for the enable-time screen and stored nowhere, so there is no
+    // stored list here to filter by. Retell answers for a name or runs the
+    // customer's real implementation, and the record marks a call `mocked`
+    // when the run's snapshot covers its name — the live text-mode e2e is the
+    // gate that proves the wire.
     expect(spec.mock_tools).toEqual([
       {
         tool_name: "check_availability",
         answer: { answer: { ok: "check_availability" } },
         // Delays ride along on every lane and are never spent on chat.
         delay_milliseconds: 250,
+      },
+      {
+        tool_name: "transfer_to_front_desk",
+        answer: { answer: { ok: "transfer_to_front_desk" } },
+        delay_milliseconds: 0,
+      },
+      {
+        tool_name: "inventory",
+        answer: { answer: { ok: "inventory" } },
+        delay_milliseconds: 500,
       },
     ]);
 
@@ -1065,23 +1020,38 @@ describe("the work order a version-pinned run hands over", () => {
     expect(JSON.stringify(withoutConnection)).not.toContain(SENTINEL_KEY);
   });
 
-  it("serves what the run resolved, unfiltered, on a lane that pinned nothing", async () => {
+  it("carries no answers at all when the connection's switch is off", async () => {
+    // **A text run with the switch off goes real.** The switch is on the
+    // connection and the run froze it at start, so whether a run is mocked is
+    // read from its own snapshot on every lane — never from the connection
+    // row, which may have moved since.
     const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("text_mode_claim_unpinned", RETELL_CHAT);
+      await aCustomerReadyToRun("text_mode_claim_unmocked", TEXT_MODE);
 
     const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
-      tool: "transfer_to_front_desk",
+      tool: "check_availability",
       answer: { ok: true },
       delayMs: 0,
     });
     expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
 
-    await startRun(contextFor(ada, "member"), {
+    const untick = await ask(
+      api.app,
+      "PATCH",
+      `/v1/agents/${agentId}/connections/${connectionId}`,
+      key,
+      { mockToolsEnabled: false },
+    );
+    expect(untick.statusCode, JSON.stringify(untick.body)).toBe(200);
+
+    const started = await ask(api.app, "POST", "/v1/runs", key, {
       suiteId,
       agentId,
       connectionId,
       idempotencyKey: newId("run"),
     });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    expect(started.body.mockToolsEnabled).toBe(false);
 
     const claimed = await api.app.inject({
       method: "POST",
@@ -1092,16 +1062,11 @@ describe("the work order a version-pinned run hands over", () => {
     const spec = (claimed.json() as { specs: Record<string, unknown>[] })
       .specs[0] as Record<string, unknown>;
 
-    // Egma itself is in the tool path on such a lane and answers for whatever
-    // it is asked, so nothing is filtered — and no version is claimed.
-    expect(spec.mock_tools).toEqual([
-      {
-        tool_name: "transfer_to_front_desk",
-        answer: { answer: { ok: true } },
-        delay_milliseconds: 0,
-      },
-    ]);
-    expect(spec.agent_version).toBeUndefined();
-    expect(spec.dynamic_variables).toBeUndefined();
+    // No answers at all — an empty list would be a claim about tools where
+    // there is nothing to claim. The version is still named, because a chat
+    // result speaks for the version real traffic reaches either way.
+    expect(spec.mock_tools).toBeUndefined();
+    expect(spec.agent_version).toBe(SERVING_VERSION);
+    void ada;
   });
 });

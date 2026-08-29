@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { createPersona, recordMockedWorld, type MockedWorld } from "@egma/db";
+import { createPersona, recordMockState, type MockMetadata } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -105,88 +105,6 @@ async function aCustomer(
   return { ada, key: await projectKeyFor(api.app, ada) };
 }
 
-describe("the mock-tools tick, through the API", () => {
-  it("reads off a new agent as off, and is refused with a reason", async () => {
-    const { key } = await aCustomer("tick_contract_refused");
-
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Front desk",
-    });
-    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
-    const agentId = (registered.body.agent as { id: string }).id;
-    expect(
-      (registered.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(false);
-
-    const refused = await ask(
-      api.app,
-      "PATCH",
-      `/v1/agents/${agentId}`,
-      key,
-      { mockToolsDuringSimulations: true },
-    );
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(400);
-    // The sentence says what to do about it rather than naming a constraint.
-    expect(String(refused.body.message)).toContain("platform identity and key");
-    expect(String(refused.body.message)).toContain(
-      "Connect the agent to its platform first",
-    );
-  });
-
-  it("turns on for an agent that holds its platform key, and reads back", async () => {
-    const { key } = await aCustomer("tick_contract_on");
-
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Front desk",
-      connection: { ...RETELL_CHAT, platformAgentId: "agent_in_retell_1" },
-    });
-    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
-    const agentId = (registered.body.agent as { id: string }).id;
-
-    const ticked = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-    });
-    expect(ticked.statusCode, JSON.stringify(ticked.body)).toBe(200);
-    expect(
-      (ticked.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(true);
-
-    const read = await ask(api.app, "GET", `/v1/agents/${agentId}`, key);
-    expect(
-      (read.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(true);
-
-    // A rename leaves it alone: a mocked world must never be turned off as the
-    // side effect of an unrelated edit.
-    const renamed = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      name: "Front desk, renamed",
-    });
-    expect(
-      (renamed.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(true);
-  });
-
-  it("refuses a value that is not true or false", async () => {
-    const { key } = await aCustomer("tick_contract_bad_value");
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Front desk",
-    });
-    const agentId = (registered.body.agent as { id: string }).id;
-
-    const refused = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: "yes",
-    });
-    expect(refused.statusCode).toBe(400);
-  });
-});
-
 describe("the retell_web_call connection, through the API", () => {
   it("is registered and read back with its own product label", async () => {
     const { key } = await aCustomer("web_call_contract");
@@ -237,9 +155,9 @@ describe("the retell_web_call connection, through the API", () => {
   });
 });
 
-describe("the world a run built, through the API", () => {
-  it("is null on a run that built none, and reports itself when it did", async () => {
-    const { ada, key } = await aCustomer("mocked_world_contract");
+describe("what one run records, through the API", () => {
+  it("is four plain facts a reader can interpret without a decoder", async () => {
+    const { ada, key } = await aCustomer("mock_tools_contract");
 
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",
@@ -277,42 +195,40 @@ describe("the world a run built, through the API", () => {
 
     const before = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(before.statusCode, JSON.stringify(before.body)).toBe(200);
-    expect(before.body.mockedWorld).toBeNull();
+    // A run that copied nothing says so in three nulls, and says whether it
+    // was mocked at all off its own frozen snapshot.
+    expect(before.body.tempMockAgentVersion).toBeNull();
+    expect(before.body.tempMockAgentVersionCleanup).toBeNull();
+    expect(before.body.mockMetadata).toBeNull();
+    expect(before.body.mockToolsEnabled).toBe(false);
 
-    const world: MockedWorld = {
-      servingVersion: 105,
-      draftVersion: 106,
+    const note: MockMetadata = {
       engine: {
         type: "conversation-flow",
         engineId: "conversation_flow_2346a0e8367c",
-        version: 106,
+        version: 105,
       },
-      numbers: [
-        {
-          number: "+14155550199",
-          pinned: true,
-          bindings: [
-            {
-              agent_id: "agent_in_retell_1",
-              agent_version: "latest",
-              weight: 2,
-              a_field_egma_has_never_heard_of: "keep me",
-            },
-          ],
-        },
-      ],
-      coverage: {
-        mocked: ["get_availability"],
-        notInterceptable: ["transfer_to_front_desk"],
-        notInThisVersion: ["inventory"],
-      },
+      numbers: [{ number: "+14155550199", was: "latest", pinnedTo: 8 }],
     };
-    await recordMockedWorld(contextFor(ada, "member"), runId, world);
+    await recordMockState(contextFor(ada, "member"), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: note,
+    });
 
     const after = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(after.statusCode, JSON.stringify(after.body)).toBe(200);
-    // The temporary version, and the routing egma promised to put back —
-    // sibling fields it never read included.
-    expect(after.body.mockedWorld).toEqual(world);
+    expect(after.body.tempMockAgentVersion).toBe(106);
+    expect(after.body.tempMockAgentVersionCleanup).toBe(false);
+    // The note as the record stores it: where each touched number pointed,
+    // and what Egma pinned it to.
+    expect(after.body.mockMetadata).toEqual({
+      engine: {
+        type: "conversation-flow",
+        engine_id: "conversation_flow_2346a0e8367c",
+        version: 105,
+      },
+      numbers: [{ number: "+14155550199", was: "latest", pinned_to: 8 }],
+    });
   });
 });

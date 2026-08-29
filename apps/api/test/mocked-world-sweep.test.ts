@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import { createPersona, getRun, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { settleMockedWorlds } from "../src/mocked-world.ts";
+import { settleOwedMockCleanups } from "../src/mocked-world.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
@@ -16,7 +16,7 @@ import {
 /**
  * The sweep's two hard cases, both about a run that is `pending`.
  *
- * A mocked run's simulations are unclaimable until its world names a draft, so
+ * A mocked run's simulations are unclaimable until it names a temporary copy, so
  * a run whose build died leaves them queued forever — the sweep must find it
  * and cancel it (S2). But a run whose world is fully built and is merely
  * *waiting for a free simulator* is not stuck, and cancelling it for queue wait
@@ -133,7 +133,7 @@ async function aTickedAgent(label: string): Promise<Ready> {
  */
 async function seedRun(
   ready: Ready,
-  world: Record<string, unknown> | null,
+  copy: { readonly version: number | null } | null,
   minutesOld: number,
   status: "pending" | "completed" = "pending",
 ): Promise<{ runId: string; simulationId: string }> {
@@ -144,9 +144,14 @@ async function seedRun(
     `insert into run
        (id, organization_id, project_id, suite_id, agent_id, connection_id,
         status, triggered_via, connection_snapshot, mock_tool_snapshot,
-        mocked_world, expected_simulation_count, created_at, started_at,
+        temp_mock_agent_version, temp_mock_agent_version_cleanup,
+        mock_metadata, expected_simulation_count, created_at, started_at,
         finished_at, completed_count, failed_count, canceled_count)
-     values ($1,$2,$3,$4,$5,$6,$11,'manual',$7::jsonb,$8::jsonb,$9::jsonb,1,
+     values ($1,$2,$3,$4,$5,$6,$11,'manual',$7::jsonb,$8::jsonb,$9::integer,
+        case when $12 = 'no' then null else false end,
+        case when $12 = 'no' then null else
+          '{"engine": {"type": "conversation-flow", "engine_id": "flow_1", "version": 105}, "numbers": []}'::jsonb
+        end,1,
         now() - ($10 || ' minutes')::interval,
         case when $11 = 'completed' then now() - ($10 || ' minutes')::interval end,
         case when $11 = 'completed' then now() - interval '1 minute' end,
@@ -168,11 +173,13 @@ async function seedRun(
         topology: "hosted-broker",
         environment: null,
         config: { retellAgentId: RETELL_AGENT },
+        mockToolsEnabled: true,
       }),
       JSON.stringify({ defaults: [], overrides: {} }),
-      world === null ? null : JSON.stringify(world),
+      copy?.version ?? null,
       String(minutesOld),
       status,
+      copy === null ? "no" : "yes",
     ],
   );
   await api.database.sql(
@@ -210,31 +217,21 @@ const RETELL_DELETE_REFUSED: typeof fetch = (async (
   return RETELL(input as string, init);
 }) as typeof fetch;
 
-const MARKER = {
-  servingVersion: 0,
-  draftVersion: null,
-  engine: { type: "", engineId: "", version: null },
-  numbers: [],
-  coverage: { mocked: [], notInterceptable: [], notInThisVersion: [] },
-};
+/** The claim's own marker: a cleanup owed, and no copy branched yet. */
+const CLAIMED = { version: null };
 
-const BUILT = {
-  servingVersion: 105,
-  draftVersion: 106,
-  engine: { type: "conversation-flow", engineId: "flow_1", version: 106 },
-  numbers: [],
-  coverage: { mocked: ["get_availability"], notInterceptable: [], notInThisVersion: [] },
-};
+/** A run that branched its copy: the cleanup is owed and names a version. */
+const BRANCHED = { version: 106 };
 
 describe("the sweep, over a run that is pending", () => {
   it("cancels a run whose build died before it named a draft", async () => {
     const ready = await aTickedAgent("sweep_cancels_stuck");
     // Its world is the building marker — the row a run wears while building,
     // with no draft — and it is twenty minutes old, well past the build window.
-    const { runId, simulationId } = await seedRun(ready, MARKER, 20);
+    const { runId, simulationId } = await seedRun(ready, CLAIMED, 20);
     const auth = contextFor(ready.ada, "member");
 
-    await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     // The stuck run is canceled, so its unclaimable simulations stop waiting.
     expect((await getRun(auth, runId))?.status).toBe("canceled");
@@ -246,10 +243,10 @@ describe("the sweep, over a run that is pending", () => {
     // A fully built world — its draft exists — and just as old. This run is not
     // stuck; it is queued, waiting for a free simulator, and its clock is queue
     // wait, not a dead build.
-    const { runId, simulationId } = await seedRun(ready, BUILT, 20);
+    const { runId, simulationId } = await seedRun(ready, BRANCHED, 20);
     const auth = contextFor(ready.ada, "member");
 
-    await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     // Untouched: still pending, its simulation still claimable, and its draft
     // never torn down. Cancelling it for queue wait would be a fate no other
@@ -257,16 +254,16 @@ describe("the sweep, over a run that is pending", () => {
     expect((await getRun(auth, runId))?.status).toBe("pending");
     expect((await getSimulation(auth, simulationId))?.status).toBe("queued");
     const after = await getRun(auth, runId);
-    expect(after?.mockedWorld?.draftVersion).toBe(106);
+    expect(after?.tempMockAgentVersion).toBe(106);
   });
 
   it("does not cancel a stuck run that is still inside the build window", async () => {
     const ready = await aTickedAgent("sweep_young_stuck");
     // Same marker, but two minutes old — a build in flight, not a dead one.
-    const { runId } = await seedRun(ready, MARKER, 2);
+    const { runId } = await seedRun(ready, CLAIMED, 2);
     const auth = contextFor(ready.ada, "member");
 
-    await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     expect((await getRun(auth, runId))?.status).toBe("pending");
   });
@@ -282,7 +279,7 @@ describe("what the sweep answers", () => {
     const ready = await aTickedAgent("sweep_answers_clean");
     const auth = contextFor(ready.ada, "member");
 
-    const swept = await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    const swept = await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     expect(swept).toEqual({ kind: "settled" });
   });
@@ -291,21 +288,23 @@ describe("what the sweep answers", () => {
     const ready = await aTickedAgent("sweep_answers_settled");
     // A finished run still holding its draft — ordinary litter, and the
     // account honours the delete.
-    const { runId } = await seedRun(ready, BUILT, 20, "completed");
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
 
-    const swept = await settleMockedWorlds(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    const swept = await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
 
     expect(swept).toEqual({ kind: "settled" });
-    expect((await getRun(auth, runId))?.mockedWorld?.draftVersion).toBe(null);
+    // The copy is gone from Retell, and the flag says the account is back.
+    // The version number stays: it is the record of what this run branched.
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
   });
 
   it("answers unsettled while a finished run's draft cannot be deleted", async () => {
     const ready = await aTickedAgent("sweep_answers_unsettled");
-    const { runId } = await seedRun(ready, BUILT, 20, "completed");
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
 
-    const swept = await settleMockedWorlds(
+    const swept = await settleOwedMockCleanups(
       auth,
       ready.agentId,
       { baseUrl: "https://egma.test", retellFetch: RETELL_DELETE_REFUSED },
@@ -319,6 +318,7 @@ describe("what the sweep answers", () => {
       expect(swept.reason).toContain(runId);
       expect(swept.reason).toContain("still owes");
     }
-    expect((await getRun(auth, runId))?.mockedWorld?.draftVersion).toBe(106);
+    expect((await getRun(auth, runId))?.tempMockAgentVersion).toBe(106);
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(false);
   });
 });

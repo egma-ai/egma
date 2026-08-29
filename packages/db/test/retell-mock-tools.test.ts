@@ -164,7 +164,7 @@ async function anAgent(name: string): Promise<string> {
 async function aConnection(
   agentId: string,
   lane: Lane,
-  name = lane.connectionType,
+  name: string = lane.connectionType,
 ): Promise<string> {
   const connection = await addConnection(acting(), agentId, {
     name,
