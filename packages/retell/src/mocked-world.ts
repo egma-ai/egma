@@ -896,12 +896,18 @@ export async function finishMockedWorld(
     // Only the notes that still owe a write survive, so a retry does not walk
     // past the numbers already settled.
     const metadata = state.mockMetadata;
+    const settledSome = outstanding.length < notes.length;
     state = {
       ...state,
       mockMetadata:
         metadata === null ? null : { ...metadata, numbers: outstanding },
     };
-    await input.record(state);
+    // Recorded only where what egma owes actually moved — the record is an
+    // obligation, and a write that changes nothing is not a change in it. It
+    // is also refused: a finished run's header admits a write only where one
+    // of the two cleanup columns moved, so a teardown that put nothing back
+    // (every restore failed, or the note names no number at all) must not try.
+    if (settledSome) await input.record(state);
     return { state, unfinished, leftAlone };
   }
 

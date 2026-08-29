@@ -87,6 +87,8 @@ type Account = {
     holdOneDelete?: Promise<void>;
     /** Called as that delete arrives, so a test knows the teardown is inside. */
     onDelete?: () => void;
+    /** Called as a version is branched, so a test knows a copy now stands. */
+    onBranch?: () => void;
     /**
      * Every binding this account was asked to write, with the versions that
      * stood at the moment it was asked.
@@ -201,6 +203,7 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
         );
       }
       state.versions.add(next);
+      state.onBranch?.();
       return json({
         agent_id: RETELL_AGENT,
         version: next,
@@ -698,18 +701,29 @@ describe("a teardown that is in flight when the next run starts", () => {
 
     // The next run, started now: its claim finds a finished run, which does
     // not block it, and it must still wait for the teardown to finish.
+    const branched = new Promise<void>((minted) => {
+      ready.state.onBranch = () => {
+        minted();
+      };
+    });
     const second = ask(api.app, "POST", "/v1/runs", ready.key, {
       suiteId: ready.suiteId,
       agentId: ready.agentId,
       connectionId: ready.connectionId,
       idempotencyKey: newId("run"),
     });
-    // Long enough for an unfenced build to have swept, branched and pinned.
-    await new Promise((resume) => setTimeout(resume, 50));
+    // The teardown is let go the moment the second run has branched — which is
+    // the moment its copy could be hijacked — or after long enough that it
+    // plainly never will. A build that is waiting its turn never gets there,
+    // so this waits out the timer; a build that is not waiting gets there in
+    // milliseconds and the restore below lands on top of its copy.
+    await Promise.race([
+      branched,
+      new Promise((resume) => setTimeout(resume, 300)),
+    ]);
     release();
     const [, answered] = await Promise.all([landing, second]);
 
-    console.log("WRITES", JSON.stringify(ready.state.writes), "STATUS", answered.statusCode);
     // The whole point: every write of this number's binding happened over an
     // account holding no temporary version but the serving one.
     for (const write of ready.state.writes) {

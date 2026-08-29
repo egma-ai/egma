@@ -2,6 +2,8 @@ import { newId } from "@egma/ids";
 import { createPersona, getRun, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { canonicalJson } from "@egma/retell";
+
 import { settleOwedMockCleanups } from "../src/mocked-world.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
@@ -183,6 +185,8 @@ async function seedRun(
   status: "pending" | "completed" = "pending",
   /** The numbers this run's note says it pinned, if it pinned any. */
   numbers: readonly Record<string, unknown>[] = [],
+  /** What this run's note says the serving version's tools looked like. */
+  toolPrint?: string,
 ): Promise<{ runId: string; simulationId: string }> {
   const runId = newId("run");
   const simulationId = newId("sim");
@@ -230,6 +234,7 @@ async function seedRun(
           type: "conversation-flow",
           engine_id: "flow_1",
           version: 105,
+          ...(toolPrint === undefined ? {} : { tool_print: toolPrint }),
         },
         numbers,
       }),
@@ -372,6 +377,103 @@ describe("what the sweep answers", () => {
       expect(swept.reason).toContain("still owes");
     }
     expect((await getRun(auth, runId))?.tempMockAgentVersion).toBe(106);
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(false);
+  });
+});
+
+/**
+ * The promise a resumed teardown can still keep, because the note carries the
+ * comparison value: the version this agent serves never moved.
+ *
+ * The run that built the world compared the engine it read back against a print
+ * it held in memory. A run that crashed took that print with it — so without
+ * one on the note, a teardown finished by anybody else could delete the copy
+ * and call the account settled without ever looking at the version real callers
+ * are served from.
+ */
+describe("a teardown resumed from the note alone", () => {
+  const TOOLS = [
+    {
+      tool_id: "tool-get_availability",
+      type: "custom",
+      name: "get_availability",
+      url: "https://backend.example.com/tools/get_availability",
+    },
+  ];
+
+  /** The same account, answering for the engine the note names. */
+  function anAccountServing(
+    tools: readonly Record<string, unknown>[],
+  ): typeof fetch {
+    return (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.startsWith("/get-conversation-flow/")) {
+        return new Response(
+          JSON.stringify({ conversation_flow_id: "flow_1", version: 105, tools }),
+          { status: 200 },
+        );
+      }
+      return RETELL(input as string, init);
+    }) as typeof fetch;
+  }
+
+  it("settles when the serving version still declares what was captured", async () => {
+    const ready = await aTickedAgent("sweep_print_unmoved");
+    const { runId } = await seedRun(
+      ready,
+      BRANCHED,
+      20,
+      "completed",
+      [],
+      canonicalJson(TOOLS),
+    );
+    const auth = contextFor(ready.ada, "member");
+
+    const swept = await settleOwedMockCleanups(
+      auth,
+      ready.agentId,
+      { baseUrl: "https://egma.test", retellFetch: anAccountServing(TOOLS) },
+      SWEEP_LOG,
+    );
+
+    expect(swept).toEqual({ kind: "settled" });
+    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
+  });
+
+  it("stays unsettled, and says what stands there now, when it moved", async () => {
+    const ready = await aTickedAgent("sweep_print_moved");
+    const { runId } = await seedRun(
+      ready,
+      BRANCHED,
+      20,
+      "completed",
+      [],
+      canonicalJson(TOOLS),
+    );
+    const auth = contextFor(ready.ada, "member");
+
+    // The serving version declares something else now — which is the one
+    // failure this whole design exists to prevent, and which a settle that
+    // could not compare would have reported as a clean account.
+    const swept = await settleOwedMockCleanups(
+      auth,
+      ready.agentId,
+      {
+        baseUrl: "https://egma.test",
+        retellFetch: anAccountServing([
+          { tool_id: "tool-sms", type: "send_sms", name: "text_the_caller" },
+        ]),
+      },
+      SWEEP_LOG,
+    );
+
+    expect(swept.kind).toBe("unsettled");
+    if (swept.kind === "unsettled") {
+      expect(swept.reason).toContain("conversation-flow flow_1 v105");
+      expect(swept.reason).toContain("text_the_caller");
+    }
+    // Still owed, so the next mocked run of this agent is refused rather than
+    // branching over a version Egma can no longer vouch for.
     expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(false);
   });
 });
