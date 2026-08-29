@@ -356,7 +356,8 @@ function PersonaPicker({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className="w-[300px] p-0"
+        /* Never wider than the screen it has to fit on, as `ui/menu.tsx` is. */
+        className="w-[min(300px,calc(100vw-var(--space-8)))] p-0"
         aria-label="Choose personas"
         /*
          * **Focus leaving does not shut this panel; a press elsewhere does.**

@@ -33,6 +33,15 @@ import { cn } from "@/lib/utils";
  * `overflow-x` is pinned to `hidden` rather than left alone: a single axis set
  * to `auto` computes the other from `visible` to `auto` as well, which hangs a
  * horizontal scrollbar under a menu that never needed one.
+ *
+ * **`collisionPadding` is the same gap, on the other axis.** Radix shifts a
+ * panel back inside the window when it would overflow, and it shifts it to
+ * exactly the edge: the default padding is zero. A 300px panel opened from a
+ * column near the right of a 640px screen therefore landed flush, with its last
+ * column of text and the underline of its Done touching the window — the same
+ * cut-off look the select picker shipped, one axis over. Eight pixels, matching
+ * the picker's own margins, so a panel pushed against an edge still reads as a
+ * panel.
  */
 function Popover(props: ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />;
@@ -52,6 +61,7 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 8,
+  collisionPadding = 8,
   ...props
 }: ComponentProps<typeof PopoverPrimitive.Content>) {
   return (
@@ -60,6 +70,7 @@ function PopoverContent({
         data-slot="popover-content"
         align={align}
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
           "z-30 w-72 rounded-card border border-border bg-popover p-4",
           "text-base text-popover-foreground shadow-popover outline-none",
