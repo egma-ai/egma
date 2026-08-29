@@ -1,6 +1,6 @@
 # The measure catalog
 
-**Catalog version: 5**
+**Catalog version: 6**
 
 Every metric a conversation produces, named once and defined once, so that a
 grader references a known metric instead of guessing a string — and so that the
@@ -52,7 +52,7 @@ number was timed or counted.
 | Measure | Unit | Taken | Emitted by | Arrives as | What it is |
 | --- | --- | --- | --- | --- | --- |
 | `first_response_latency` | milliseconds | once | every simulation | timing span | How long the agent took to say anything at all, from the moment the simulation began. |
-| `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer, measured once for every turn the persona took. |
+| `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer: from the persona's turn going out to the agent beginning its answer. One sample per persona turn the agent began answering; a turn it never began answering takes none. |
 | `time_to_first_word` | milliseconds | per turn | voice simulations | timing span | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
 | `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
 | `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long Egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |

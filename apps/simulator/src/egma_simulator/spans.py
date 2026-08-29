@@ -41,7 +41,7 @@ persona is full-duplex, and the shape always permitted it rather
 than being widened later.
 
 **Where a turn's two ends come from depends on who conducted it.** Chat's
-walk observes a turn at one moment and this stamps it there, which is the
+conversation loop observes a turn at one moment and this stamps it there, which is the
 whole truth about a message that was never spoken. A voice conductor knows
 both ends before it says anything, because it read them off the audio
 itself, and hands both over — see :meth:`SpanEmitter.spoken_turn`. Only

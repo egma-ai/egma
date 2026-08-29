@@ -37,6 +37,7 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
+from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -70,7 +71,6 @@ from egma_simulator.speech import (
     spoken_seconds,
     voice_from_models,
 )
-from egma_simulator.walk import Conducted, WalkControls
 
 TTS_VOICE = {"provider": "cartesia", "voiceId": "warm-alto-2", "speed": 0.9}
 
@@ -110,7 +110,7 @@ async def voice_simulation(
     *,
     speech: SpeechProviders = SCRIPTED_PAIR,
     parameters: ConductParameters | None = None,
-    controls: WalkControls | None = None,
+    controls: ConversationControls | None = None,
     **overrides,
 ) -> Observed:
     """One voice simulation, conducted the way the service conducts it."""
@@ -127,7 +127,7 @@ async def voice_simulation(
         conductor,
         assembled,
         spec,
-        controls=controls or WalkControls(),
+        controls=controls or ConversationControls(),
     )
 
 
@@ -136,7 +136,7 @@ async def observe(
     assembled: Assembled,
     spec: SimulationSpec,
     *,
-    controls: WalkControls,
+    controls: ConversationControls,
 ) -> Observed:
     """Conduct, and keep everything the conductor said about it."""
     spans: list[tuple[str, str, int, int]] = []
@@ -351,7 +351,9 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
         return await reply_to(persona, messages)
 
     monkeypatch.setattr(Persona, "reply_to", delayed)
-    observed = await observe(conductor, assembled, spec, controls=WalkControls())
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
     assert observed.conducted.status == "completed"
 
 
@@ -490,7 +492,9 @@ async def test_every_span_points_at_the_audio_it_names(
             await push_frame(frame, direction)
 
     monkeypatch.setattr(input_processor, "push_frame", carry_one_transport_gap)
-    observed = await observe(conductor, assembled, spec, controls=WalkControls())
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
     assert inserted_gap
     audio = observed.assembled.audio
     assert audio is not None
@@ -607,7 +611,9 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
         "persona_stopped",
         agent_departs_as_the_concluding_tts_stops,
     )
-    observed = await observe(conductor, assembled, spec, controls=WalkControls())
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
 
     assert observed.conducted.ending == "agent_ended"
     assert observed.conducted.reason == "the agent ended the exchange"
@@ -702,7 +708,7 @@ async def test_departure_finalizes_the_active_agent_utterance(
     )
 
     observed = await observe(
-        conductor, Assembled(conductor=conductor), spec, controls=WalkControls()
+        conductor, Assembled(conductor=conductor), spec, controls=ConversationControls()
     )
 
     assert observed.conducted.ending == "agent_ended"
@@ -779,7 +785,7 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
                 conductor,
                 Assembled(conductor=conductor),
                 spec,
-                controls=WalkControls(),
+                controls=ConversationControls(),
             ),
             timeout=1.0,
         )
@@ -879,7 +885,7 @@ async def stopped_while_opening(
 ) -> tuple[Conducted, _NeverAnswers]:
     """One simulation stopped before its exchange ever opened."""
     spec = spec_for(max_duration_seconds=max_duration_seconds)
-    controls = WalkControls()
+    controls = ConversationControls()
     stop = getattr(controls, stop_with)
     # A leg that never connects is the other long wait in opening; where a
     # test names one, the line answers the stop instead.
@@ -974,7 +980,7 @@ async def test_a_concluding_turn_that_fills_the_budget_still_concludes(
 ):
     """Chat and voice end the same scenario the same way at the same limit.
 
-    The walk checks its budget *before* letting the persona move, so a
+    The conversation loop checks its budget *before* letting the persona move, so a
     concluding turn it allowed can never also be the turn that trips the
     limit. Reading the count afterwards on voice would report
     ``limit_reached`` for the very turn that concluded the scenario — the
@@ -1060,7 +1066,7 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
         parameters=ConductParameters(agent_opening_seconds=0.2),
     )
     observed = await observe(
-        conductor, Assembled(conductor=conductor), spec, controls=WalkControls()
+        conductor, Assembled(conductor=conductor), spec, controls=ConversationControls()
     )
 
     persona = next(
@@ -1356,7 +1362,7 @@ async def test_an_unconfigured_voice_exchange_connects_nothing(
 
 def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):
     """Modality selects the legs and nothing else: a chat simulation is the
-    plug on its own, walked, and its report has no audio to carry."""
+    plug on its own, looped, and its report has no audio to carry."""
     spec = SimulationSpec.from_document(scripted_spec("sim-chat"))
     assembled = assemble(
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR

@@ -1,6 +1,6 @@
 import {
   GRADER_DEFINITION_CATALOG,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   reconcileGraderCatalog,
 } from "@egma/db";
@@ -109,8 +109,8 @@ describe("the grader library", () => {
       activeProjectGraderId: null,
       settingDefinitions: [
         {
-          key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
-          label: "Maximum average response time",
+          key: MAXIMUM_RESPONSE_TIME_PARAMETER,
+          label: "Maximum response time (p90)",
           valueType: "integer",
           defaultValue: 3_000,
           unit: "milliseconds",
@@ -158,7 +158,7 @@ describe("the grader library", () => {
       "POST",
       `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/use`,
       viewer.secret,
-      policy({ [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500 }),
+      policy({ [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 }),
     );
     expect(refused.statusCode).toBe(403);
 
@@ -219,7 +219,7 @@ describe("the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     const input = policy({
-      [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+      [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
     });
 
     const used = await request(

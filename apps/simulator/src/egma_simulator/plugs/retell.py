@@ -291,7 +291,7 @@ def _agent_words(messages: object) -> str | None:
     An answer holds the agent's messages and its tool traffic together, so
     the words are the ``agent`` role's contents in order; two bubbles for
     one turn stay one turn. ``None`` when the agent produced no words at
-    all, which the walk records as an answer without words rather than as
+    all, which the conversation loop records as an answer without words rather than as
     silence in the transcript.
     """
     if not isinstance(messages, list):

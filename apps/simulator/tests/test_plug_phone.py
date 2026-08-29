@@ -24,6 +24,7 @@ from conftest import assert_one_speaker_to_a_channel, phone_spec
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import MediaSettings
 from egma_simulator.contract import ERROR, NOT_ANSWERED
+from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media import (
     BACKENDS,
     NOT_ANSWERED_STATUSES,
@@ -45,7 +46,6 @@ from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
-from egma_simulator.walk import Conducted, WalkControls
 
 A_NUMBER = "+15551234567"
 
@@ -202,7 +202,7 @@ async def _conduct_phone(tmp_path: Path, **overrides: object) -> _PhoneRun:
         ),
         max_turns=spec.limits.max_turns,
         max_duration_seconds=spec.limits.max_duration_seconds,
-        controls=WalkControls(),
+        controls=ConversationControls(),
         name="sim:phone-plug-test",
         on_utterance=on_utterance,
         on_measured=on_measured,

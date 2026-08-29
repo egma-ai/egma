@@ -40,6 +40,7 @@ from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
+from .conversation import Conducted, ConversationControls, conduct
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -50,7 +51,6 @@ from .reporting import Reporter
 from .spans import SpanEmitter, trace_id_for
 from .spec import SimulationSpec
 from .speech import SpeechProviders
-from .walk import Conducted, WalkControls, conduct
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ class RunningSimulation:
     It is also the one place that sees everything a conductor observes,
     which is why the conversation's spans are authored here rather than
     deeper in. There are two conductors and they observe in two
-    currencies: the walk sees a turn at the moment it happened, and the
+    currencies: the conversation loop sees a turn at the moment it happened, and the
     voice conductor sees both ends of one, read off the audio. Both report
     to the callbacks below, and what comes out is one emitter for chat and
     voice alike.
@@ -226,7 +226,7 @@ class RunningSimulation:
         # puts every span ahead of the terminal document rather than
         # alongside it.
         self._spans = SpanEmitter(spec.simulation_id, flush=self._reporter.spans)
-        self._controls = WalkControls()
+        self._controls = ConversationControls()
         self._first_human_at: float | None = None
         self._first_latency_reported = False
         self._assembled: Assembled | None = None
@@ -347,7 +347,7 @@ class RunningSimulation:
                 reporter.mock_tool_coverage = assembled.mock_tool_coverage
                 await model.close()
         except asyncio.CancelledError:
-            # The service itself is being torn down mid-walk. Reporting a
+            # The service itself is being torn down mid-conversation. Reporting a
             # terminal state now would be a guess; a simulation whose
             # simulator vanished is answered by the control plane noticing
             # the heartbeats stop. Say nothing.
@@ -433,7 +433,7 @@ class RunningSimulation:
     ) -> None:
         """One turn a voice conductor read off the audio, both ends known.
 
-        The same span the walk's turns become, authored from the audio
+        The same span the conversation loop's turns become, authored from the audio
         timeline instead of from the wall clock — which is what lets two
         of them cross when the persona and the agent speak at once. The
         turn count is tallied here exactly as it is above, because it is

@@ -48,6 +48,7 @@ from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR
+from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.media.livekit_room import (
     CHAT_TOPIC,
     SPOKEN_TRACK_ATTRIBUTE,
@@ -68,7 +69,6 @@ from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import RunningSimulation
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
-from egma_simulator.walk import Conducted, WalkControls, conduct
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
 A_KEY = "APIlakeside0000"
@@ -247,13 +247,13 @@ async def chat_walk(
     stub: ChatStub,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    controls: WalkControls | None = None,
+    controls: ConversationControls | None = None,
     **overrides: object,
 ) -> tuple[Conducted, list[tuple[str, str]], list[tuple[str, str | None]], object]:
     """One chat simulation, conducted the way the service conducts it.
 
     The spec goes in at the top — through the plug registry and the
-    pipeline the service assembles — and is walked by the real walk, so
+    pipeline the service assembles — and is driven by the real conversation loop, so
     everything below the room-shaped LiveKit is every line the service
     would run. What comes back is the ending, the transcript, the tool
     calls egma answered, and the assembled pipeline, which is where the
@@ -277,7 +277,7 @@ async def chat_walk(
     assembled = assemble(
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
-    assert assembled.plug is not None, "a chat spec is walked, never conducted"
+    assert assembled.plug is not None, "a chat spec is looped, never conducted"
     conducted = await conduct(
         persona=Persona(
             authored=spec.persona,
@@ -290,7 +290,7 @@ async def chat_walk(
         on_turn=on_turn,
         on_timing=None,
         on_tool_call=on_tool_call,
-        controls=controls if controls is not None else WalkControls(),
+        controls=controls if controls is not None else ConversationControls(),
         name="sim:room-chat-test",
     )
     return conducted, turns, calls, assembled
@@ -362,7 +362,7 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
     # Every persona turn that was delivered went out on the topic a
     # LiveKit session listens to, and nothing else went anywhere. The
     # concluding goodbye is on the transcript and not on the wire, which
-    # is the walk's own rule and not this plug's: a persona that has
+    # is the conversation loop's own rule and not this plug's: a persona that has
     # concluded is not waiting for an answer.
     assert [typed.topic for typed in stub.typed] == [CHAT_TOPIC] * 2
     assert [typed.text for typed in stub.typed] == [
@@ -822,7 +822,7 @@ async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_recor
 
     closing = asyncio.ensure_future(closes_after_the_quiet_period())
 
-    # The record, written exactly as `walk.conduct` writes it: the opening
+    # The record, written exactly as `conversation.conduct` writes it: the opening
     # if there was one, the persona's turn, then the answer's words.
     record: list[tuple[str, str]] = []
     greeting = await opening
@@ -1108,6 +1108,55 @@ async def test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn(
     copy of it. So this test holds the *number*: cut the quiet period and
     the pause grows past it, and the turn ends on the filler.
     """
+async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """``turn_response_latency`` stops where the agent began answering.
+
+    The measure runs between two events. Its starting line is the moment
+    the persona's turn went out; its finish line is the moment the agent
+    began replying. Everything after that is egma establishing the agent
+    has no more to say, so the persona may speak — real work, and egma's
+    own, not the agent's speed.
+
+    A stateless agent pays the whole quiet period for that, every turn.
+    This test holds the two apart: the call really does take the quiet
+    period, and the reported instant really is before it. Carrying the
+    wait was a production defect — an agent answering in about a second
+    read as 6890 ms on the page, which is the quiet period plus the
+    answer, and it was the number the Response latency grader judged.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
+    stub = ChatStub(greeting=None, replies=[["In person it is."]])
+    assert stub.agent_states is None, "this agent says nothing about itself"
+    plug = chat_room(stub)
+    assert await plug.open() is None
+
+    clock = asyncio.get_running_loop()
+    asked_at = clock.time()
+    answered = await plug.deliver("In person, please.")
+    returned_at = clock.time()
+
+    assert answered.answered_at is not None, (
+        "this lane can see when the agent began answering — a stream's "
+        "header is that moment — and a plug that reported nothing would "
+        "send the loop back to timing its own call"
+    )
+    to_the_answer = answered.answered_at - asked_at
+    to_the_return = returned_at - asked_at
+    assert to_the_return >= A_MEASURED_QUIET, (
+        "the quiet period was not actually paid, so this test is not "
+        "holding the two instants apart at all"
+    )
+    assert to_the_answer < A_MEASURED_QUIET, (
+        f"the answer began {to_the_answer:.3f}s in and the call returned "
+        f"{to_the_return:.3f}s in: the finish line has to be the first, or "
+        "every stateless agent is billed egma's whole quiet period"
+    )
+    await plug.close()
+
+
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
     stub = ChatStub(
@@ -1176,7 +1225,7 @@ async def test_a_greeting_that_never_comes_is_still_not_a_failure(
 
     This agent announces itself listening and then waits to be spoken to,
     which is most agents. The greeting budget expires, ``open`` answers
-    with nothing, and the walk has the persona go first. Nothing about
+    with nothing, and the conversation loop has the persona go first. Nothing about
     reading the agent's state may turn that ordinary answer into a fault.
     """
     hurry(monkeypatch)
@@ -1452,7 +1501,7 @@ async def test_a_greeting_that_never_comes_lets_the_persona_open(
     """Plenty of agents wait to be spoken to, and that is not a failure.
 
     The greeting budget expires, ``open`` answers with nothing, and the
-    walk has the persona go first — which is exactly what it does for
+    conversation loop has the persona go first — which is exactly what it does for
     every other plug that opens on silence.
     """
     stub = ChatStub(replies=["Certainly, Thursday it is."])
@@ -1942,7 +1991,7 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
 ):
     """A directive really arrives on a heartbeat answer, mid-exchange."""
 
-    class CancelsOnceUnderWay(WalkControls):
+    class CancelsOnceUnderWay(ConversationControls):
         def __init__(self) -> None:
             super().__init__()
             self._steps = 0

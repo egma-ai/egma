@@ -259,7 +259,7 @@ describe("reducing the measurements to one number", () => {
       await filesMatching(/export function worstSampleOf\b/u),
     ).toEqual([THE_MODULE]);
     expect(
-      await filesMatching(/export function arithmeticMeanOf\b/u),
+      await filesMatching(/export function p90Of\b/u),
     ).toEqual([THE_MODULE]);
   });
 

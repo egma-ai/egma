@@ -1,5 +1,5 @@
 import {
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   type GraderDefinitionSnapshot,
 } from "@egma/db";
@@ -51,7 +51,7 @@ function grade(samples: readonly number[], maximum = 3_000) {
   return execute({
     definition: definition(),
     parameterValues: {
-      [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: maximum,
+      [MAXIMUM_RESPONSE_TIME_PARAMETER]: maximum,
     },
     conversation: conversation(samples),
     judging: noJudgeWanted(),
@@ -64,21 +64,51 @@ function grade(samples: readonly number[], maximum = 3_000) {
 }
 
 describe("Response latency", () => {
-  it("passes when the arithmetic mean is at or below the project maximum", async () => {
-    await expect(grade([2_000, 3_000, 4_000])).resolves.toEqual({
+  it("passes when the p90 is at or below the project maximum", async () => {
+    // Ten samples, so the p90 is the ninth of them and not the slowest: the
+    // one nine-second turn is exactly what a mean would have hidden and what
+    // this grader is now built to catch, but at rank nine it is still inside
+    // the bound.
+    const ten = [
+      500, 600, 700, 800, 900, 1_000, 1_100, 1_200, 3_000, 9_000,
+    ];
+    await expect(grade(ten)).resolves.toEqual({
       score: 1,
       details: {
-        rationale: "Average response time was 3000 ms; the maximum was 3000 ms.",
-        observedAverageResponseTimeMs: 3_000,
-        maximumAverageResponseTimeMs: 3_000,
+        rationale: "The p90 response time was 3000 ms; the maximum was 3000 ms.",
+        observedP90ResponseTimeMs: 3_000,
+        maximumResponseTimeMs: 3_000,
       },
     });
   });
 
-  it("fails when the arithmetic mean is above the project maximum", async () => {
-    await expect(grade([3_001, 4_000])).resolves.toMatchObject({
+  it("fails when the p90 is above the project maximum", async () => {
+    const ten = [
+      500, 600, 700, 800, 900, 1_000, 1_100, 1_200, 3_001, 9_000,
+    ];
+    await expect(grade(ten)).resolves.toMatchObject({
       score: 0,
-      details: { observedAverageResponseTimeMs: 3_500.5 },
+      details: { observedP90ResponseTimeMs: 3_001 },
+    });
+  });
+
+  it("catches the one slow turn a mean would have hidden", async () => {
+    // The mean of these is 2100 ms and would have passed a 3000 ms bound.
+    // The p90 is the nine-second turn, and a caller who waited nine seconds
+    // did wait nine seconds.
+    const mostlyFast = [500, 500, 500, 9_000];
+    await expect(grade(mostlyFast)).resolves.toMatchObject({
+      score: 0,
+      details: { observedP90ResponseTimeMs: 9_000 },
+    });
+  });
+
+  it("reads the slowest turn below ten samples, because nearest-rank does", async () => {
+    // Nearest-rank never interpolates a number nothing measured, so on a
+    // short conversation the p90 is a turn that really happened — the worst
+    // one. Stated here so the behaviour is a decision and not a surprise.
+    await expect(grade([1_000, 2_000, 4_000])).resolves.toMatchObject({
+      details: { observedP90ResponseTimeMs: 4_000 },
     });
   });
 

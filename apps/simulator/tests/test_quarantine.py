@@ -265,7 +265,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         from egma_simulator.pipeline import assemble
         from egma_simulator.spec import SimulationSpec
         from egma_simulator.speech import SCRIPTED_PAIR
-        from egma_simulator.walk import WalkControls
+        from egma_simulator.conversation import ConversationControls
 
         def spec_for(connection, platform=None):
             document = {
@@ -360,7 +360,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                         persona=persona_for(spec),
                         max_turns=spec.limits.max_turns,
                         max_duration_seconds=spec.limits.max_duration_seconds,
-                        controls=WalkControls(),
+                        controls=ConversationControls(),
                         name="sim:unconfigured",
                         on_utterance=on_utterance,
                         on_measured=on_measured,

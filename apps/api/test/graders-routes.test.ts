@@ -1,5 +1,5 @@
 import {
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,7 +67,7 @@ async function useResponseLatency(key: string): Promise<Listed> {
     key,
     {
       scope: { simulations: [{ kind: "all" }], production: null },
-      settings: { [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000 },
+      settings: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000 },
       passThreshold: 1,
     },
   );
@@ -133,7 +133,7 @@ describe("active project graders", () => {
           simulations: [],
           production: { samplePercent: 25 },
         },
-        settings: { [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000 },
+        settings: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_000 },
         passThreshold: 0.75,
       },
     );
@@ -145,7 +145,7 @@ describe("active project graders", () => {
         simulations: [],
         production: { samplePercent: 25 },
       },
-      settings: { [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000 },
+      settings: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_000 },
       passThreshold: 0.75,
     });
 

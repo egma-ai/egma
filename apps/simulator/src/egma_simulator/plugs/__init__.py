@@ -3,7 +3,7 @@
 A **plug** is the component behind a connection type. It alone knows how
 to open that connection, deliver the persona's turns, hear
 the agent's answers, and end the exchange. Everything else in the
-simulator is plug-blind: the persona brain, the walk, the claim loop, and
+simulator is plug-blind: the persona brain, the conversation loop, the claim loop, and
 the reporting never learn how they reached the agent. Adding a connection
 kind therefore touches exactly two things — a new module in this
 package, and one line in the registry below.
@@ -117,7 +117,7 @@ A chat plug's is three steps, for one simulation, in order, always:
    - ``text`` — what the agent said, or ``None`` for an answer that
      carried no words.
    - ``ended=True`` — the agent (or the platform) ended the exchange with
-     this answer. The walk records any final words and reports the ending
+     this answer. The conversation loop records any final words and reports the ending
      as the agent's doing. Once returned, ``deliver`` is never called
      again.
    - ``platform_notes`` — what the platform said about the answer that the
@@ -251,6 +251,29 @@ class AgentReply:
     Empty for every plug that has nothing of the kind, which is most of
     them."""
 
+    answered_at: float | None = None
+    """When the agent's answer *started*, on the running loop's clock.
+
+    The finish line of ``turn_response_latency``: its starting line is the
+    moment the persona's turn went out, and this is the moment the agent
+    began replying. The conversation loop measures between the two.
+
+    **Why a plug reports it rather than the loop timing the call.** For a
+    plug whose ``deliver`` is a request and its response, the two are the
+    same instant and this stays ``None``: the call returns when the answer
+    does, so the return *is* the finish line and the loop uses it. For a
+    plug that reads a live room, they are not the same. Egma there must
+    also decide the agent has no more to say before the persona may speak,
+    and that decision costs a wait — up to the whole quiet period on an
+    agent whose platform never publishes a finished state. That wait is
+    egma's own turn-taking cost. It falls after the finish line, and a
+    number that carried it reported egma's patience as the agent's speed.
+
+    ``None`` also where a turn had no answer to start: one that only
+    called a tool, or produced nothing at all. Then no sample is taken,
+    because there is no wait to measure rather than a wait of zero.
+    """
+
 
 class PlugError(Exception):
     """A plug refusing config it does not understand, a modality it cannot
@@ -359,7 +382,7 @@ def failed_ending(fault: BaseException) -> str:
 
 
 class ConnectionPlug(Protocol):
-    """The seam the walk drives: text in, text out, whatever the modality.
+    """The seam the conversation loop drives: text in, text out, whatever the modality.
 
     A chat plug implements it directly; a voice plug is reached through it,
     with the speech legs assembled in between. See the module docstring for

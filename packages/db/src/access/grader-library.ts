@@ -24,6 +24,7 @@ import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
 import {
   backfillExpectedBehaviorsProjectGraders,
+  moveResponseLatencySettingToItsNewKey,
   type SeededProjectGrader,
 } from "./seeded-graders.ts";
 
@@ -326,6 +327,9 @@ export async function reconcileGraderCatalog(
     );
     const definitions = await reconcileDefinitions(tx, catalog);
     const projectGraders = await backfillExpectedBehaviorsProjectGraders(tx);
+    // After the reconcile above, so no project is left holding a setting the
+    // definition version now live does not name.
+    await moveResponseLatencySettingToItsNewKey(tx);
     return { definitions, projectGraders };
   });
 }

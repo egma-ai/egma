@@ -8,7 +8,7 @@ joining the room as a participant that publishes nothing. Everything about
 the room is the driver's — see
 :mod:`egma_simulator.media.livekit_room`, whose lifecycle this plug shares
 with the voice one line for line. What is here is the chat half of the
-walk's three verbs: open, deliver, close.
+conversation loop's three verbs: open, deliver, close.
 
 Its config keys and its credentials are the voice plug's, read by the same
 driver, and its ``agentName`` is required for the same reason: egma
@@ -344,7 +344,7 @@ class LiveKitChat:
         """Make the room, get the agent in, and hear it out if it speaks first.
 
         ``None`` where it does not, which is an ordinary answer rather
-        than a fault: the walk then has the persona open.
+        than a fault: the conversation loop then has the persona open.
         """
         try:
             await self._backend.open_room()
@@ -375,7 +375,16 @@ class LiveKitChat:
         # The tool calls stay empty on purpose: what egma answered for is
         # already a span of its own, and what it did not answer for it
         # never saw.
-        return AgentReply(text=answer.text, ended=answer.ended, tool_calls=())
+        return AgentReply(
+            text=answer.text,
+            ended=answer.ended,
+            tool_calls=(),
+            # This lane is the reason the field exists. The call above
+            # returns only once the turn-end rule has fired and every
+            # stream has drained, which is later — sometimes five seconds
+            # later — than the moment the agent began answering.
+            answered_at=answer.answer_began_at,
+        )
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""

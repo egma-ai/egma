@@ -33,6 +33,7 @@ from room_stub import RoomStub
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, NOT_ANSWERED
+from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media.livekit_room import PLATFORM_NAMED_ROOM, RoomSettings
 from egma_simulator.media.room import ROOM_PREFIX, room_name_for
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -47,7 +48,6 @@ from egma_simulator.plugs.retell_web_call import (
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
-from egma_simulator.walk import Conducted, WalkControls
 
 SENTINEL_KEY = "SENTINEL-retell-web-call-key-4c81de"
 """The account key that creates the call. A sentinel because every path
@@ -157,7 +157,7 @@ async def web_call_walk(
     monkeypatch: pytest.MonkeyPatch,
     *,
     base_url: str,
-    controls: WalkControls | None = None,
+    controls: ConversationControls | None = None,
     **overrides: Any,
 ) -> tuple[Conducted, list[tuple[str, str]], Any]:
     """One web-call simulation, conducted the way the service conducts it.
@@ -189,7 +189,7 @@ async def web_call_walk(
         ),
         max_turns=spec.limits.max_turns,
         max_duration_seconds=spec.limits.max_duration_seconds,
-        controls=controls if controls is not None else WalkControls(),
+        controls=controls if controls is not None else ConversationControls(),
         name="sim:web-call-test",
         on_utterance=on_utterance,
         on_measured=ignore,
@@ -675,7 +675,7 @@ async def test_egma_leaves_the_room_however_the_simulation_ends(
 
 
 
-class CancelsOnceUnderWay(WalkControls):
+class CancelsOnceUnderWay(ConversationControls):
     """A cancel directive that lands after the exchange has opened."""
 
     def __init__(self) -> None:

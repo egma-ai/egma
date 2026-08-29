@@ -462,7 +462,7 @@ def test_two_turns_may_cross_in_time():
 def test_a_turn_nobody_spoke_is_an_instant():
     """Chat messages have no duration, and one is not invented for them.
 
-    The two ways a turn is authored are one per conductor: the walk knows
+    The two ways a turn is authored are one per conductor: the conversation loop knows
     only when a message arrived, and the voice conductor knows both ends
     of the audio. Nothing joins them after the fact any more.
     """

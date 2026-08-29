@@ -355,31 +355,33 @@ function nearestRank(values: readonly number[], percentile: number): number {
 }
 
 /**
- * The arithmetic mean of a measure's samples, exact and unrounded.
+ * The p90 of a measure's samples, for a grader to hold a bound against.
  *
- * Response latency is the first grader whose immutable definition asks for a
- * mean rather than the strict worst sample, and a grader's arithmetic is not
- * rounded for reading: the bound is held against the mean itself. The display
- * family above answers through `aggregateOf`, whose `mean` is this figure
- * rounded once for a page; the two are one arithmetic at two precisions, and
- * the reduction still lives here so the grader does not become a second
- * reader of the measurement series.
+ * **The tail is what a caller feels.** A mean hides the one turn that took
+ * nine seconds; the p90 is the number that turn moves. Response latency
+ * bounds this, and the page that leads with a conversation's latency shows
+ * the same reduction — so a developer reading a figure and a grader judging
+ * one are reading one number, which the mean-against-p90 split they had
+ * before made impossible.
  *
- * `undefined` means the series is empty or contains a value that cannot be a
- * measurement. A grader must report that as an error, never turn it into zero.
+ * Nearest-rank, exactly as `aggregateOf` computes it and the catalog states
+ * it: the answer is a measurement that actually happened, findable in the
+ * transcript. Below ten samples that is the slowest turn, and deliberately
+ * so — nearest-rank never interpolates a number nothing measured.
+ *
+ * Separate from `aggregateOf` only for the validation: a grader must refuse a
+ * series it cannot trust rather than score it. `undefined` means the series is
+ * empty or holds a value that cannot be a measurement, and a grader reports
+ * that as an error, never as zero.
  */
-export function arithmeticMeanOf(
-  measured: MeasuredFromSpans,
-): number | undefined {
-  let total = 0;
-  let count = 0;
+export function p90Of(measured: MeasuredFromSpans): number | undefined {
+  const values: number[] = [];
   for (const sample of measured.samples) {
     if (!Number.isFinite(sample.value) || sample.value < 0) return undefined;
-    total += sample.value;
-    count += 1;
+    values.push(sample.value);
   }
-  if (count === 0 || !Number.isFinite(total)) return undefined;
-  return total / count;
+  if (values.length === 0) return undefined;
+  return nearestRank(values, 90);
 }
 
 /**

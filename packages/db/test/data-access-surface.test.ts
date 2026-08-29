@@ -400,7 +400,7 @@ const THE_GRADER_LIBRARY = [
   "GRADER_DEFINITION_CATALOG",
   "GRADER_DEFINITION_TYPES",
   "GRADER_MODALITIES",
-  "MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER",
+  "MAXIMUM_RESPONSE_TIME_PARAMETER",
   // The identifiers of the entries egma ships, by the name a person calls
   // them. Exported because three things outside this module point at one — the
   // copy every project is seeded with, the engine's roster of what it can

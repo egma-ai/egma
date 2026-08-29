@@ -51,6 +51,16 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
+from .conversation import (
+    AGENT_ENDED,
+    CANCEL_DIRECTIVE,
+    PERSONA_CONCLUDED,
+    Conducted,
+    ConversationControls,
+    Ending,
+    duration_limit_reached,
+    turn_limit_reached,
+)
 from .media import RemoteParticipantLeftFrame, VoiceMedia
 from .model import END_CALL_TOOL_NAME, ModelFailure, PersonaReply
 from .persona import Persona, Turn
@@ -65,16 +75,6 @@ from .speech import (
     SpeechProviders,
     build_legs,
     build_vad,
-)
-from .walk import (
-    AGENT_ENDED,
-    CANCEL_DIRECTIVE,
-    PERSONA_CONCLUDED,
-    Conducted,
-    Ending,
-    WalkControls,
-    duration_limit_reached,
-    turn_limit_reached,
 )
 
 logger = logging.getLogger(__name__)
@@ -790,7 +790,7 @@ class VoiceConductor:
 
         self._persona: Persona | None = None
         self._max_turns = 0
-        self._controls = WalkControls()
+        self._controls = ConversationControls()
         self._on_utterance: OnUtterance | None = None
         self._on_measured: OnMeasured | None = None
         self._on_answered: OnAnswered | None = None
@@ -860,7 +860,7 @@ class VoiceConductor:
         persona: Persona,
         max_turns: int,
         max_duration_seconds: float,
-        controls: WalkControls,
+        controls: ConversationControls,
         name: str,
         on_utterance: OnUtterance,
         on_measured: OnMeasured,
@@ -1432,7 +1432,7 @@ async def _never() -> None:
 
 
 async def _duration_watchdog(
-    max_duration_seconds: float, controls: WalkControls
+    max_duration_seconds: float, controls: ConversationControls
 ) -> None:
     await asyncio.sleep(max_duration_seconds)
     controls.trip_duration_limit()

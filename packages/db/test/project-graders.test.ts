@@ -22,6 +22,7 @@ import { provisionOrganization } from "../src/access/provisioning.ts";
 import {
   GRADER_DEFINITION_CATALOG,
   MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
 } from "../src/grader-library/catalog.ts";
 import type { AuthContext } from "../src/access/context.ts";
@@ -112,7 +113,7 @@ describe("shared definitions and project grader policy", () => {
       scopeEditable: true,
       activeProjectGraderId: null,
       parameterContract: [{
-        key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+        key: MAXIMUM_RESPONSE_TIME_PARAMETER,
         defaultValue: 3_000,
         minimum: 1,
         maximum: null,
@@ -123,7 +124,7 @@ describe("shared definitions and project grader policy", () => {
       scope: { simulations: [{ kind: "all" }], production: null },
       parameterValues: {},
       passThreshold: 1,
-    })).rejects.toThrow(`need values for ${MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER}`);
+    })).rejects.toThrow(`need values for ${MAXIMUM_RESPONSE_TIME_PARAMETER}`);
 
     const active = await useGraderInProject(
       auth,
@@ -131,7 +132,7 @@ describe("shared definitions and project grader policy", () => {
       {
         scope: { simulations: [{ kind: "all" }], production: null },
         parameterValues: {
-          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+          [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
         },
         passThreshold: 1,
       },
@@ -140,7 +141,7 @@ describe("shared definitions and project grader policy", () => {
       type: "code",
       owner: "egma",
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
       },
       passThreshold: 1,
     });
@@ -150,7 +151,7 @@ describe("shared definitions and project grader policy", () => {
       {
         scope: { simulations: [], production: null },
         parameterValues: {
-          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+          [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000,
         },
         passThreshold: 1,
       },
@@ -159,14 +160,14 @@ describe("shared definitions and project grader policy", () => {
     const edited = await editProjectGrader(auth, active?.id ?? "missing", {
       scope: { simulations: [], production: null },
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_000,
       },
       passThreshold: 0.8,
     });
     expect(edited).toMatchObject({
       scope: { simulations: [], production: null },
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_000,
       },
       passThreshold: 0.8,
     });
@@ -261,11 +262,56 @@ describe("shared definitions and project grader policy", () => {
       {
         scope: { simulations: [], production: null },
         parameterValues: {
-          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+          [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000,
         },
         passThreshold: 1,
       },
     )).rejects.toThrow("may not author_definitions");
+  });
+
+  it("carries a Response latency setting across the key's rename", async () => {
+    /*
+     * The grader bounded the mean and its setting was called
+     * `maximum_average_response_time_ms`. It bounds the p90 now, so the key
+     * was renamed — and a project that had already turned the grader on holds
+     * its answer under the old name. Left there, the current contract does not
+     * name that project's only setting: the grader errors instead of grading
+     * and the project cannot be edited. The boot door moves the answer, and
+     * never changes it.
+     */
+    const used = await useGraderInProject(
+      auth,
+      PREDEFINED_GRADERS.responseLatency,
+      {
+        scope: { simulations: [{ kind: "all" }], production: null },
+        parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+        passThreshold: 1,
+      },
+    );
+    if (used === undefined) throw new Error("the grader was not turned on");
+
+    // Put the row back the way the old contract wrote it.
+    await database.sql(
+      `update project_grader set parameter_values = $2 where id = $1`,
+      [used.id, JSON.stringify({
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+      })],
+    );
+
+    await reconcileGraderCatalog();
+
+    const after = await getProjectGrader(auth, used.id);
+    expect(after?.parameterValues).toEqual({
+      [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500,
+    });
+
+    // Idempotent: a second boot finds nothing to move and changes nothing.
+    await reconcileGraderCatalog();
+    await expect(getProjectGrader(auth, used.id)).resolves.toMatchObject({
+      parameterValues: { [MAXIMUM_RESPONSE_TIME_PARAMETER]: 2_500 },
+    });
+
+    await archiveProjectGrader(auth, used.id);
   });
 
   it("updates one shared definition version without copying it into projects", async () => {

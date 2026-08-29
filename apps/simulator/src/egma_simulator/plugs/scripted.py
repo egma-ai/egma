@@ -4,7 +4,7 @@ A fake platform whose agent answers from a script, so a whole simulation
 conducts with no account, no network, and no model on the other side —
 deterministically. It is not a shortcut around the seam: it implements the
 same plug surface a real platform does, which is what makes the acceptance
-suite's walks representative.
+suite's conversations representative.
 
 Its config keys, like every plug's, are its own:
 

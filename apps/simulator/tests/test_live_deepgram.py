@@ -40,6 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import VoiceConductor
+from egma_simulator.conversation import ConversationControls
 from egma_simulator.media import VoiceMedia
 from egma_simulator.model import ScriptedModel
 from egma_simulator.persona import Persona
@@ -49,7 +50,6 @@ from egma_simulator.speech import (
     PersonaVoice,
     SpeechProviders,
 )
-from egma_simulator.walk import WalkControls
 
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
 
@@ -186,7 +186,7 @@ async def test_a_real_transcriber_reads_a_real_sentence(tmp_path: Path):
         ),
         max_turns=8,
         max_duration_seconds=120,
-        controls=WalkControls(),
+        controls=ConversationControls(),
         name="sim:live-deepgram",
         on_utterance=on_utterance,
         on_measured=on_measured,

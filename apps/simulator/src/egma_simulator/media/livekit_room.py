@@ -1409,6 +1409,18 @@ class AgentTurn:
     mark. Either one means the agent never took the chat setup, and the
     plug above ends the simulation rather than grading it."""
 
+    answer_began_at: float | None = None
+    """When this turn's answer started, on the running loop's clock.
+
+    The turn's finish line for ``turn_response_latency``. It is carried
+    up rather than turned into a duration here because the starting line
+    is the conversation loop's — the moment the persona's turn went out —
+    and only one of the two ends is visible from inside this driver.
+
+    ``None`` where the agent never began answering: a turn that only
+    called a tool, or one that produced nothing at all.
+    """
+
 
 class TextRoom:
     """One LiveKit room joined for typing, with no media in it at all.
@@ -1459,6 +1471,22 @@ class TextRoom:
         """How many streams this room has seen open, ever. The order key
         an utterance carries, and the reason a turn can be joined in the
         order the agent said it rather than the order it finished."""
+        self._answer_began: dict[int, float] = {}
+        """When each turn's answer *started*, against the turn it started.
+
+        The finish line of ``turn_response_latency``, and the only place
+        on this lane that can see it. A stream's header is the first
+        moment the wire says the agent is answering this question — before
+        a word of it exists — and it is what a caller would hear as the
+        agent beginning to reply. Everything after it is the answer being
+        written and then egma deciding no more is coming, which is egma's
+        own wait and not the agent's speed.
+
+        Kept per turn rather than as one instant because a stream opening
+        late still belongs to the turn it opened in, and the first stream
+        of *this* turn is the one that answers it. Only the first is kept:
+        a turn's later utterances are the same answer continuing.
+        """
         self.utterances: asyncio.Queue[Utterance] = asyncio.Queue()
         self._turn = 0
         """Which persona turn is outstanding. Nought is the greeting's, which
@@ -1649,6 +1677,10 @@ class TextRoom:
         # before this one. A finished state that arrived then must not end
         # a turn that has not been answered yet.
         self.agent_finished.clear()
+        # The turns that have ended cannot be asked about again, and a
+        # simulation of a thousand turns should not carry a thousand
+        # instants to answer a question only ever asked about the newest.
+        self._answer_began.clear()
         return self._turn
 
     async def next_utterance(
@@ -1740,6 +1772,9 @@ class TextRoom:
             return
         self._opened += 1
         turn = self._turn
+        # Before the reading, because this is the header's own moment and
+        # the finish line is the header rather than anything it carries.
+        self._answer_began.setdefault(turn, asyncio.get_running_loop().time())
         reading = asyncio.create_task(
             self._read(reader, turn, self._opened), name="livekit-agent-utterance"
         )
@@ -1790,6 +1825,17 @@ class TextRoom:
             for reading, stamped in self._reading.items()
             if stamped == turn and not reading.done()
         )
+
+    def answer_began_in(self, turn: int) -> float | None:
+        """When this turn's answer started, or ``None`` if it never did.
+
+        ``None`` is a real answer and not a gap: a turn that only called a
+        tool, or one the agent never answered at all, has no moment where
+        it began replying — so it contributes no latency sample rather
+        than a made-up one. The voice lane answers the same way, for the
+        same reason, out of the audio.
+        """
+        return self._answer_began.get(turn)
 
     async def settle_turn(self, turn: int, *, within: float) -> None:
         """Let this turn's still-open streams finish, for a bounded while.
@@ -1933,7 +1979,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         """What the agent opens with, if it opens with anything.
 
         A turn with no words in it is the ordinary answer here: plenty of
-        agents wait to be spoken to, and the walk then has the persona
+        agents wait to be spoken to, and the conversation loop then has the persona
         open. The budget is separate from the quiet period because a
         greeting is a whole model round trip after a session starts, where
         a quiet period is the gap between two things already being said.
@@ -2185,4 +2231,5 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             or None,
             ended=room.ended.is_set(),
             speaking=speaking,
+            answer_began_at=room.answer_began_in(turn),
         )

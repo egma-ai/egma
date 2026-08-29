@@ -84,7 +84,7 @@ touching the others:
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs. Connection type selects the
 plug, and access variant supplies that plug's configuration and authority. A
-chat simulation is the plug and the brain, walked
+chat simulation is the plug and the brain, looped
 a turn at a time. A voice simulation on a full-duplex transport is the
 same brain with the speech legs around it, conducted by a real Pipecat
 pipeline (`conductor.py`): both directions of the transport are open at once,
@@ -556,8 +556,8 @@ src/egma_simulator/
   blob.py         Where a recording is written and what a report points
                   at: one key-confining seam, an object store and a
                   directory behind it.
-  walk.py         One chat simulation's exchange: the turn loop, limits,
-                  cancel delivery, and how each walk names its ending.
+  conversation.py One chat simulation's exchange: the turn loop, limits,
+                  cancel delivery, and how each conversation names its ending.
   reporting.py    Event minting, the write-ahead log, ordered delivery.
   redaction.py    Credential values registered once, scrubbed everywhere.
   workbench/      The fake control plane: same contract, fixture-fed,

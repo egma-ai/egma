@@ -42,7 +42,7 @@ export {
 
 export {
   aggregateOf,
-  arithmeticMeanOf,
+  p90Of,
   everySpanIn,
   measuresFromSpans,
   turnResponseLatencySpanKinds,

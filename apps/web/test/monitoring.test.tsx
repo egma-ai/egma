@@ -154,7 +154,7 @@ const FAILED_GRADE: Grade = {
   graderName: "response_latency",
   score: 0,
   details: {
-    rationale: "Average response time exceeded the configured maximum.",
+    rationale: "The p90 response time exceeded the configured maximum.",
   },
   passThreshold: 1,
   result: "failed",

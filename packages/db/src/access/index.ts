@@ -363,7 +363,7 @@ export {
 } from "./grader-library.ts";
 export {
   GRADER_DEFINITION_CATALOG,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   type GraderOutputContract,
   type GraderParameter,
