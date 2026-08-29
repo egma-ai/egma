@@ -1,4 +1,4 @@
-import { connectionTypeTakesMockedWorld } from "@egma/db";
+import { connectionTypeBranchesMockDraft } from "@egma/db";
 import {
   bindingDecisionsFor,
   discoverTools,
@@ -24,28 +24,27 @@ import {
  * carries the same sentence; and both come from this one function, so they
  * cannot say different things.
  *
- * The five:
+ * **Pinning a `latest`-riding number is not one of them.** It is one of the
+ * four promises the single consent screen carries, so there is no second
+ * per-number checkbox to decline and no refusal to raise for declining it.
+ *
+ * The four:
  *
  * 1. **A custom-LLM engine.** The brain and the tools live on the customer's
  *    own socket server; Retell stores no tool configuration this seam could
  *    swap. Not a permanent no — it is structurally a LiveKit-shaped problem,
  *    and it belongs to the Egma SDK's in-process seam when that grows a Retell
  *    adapter.
- * 2. **Declined pin consent.** A number that follows `latest` reaches whatever
- *    version was minted most recently, so branching would send real callers to
- *    the temporary version the instant it exists. Without consent to pin it for
- *    the length of each run, the tick stays off — a ticked agent whose runs
- *    quietly reached the real tools would be a box that lied.
- * 3. **An agent whose only connection is a phone number.** The phone lane is
+ * 2. **An agent whose only connection is a phone number.** The phone lane is
  *    the real-telephony lane by design: real carrier, real band, real tools. A
  *    mocked run is a call Egma places itself, and this agent has no lane to
  *    place one over.
- * 4. **Keys that disagree.** The agent's platform key builds the world and a
+ * 3. **Keys that disagree.** The agent's platform key builds the world and a
  *    connection's own key opens the calls. If the two resolve different
  *    accounts or different platform agents, one account would build the draft
  *    while another tried to call it — a failure that would otherwise surface
  *    only after the world was built.
- * 5. **The platform would not answer.** Not a fact about the agent but about
+ * 4. **The platform would not answer.** Not a fact about the agent but about
  *    the moment: Retell was unreachable while Egma read the account. Nothing is
  *    changed, and the person is told to try again — a fair fifth, kept apart
  *    from the four because its next move is "wait", not "reconfigure".
@@ -53,7 +52,6 @@ import {
 
 export const MOCK_TOOLS_REFUSALS = [
   "custom_llm_engine",
-  "pin_consent_required",
   "phone_only_agent",
   "keys_disagree",
   "platform_unavailable",
@@ -92,11 +90,6 @@ export type MockToolsDiscoveryInput = {
    * two-keys check can both be answered from what Egma already holds.
    */
   readonly lanes: readonly MockableLane[];
-  /**
-   * Whether the person has consented to a `latest`-riding number being pinned
-   * for the length of each run. Only asked about when such a number exists.
-   */
-  readonly pinConsent: boolean;
   readonly fetchImpl?: ProviderFetch | undefined;
 };
 
@@ -115,16 +108,6 @@ const PHONE_ONLY =
   "connection keeps the job only it can do — the real carrier leg, the real " +
   "line, real tools — and stays unmocked by design. Add a Retell web-call " +
   "connection to this agent to run mocked simulations.";
-
-const PIN_CONSENT =
-  "a telephone number routed to this agent follows Retell's `latest` pointer, " +
-  "which means it reaches whichever version was created most recently. Egma " +
-  "creates a temporary version at the start of every mocked run, so that " +
-  "number would reach the test version the instant it exists. Egma can pin the " +
-  "number to the version it already resolves to for the length of each run and " +
-  "put the binding back exactly as it found it afterwards — but only if you " +
-  "say so. Without that, the tick stays off: a box promising isolation must " +
-  "never quietly run your real tools.";
 
 function keysDisagree(named: string, held: string): string {
   return (
@@ -167,15 +150,15 @@ function refused(
 export async function discoverMockTools(
   input: MockToolsDiscoveryInput,
 ): Promise<MockToolsDiscovery> {
-  // Refusal three, answered from what Egma already holds. The lane list is the
+  // Refusal one of the four, answered from what Egma already holds. The lane list is the
   // registry's own, read through @egma/db, so a third mockable lane added there
   // is a lane the tick offers rather than refuses — the two cannot drift.
   const lanes = input.lanes.filter((lane) =>
-    connectionTypeTakesMockedWorld(lane.connectionType),
+    connectionTypeBranchesMockDraft(lane.connectionType),
   );
   if (lanes.length === 0) return refused("phone_only_agent", PHONE_ONLY);
 
-  // Refusal four, the half that costs nothing: a connection naming a different
+  // The keys-disagree refusal, the half that costs nothing: a connection naming a different
   // platform agent from the one the tick is on. The other half — two keys on
   // two accounts — is caught by the reads below, which use the agent's key
   // against the agent's own id and fail if that account does not hold it.
@@ -234,7 +217,7 @@ export async function discoverMockTools(
 
   const engine = serving.agentVersion.engine;
   const configuration = await readEngineConfiguration(key, engine, reach);
-  // Refusal one.
+  // The custom-LLM refusal.
   if (configuration.kind === "not-held") {
     return refused("custom_llm_engine", CUSTOM_LLM, {
       engine: engine.type,
@@ -251,17 +234,6 @@ export async function discoverMockTools(
   }
 
   const found = discoverTools(configuration.engine);
-
-  // Refusal two, last because it is about the numbers above.
-  if (numbers.some((number) => number.pin) && !input.pinConsent) {
-    return refused("pin_consent_required", PIN_CONSENT, {
-      engine: engine.type,
-      servingVersion: serving.agentVersion.version,
-      tools: found.tools,
-      warnings: found.warnings,
-      numbers,
-    });
-  }
 
   return {
     mockable: true,

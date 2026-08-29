@@ -310,24 +310,112 @@ export async function pinNumberBinding(
 }
 
 /**
- * Put a number's bindings back exactly as they were recorded.
+ * One number's own document, with every binding it carries kept whole.
  *
- * Restores rather than reconstructs: the caller hands back the entries it
- * recorded before it touched anything, so a field egma never read is still the
- * field the customer wrote.
+ * The listing is how the account is surveyed; this is how one number is read
+ * again at the moment it matters — which is the restore below, where writing
+ * without reading first is the whole hazard.
  */
-export async function restoreNumberBindings(
+export async function readRoutedNumber(
+  key: RetellCredential,
+  number: string,
+  reach: RetellReach = {},
+): Promise<ReadRoutedNumber> {
+  let answer;
+  try {
+    answer = await ask(key, reach, {
+      method: "GET",
+      // The `+` in an E.164 number is a space in a path segment unless it is
+      // encoded, which is how a number read a moment ago becomes a 404.
+      path: `/get-phone-number/${encodeURIComponent(number)}`,
+    });
+  } catch (cause) {
+    return unreachableFrom(cause);
+  }
+  const failure = failureIn(answer);
+  if (failure !== undefined) return failure;
+  const held = routedNumberFrom(parsed(answer));
+  if (held === null) {
+    return { kind: "refused", reason: "Retell answered a malformed number." };
+  }
+  return { kind: "number", number: held };
+}
+
+export type ReadRoutedNumber =
+  | { readonly kind: "number"; readonly number: RoutedNumber }
+  | RetellFailure;
+
+/**
+ * What one restore did, or did not do, and why.
+ *
+ * `left-alone` is a success and not a failure. It is the second of the two
+ * rules that close the reviewed race: **never restore blind.** A teardown that
+ * failed once retries later, and by then the number may point somewhere else —
+ * the customer rebound it, or a newer run pinned it. Writing the recorded value
+ * back then would undo somebody else's deliberate change, and in the worst
+ * case would put a `latest` binding onto a newer run's temporary copy, sending
+ * real callers to a mocked agent. So a restore writes only where the binding
+ * still points exactly where this run's own note says it pinned it, and
+ * otherwise does nothing and says so.
+ */
+export type RestoredNumberBinding =
+  | { readonly kind: "restored" }
+  | { readonly kind: "left-alone"; readonly reason: string }
+  | RetellFailure;
+
+/**
+ * Put one number's binding back where this run's note says it found it —
+ * reading first, and writing only what still matches.
+ *
+ * The whole `inbound_agents` array is read again rather than replayed from a
+ * copy taken before the run: a sibling agent's entry, or a second number this
+ * agent answers, may have changed in between, and writing back a stale array
+ * would delete whatever changed. Only this agent's entries that still point at
+ * `pinnedTo` move, and they move back to `was`.
+ */
+export async function restoreNumberBinding(
   key: RetellCredential,
   restore: {
     readonly number: string;
-    readonly bindings: readonly NumberBinding[];
+    readonly agentId: string;
+    /** The numeric version this run pinned the binding to. */
+    readonly pinnedTo: number;
+    /** Where the binding pointed before this run touched it. */
+    readonly was: string | number | null;
   },
   reach: RetellReach = {},
-): Promise<WroteNumberBindings> {
-  return writeInboundAgents(
-    key,
-    restore.number,
-    restore.bindings.map((binding) => binding.verbatim),
-    reach,
+): Promise<RestoredNumberBinding> {
+  const read = await readRoutedNumber(key, restore.number, reach);
+  if (read.kind === "gone") {
+    return {
+      kind: "left-alone",
+      reason:
+        `${restore.number} is no longer on this Retell account, so there is ` +
+        "no binding to put back.",
+    };
+  }
+  if (read.kind !== "number") return read;
+
+  const mine = bindingsFor(read.number, restore.agentId);
+  const stillPinned = mine.some(
+    (binding) => binding.agentVersion === restore.pinnedTo,
   );
+  if (!stillPinned) {
+    return {
+      kind: "left-alone",
+      reason:
+        `${restore.number} no longer points at version ${restore.pinnedTo}, ` +
+        "which is where Egma pinned it, so its binding has been changed by " +
+        "somebody else since. Egma wrote nothing rather than undoing that.",
+    };
+  }
+
+  const written = read.number.bindings.map((binding) =>
+    binding.agentId === restore.agentId &&
+    binding.agentVersion === restore.pinnedTo
+      ? { ...binding.verbatim, agent_version: restore.was }
+      : binding.verbatim,
+  );
+  const wrote = await writeInboundAgents(key, restore.number, written, reach);
+  return wrote.kind === "written" ? { kind: "restored" } : wrote;
 }

@@ -252,9 +252,9 @@ async function modelsBlock(
  *   once at start, so every simulation of the run tests the one version a real
  *   caller reaches.
  *
- * The draft version wins when both are somehow present, because a draft-lane run
- * is being conducted against the mocked tools and nothing else would be honest;
- * in practice a run is over one lane, so at most one is set.
+ * The temporary version wins when both are present, because a run that branched
+ * one is being conducted against the mocked tools on it and nothing else would
+ * be honest: the serving version beside it is what the copy was branched from.
  *
  * **The variables** are what the platform renders per call, and Egma passes only
  * its own: the attribution variable that carries this simulation's identifier
@@ -272,14 +272,8 @@ function runVersionSpecOf(
   run: Run,
   simulationId: string,
 ): Record<string, unknown> {
-  const draftVersion = run.mockedWorld?.draftVersion ?? null;
-  const version =
-    draftVersion !== null
-      ? draftVersion
-      : run.conductedWorld !== null
-        ? run.conductedWorld.agentVersion
-        : undefined;
-  if (version === undefined) return {};
+  const version = run.tempMockAgentVersion ?? run.agentVersion ?? undefined;
+  if (version === null || version === undefined) return {};
 
   const variables = dynamicVariablesFor(simulationId);
   if (variables[SIMULATION_VARIABLE] !== simulationId) {
@@ -505,28 +499,14 @@ async function assembledSpec(
     claim.testVersionId,
   );
 
-  // **Which of the run's answers this lane may actually serve.**
-  //
-  // A run that read the agent's configuration knows which tools Egma can stand
-  // in front of. On such a lane the answers travel to the platform as its own
-  // native mocks, and the platform answers for a name or runs the customer's
-  // real implementation — there is no third thing it can do. So a name Egma
-  // classed *not interceptable by construction* or *not in this version* is
-  // deliberately left off: sending it would be Egma claiming to have stood in
-  // front of a tool that in fact reached the real world, which is the one thing
-  // a coverage stamp exists to prevent.
-  //
-  // Every other lane serves what the run resolved, unfiltered, because Egma
-  // itself is in the tool path there and answers for whatever it is asked.
-  const conductedCoverage = run.conductedWorld?.coverage;
-  const servable =
-    conductedCoverage === undefined
-      ? resolved
-      : resolved.filter((mock) =>
-          conductedCoverage.mocked.includes(mock.toolName),
-        );
-
-  const mockTools = servable.map((mock) => ({
+  // **Whether this run is mocked at all is read from its own snapshot**, on
+  // every lane. The switch lives on the connection, and the run froze it at
+  // start — so a switch unticked mid-run leaves this run in the world it began
+  // in, and a text run started with the switch off carries no answers and goes
+  // real. Nothing consults the connection row here.
+  const mockTools = (
+    run.connectionSnapshot.mockToolsEnabled ? resolved : []
+  ).map((mock) => ({
     tool_name: mock.toolName,
     answer: mock.answer,
     // Carried on every lane, and deliberately never spent on a chat one: a

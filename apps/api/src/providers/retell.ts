@@ -199,17 +199,27 @@ export async function discoverRetellAgents(
 ): Promise<RetellAgentDiscovery> {
   const key = credential(apiKey);
   const reach = { fetchImpl, signal: AbortSignal.timeout(15_000) };
-  const agents = await listAgents(key, reach);
-  if (agents.kind !== "agents") return discoveryFailure(agents);
+  const listed = await listAgents(key, reach);
+  if (listed.kind !== "agents") return discoveryFailure(listed);
+
+  // **Voice agents only.** Egma registers a Retell voice agent and asks how to
+  // test it — in text, over a web call, or by dialling its number. A
+  // chat-native Retell agent is a different product question, and offering one
+  // here would put a door in front of a person that no part of the product is
+  // built around. The `retell_chat_api` lane stays in the tree, dormant: rows
+  // already written through it still read and still conduct.
+  const agents = {
+    ...listed,
+    agents: listed.agents.filter((agent) => agent.modality === "voice"),
+  };
 
   // A voice agent without a listed number is a real provider fact. Do not turn
   // a failed number listing into that fact: the UI would disable a routed
   // agent and tell the person it has no phone number. Discovery therefore
   // succeeds only after every provider read needed to describe the account
   // succeeds.
-  const listedNumbers = agents.agents.some((agent) => agent.modality === "voice")
-    ? await listNumbers(key, reach)
-    : undefined;
+  const listedNumbers =
+    agents.agents.length > 0 ? await listNumbers(key, reach) : undefined;
   if (listedNumbers !== undefined && listedNumbers.kind !== "numbers") {
     return discoveryFailure(listedNumbers);
   }
@@ -221,24 +231,21 @@ export async function discoverRetellAgents(
       platformAgentId: agent.id,
       name: agent.name,
       modality: agent.modality,
-      connectionCandidates:
-        agent.modality === "chat"
-          ? [chatCandidate(agent.id)]
-          : [
-              // The chat door a voice agent otherwise has none of: the
-              // text mode conducts a chat simulation of it in text. Offered
-              // for every voice agent, because whether its engine is one the
-              // text mode can reach is a question answered when the connection
-              // is confirmed, not one discovery can answer from a listing.
-              textModeCandidate(agent.id),
-              // The web call: it needs nothing of the customer's to be routed,
-              // it is what a mocked run is conducted over, and it is the one
-              // voice lane every voice agent has.
-              webCallCandidate(agent.id),
-              ...numbersAnswering(numbers, agent.id).map(({ number }) =>
-                phoneCandidate(number),
-              ),
-            ],
+      connectionCandidates: [
+        // The chat door a voice agent otherwise has none of: text mode
+        // conducts a chat simulation of it in text. Offered for every voice
+        // agent, because whether its engine is one text mode can reach is a
+        // question answered when the connection is confirmed, not one
+        // discovery can answer from a listing.
+        textModeCandidate(agent.id),
+        // The web call: it needs nothing of the customer's to be routed, it is
+        // what a mocked run is conducted over, and it is the one voice lane
+        // every voice agent has.
+        webCallCandidate(agent.id),
+        ...numbersAnswering(numbers, agent.id).map(({ number }) =>
+          phoneCandidate(number),
+        ),
+      ],
     })),
   };
 }

@@ -348,11 +348,7 @@ async function actingProject(
   return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
 }
 
-const AGENT_EDIT_KEYS = [
-  "name",
-  "mockToolsDuringSimulations",
-  "pinNumbersDuringRuns",
-] as const;
+const AGENT_EDIT_KEYS = ["name"] as const;
 const MOCK_TOOL_DISCOVERY_KEYS = ["seed"] as const;
 const ARCHIVE_KEYS = [] as const;
 const AGENT_RESTORE_KEYS = ["name"] as const;
@@ -361,6 +357,7 @@ const CONNECTION_EDIT_KEYS = [
   "environment",
   "config",
   "credentials",
+  "mockToolsEnabled",
 ] as const;
 const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
@@ -568,38 +565,6 @@ function retellChoiceIn(
   };
 }
 
-/**
- * The mock-tools tick as an edit sent it — and `undefined` for an edit that
- * did not mention it, which leaves it as it is.
- *
- * Absence is "keep" rather than "off", unlike the pull flag on a create beside
- * it, and the two differ because the questions do: a create with no flag is
- * somebody who has not asked for pulling, while an edit with no flag is
- * somebody renaming an agent, who must not silently turn a mocked world off.
- */
-function tickIn(value: unknown): boolean | undefined | Refusal {
-  if (value === undefined) return undefined;
-  if (typeof value !== "boolean") {
-    return invalid("mockToolsDuringSimulations is written as true or false");
-  }
-  return value;
-}
-
-/**
- * Whether the person has consented to a `latest`-riding number being pinned.
- *
- * Absent is not consent. The pin changes what a real caller reaches for the
- * length of a run — briefly, reversibly, and back exactly as it was — and a
- * silence read as yes would be Egma deciding that for somebody.
- */
-function pinConsentIn(value: unknown): boolean | Refusal {
-  if (value === undefined) return false;
-  if (typeof value !== "boolean") {
-    return invalid("pinNumbersDuringRuns is written as true or false");
-  }
-  return value;
-}
-
 function seedFlagIn(value: unknown): boolean | Refusal {
   if (value === undefined) return false;
   if (typeof value !== "boolean") {
@@ -617,7 +582,6 @@ function seedFlagIn(value: unknown): boolean | Refusal {
 async function discoveryFor(
   acting: AuthContext,
   agentId: string,
-  pinConsent: boolean,
   options: AgentRoutesOptions,
 ): Promise<MockToolsDiscovery | Refusal> {
   const one = await getAgent(acting, agentId);
@@ -655,7 +619,6 @@ async function discoveryFor(
       connectionType: connection.connectionType,
       platformAgentId: connection.config["retellAgentId"] ?? "",
     })),
-    pinConsent,
     ...(options.retellFetch === undefined
       ? {}
       : { fetchImpl: options.retellFetch }),
@@ -1087,7 +1050,6 @@ function describedAgent(one: Agent): Record<string, unknown> {
     monitoringKeyPresent: one.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: one.monitoringApiKeyHint,
     pullProductionCalls: one.pullProductionCalls,
-    mockToolsDuringSimulations: one.mockToolsDuringSimulations,
     monitoringConfigured: one.monitoringConfigured,
     // Setup survives a stop because the machine notebook survives it too.
     // Last received remains a bare fact, never a health judgment.
@@ -1127,6 +1089,9 @@ function describedConnection(one: Connection): Record<string, unknown> {
     // and never a blank field a serializer could one day be taught to fill.
     credentialPresent: one.credentialsHint !== null,
     credentialsHint: one.credentialsHint,
+    // The switch, per connection: whether a run over this lane is conducted
+    // with Egma's mock tools in front of the agent's own.
+    mockToolsEnabled: one.mockToolsEnabled,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -1804,18 +1769,14 @@ export async function agentRoutes(
    * column was dropped pre-launch (ADR-0015), so two people editing one agent
    * from two browsers is a silent overwrite.
    *
-   * The name and the mock-tools tick, and nothing else. The provider's prompt,
-   * model and tools are not here, are not in the read, and are not coming: they
-   * live where the customer configures them, and egma being a second place to
-   * edit them would make two answers to one question with no rule to choose
-   * between.
+   * The name, and nothing else. The provider's prompt, model and tools are not
+   * here, are not in the read, and are not coming: they live where the customer
+   * configures them, and egma being a second place to edit them would make two
+   * answers to one question with no rule to choose between.
    *
-   * The tick is here and not on a door of its own because it is a **declared
-   * setting on the agent**, exactly as the pull switch is — a boolean the
-   * customer sets and egma reads at the start of every run. What it consents to
-   * is described where the contract describes it, and refusing it for an agent
-   * with no platform key is the access layer's own sentence, relayed word for
-   * word.
+   * **Mocking is not an agent setting.** It is a switch on each connection,
+   * because the lane is what decides whether a mocked run is a thing Egma can
+   * conduct — so it is edited where a connection is edited.
    */
   registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1828,38 +1789,11 @@ export async function agentRoutes(
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
 
-    const tick = tickIn(body.mockToolsDuringSimulations);
-    if (isRefusal(tick)) return refused(reply, tick);
-
-    const pinConsent = pinConsentIn(body.pinNumbersDuringRuns);
-    if (isRefusal(pinConsent)) return refused(reply, pinConsent);
-
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
 
-    // Turning the tick on reads the account first, and is refused with its own
-    // reason where the agent cannot be mocked. The four reasons are worth four
-    // sentences: each is a different fact about somebody's Retell account with
-    // a different next move, and "mocking is unavailable" would leave a person
-    // with a disabled control and nothing to do about it.
-    if (tick === true) {
-      const found = await discoveryFor(acting, agentId, pinConsent, options);
-      if (isRefusal(found)) return refused(reply, found);
-      if (found.refusal !== null) {
-        return refused(reply, {
-          refused: true,
-          error: "unprocessable",
-          message: found.refusal.message,
-        });
-      }
-      // Seeded before the tick lands, so an agent that reads as ticked always
-      // has the answers a run over it would serve.
-      await seedMockTools(acting, agentId, found.tools);
-    }
-
     const updated = await updateAgent(acting, agentId, {
       ...(name === undefined ? {} : { name }),
-      ...(tick === undefined ? {} : { mockToolsDuringSimulations: tick }),
     });
 
     if (updated === undefined) return refused(reply, NO_SUCH_AGENT);
@@ -1900,7 +1834,7 @@ export async function agentRoutes(
     // Read with consent granted, because this read is what the consent is
     // asked *from*: refusing the pin question here would hide the numbers the
     // question is about. The tick itself asks again, and refuses without it.
-    const found = await discoveryFor(acting, agentId, true, options);
+    const found = await discoveryFor(acting, agentId, options);
     if (isRefusal(found)) return refused(reply, found);
 
     const answered = await answeredToolNames(acting);
@@ -2038,11 +1972,26 @@ export async function agentRoutes(
           : textWhenGiven(body.environment, "a connection's environment");
       if (isRefusal(environment)) return refused(reply, environment);
 
+      // Absence is "keep" rather than "off": somebody renaming a connection
+      // must not silently turn its mocked world off.
+      if (
+        body.mockToolsEnabled !== undefined &&
+        typeof body.mockToolsEnabled !== "boolean"
+      ) {
+        return refused(
+          reply,
+          invalid("mockToolsEnabled is written as true or false"),
+        );
+      }
+
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
       const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
+        ...(body.mockToolsEnabled === undefined
+          ? {}
+          : { mockToolsEnabled: body.mockToolsEnabled }),
         ...(body.environment === undefined ? {} : { environment }),
         ...(body.config === undefined
           ? {}

@@ -1,16 +1,13 @@
 import {
   completeSimulation,
-  coverageFromClasses,
   failSimulation,
   markSimulationCanceled,
   resolveSimulationStanding,
-  simulationMockedWorld,
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
   type MockToolCoverage,
   type Simulation,
-  type SimulationMockedWorld,
   type SimulationStanding,
   type SimulationSummaryFacts,
 } from "@egma/db";
@@ -26,7 +23,7 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import {
-  settleMockedWorlds,
+  settleOwedMockCleanups,
   type MockedWorldReach,
 } from "../mocked-world.ts";
 
@@ -156,53 +153,29 @@ function reportedMoments(facts: {
 }
 
 /**
- * The stamp this landing writes, out of what the conductor reported and what
- * the platform already knew.
+ * The stamp this landing writes: what the conductor reported, and nothing
+ * added to it.
  *
- * **Two writers, one stamp.** A simulator that stands in the tool path reports
- * three lists and knows nothing about interceptability, because on its seam
- * every tool the agent declares is reachable — so its two class lists are empty
- * and empty is the truth. A run whose world was built from a platform
- * configuration knows the other two classes **before** any conversation
- * happened, and they are read off the run rather than asked for again.
- *
- * When the conductor reports no coverage at all and the run knows its agent's
- * tools — because it built a temporary world, or because it read the version
- * it conducts against — the stamp is built from the run alone. That is not
- * this door inventing a fact: either way the tool list came from a
- * configuration read before the first turn, so there was never anything to be
- * late to.
- *
- * When neither has anything to say, the stamp is left off, which is the report
- * saying nobody was ever asked — a different sentence from three empty lists.
+ * **One writer, deliberately.** A simulator that stands in the tool path — the
+ * LiveKit in-room seam — reports the three lists, because there the agent
+ * declares its tools per conversation and two simulations of one run can
+ * honestly differ. Every other lane reports none, and the stamp is left off,
+ * which is the report saying nobody was ever asked — a different sentence from
+ * three empty lists. The Retell lanes decide what they answer for once per run
+ * and mark each answered call on the transcript, so a per-simulation copy would
+ * be a second version of a fact that cannot differ.
  */
 function coverageOf(
   facts: NonNullable<StatusEvent["facts"]>,
-  mocked: SimulationMockedWorld | undefined,
 ): MockToolCoverage | undefined {
-  // Whichever world this run has, said in one place by the read itself: a
-  // temporary one built on the platform, or a version read and conducted
-  // against. Both know the three classes before any conversation happened.
-  const classes = mocked?.classes ?? undefined;
-  if (facts.mock_tool_coverage !== undefined) {
-    return {
-      ...facts.mock_tool_coverage,
-      notInterceptable: [...(classes?.notInterceptable ?? [])],
-      notInThisVersion: [...(classes?.notInThisVersion ?? [])],
-    };
-  }
-  if (classes === undefined) return undefined;
-  return coverageFromClasses(classes, mocked?.answeredFor ?? []);
+  return facts.mock_tool_coverage;
 }
 
 /** The terminal facts, as the landings take them. */
-function summaryFactsOf(
-  event: StatusEvent,
-  mocked: SimulationMockedWorld | undefined,
-): SimulationSummaryFacts {
+function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   const facts = event.facts;
   if (facts === undefined) return {};
-  const coverage = coverageOf(facts, mocked);
+  const coverage = coverageOf(facts);
   return {
     turnCount: facts.turn_count,
     ...(facts.provider_reference === null
@@ -348,7 +321,7 @@ export async function reportRoutes(
         lastKnownStatus === "failed" ||
         lastKnownStatus === "canceled")
     ) {
-      await settleMockedWorlds(
+      await settleOwedMockCleanups(
         standing.auth,
         standing.agentId,
         options.mockedWorldReach,
@@ -529,11 +502,7 @@ async function applyLanding(
   ending: string,
 ): Promise<Simulation | undefined> {
   const conductor = standing.claimedBy ?? "";
-  // Read here rather than once per document: a landing is the only event that
-  // writes a stamp, and a `running` event must not pay for a read it has no
-  // use for.
-  const mocked = await simulationMockedWorld(standing.auth, standing.id);
-  const facts = summaryFactsOf(event, mocked);
+  const facts = summaryFactsOf(event);
 
   if (event.status === "completed") {
     return completeSimulation(standing.auth, standing.id, conductor, {

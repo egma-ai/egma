@@ -1,6 +1,5 @@
 import {
   cancelRun,
-  conductedWorldRow,
   connectionTypeOf,
   connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
@@ -11,7 +10,7 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
-  mockedWorldRow,
+  mockMetadataRow,
   mockToolCoverageRow,
   NotPermittedError,
   productLabelOf,
@@ -26,7 +25,6 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
-  type ConductedWorld,
   type RunStartReach,
   type ExpectedTestVersion,
   type NewRun,
@@ -83,13 +81,7 @@ type RunStartReader = (
 const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
   retell_text_mode: (reach, fetchImpl) =>
     readTextModeWorld(
-      {
-        apiKey: reach.apiKey,
-        agentId: reach.config["retellAgentId"] ?? "",
-        ...(reach.config["baseUrl"] === undefined
-          ? {}
-          : { baseUrl: reach.config["baseUrl"] }),
-      },
+      { apiKey: reach.apiKey, agentId: reach.config["retellAgentId"] ?? "" },
       fetchImpl,
     ),
 };
@@ -233,27 +225,24 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
-    // The one number off the conducted world, which is cheap enough for a
-    // list: a reader scanning a page of runs can see which version each of
-    // them tested. The lists beside it are not, and are answered below.
-    conductedAgentVersion: run.conductedWorld?.agentVersion ?? null,
-    // The temporary world, whole: the version branched from, the version
-    // minted, the engine it runs on, and each touched number's routing exactly
-    // as it was read. A reader sees what Egma promised to put back. Absent from
-    // a list, on purpose — see the note above.
+    // The version this run conducted against, cheap enough for a list: a
+    // reader scanning a page of runs can see which version each of them
+    // tested.
+    agentVersion: run.agentVersion,
+    // Whether this run was mocked, read off its own frozen snapshot rather
+    // than off the connection, which may have been unticked since.
+    mockToolsEnabled: run.connectionSnapshot.mockToolsEnabled,
+    // What this run put onto the customer's account and what it owes back:
+    // the temporary copy, the cleanup flag, and the put-it-back note. A reader
+    // sees what Egma promised to restore. Absent from a list, on purpose — the
+    // note carries every touched number and a page of two hundred runs would
+    // repeat all of it for a reader who asked for a list of runs.
     ...(whole
       ? {
-          mockedWorld:
-            run.mockedWorld === null ? null : mockedWorldRow(run.mockedWorld),
-          // The world this run read rather than built: the version, the engine
-          // it runs on, and the three classes of that version's tools. On the
-          // detail read for the same reason the mocked world is — the coverage
-          // lists are per-run detail, not something to repeat two hundred times
-          // down a page.
-          conductedWorld:
-            run.conductedWorld === null
-              ? null
-              : conductedWorldRow(run.conductedWorld),
+          tempMockAgentVersion: run.tempMockAgentVersion,
+          tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
+          mockMetadata:
+            run.mockMetadata === null ? null : mockMetadataRow(run.mockMetadata),
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,
@@ -339,9 +328,6 @@ function describedSimulation(
       simulation.mockToolCoverage === null
         ? null
         : mockToolCoverageRow(simulation.mockToolCoverage),
-    // Evidence pins at the evidence grain: this row says what it conducted,
-    // without a reader having to fetch the run to find out.
-    conductedAgentVersion: simulation.conductedAgentVersion,
   };
 }
 
@@ -517,7 +503,7 @@ export async function runRoutes(
       // conduct against a world Egma never looked at, whose coverage stamp would
       // be a claim about tools nobody saw.
       const kind = await connectionTypeOf(acting.auth, connectionId);
-      let conducted: ConductedWorld | undefined;
+      let conducted: number | undefined;
       let conductedIdentity: string | undefined;
       if (kind !== undefined && connectionTypeReadsPlatformAtRunStart(kind)) {
         const reach = await resolveRunStartReach(
@@ -549,7 +535,7 @@ export async function runRoutes(
         if (read.kind !== "world") {
           return sendRefusal(reply, "provider_unavailable", read.message);
         }
-        conducted = read.world;
+        conducted = read.agentVersion;
         // The fingerprint of the connection the world was read from, carried
         // into the write so it can refuse if the connection moved in between.
         conductedIdentity = reach.connectionIdentity;
@@ -560,7 +546,7 @@ export async function runRoutes(
         ...(conducted === undefined
           ? {}
           : {
-              conductedWorld: conducted,
+              agentVersion: conducted,
               conductedConnectionIdentity: conductedIdentity,
             }),
       });

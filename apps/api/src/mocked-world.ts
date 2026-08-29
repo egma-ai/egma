@@ -1,21 +1,21 @@
 import {
   agentMonitoringKey,
   cancelRun,
-  claimMockedWorldFor,
-  connectionTypeTakesMockedWorld,
+  claimMockDraftFor,
+  connectionTypeBranchesMockDraft,
   getAgent,
-  outstandingMockedWorlds,
-  recordMockedWorld,
+  owedMockCleanups,
+  recordMockState,
   type AuthContext,
-  type MockedWorld,
+  type MockRunState,
   type Run,
 } from "@egma/db";
 import {
   buildMockedWorld,
   finishMockedWorld,
-  mockedWorldIsSettled,
+  mockRunIsSettled,
   type Fetch as ProviderFetch,
-  type MockedWorldRecord,
+  type MockRunRecord,
   type RetellCredential,
 } from "@egma/retell";
 
@@ -115,13 +115,19 @@ export async function buildRunMockedWorld(
   reach: MockedWorldReach,
   log: { error: (payload: unknown, message?: string) => void },
 ): Promise<MockedWorldOutcome> {
-  if (!connectionTypeTakesMockedWorld(run.connectionSnapshot.connectionType)) {
+  // Two facts, both frozen onto this run's own snapshot at start: the lane,
+  // and the switch. A run whose connection had mocking off goes real, and one
+  // over a lane that carries its answers on the request — text mode — branches
+  // nothing here. The queue's own gate reads the same two facts, so the two can
+  // never disagree about which runs wait for a copy.
+  if (
+    !run.connectionSnapshot.mockToolsEnabled ||
+    !connectionTypeBranchesMockDraft(run.connectionSnapshot.connectionType)
+  ) {
     return { kind: "not-mocked" };
   }
   const agent = await getAgent(auth, run.agentId);
-  if (agent?.mockToolsDuringSimulations !== true) return { kind: "not-mocked" };
-
-  const platformAgentId = agent.platformAgentId ?? "";
+  const platformAgentId = agent?.platformAgentId ?? "";
   if (platformAgentId === "") {
     return await refuseRun(
       auth,
@@ -171,7 +177,7 @@ export async function buildRunMockedWorld(
   // other's freshly branched draft is what `latest` now resolves to, and real
   // callers reach a mocked agent. Delete-before-restore protects a run from its
   // own draft and cannot see another's, so the overlap itself is what is
-  // refused. `claimMockedWorldFor` decides it under an advisory lock keyed on
+  // refused. `claimMockDraftFor` decides it under an advisory lock keyed on
   // the agent, so two runs starting together serialize and exactly one builds.
   //
   // The claim writes the building marker, which is also what makes this run
@@ -179,7 +185,7 @@ export async function buildRunMockedWorld(
   // first record would otherwise leave a null `mockedWorld` no sweep ever sees,
   // and its simulations — unclaimable until a draft exists — would sit queued
   // forever.
-  const claim = await claimMockedWorldFor(auth, {
+  const claim = await claimMockDraftFor(auth, {
     runId: run.id,
     agentId: run.agentId,
     staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
@@ -200,7 +206,7 @@ export async function buildRunMockedWorld(
   // `latest` binding would then resolve to. Refusing here is what makes the
   // retry safe: a restore only ever runs while no temporary version of this
   // agent exists.
-  const swept = await settleMockedWorlds(auth, run.agentId, reach, log, {
+  const swept = await settleOwedMockCleanups(auth, run.agentId, reach, log, {
     exceptRunId: run.id,
   });
   if (swept.kind === "unsettled") {
@@ -223,8 +229,8 @@ export async function buildRunMockedWorld(
     {
       agentId: platformAgentId,
       target: { base: mockToolBase(reach.baseUrl), runId: run.id },
-      record: async (world) => {
-        await recordMockedWorld(auth, run.id, asStoredWorld(world));
+      record: async (state) => {
+        await recordMockState(auth, run.id, asStoredState(state));
       },
     },
     reachOf(reach),
@@ -233,21 +239,21 @@ export async function buildRunMockedWorld(
     reason:
       "Egma could not finish building the mocked world for this run " +
       `(${safeExceptionType(cause)}).`,
-    world: null,
+    state: null,
   }));
 
   if (built.kind === "built") return { kind: "built" };
 
   // Whatever was made before the refusal is given back at once, in the one
   // order that is safe, and then the run is failed.
-  if (built.world !== null) {
+  if (built.state !== null) {
     await finishMockedWorld(
       key,
       {
         agentId: platformAgentId,
-        world: built.world,
-        record: async (world) => {
-          await recordMockedWorld(auth, run.id, asStoredWorld(world));
+        state: built.state,
+        record: async (state) => {
+          await recordMockState(auth, run.id, asStoredState(state));
         },
       },
       reachOf(reach),
@@ -277,7 +283,7 @@ export type SweptMockedWorlds =
  * that keeps this sweep from *knowing* the agent is clean — the read failing,
  * the platform key gone — is therefore `unsettled` too, never a shrug.
  */
-export async function settleMockedWorlds(
+export async function settleOwedMockCleanups(
   auth: AuthContext,
   agentId: string,
   reach: MockedWorldReach,
@@ -286,7 +292,7 @@ export async function settleMockedWorlds(
 ): Promise<SweptMockedWorlds> {
   let outstanding;
   try {
-    outstanding = await outstandingMockedWorlds(auth, agentId, options);
+    outstanding = await owedMockCleanups(auth, agentId, options);
   } catch (cause) {
     log.error(
       platformEvent(
@@ -329,7 +335,7 @@ export async function settleMockedWorlds(
     // wait, and cancelling it for that would be a fate no other run in the
     // product suffers. Only a run still without a draft after the window has
     // genuinely lost its build process.
-    const worldBuilt = held.world.draftVersion !== null;
+    const worldBuilt = held.tempMockAgentVersion !== null;
     const stale =
       held.status === "pending" &&
       !worldBuilt &&
@@ -353,16 +359,37 @@ export async function settleMockedWorlds(
       key,
       {
         agentId: platformAgentId,
-        world: held.world,
-        record: async (world) => {
-          await recordMockedWorld(auth, held.runId, asStoredWorld(world));
+        state: {
+          tempMockAgentVersion: held.tempMockAgentVersion,
+          tempMockAgentVersionCleanup: false,
+          mockMetadata: held.metadata,
+        },
+        record: async (state) => {
+          await recordMockState(auth, held.runId, asStoredState(state));
         },
       },
       reachOf(reach),
     ).catch((cause: unknown) => ({
-      world: held.world,
       unfinished: [`the teardown threw (${safeExceptionType(cause)})`],
+      leftAlone: [] as readonly string[],
     }));
+
+    if (settled.leftAlone.length > 0) {
+      // Not a debt: a binding that has moved since this run pinned it is a
+      // binding Egma must not touch. Recorded so the decision is visible.
+      log.error(
+        platformEvent(
+          "egma.mock_tools.restore_left_alone",
+          "a restore was not made because the binding had moved since",
+          {
+            "egma.agent_id": agentId,
+            "egma.run_id": held.runId,
+            "error.type": "mock_tools_restore_left_alone",
+          },
+        ),
+        settled.leftAlone.join("; "),
+      );
+    }
 
     if (settled.unfinished.length > 0) {
       log.error(
@@ -386,19 +413,19 @@ export async function settleMockedWorlds(
     : { kind: "unsettled", reason: owed.join("; ") };
 }
 
-/** Whether a world still owes the platform anything. */
-export { mockedWorldIsSettled };
+/** Whether a run still owes the platform anything. */
+export { mockRunIsSettled };
 
 /**
- * The temporary world, as the record stores it.
+ * The mock-tool record, as the store keeps it.
  *
  * The two shapes are the same shape, and this is where that is said out loud:
  * `@egma/retell` knows Retell and nothing about a store, `@egma/db` knows the
  * store and nothing about Retell, and a change to either one that broke the
  * other stops compiling here.
  */
-function asStoredWorld(world: MockedWorldRecord): MockedWorld {
-  return world;
+function asStoredState(state: MockRunRecord): MockRunState {
+  return state;
 }
 
 async function refuseRun(

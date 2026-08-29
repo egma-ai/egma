@@ -6,16 +6,19 @@
  * writes nothing, and holds nothing — which is what lets the whole promise be
  * checked against a captured configuration rather than against an account.
  *
- * **Exactly two fields change per intercepted tool.** The URL becomes egma's
- * mock endpoint, and the headers are emptied. Name, description and parameters
- * are the tool's contract — the part the model reads — and they stay
- * byte-identical, so the agent under test reasons and asks exactly as it does
- * in production. Node references by tool id are untouched for the same reason:
- * they name tools, and no tool is renamed.
+ * **Exactly three fields change per intercepted tool.** The URL becomes egma's
+ * mock endpoint, and the headers and the query params are emptied. Name,
+ * description and parameters are the tool's contract — the part the model reads
+ * — and they stay byte-identical, so the agent under test reasons and asks
+ * exactly as it does in production. Node references by tool id are untouched
+ * for the same reason: they name tools, and no tool is renamed.
  *
- * **Headers are emptied rather than carried.** They are where a backend's
- * credentials live, and a mocked run must never be the reason a customer's API
- * token travelled somewhere new.
+ * **Headers and query params are emptied rather than carried.** Both are where
+ * a backend's credentials live — a static query param is a backend constant
+ * exactly as a header is — and a mocked run must never be the reason a
+ * customer's API token travelled somewhere new. The request *body* is
+ * untouched: it is the model's own arguments, and a future argument-matching
+ * feature reads it.
  */
 
 import type { EngineConfiguration } from "./versions.ts";
@@ -108,8 +111,10 @@ function swapped(
     url: mockToolUrl(target, tool.name),
     // Emptied, never dropped: a tool whose `headers` key vanished would be a
     // tool whose configuration changed shape, and the promise is that only the
-    // two values move.
+    // three values move. The query params go the same way and for the same
+    // reason — they are backend constants, and secrets travel in them.
     headers: {},
+    query_params: {},
   };
 }
 

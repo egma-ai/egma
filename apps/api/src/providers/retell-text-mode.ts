@@ -1,4 +1,3 @@
-import type { ConductedWorld } from "@egma/db";
 import {
   readEngineConfiguration,
   resolveAgentVersion,
@@ -6,6 +5,7 @@ import {
   toolsOf,
   type Fetch as ProviderFetch,
   type RetellCredential,
+  type ToolCoverage,
 } from "@egma/retell";
 
 /**
@@ -48,7 +48,19 @@ const READ_TIMEOUT_MILLISECONDS = 15_000;
  * same three shapes or the route cannot treat the two alike.
  */
 export type PlatformWorldRead =
-  | { readonly kind: "world"; readonly world: ConductedWorld }
+  | {
+      readonly kind: "world";
+      /** The serving version this run will name on every request. */
+      readonly agentVersion: number;
+      /**
+       * The three classes of that version's tools, read before any turn.
+       *
+       * Answered to the caller and stored nowhere: it is what an enable-time
+       * screen shows, computed live, and the record has no room for a list
+       * that would go stale the moment the customer edits the agent.
+       */
+      readonly coverage: ToolCoverage;
+    }
   /**
    * A settled fact about this agent, which retrying will not change: its
    * engine is out of this lane's reach, or Retell no longer holds it.
@@ -105,8 +117,6 @@ export async function readTextModeWorld(
   input: {
     readonly apiKey: string;
     readonly agentId: string;
-    /** Where Retell answers, when the connection names somewhere else. */
-    readonly baseUrl?: string | undefined;
   },
   fetchImpl: ProviderFetch = fetch,
   timeoutMilliseconds = READ_TIMEOUT_MILLISECONDS,
@@ -116,15 +126,18 @@ export async function readTextModeWorld(
     return {
       kind: "refused",
       message:
-        "This Retell text mode connection names no agent, so there is " +
+        "This Retell text-mode connection names no agent, so there is " +
         "nothing to conduct against. Register the connection again with the " +
         "agent's own identifier from Retell.",
     };
   }
 
   const key = credential(input.apiKey);
+  // Retell's own address, always. Where Retell answers is not a stored config
+  // key on this door: a customer-writable one would decide where this
+  // connection's sealed key is sent, and the control plane is the thing making
+  // the request. The seam a test stands in is `fetchImpl`.
   const reach = {
-    ...(input.baseUrl === undefined ? {} : { url: input.baseUrl }),
     fetchImpl,
     signal: AbortSignal.timeout(Math.max(1, timeoutMilliseconds)),
   };
@@ -181,17 +194,10 @@ export async function readTextModeWorld(
 
   return {
     kind: "world",
-    world: {
-      agentVersion: agentVersion.version,
-      engine: {
-        type: engine.type,
-        engineId: engine.engineId,
-        version: engine.version,
-      },
-      // The three classes, from the configuration and from nothing else. What
-      // a conversation later calls cannot add to this: a tool that is in the
-      // agent and never called is still a tool the record has to account for.
-      coverage: toolCoverageOf(toolsOf(configuration.engine)),
-    },
+    agentVersion: agentVersion.version,
+    // The three classes, from the configuration and from nothing else. What
+    // a conversation later calls cannot add to this: a tool that is in the
+    // agent and never called is still a tool a screen has to account for.
+    coverage: toolCoverageOf(toolsOf(configuration.engine)),
   };
 }

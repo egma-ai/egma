@@ -30,18 +30,20 @@
  * 7. **Verify** — read the serving version's tools back and compare them to the
  *    capture. A difference means the swap landed somewhere it should not have;
  *    the capture is written back and the run fails loudly.
- * 8. **Teardown** — `finishMockedWorld` again: **delete the draft first, then
- *    restore any pin**. The reverse order is lethal — restoring `latest` while
- *    the draft exists makes the draft *be* latest.
+ * 8. **Teardown** — `finishMockedWorld` again: **delete the copy first, then
+ *    restore any pin**, and **never restore blind** — a restore reads where the
+ *    number points now and writes only where it still points at what this run
+ *    pinned it to. The reverse order is lethal: restoring `latest` while the
+ *    copy exists makes the copy *be* latest.
  *
  * ## The record is an obligation, not a report
  *
  * `record` is called at every point where what egma owes the account changes,
  * and each call replaces the whole record. What is written is always the
- * **outstanding** obligation: a `draftVersion` that is not null is a version
- * that must be deleted, and a number marked `pinned` is a binding that must be
- * put back. Teardown clears each one as it lands, so a record with a null draft
- * and no pinned number is a world that owes nothing.
+ * **outstanding** obligation: a `tempMockAgentVersion` that is not null is a
+ * version that must be deleted, and a number in the note is a binding that must
+ * be put back. Teardown clears each one as it lands, and flips the cleanup flag
+ * to true only once the account owes nothing.
  *
  * That is also why an intent is written **before** the write it describes. A
  * crash between "egma says it pinned this number" and the pin itself leaves a
@@ -51,7 +53,7 @@
  * ## One mocked world per agent at a time
  *
  * **Two of these lifecycles may never overlap on one agent**, and the control
- * plane refuses the second run rather than queueing it (`claimMockedWorldFor`,
+ * plane refuses the second run rather than queueing it (`claimMockDraftFor`,
  * under an advisory lock keyed on the agent).
  *
  * The reason is this teardown. Delete-before-restore protects a run from **its
@@ -109,7 +111,7 @@ import {
   listRoutedNumbers,
   numbersRouting,
   pinNumberBinding,
-  restoreNumberBindings,
+  restoreNumberBinding,
   type BindingVerdict,
   type NumberBinding,
   type RoutedNumber,
@@ -186,38 +188,52 @@ export function bindingDecisionsFor(
   });
 }
 
-/** One number as the record keeps it: what to put back, and whether to. */
-export type MockedWorldNumberRecord = {
+/** One number Egma pinned, and everything it takes to put it back. */
+export type MockNumberNote = {
   readonly number: string;
-  /** Whether a pin egma made is still outstanding. */
-  readonly pinned: boolean;
-  /** The whole `inbound_agents` array as it was read, entry for entry. */
-  readonly bindings: readonly Readonly<Record<string, unknown>>[];
+  /**
+   * Where this agent's binding pointed before Egma touched it, verbatim.
+   *
+   * Under weighted routing an agent can carry several entries on one number,
+   * and only the hijackable ones are pinned — `latest` or unset by definition
+   * of the verdict — so one value puts every one of them back.
+   */
+  readonly was: string | number | null;
+  /** The numeric version Egma pinned it to for the length of the run. */
+  readonly pinnedTo: number;
+};
+
+/** The serving engine capture the verify step compares against. */
+export type MockEngineNote = {
+  readonly type: string;
+  readonly engineId: string;
+  readonly version: number | null;
+};
+
+/** The put-it-back note, and nothing else lives in it. */
+export type MockMetadataRecord = {
+  readonly engine: MockEngineNote;
+  readonly numbers: readonly MockNumberNote[];
 };
 
 /**
- * The temporary world, in the shape the record stores.
+ * What one run has put onto a Retell account, in the shape the record stores.
  *
- * Structurally the platform-neutral `MockedWorld` the control plane writes onto
- * a run. It is spelled again here rather than imported because this package
- * knows Retell and nothing about a database — and a test in the control plane
- * holds the two shapes to each other, so they cannot drift.
+ * Structurally the platform-neutral state the control plane writes onto a run.
+ * It is spelled again here rather than imported because this package knows
+ * Retell and nothing about a database — and a test in the control plane holds
+ * the two shapes to each other, so they cannot drift.
  */
-export type MockedWorldRecord = {
-  readonly servingVersion: number;
-  /** The temporary version that exists right now, or null when none does. */
-  readonly draftVersion: number | null;
-  readonly engine: {
-    readonly type: string;
-    readonly engineId: string;
-    readonly version: number | null;
-  };
-  readonly numbers: readonly MockedWorldNumberRecord[];
-  readonly coverage: ToolCoverage;
+export type MockRunRecord = {
+  /** The temporary copy that exists right now, or null when none does. */
+  readonly tempMockAgentVersion: number | null;
+  /** Null = no copy was made; false = cleanup owed; true = account put back. */
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  readonly mockMetadata: MockMetadataRecord | null;
 };
 
 /** How the caller is told what egma currently owes the account. */
-export type RecordMockedWorld = (world: MockedWorldRecord) => Promise<void>;
+export type RecordMockRun = (state: MockRunRecord) => Promise<void>;
 
 /**
  * Which version a run over this agent should be testing.
@@ -268,13 +284,20 @@ export type MockedWorldBuild = {
   readonly versionReference?: VersionReference | undefined;
   /** Where the swapped tool URLs point. */
   readonly target: MockEndpointTarget;
-  readonly record: RecordMockedWorld;
+  readonly record: RecordMockRun;
 };
 
 export type BuiltMockedWorld =
-  | { readonly kind: "built"; readonly world: MockedWorldRecord }
+  | {
+      readonly kind: "built";
+      readonly state: MockRunRecord;
+      /** The serving version every request of this run names. */
+      readonly agentVersion: number;
+      /** The three classes of that version's tools, read before any turn. */
+      readonly coverage: ToolCoverage;
+    }
   /**
-   * The world could not be built. `world` is what egma owes the account and is
+   * The world could not be built. `state` is what egma owes the account and is
    * null only when nothing was touched at all; the caller tears it down and
    * fails the run. There is no third answer: a mockable run that cannot build
    * its world never falls back to the real tools.
@@ -282,15 +305,24 @@ export type BuiltMockedWorld =
   | {
       readonly kind: "refused";
       readonly reason: string;
-      readonly world: MockedWorldRecord | null;
+      readonly state: MockRunRecord | null;
     };
 
-/** What a teardown or a sweep could not finish. */
+/** What a teardown or a sweep could not finish, and what it chose not to do. */
 export type FinishedMockedWorld = {
-  /** What is still owed. Nothing is owed when the draft is null and no number is pinned. */
-  readonly world: MockedWorldRecord;
+  /** What is still owed. Nothing is owed once the cleanup flag stands true. */
+  readonly state: MockRunRecord;
   /** Each step that did not land, in the words a log should carry. */
   readonly unfinished: readonly string[];
+  /**
+   * Each restore that was deliberately not made, and why.
+   *
+   * Not a debt: a binding that has moved since this run pinned it is a binding
+   * egma must not touch, so nothing is owed and nothing is retried. It is
+   * reported so a reader can see the decision rather than infer it from
+   * silence.
+   */
+  readonly leftAlone: readonly string[];
 };
 
 /** The sentence a failure of any verb is reported as. */
@@ -340,23 +372,25 @@ function toolPrint(engine: EngineConfiguration): string {
   return canonical(toolsOf(engine).map((tool) => tool.verbatim));
 }
 
-function recordOf(
-  servingVersion: number,
-  draftVersion: number | null,
+function stateOf(
+  tempMockAgentVersion: number | null,
   engine: EngineReference,
-  numbers: readonly MockedWorldNumberRecord[],
-  coverage: ToolCoverage,
-): MockedWorldRecord {
+  numbers: readonly MockNumberNote[],
+): MockRunRecord {
   return {
-    servingVersion,
-    draftVersion,
-    engine: {
-      type: engine.type,
-      engineId: engine.engineId,
-      version: engine.version,
+    tempMockAgentVersion,
+    // False from the first record to the last: a cleanup is owed from the
+    // moment anything has been read for this run until the moment the account
+    // is back as it was found.
+    tempMockAgentVersionCleanup: false,
+    mockMetadata: {
+      engine: {
+        type: engine.type,
+        engineId: engine.engineId,
+        version: engine.version,
+      },
+      numbers: numbers.map((one) => ({ ...one })),
     },
-    numbers,
-    coverage,
   };
 }
 
@@ -384,7 +418,7 @@ export async function buildMockedWorld(
     return {
       kind: "refused",
       reason: sentenceOf(listed, "reading the account's phone numbers"),
-      world: null,
+      state: null,
     };
   }
   const decisions = bindingDecisionsFor(listed.numbers, agentId);
@@ -402,7 +436,7 @@ export async function buildMockedWorld(
     return {
       kind: "refused",
       reason: sentenceOf(serving, "resolving the version this agent serves"),
-      world: null,
+      state: null,
     };
   }
   const servingVersion = serving.agentVersion.version;
@@ -413,10 +447,10 @@ export async function buildMockedWorld(
   // wrong. `readEngineConfiguration` sends no `?version=` for a null version,
   // which means "Retell's newest" — so the capture would read the newest engine
   // rather than the one this version serves, the verify re-read would land on
-  // the draft egma just mocked (a false hijack alarm), and the repair would
+  // the copy egma just mocked (a false hijack alarm), and the repair would
   // PATCH the capture onto `servingVersion` used as an engine version, writing
   // real tools onto a version egma never read. One guard here forecloses all
-  // three. The draft side already refuses its own null version below; this is
+  // three. The copy's side already refuses its own null version below; this is
   // the serving side's matching guard.
   //
   // A custom LLM is exempt and falls through to the capture read below, which
@@ -431,22 +465,22 @@ export async function buildMockedWorld(
         "engine version, and Egma never reads or writes an unnamed one: the " +
         "default is Retell's newest, which is not necessarily the one this " +
         "agent serves. Egma stopped before reading or changing anything.",
-      world: null,
+      state: null,
     };
   }
 
   // 3b. The serving engine configuration, verbatim. This is both what the
-  // draft is built from and what the verification compares against, and it is
+  // copy is built from and what the verification compares against, and it is
   // read once so those two can never be readings of different things.
   const captured = await readEngineConfiguration(key, servingEngine, reach);
   if (captured.kind === "not-held") {
-    return { kind: "refused", reason: captured.reason, world: null };
+    return { kind: "refused", reason: captured.reason, state: null };
   }
   if (captured.kind !== "engine") {
     return {
       kind: "refused",
       reason: sentenceOf(captured, "reading this agent's tools"),
-      world: null,
+      state: null,
     };
   }
   // The capture read succeeded, so this is a hosted engine, and the guard above
@@ -462,32 +496,23 @@ export async function buildMockedWorld(
   }
   const before = toolPrint(captured.engine);
   // The transform runs once, here, and both halves of its answer are used: the
-  // coverage stamp goes into the record before anything is branched, and the
-  // tools go onto the draft below. Running it twice would be two chances to
-  // stamp one configuration and write another.
+  // coverage classes go back to the caller and the tools go onto the copy below.
+  // Running it twice would be two chances to read one configuration and write
+  // another.
   const mocked = mockedToolsFor(captured.engine, build.target);
   const { coverage } = mocked;
 
-  // 3c. Written down before a single write goes out, and written with the pins
-  // egma is **about to** make already marked. See the note at the top of this
-  // file: a claimed pin that never happened restores bytes that are already
-  // there, and an unclaimed pin that did happen is a number nobody puts back.
-  const numbers: MockedWorldNumberRecord[] = decisions.map((decision) => ({
-    number: decision.number,
-    pinned: decision.pin,
-    bindings: decision.bindings.map((binding) => binding.verbatim),
-  }));
-  let world = recordOf(
-    servingVersion,
-    null,
-    servingEngine,
-    numbers,
-    coverage,
-  );
-  await record(world);
+  // 3c. Written down before a single write goes out, and — where a pin is
+  // coming — written with the pin egma is **about to** make already noted. See
+  // the note at the top of this file: a claimed pin that never happened is a
+  // restore that finds the binding untouched and leaves it alone, and an
+  // unclaimed pin that did happen is a number nobody puts back.
+  let numbers: MockNumberNote[] = [];
+  let state = stateOf(null, servingEngine, numbers);
+  await record(state);
 
   // 3d. The pins themselves. A number already pinned, riding a tag, or riding
-  // the published pointer is recorded and never touched — the tag assignment
+  // the published pointer is passed over and never touched — the tag assignment
   // in particular is the customer's and egma has no business in it.
   //
   // **A pin preserves today's behaviour and never changes it**, so the version
@@ -496,7 +521,8 @@ export async function buildMockedWorld(
   // deliberately not the run's serving version: an agent whose tagged number
   // serves 105 while its `latest` number serves 110 would otherwise have its
   // second number quietly moved back five versions for the length of a run.
-  if (decisions.some((decision) => decision.pin)) {
+  const pinning = decisions.filter((decision) => decision.pin);
+  if (pinning.length > 0) {
     const newest = await resolveAgentVersion(key, agentId, "latest", reach);
     if (newest.kind !== "version") {
       return {
@@ -505,12 +531,19 @@ export async function buildMockedWorld(
           newest,
           "resolving the version a number riding `latest` reaches right now",
         ),
-        world,
+        state,
       };
     }
     const pinVersion = newest.agentVersion.version;
-    for (const decision of decisions) {
-      if (!decision.pin) continue;
+    numbers = pinning.map((decision) => ({
+      number: decision.number,
+      was: hijackableBindingOf(decision),
+      pinnedTo: pinVersion,
+    }));
+    state = stateOf(null, servingEngine, numbers);
+    await record(state);
+
+    for (const decision of pinning) {
       const pinned = await pinNumberBinding(
         key,
         {
@@ -528,7 +561,7 @@ export async function buildMockedWorld(
             pinned,
             `pinning ${decision.number} to version ${pinVersion}`,
           ),
-          world,
+          state,
         };
       }
     }
@@ -544,17 +577,17 @@ export async function buildMockedWorld(
         branched,
         `branching a temporary version from version ${servingVersion}`,
       ),
-      world,
+      state,
     };
   }
   const draft = branched.agentVersion;
-  world = recordOf(servingVersion, draft.version, draft.engine, numbers, coverage);
-  await record(world);
+  state = stateOf(draft.version, servingEngine, numbers);
+  await record(state);
 
   // 5. **The fork guard**, before any write.
   //
   // Whether branching an agent forks a Retell LLM the way it provably forks a
-  // conversation flow is not assumed anywhere in this file. If the draft still
+  // conversation flow is not assumed anywhere in this file. If the copy still
   // points at the serving version's engine document *at the same version*,
   // then writing the mocked tools onto it would be writing them onto the
   // configuration the customer's real callers are served from. So nothing is
@@ -572,7 +605,7 @@ export async function buildMockedWorld(
         `${draft.engine.engineId} v${String(draft.engine.version)}). Writing ` +
         "the mocked tools onto it would change the version this agent serves, " +
         "so Egma wrote nothing and stopped.",
-      world,
+      state,
     };
   }
   if (draft.engine.version === null) {
@@ -581,14 +614,14 @@ export async function buildMockedWorld(
       reason:
         `Retell branched version ${draft.version} without naming a response ` +
         "engine version, and Egma never writes to an unnamed version: the " +
-        "default is the latest one, which after a branch is somebody's draft.",
-      world,
+        "default is the latest one, which after a branch is somebody's copy.",
+      state,
     };
   }
 
   // 6. Swap, naming the target version explicitly. The transform is a pure
   // function of the captured configuration, so what is written is what was
-  // read with exactly two fields moved per intercepted tool.
+  // read with exactly three fields moved per intercepted tool.
   const written = await writeEngineTools(
     key,
     {
@@ -605,16 +638,16 @@ export async function buildMockedWorld(
         written,
         `writing the mocked tools onto version ${draft.version}`,
       ),
-      world,
+      state,
     };
   }
 
   // 7. Verify. The one check that answers the question a developer actually
-  // asks — "is my live agent still exactly as it was?" — by reading it rather
-  // than by trusting the request that was just sent.
+  // asks — "is my live agent still exactly as it was?" — by reading the engine
+  // the note captured rather than by trusting the request that was just sent.
   const after = await readEngineConfiguration(key, servingEngine, reach);
   if (after.kind === "not-held") {
-    return { kind: "refused", reason: after.reason, world };
+    return { kind: "refused", reason: after.reason, state };
   }
   if (after.kind !== "engine") {
     return {
@@ -623,7 +656,7 @@ export async function buildMockedWorld(
         after,
         "reading the serving version back to prove it did not move",
       ),
-      world,
+      state,
     };
   }
   if (toolPrint(after.engine) !== before) {
@@ -653,11 +686,28 @@ export async function buildMockedWorld(
           : "captured before it started back onto it and that write failed too") +
         ", and failed the run rather than conducting a simulation against a " +
         "version it can no longer vouch for.",
-      world,
+      state,
     };
   }
 
-  return { kind: "built", world };
+  return { kind: "built", state, agentVersion: servingVersion, coverage };
+}
+
+/**
+ * Where this agent's hijackable entries on one number point right now.
+ *
+ * Every hijackable entry is `latest`, `""` or unset by the verdict's own
+ * definition, so one value is the honest answer for all of them — and it is
+ * read off the first rather than invented, because `null` and `"latest"` are
+ * different bytes and a restore writes back what was there.
+ */
+function hijackableBindingOf(
+  decision: BindingDecision,
+): string | number | null {
+  for (const binding of decision.ownBindings) {
+    if (bindingVerdictOf(binding) === "hijackable") return binding.agentVersion;
+  }
+  return null;
 }
 
 /**
@@ -683,19 +733,23 @@ function toolsWriteOf(
 }
 
 /**
- * Put the account back: **delete the draft first, then restore any pin.**
+ * Put the account back: **delete the copy first, then restore any pin.**
  *
  * One function, two callers. A run's own teardown calls it when every
- * simulation is terminal; the next run's sweep calls it over whatever a crashed
+ * simulation is terminal; the next run's claim calls it over whatever a crashed
  * run left recorded. They are the same act, and writing them twice would be two
  * chances to get the order wrong.
  *
- * The order is the safety property. Restoring a `latest` binding while the
- * draft still exists makes the draft *be* latest, and every real caller reaches
- * the mocked agent until the delete lands. In this order every failure is
- * benign: a failed delete leaves a real version pinned with a stray draft, and
- * a failed restore leaves a real version pinned. The next sweep finishes
- * either.
+ * The order is the safety property. Restoring a `latest` binding while the copy
+ * still exists makes the copy *be* latest, and every real caller reaches the
+ * mocked agent until the delete lands. In this order every failure is benign: a
+ * failed delete leaves a real version pinned with a stray copy, and a failed
+ * restore leaves a real version pinned. The next sweep finishes either.
+ *
+ * **A restore never writes blind.** It reads where the number points now and
+ * writes only where it still points at what this run's own note says it pinned
+ * — so a retry that arrives after the customer rebound the number, or after a
+ * newer run pinned it, does nothing and says why.
  *
  * Each landing is recorded as it happens, so a crash halfway through leaves a
  * record of exactly what is still owed rather than a record of what was owed
@@ -705,75 +759,88 @@ export async function finishMockedWorld(
   key: RetellCredential,
   input: {
     readonly agentId: string;
-    readonly world: MockedWorldRecord;
-    readonly record: RecordMockedWorld;
+    readonly state: MockRunRecord;
+    readonly record: RecordMockRun;
   },
   reach: RetellReach = {},
 ): Promise<FinishedMockedWorld> {
   const unfinished: string[] = [];
-  let world = input.world;
+  const leftAlone: string[] = [];
+  let state = input.state;
 
-  if (world.draftVersion !== null) {
+  if (state.tempMockAgentVersion !== null) {
     const deleted = await deleteAgentVersion(
       key,
       input.agentId,
-      world.draftVersion,
+      state.tempMockAgentVersion,
       reach,
     );
     // `gone` is a success here and nowhere else in this file: a version that is
     // not there is a version serving nobody, which is the whole of what the
     // delete is for.
     if (deleted.kind === "deleted" || deleted.kind === "gone") {
-      world = { ...world, draftVersion: null };
-      await input.record(world);
+      state = { ...state, tempMockAgentVersion: null };
+      await input.record(state);
     } else {
       unfinished.push(
-        sentenceOf(deleted, `deleting temporary version ${world.draftVersion}`),
+        sentenceOf(
+          deleted,
+          `deleting temporary version ${state.tempMockAgentVersion}`,
+        ),
       );
       // Nothing below this line runs. The pin is what keeps real callers off
-      // the draft, and the draft is still there.
-      return { world, unfinished };
+      // the copy, and the copy is still there.
+      return { state, unfinished, leftAlone };
     }
   }
 
-  for (const number of world.numbers) {
-    if (!number.pinned) continue;
-    const restored = await restoreNumberBindings(
+  const notes = state.mockMetadata?.numbers ?? [];
+  const outstanding: MockNumberNote[] = [];
+  for (const note of notes) {
+    const restored = await restoreNumberBinding(
       key,
       {
-        number: number.number,
-        // Rebuilt into the binding shape the write takes, out of the bytes that
-        // were recorded — never out of anything read again since.
-        bindings: number.bindings.map((verbatim) => ({
-          agentId: String(verbatim["agent_id"] ?? ""),
-          agentVersion: null,
-          verbatim,
-        })),
+        number: note.number,
+        agentId: input.agentId,
+        pinnedTo: note.pinnedTo,
+        was: note.was,
       },
       reach,
     );
-    if (restored.kind === "written") {
-      world = {
-        ...world,
-        numbers: world.numbers.map((one) =>
-          one.number === number.number ? { ...one, pinned: false } : one,
-        ),
-      };
-      await input.record(world);
-    } else {
+    if (restored.kind === "left-alone") {
+      leftAlone.push(restored.reason);
+      continue;
+    }
+    if (restored.kind !== "restored") {
       unfinished.push(
-        sentenceOf(restored, `restoring ${number.number}'s routing`),
+        sentenceOf(restored, `restoring ${note.number}'s routing`),
       );
+      outstanding.push(note);
+      continue;
     }
   }
 
-  return { world, unfinished };
+  if (unfinished.length > 0) {
+    // Only the notes that still owe a write survive, so a retry does not walk
+    // past the numbers already settled.
+    const metadata = state.mockMetadata;
+    state = {
+      ...state,
+      mockMetadata:
+        metadata === null ? null : { ...metadata, numbers: outstanding },
+    };
+    await input.record(state);
+    return { state, unfinished, leftAlone };
+  }
+
+  // Nothing left: the copy is gone, every pin is settled one way or the other,
+  // and the account is as it was found.
+  state = { ...state, tempMockAgentVersionCleanup: true };
+  await input.record(state);
+  return { state, unfinished, leftAlone };
 }
 
-/** A world that owes the account nothing, and can be forgotten. */
-export function mockedWorldIsSettled(world: MockedWorldRecord): boolean {
-  return (
-    world.draftVersion === null &&
-    !world.numbers.some((number) => number.pinned)
-  );
+/** A record that owes the account nothing, and can be forgotten. */
+export function mockRunIsSettled(state: MockRunRecord): boolean {
+  return state.tempMockAgentVersionCleanup !== false;
 }
