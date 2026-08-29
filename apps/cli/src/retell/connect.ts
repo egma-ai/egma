@@ -1,14 +1,13 @@
 /**
- * Connecting a Retell voice agent to egma, once, for both surfaces.
+ * Connecting a Retell voice agent to Egma.
  *
- * There is one flow here and there is no second one. The wizard is a screen
- * over it and `egma connect` is plain lines over it, which is what makes the
- * wizard passing its checks evidence that the agent-callable surface works.
+ * There is one flow here. `egma connect` is a plain-line adapter over it, so
+ * tests exercise the same provider path a coding agent uses.
  *
  * Nothing in here draws and nothing in here reads a keystroke. The key arrives
  * through `askForKey`, the choice between several agents through `chooseAgent`,
  * and everything the developer should see goes out through `say` — so the same
- * flow runs on a screen, in a pipe, and in a check with nobody watching.
+ * flow runs in a pipe and in a check with nobody watching.
  *
  * Six things happen in order and each one can end the flow honestly: the key is
  * taken, it is checked by listing the account's **voice** agents, one agent is
@@ -216,7 +215,7 @@ export function registrationLine(registered: Registered): string | null {
   }
 }
 
-/** What the wizard is waiting to be given, while it still is. */
+/** The provider values registration needs before it can continue. */
 export type KeyAsk = {
   /** What is being asked for. */
   readonly asking: string;
@@ -998,8 +997,7 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   }
 
   // Confirm the settled agent before the next provider read. The read gives a
-  // terminal renderer time to paint this line; saying it only after every
-  // registration step can let the next wizard screen replace it first.
+  // caller the settled fact before the next provider request begins.
   options.say(`Retell agent ${defaultAgentName(chosen.name)}`, "action");
 
   const pulled = await pullAgent(key, chosen, options.retell ?? {});

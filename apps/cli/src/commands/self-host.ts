@@ -1,7 +1,7 @@
 /**
  * `egma self-host`: the platform operator's half of the CLI.
  *
- * One CLI, two contexts. The bare wizard and `connect`, `pull`, `push` and
+ * One CLI, two contexts. The repository commands `connect`, `pull`, `push` and
  * `run` operate an *agent repository* — tests, and the address of the platform
  * that owns their identifiers. Everything under `self-host` operates a
  * *platform workspace* — the deployment itself and its containers. On one

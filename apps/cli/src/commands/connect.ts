@@ -1,16 +1,17 @@
 /**
- * `egma connect`: the same flow the wizard runs, with nobody watching.
+ * `egma connect`: promptless provider registration for coding agents.
  *
  * It asks nothing. What it prints is one fact per line, `name: value`, in a
  * shape that does not move, and the exit code is the branch — so a coding agent
  * can run it, read the answer, and act on it without a person relaying
  * anything.
  *
- * The key comes in on standard input or out of the environment, and **never**
- * as a command argument. Arguments are readable by every process on the machine
- * through the process table and are kept by shell history; an argument named
- * for a key is therefore refused outright rather than accepted with a warning
- * nobody reads.
+ * Provider secrets never come in as command arguments. Retell's key comes in
+ * on standard input or out of the environment; LiveKit's several credential
+ * fields come only from named environment variables. Arguments are readable by
+ * every process on the machine through the process table and are kept by shell
+ * history, so an argument named for a secret is refused outright rather than
+ * accepted with a warning nobody reads.
  */
 
 import {
@@ -18,6 +19,7 @@ import {
   folderPathsIn,
   recordRegisteredTarget,
 } from "../folder/egma-folder.ts";
+import { runLiveKitConnectCommand } from "./connect-livekit.ts";
 import { readCredentials, type PlatformAccess } from "../platform/credentials.ts";
 import { readProject } from "../platform/projects.ts";
 import { RetellKey } from "../retell/key.ts";
@@ -65,7 +67,7 @@ export const CONNECT_EXIT = {
    * was, and the lines above it list what there was to choose from.
    */
   unchosen: 5,
-  /** No key was given at all. */
+  /** No required provider credential was given at all. */
   noKey: 6,
   /** This machine holds no egma key, so there is nowhere to register. */
   notSignedIn: 7,
@@ -124,10 +126,31 @@ export function lanesIn(
 }
 
 /** Argument names that would put a secret in the process table. */
-const REFUSED_ARGUMENTS = ["--key", "--api-key", "--retell-key", "--retell-api-key"];
+const REFUSED_ARGUMENTS = [
+  "--key",
+  "--api-key",
+  "--retell-key",
+  "--retell-api-key",
+  "--livekit-api-key",
+  "--livekit-api-secret",
+  "--livekit-token-headers",
+] as const;
+
+const LIVEKIT_REFUSED_ARGUMENTS = [
+  "--livekit-api-key",
+  "--livekit-api-secret",
+  "--livekit-token-headers",
+] as const;
 
 /** What a developer is told when they tried to pass the key as an argument. */
 export function argumentRefusal(argument: string): string {
+  if ((LIVEKIT_REFUSED_ARGUMENTS as readonly string[]).includes(argument)) {
+    return [
+      `Egma will not take a LiveKit secret in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
+      "",
+      "Set EGMA_LIVEKIT_API_KEY and EGMA_LIVEKIT_API_SECRET for project credentials, or EGMA_LIVEKIT_TOKEN_HEADERS for a customer token endpoint, in the environment of this one command.",
+    ].join("\n");
+  }
   return [
     `Egma will not take a key in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
     "",
@@ -152,6 +175,18 @@ export type ConnectCommandOptions = {
   readonly phoneNumber: string | null;
   /** `--repo-prompt`: the file to compare what the provider runs against. */
   readonly repoPrompt: string | null;
+  /** `--platform`; omitted retains the original Retell command. */
+  readonly platform?: string | null;
+  /** `--show-context`; Retell prompt and tools as one-line JSON facts. */
+  readonly showContext?: boolean;
+  /** LiveKit inputs, selected from and checked against the platform catalog. */
+  readonly modality?: string | null;
+  readonly accessVariant?: string | null;
+  readonly livekitUrl?: string | null;
+  readonly dispatchName?: string | null;
+  readonly tokenEndpoint?: string | null;
+  readonly metadata?: string | null;
+  readonly name?: string | null;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly out: (line: string) => void;
@@ -168,7 +203,7 @@ export type ConnectCommandOptions = {
 export function refusedArgumentIn(argv: readonly string[]): string | null {
   for (const argument of argv) {
     const name = argument.split("=")[0] ?? argument;
-    if (REFUSED_ARGUMENTS.includes(name)) return name;
+    if ((REFUSED_ARGUMENTS as readonly string[]).includes(name)) return name;
   }
   return null;
 }
@@ -241,6 +276,35 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     return CONNECT_EXIT.noKey;
   }
 
+  const platform = (options.platform ?? "retell").trim().toLowerCase();
+  if (platform === "livekit") {
+    return await runLiveKitConnectCommand({
+      access: options.access,
+      cwd: options.cwd,
+      name: options.name ?? null,
+      modality: options.modality ?? null,
+      accessVariant: options.accessVariant ?? null,
+      livekitUrl: options.livekitUrl ?? null,
+      dispatchName: options.dispatchName ?? null,
+      tokenEndpoint: options.tokenEndpoint ?? null,
+      metadata: options.metadata ?? null,
+      env: options.env,
+      signal: options.signal,
+      out: options.out,
+      fail: options.fail,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+  }
+  if (platform !== "" && platform !== "retell") {
+    options.out("platform_option: retell");
+    options.out("platform_option: livekit");
+    options.out("status: unsupported-platform");
+    options.fail(
+      `Egma connect does not know platform ${platform}. Choose one of the platform_option lines. Nothing was written.`,
+    );
+    return CONNECT_EXIT.unchosen;
+  }
+
   // Said before anything is read, because a word egma does not know is the
   // developer's own typo and finding out after a key has been sent to Retell
   // would cost them the round trip.
@@ -269,7 +333,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
 
   // A binding written before the key was even read would leave an egma folder
   // behind every time this command ends at "no key given" — which is the same
-  // wart the wizard used to have, and it belongs here for the same reason it
+  // historical provider wart, and it belongs here for the same reason it
   // belonged there. So the binding is written from inside the flow, at the one
   // moment after which this repository owns something only this platform can
   // resolve.
@@ -297,7 +361,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       }
     },
     askForKey: () => {
-      // The same two lines the wizard's screen draws, so a coding agent reading
+      // Stable choice lines let a coding agent read
       // this is told exactly what a person is told. There is nobody to ask
       // twice, so the second ask answers with nothing and the flow ends.
       if (asked) return Promise.resolve(null);
@@ -314,7 +378,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       const wanted = (options.agentId ?? options.env[AGENT_VARIABLE] ?? "").trim();
       return Promise.resolve(wanted === "" ? null : wanted);
     },
-    // The same question the wizard's screen asks, and the same two lines, so a
+    // The same stable choice lines are printed each time, so a
     // coding agent reading this is told exactly what a person is told. There is
     // nobody here to answer it, so it is answered in the command or not at all
     // — and not at all creates nothing, which is the point.
@@ -370,6 +434,10 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`retell_response_engine: ${config.engine}`);
       options.out(`prompt_characters: ${config.prompt === null ? 0 : config.prompt.length}`);
       options.out(`tools: ${config.tools.length}`);
+      if (options.showContext === true) {
+        options.out(`provider_prompt: ${JSON.stringify(config.prompt)}`);
+        options.out(`provider_tools: ${JSON.stringify(config.tools)}`);
+      }
       options.out(`lanes: ${outcome.lanes.join(",")}`);
       for (const one of outcome.connections) {
         options.out(
@@ -402,7 +470,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       if (already !== null) options.out(`note: ${already}`);
       options.out(driftLine(outcome));
       // Which half the tests will be written from, said the same way the
-      // wizard says it, so neither surface can promise the other's answer.
+      // provider says it, so this command does not promise another answer.
       options.out("grounded_in: retell");
       if (outcome.drift === "differs") options.out(`note: ${DRIFT_LINE}`);
       options.out("status: connected");

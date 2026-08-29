@@ -46,7 +46,7 @@ name. Keep those facts separate.
 
 Recognize `pipecat-ai` or a `pipecat` import as Pipecat evidence. Recognize a
 Vapi SDK, API operation, or committed assistant configuration as Vapi evidence.
-Egma's wizard cannot create these connections yet, but discovery must still
+The raw Egma CLI cannot create these connections yet, but discovery must still
 report the agent platform and evidence.
 
 Keep separate voice agents separate. If several candidates survive, report

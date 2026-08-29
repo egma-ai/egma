@@ -21,18 +21,12 @@ import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { gradeEveryRun } from "./support/grading.ts";
 import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
+const LIVEKIT_API_KEY = "APIhx4bmvHnLcWXYZ";
+const LIVEKIT_API_SECRET = "livekit-secret-E5F6G7H8QRST";
 const PROMPT = "You answer the order line.\nNever quote a price.\n";
-const GENERATED_TEST_NAMES = [
-  "price-question",
-  "opening-hours",
-  "order-status",
-  "refund-policy",
-] as const;
-
 const DIALLED = "+14155550111";
 
 const ONE_AGENT: FakeRetellScript = {
@@ -58,23 +52,6 @@ const ONE_AGENT: FakeRetellScript = {
 const VOICE_AGENT: FakeRetellScript = {
   ...ONE_AGENT,
   agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
-};
-
-/** A voice agent whose brain is a custom LLM, out of text mode's reach. */
-const CUSTOM_LLM_VOICE_AGENT: FakeRetellScript = {
-  keys: [KEY],
-  agents: [
-    {
-      agent_id: "agent_0001",
-      agent_name: "order-line",
-      channel: "voice",
-      voice_id: "11labs-Adrian",
-      response_engine: {
-        type: "custom-llm",
-        llm_websocket_url: "wss://example.invalid/llm",
-      },
-    },
-  ],
 };
 
 const TWO_AGENTS: FakeRetellScript = {
@@ -174,6 +151,8 @@ describe("egma connect", () => {
     expect(said.retell_response_engine).toBe("retell-llm");
     expect(said.prompt_characters).toBe(String(PROMPT.length));
     expect(said.tools).toBe("1");
+    expect(said.provider_prompt).toBeUndefined();
+    expect(said.provider_tools).toBeUndefined();
     expect(said.agent_name).toBe("order-line");
     expect(said.agent_id).toMatch(/^agt_/u);
     expect(said.connection_id).toMatch(/^con_/u);
@@ -191,15 +170,14 @@ describe("egma connect", () => {
     expect(said.status).toBe("connected");
 
     // The custody sentence is said before the key is asked for, on this
-    // surface as much as on the wizard's.
+    // surface as much as on any other provider path.
     expect(result.stdout).toContain(
       "note: Egma uses this key now to read your Retell agents and confirm the selected setup. For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.sealed).toEqual([KEY]);
-    // The same four things the wizard's own walk writes, so a repository
-    // connected by the verb and one connected by the wizard hold one file.
+    // The complete registration facts land in one repository file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
       format: 3,
       platform: { origin: platform.url },
@@ -221,6 +199,79 @@ describe("egma connect", () => {
         },
       ],
     });
+  });
+
+  it("shows the Retell prompt and tools as credential-free one-line JSON only when asked", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const result = await egma(["connect", "--show-context"], { stdin: `${KEY}\n` });
+
+    expect(result.code).toBe(CONNECT_EXIT.connected);
+    const said = facts(result.stdout);
+    expect(said.provider_prompt).toBe(JSON.stringify(PROMPT));
+    expect(JSON.parse(said.provider_prompt ?? "null")).toBe(PROMPT);
+    expect(JSON.parse(said.provider_tools ?? "null")).toEqual([{ type: "end_call" }]);
+    expect(result.stdout.match(/^provider_prompt: .*$/gmu)).toHaveLength(1);
+    expect(result.stdout.match(/^provider_tools: .*$/gmu)).toHaveLength(1);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(KEY);
+  });
+
+  it("registers LiveKit from flags and env through the built command", async () => {
+    const result = await egma(
+      [
+        "connect",
+        "--platform",
+        "livekit",
+        "--name",
+        "front-desk",
+        "--modality",
+        "chat",
+        "--livekit-url",
+        "wss://acme.livekit.cloud",
+        "--dispatch-name",
+        "receptionist",
+        "--metadata",
+        '{"tenant":"acme"}',
+      ],
+      {
+        env: {
+          EGMA_LIVEKIT_API_KEY: LIVEKIT_API_KEY,
+          EGMA_LIVEKIT_API_SECRET: LIVEKIT_API_SECRET,
+        },
+      },
+    );
+
+    expect(result.code, result.stderr).toBe(CONNECT_EXIT.connected);
+    const said = facts(result.stdout);
+    expect(said.agent_name).toBe("front-desk");
+    expect(said.agent_platform).toBe("livekit");
+    expect(said.access_variant).toBe("livekit_room.project_credentials");
+    expect(said.connection_modality).toBe("chat");
+    expect(said.status).toBe("connected");
+    expect(result.stdout).toContain("modality_option: chat");
+    expect(result.stdout).toContain(
+      "access_variant_option: livekit_room.project_credentials " +
+        "LiveKit project credentials [Recommended]",
+    );
+    expect(`${result.stdout}${result.stderr}`).not.toContain(LIVEKIT_API_KEY);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(LIVEKIT_API_SECRET);
+    expect(platform.registered.sealed).toEqual([LIVEKIT_API_KEY, LIVEKIT_API_SECRET]);
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.platform).toEqual({ origin: platform.url });
+    expect(config.agents).toEqual([
+      {
+        id: said.agent_id,
+        name: "front-desk",
+        connections: [
+          {
+            id: said.connection_id,
+            name: said.connection_name,
+            modality: "chat",
+          },
+        ],
+      },
+    ]);
   });
 
   it("takes the key from the environment, under either name", async () => {
@@ -418,8 +469,8 @@ describe("egma connect", () => {
 /**
  * The choice, on the surface a coding agent drives.
  *
- * The wizard has a screen for it; this has a flag, an environment variable, and
- * an exit code for the case nobody said. What must not exist on either surface
+ * This has a flag, an environment variable, and an exit code for the case
+ * nobody said. What must not exist on the surface
  * is a default — egma picking one of the two would be egma deciding whether to
  * dial somebody's telephone.
  */
@@ -560,139 +611,5 @@ describe("which connection egma creates", () => {
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
-  });
-});
-
-describe("the whole walk, headless", () => {
-  it("prints the compatible Retell reach and stops before writing on a custom-LLM mismatch", async () => {
-    // Text mode reaches a voice agent's words and tools through Retell, and
-    // a custom LLM keeps both on its own socket. So text is offered — every
-    // voice agent has it — but the engine is refused at the door, with phone
-    // named as the way that does reach it.
-    retell = await startFakeRetell(CUSTOM_LLM_VOICE_AGENT);
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:found framework retell-sdk\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
-    const result = await egma(
-      [
-        "--headless",
-        "--lanes",
-        "text",
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        new URL("./support/fake-agent.ts", import.meta.url).pathname,
-        script,
-      ],
-      { env: { EGMA_RETELL_API_KEY: KEY } },
-    );
-
-    expect(result.code).toBe(1);
-    // A voice agent offers every lane; the engine, not the lane, is what fails.
-    expect(result.stdout).toContain("lane_option: text");
-    expect(result.stdout).toContain("lane_option: phone");
-    expect(result.stdout).toContain("Egma could not finish: ");
-    expect(result.stdout).toContain("custom LLM");
-    expect(result.stdout).toContain("Choose --lanes phone");
-    expect(result.stdout).toContain("Nothing was written.");
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
-  it("finds the agent, connects it, and leaves one line behind", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
-    await writeFile(path.join(workspace.dir, "prompt.md"), "Always quote a price.\n", "utf8");
-
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:found framework retell-sdk\n" },
-        { kind: "say", text: "egma:found prompts prompt.md\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-      // The walk carries on past connect into writing tests, so the same
-      // scripted agent has to answer that task too.
-      stepsByTask: [
-        {
-          contains: "Write 4 tests",
-          steps: [
-            { kind: "say", text: "egma:plan price-question\n" },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/price-question.md",
-              content:
-                "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/opening-hours.md",
-              content:
-                "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/order-status.md",
-              content:
-                "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/refund-policy.md",
-              content:
-                "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
-            },
-            { kind: "say", text: "egma:wrote price-question\n" },
-            { kind: "stop", reason: "end_turn" },
-          ],
-        },
-      ],
-    });
-
-    // The walk ends in a run, and a trace result ends when grading is terminal. Nothing
-    // here conducts a simulation, so the fixture is given the one thing a
-    // platform with a simulator attached has.
-    const grading = gradeEveryRun(platform);
-    const result = await egma(
-      [
-        "--headless",
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        new URL("./support/fake-agent.ts", import.meta.url).pathname,
-        script,
-      ],
-      { env: { EGMA_RETELL_API_KEY: KEY } },
-    );
-    grading.stop();
-
-    expect(result.code).toBe(0);
-    // The drift the coding agent's answer made checkable, said once.
-    expect(result.stdout).toContain(DRIFT_LINE);
-    expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections[0]?.name).toBe("retell_text_mode-1");
-
-    // And the walk did not stop at connecting: the test the coding agent wrote
-    // is a file in the repository and a version on egma.
-    expect(result.stdout).toContain("test: price-question no persona named");
-    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual(
-      [...GENERATED_TEST_NAMES].sort(),
-    );
-    // And it did not stop at pushing either: the run is going, and the line
-    // left behind says where to watch it.
-    expect(result.stdout).toContain("✓ Your first run is live");
-    expect(result.stdout).toContain(
-      `${platform.url}/projects/${platform.projectId}/runs/${platform.running.runs[0]?.id ?? ""}`,
-    );
-    expect(result.stdout).toContain(
-      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
-    );
   });
 });

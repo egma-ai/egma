@@ -133,7 +133,8 @@ describe("the public skill source", () => {
     expect(skill).toContain(
       "[references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md)",
     );
-    expect(skill).toContain("every `.env` file");
+    expect(skill).toContain("Do not read or edit");
+    expect(skill).toContain("CLI's documented safe write");
     expect([finding, retell, integrating, livekit].join("\n")).not.toContain("`.env");
     expect(skill).not.toMatch(CLI_MARKER);
     expect(finding).toContain("Pipecat");

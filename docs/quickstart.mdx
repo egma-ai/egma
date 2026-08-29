@@ -1,392 +1,347 @@
 ---
-title: "Quickstart: From install to first graded result"
+title: "Quickstart: From repository to first graded result"
 sidebarTitle: "Quickstart"
-description: "Install the Egma CLI, connect your Retell or LiveKit agent, generate a test suite, and see your first completed trace reach terminal grading."
+description: "Install Egma's public skills, let your coding agent inspect the repository, and use promptless CLI commands to connect, validate, publish, and run a first suite."
 ---
 
-The fastest path to your first Egma test run is the CLI wizard. Run it from your voice agent's repository and it handles everything in sequence: signing in, registering your agent, generating tests with your existing coding agent, and starting a run. This guide walks you through each step so you know exactly what to expect before you press a key.
+Egma onboarding runs inside the coding agent you already use. Public skills
+tell it how to inspect a voice-agent repository and where developer approval is
+required. Named CLI commands perform each operation without asking terminal
+questions.
 
 <Note>
-  You need Node 22 or newer and a coding agent installed — Claude Code or Codex both work. You do not need a global `egma` install; `npx` fetches the latest version on each run.
+  You need Node.js 22 or newer, a coding agent that can use Agent Skills and run
+  shell commands, and a browser where you can approve sign-in. A global Egma
+  install is optional.
 </Note>
 
-## Step 1 — Install and launch the wizard
+## 1. Install the public skills
 
-Open a terminal in the repository that contains your voice agent and run:
-
-```bash
-npx @egma/cli
-```
-
-The wizard opens on the terminal's alternate screen. It tells you what it is about to do and waits for one keystroke before it starts. It authorizes the CLI first. Only after sign-in succeeds does it look for installed copies of Claude Code, Codex, Cursor, or OpenCode and ask which one to use. If you are running in CI or want plain output without the interactive UI, pass `--headless`:
+Open the repository that contains your voice agent and run the bare CLI:
 
 ```bash
-npx @egma/cli --headless
+npx --yes @egma/cli
 ```
+
+It prints the public skill install command and the exact coding-agent handoff.
+It does not sign in, inspect the repository, start another process, or change
+anything.
+
+Install the three skills it prints:
+
+```bash
+npx --yes skills add egma-ai/egma \
+  --skill integrate-egma \
+  --skill write-egma-tests \
+  --skill egma
+```
+
+Then give your coding agent this handoff:
+
+> Use the integrate-egma skill to inspect this repository, integrate its voice
+> agent with Egma, and run the first reviewed test suite.
+
+Use `egma` in the examples below when it is installed. On a clean machine, the
+coding agent can use `npx --yes @egma/cli` as the command prefix instead.
 
 <Tip>
-  If you self-host Egma, pass `--url` to point the wizard at your instance. The wizard records that platform URL in `egma/config.yaml`, and every subsequent command in the repository finds it there automatically.
+  For a self-hosted instance, run the bare command with its URL. The printed
+  handoff tells the coding agent to use that platform.
 
   ```bash
-  npx @egma/cli --url http://localhost:3101
+  npx --yes @egma/cli --url http://localhost:3101
   ```
 </Tip>
 
-## Step 2 — Authenticate with `egma login`
+## 2. Approve sign-in in your browser
 
-The wizard signs this machine in automatically as part of the flow, but you can
-also run the login step on its own, for example in CI or before using standalone
-commands against a self-hosted instance.
+The coding agent's first operational command is:
 
 ```bash
 egma login
 ```
 
-Egma displays a short code, opens your browser on a page that already has the code in the field, and waits for you to approve it there. No secret is ever typed into the terminal.
+For another instance it adds `--url`:
 
-**Expected output:**
-
+```bash
+egma login --url http://localhost:3101
 ```
-url: http://localhost:3101
+
+Egma prints a short code and an `approve_url`, opens the page when this machine
+has a browser, and waits. You approve the code in the browser. The coding agent
+does not approve it for you, and the CLI does not ask you to paste a secret into
+the terminal.
+
+```text
+url: https://app.egma.ai
 code: WDJBMJHT
-approve_url: http://localhost:3101/device?user_code=WDJBMJHT
+approve_url: https://app.egma.ai/device?user_code=WDJBMJHT
 browser: opened
 waiting: for this code to be approved in a browser
 status: stored
 credentials: /home/you/.egma/credentials
 ```
 
-The key is written to `~/.egma/credentials`, readable only by you. Set `EGMA_HOME` to store it somewhere else.
+If the browser cannot be opened, open the printed URL yourself. Continue only
+after `status: stored` or `status: already-stored`.
 
-**On a machine with no browser** — over SSH, in a container — press `[c]` after the code appears and Egma copies the approval URL to your clipboard. Open it in a browser on another machine, approve it, then paste back the full address, the `?user_code=…` part, or just the code.
+## 3. Let the coding agent discover the target
 
-<Accordion title="Login exit codes">
-  | Code | Meaning |
-  |------|---------|
-  | `0` | Signed in successfully |
-  | `2` | Authentication was denied |
-  | `3` | The device code expired before approval |
-  | `4` | Egma did not answer, or refused the request |
-  | `130` | Interrupted (Ctrl-C) |
-</Accordion>
+The `integrate-egma` skill keeps discovery read-only. The coding agent traces
+committed source to identify:
 
-## Step 3 — Register your agent with `egma connect`
+- the voice-agent platform and exact agent;
+- the prompt and tool definitions;
+- the provider identifier or publishing boundary;
+- the entrypoint and registered dispatch name for LiveKit; and
+- the production path used for monitoring.
 
-The wizard handles agent registration as part of its flow, but you can run it separately — useful for headless environments or registering an agent without running the full wizard.
+If the repository contains several credible agents, the coding agent shows the
+evidence and asks which one to integrate.
 
-```bash
-egma connect
-```
+Choose one outcome:
 
-The CLI asks for your Retell API key (or LiveKit credentials) and then asks one question: **how should Egma test this agent?** Pick as many answers as you want — each one is a connection on the same Egma agent, and one test suite runs over all of them:
+- **Testing** creates a simulation connection, one reviewed suite, and one run.
+- **Monitoring** enables production ingestion and reads its status. It creates
+  no simulation connection, suite, tests, or run.
+- **Both** completes the testing and monitoring outcomes for the same agent.
 
-- **Text** — Egma talks to the agent in text. No call is placed, and a run takes seconds.
-- **Web call** — a voice call Egma places over the internet.
-- **Phone call** — Egma dials the real number, so a run has true telephone latency and reaches your real tools.
+Before any remote write, the coding agent shows the exact Egma platform, agent,
+provider target, modality, access method, and resources it plans to create or
+reuse. Approve that setup only when every item is correct.
 
-<Note>
-  Retell is the agent platform, not the connection type. Each lane you pick is one connection: `retell_text_mode` for text, `retell_web_call` for a web call, `phone_number` for the phone. A phone connection can also reach an agent on another or unknown platform.
-</Note>
+## 4. Connect the agent for testing
 
-Pass credentials through environment variables rather than as arguments — arguments are visible to every process on your machine and are saved in shell history:
+Skip this section for a monitoring-only integration.
 
-```bash
-EGMA_RETELL_API_KEY=key_… egma connect --lanes text
-# or
-cat retell-key.txt | egma connect --lanes text,phone --phone-number +14155550111
-```
+### Retell
 
-**Expected output:**
-
-```
-url: http://localhost:3101
-retell_agents: 1
-retell_agent_id: agent_…
-reach: phone
-agent_id: agt_01K…
-agent_name: order-line
-connection_id: con_01K…
-connection_name: phone_number-1
-agent_platform: retell
-connection_type: phone_number
-access_variant: phone_number.public_e164
-product_label: Retell phone
-connection_modality: voice
-registration: created
-agent_registration: created
-connection_registration: created
-status: connected
-```
-
-<Accordion title="Connect exit codes">
-  | Code | Meaning |
-  |------|---------|
-  | `0` | Agent connected successfully |
-  | `2` | The API key was refused by Retell |
-  | `3` | No agents found on that Retell account |
-  | `4` | Retell or Egma did not answer |
-  | `5` | A required choice was not made (agent, reach, or phone number) |
-  | `6` | No API key provided |
-  | `7` | Not signed in to Egma |
-  | `8` | Retell routes no number to that agent |
-  | `130` | Interrupted (Ctrl-C) |
-</Accordion>
-
-## Step 4 — Initialize the test folder with `egma init`
-
-Egma stores your tests as Markdown files in your repository. `egma init` creates the folder structure:
+The coding agent sends the Retell key through standard input or the environment,
+never through a command argument. It includes `--show-context` so the receipt
+contains the non-secret prompt and tools that Retell runs:
 
 ```bash
-egma init
+EGMA_RETELL_API_KEY=key_live_... egma connect \
+  --platform retell \
+  --show-context \
+  --retell-agent agent_... \
+  --lanes text
 ```
 
-This creates:
+The available lanes are `text`, `web-call`, and `phone`. Several comma-separated
+lanes create several connections on one Egma agent. A phone lane may also need
+`--phone-number <e164>`.
 
-```
-egma/
-  config.yaml       format 3 platform, project, agents, and connection modalities
-  mock-tools.md     default tool mock responses for simulations
-  tests/
-    receptionist-core/  one direct directory per test suite
-      suite.yaml
-      *.md
-    release-checks/     another suite in the same project
-      suite.yaml
-      *.md
-```
+The `provider_prompt:` and `provider_tools:` lines are JSON facts for test
+grounding. When `--repo-prompt <path>` is also used, the command reports whether
+the committed prompt and provider prompt have drifted. It does not hide or
+silently resolve that difference.
 
-Everything in this folder is committed to version control. No secrets ever land here.
+### LiveKit
 
-The config supports many agents and many connections under each agent:
+The coding agent first reads the selected Egma instance's LiveKit catalog:
 
-```yaml
-format: 3
-platform:
-  origin: https://app.egma.ai
-project:
-  id: prj_01JXMK8P2QN4R6S9T1UV3WX5Y
-  name: Voice agents
-agents:
-  - id: agt_01JXMK8P2QN4R6S9T1UV3WX5Y
-    name: Front desk
-    connections:
-      - id: con_01JXMK8P2QN4R6S9T1UV3WX5Y
-        name: livekit_voice-1
-        modality: voice
-      - id: con_01JXMK8P2QN4R6S9T1UV3WX5Z
-        name: phone_number-1
-        modality: voice
-  - id: agt_01JXMK8P2QN4R6S9T1UV3WX5Z
-    name: After hours
-    connections: []
+```bash
+egma connect --platform livekit
 ```
 
-Format 3 is required. Every connection records `modality: chat` or
-`modality: voice`. The CLI refuses older folder formats. It does not translate
-or alias an old folder shape.
+This deliberately incomplete command is read-only. It prints the available
+`modality_option`, `access_variant_option`, and `required_field` lines. The
+coding agent shows any real choices to you before it runs the approved complete
+command.
 
-<Note>
-  LiveKit monitoring setup does not pause for a separate environment-line
-  approval. Egma writes the SDK lines automatically only when Git ignores the
-  `.env` file. The safe writer refuses links and non-regular files, writes
-  atomically, restricts the file to its owner, and prints the lines either way.
-</Note>
+For the recommended project-credentials variant:
 
-## Step 5 — Generate your first test suite
-
-Back in the full wizard flow, Egma creates the suite on the platform first. It
-then writes a manifest and the generated tests under one direct child of
-`egma/tests/`:
-
-```text
-egma/tests/receptionist-core/
-  suite.yaml
-  missed-appointment-reschedule.md
-  after-hours-emergency.md
+```bash
+EGMA_LIVEKIT_API_KEY=... \
+EGMA_LIVEKIT_API_SECRET=... \
+egma connect \
+  --platform livekit \
+  --name front-desk \
+  --modality voice \
+  --access-variant livekit_room.project_credentials \
+  --livekit-url wss://acme.livekit.cloud \
+  --dispatch-name receptionist
 ```
 
-The manifest contains only the stable suite ID and its current name:
+The optional `--metadata <json>` value is passed as room and dispatch metadata
+on this variant. For a customer token endpoint, the coding agent uses the
+catalog's voice option, `--token-endpoint <https-url>`, and supplies the JSON
+auth headers through `EGMA_LIVEKIT_TOKEN_HEADERS`.
 
-```yaml
-id: ste_01JXMK8P2QN4R6S9T1UV3WX5Y
-name: Receptionist core
+LiveKit secrets are accepted only from these environment variables:
+
+- `EGMA_LIVEKIT_API_KEY`
+- `EGMA_LIVEKIT_API_SECRET`
+- `EGMA_LIVEKIT_TOKEN_HEADERS`
+
+The coding agent never prints or opens the secret source.
+
+## 5. Create the first suite from valid personas
+
+First list every persona available to the bound project:
+
+```bash
+egma personas
 ```
 
-You can also create an empty suite before you write tests:
+Each `persona:` line contains JSON with the persona's stable `id` and display
+`name`. New tests use only those values. If the project already contains remote
+suites, the coding agent runs `egma pull` before creating anything.
+
+Create one approved suite:
 
 ```bash
 egma suite create receptionist-core --name "Receptionist core"
 ```
 
-If you already have test cases written down in a spreadsheet or document, pass the path and the wizard converts them first:
+The command creates the suite on Egma, then writes its stable ID and current
+name to `egma/tests/receptionist-core/suite.yaml`.
+
+The coding agent writes three or four distinct, grounded tests. It converts any
+existing cases you supplied before it adds new coverage. Each Markdown test
+names at least one persona and contains a scenario plus judgeable expected
+behaviors.
+
+For LiveKit testing, the coding agent also:
+
+- connects the Egma SDK test entry to the selected worker;
+- writes one grounded project-wide answer for each external-dependency tool in
+  `egma/mock-tools.md`; and
+- writes a test-specific mock answer only when one case needs a different
+  branch.
+
+Agent-runtime controls, such as completing or handing off a workflow, stay real.
+
+## 6. Validate and review before publishing
+
+The coding agent runs the repository's focused checks for any source changes,
+then runs:
 
 ```bash
-npx @egma/cli --existing-tests path/to/your-cases.md
+egma validate
 ```
 
-Each generated test file looks like this:
+`validate` is read-only. It parses the complete `egma/` folder and checks that
+every persona reference resolves against the bound project's current personas.
+It prints every local issue and writes nothing.
 
-```markdown
----
-format: 4
-name: missed-appointment-reschedule
----
-## Scenario
-The caller missed yesterday's appointment and wants to
-reschedule this week. They are short on time and irritated.
+The coding agent fixes the named files until the command ends with:
 
-## Expected behaviors
-1. The agent acknowledges the missed appointment without blame.
-2. The agent offers at least two concrete alternative slots.
-3. The agent confirms the new booking before ending the call.
+```text
+status: valid
 ```
 
-The first generated suite contains exactly four tests. Before starting the run,
-the wizard shows the full list and pauses:
+It then reads every changed file back and shows you the exact source,
+dependency, config, suite, test, and mock-tool changes. This is a new approval
+boundary: setup approval did not approve the authored files.
 
-```
-4 tests generated · suite "Receptionist core"
-
-  › quoted-a-price          Everyday caller
-    lost-the-order-number   Everyday caller
-    open-on-sunday          somebody-in-a-hurry
-    after-hours-emergency   default persona
-
-Run these against order-line over text-1?
-
-[enter] run   [e] edit first   [q] quit
-```
-
-Press `[e]` to open any test in `$EDITOR` before committing to the run. Press
-`[q]` to exit with all files saved to your repository. You can push and run the
-suite later with `egma push` and `egma run <suite-directory>`.
-
-Run the wizard again to add another target or another suite. It keeps the
-agents, connections, and suite directories already recorded in `egma/`.
-
-## Step 6 — Run tests with `egma run`
-
-Press `[enter]` in the wizard, or run the command directly after pushing your
-repository. The run argument is the local suite directory, not the display name
-or suite ID:
+After you approve publishing, the coding agent runs:
 
 ```bash
-egma push   # sync local files to Egma
-egma run receptionist-core   # run this complete suite and follow it
+egma push
 ```
 
-A suite is project-owned, not agent-owned. A run selects the suite, agent, and
-connection together. If the config has more than one runnable agent or the
-selected agent has more than one connection, use exact names or IDs:
+`push` uploads the complete repository as one atomic project change. If Egma
+has a newer version, nothing is uploaded. The coding agent pulls, reconciles,
+validates, shows the new diff, and asks for publish approval again.
+
+## 7. Approve and run the suite
+
+Before starting a run, the coding agent names the suite, agent, connection,
+modality, and expected simulation count. You approve this run separately. For
+a phone connection, the coding agent warns immediately before approval that the
+command places real phone calls and can cost money.
+
+For Retell or an already-running LiveKit deployment:
 
 ```bash
-egma run receptionist-core --agent "Front desk" --connection livekit_voice-1
+egma run receptionist-core \
+  --agent "Front desk" \
+  --connection text-1
 ```
 
-The simulator claims each simulation and conducts the conversation. The
-Expected behaviors grader then writes one grade for the completed trace. Its
-assertion details show each expected behavior, and its top-level score is
-normalized from `0` to `1`. The wizard follows the run live:
+When the repository has only one runnable target, the two selection flags can
+be omitted. The command follows the complete run until execution and requested
+grading are terminal.
 
-```
-run run_01K7QXV2M8  ·  4 simulations
-
-◼ quoted-a-price            grading complete
-▶ lost-the-order-number     in progress
-▶ open-on-sunday            dialing…
-◻ after-hours-emergency     queued
-
-✓ First result: quoted-a-price grading complete
-
-execution 1/4 finished  ·  grading 1/1 terminal  ·  errors 0
-```
-
-The wizard closes after the first completed trace's whole grading work becomes
-terminal. The run continues on Egma. Closing your terminal never stops a run.
-
-The standalone `egma run` command waits longer. It returns only after every
-simulation reaches a terminal execution state and every completed trace reaches
-a terminal grading state. It does not wait for grading after a simulation fails
-or is canceled without a completed trace.
-
-**Full `egma run` output:**
-
-```
-url: http://localhost:3101
-folder: /repo/egma
-agent: agt_01K…
-connection: con_01K…
-run: run_01K…
-tests: 4
-simulations: 4
-results: http://localhost:3101/projects/prj_01K…/runs/run_01K…
-simulation: quoted-a-price Everyday caller running
-simulation: quoted-a-price Everyday caller completed
-grading: quoted-a-price Everyday caller pending
-grading: quoted-a-price Everyday caller complete
-first-result: quoted-a-price Everyday caller complete
-execution-finished: 12
-execution-failed: 0
-execution-canceled: 0
-grading-terminal: 4
-grading-complete: 4
-grading-not-requested: 0
-grading-errors: 0
-grading-pending: 0
-grading-running: 0
-simulations: 4
-status: completed
-```
-
-<Accordion title="Run exit codes">
-  | Code | Meaning |
-  |------|---------|
-  | `0` | Execution and grading became terminal with no system error. Grade scores do not change this code |
-  | `1` | The selected suite has no tests |
-  | `2` | Not signed in to Egma |
-  | `4` | Egma did not answer, or refused |
-  | `5` | Egma refused to start the run, and said why |
-  | `6` | A simulation execution, grader, or terminal grading job errored |
-  | `130` | Interrupted (Ctrl-C) |
-</Accordion>
-
-<Note>
-  A low grade score never makes `egma run` exit with a non-zero code. Execution
-  and grading system errors do.
-
-  Pass `--no-follow` to start a run and return immediately without waiting for
-  execution or grading. The run carries on on Egma and you can read it in the
-  dashboard at the URL printed on the `results:` line.
-
-  ```bash
-  egma run receptionist-core --no-follow
-  ```
-</Note>
-
-## Keeping tests in sync
-
-After the first run, use `pull` and `push` to keep your local files and Egma in step:
+For a local LiveKit worker, one command owns the worker and the run:
 
 ```bash
-egma pull   # write Egma's current versions into your files
-egma push   # upload your local changes to Egma
+LIVEKIT_URL=wss://acme.livekit.cloud \
+LIVEKIT_API_KEY=... \
+LIVEKIT_API_SECRET=... \
+egma run receptionist-core \
+  --worker-entrypoint src/agent.py \
+  --worker-dependency-manifest pyproject.toml \
+  --worker-dispatch-name receptionist \
+  --agent "Front desk" \
+  --connection livekit_voice-1
 ```
 
-`egma push` refuses when Egma holds a newer version than your local file, naming each conflict. Run `egma pull` first, review what changed, then push again.
+All three worker flags are required together. The CLI checks the entrypoint,
+manifest, installed worker environment, and LiveKit credentials before it
+starts anything. It waits for the exact dispatch name to register, starts the
+remote run, and always stops the local worker when the followed run completes,
+fails, or is interrupted. `--no-follow` cannot be combined with these worker
+flags.
 
-## What to read next
+## 8. Enable monitoring when requested
+
+Skip this section for a testing-only integration. Monitoring has its own
+approval because it changes production ingestion.
+
+For Retell, the coding agent sends the key on standard input:
+
+```bash
+cat retell-key.txt | egma monitoring enable \
+  --platform retell \
+  --platform-agent agent_...
+
+egma monitoring status
+```
+
+For LiveKit, the coding agent first adds `monitor_livekit(ctx)` to the selected
+worker and runs its focused checks. After you approve the exact monitoring
+target:
+
+```bash
+egma monitoring enable --platform livekit
+egma monitoring status
+```
+
+The LiveKit command prints the two SDK environment lines and writes them to
+`.env` only when Git already ignores that regular file. The coding agent does
+not read the file or repeat its secrets.
+
+A monitoring-only task is complete when monitoring is enabled and the status
+receipt has been read. A both task is complete only when both the run and the
+monitoring status have reached their required end state.
+
+## Keep tests in step
+
+After onboarding, the normal repository loop is:
+
+```bash
+egma pull
+# edit and review tests
+egma validate
+egma push
+# get run approval
+egma run <suite-directory>
+```
 
 <CardGroup cols={2}>
-  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
-    Every command, option, and exit code — including `egma self-host` for running your own instance.
+  <Card title="CLI commands" icon="terminal" href="/cli/commands">
+    Exact verbs, flags, environment variables, output, and exit codes.
   </Card>
-  <Card title="Self-Hosting" icon="server" href="/self-hosting">
-    Run Egma on your own infrastructure with Docker Compose.
+  <Card title="Test files" icon="file-lines" href="/cli/test-files">
+    The Markdown format for scenarios, personas, behaviors, and mock tools.
   </Card>
-  <Card title="Retell Monitoring" icon="phone" href="/integrations/retell">
-    Select Retell voice agents and import completed production conversations.
+  <Card title="Self-hosting" icon="server" href="/self-hosting">
+    Run the complete Egma platform with Docker Compose.
   </Card>
-  <Card title="LiveKit Monitoring" icon="python" href="/integrations/python-sdk">
-    Add `monitor_livekit(ctx)` to a customer-hosted or LiveKit Cloud agent.
+  <Card title="Retell" icon="phone" href="/integrations/retell">
+    Retell simulation lanes, provider context, and production monitoring.
   </Card>
 </CardGroup>

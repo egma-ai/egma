@@ -103,7 +103,7 @@ function every(stdout: string, name: string): string[] {
 }
 
 /**
- * An onboarded repository, as connect or the wizard leaves one behind.
+ * An onboarded repository, as `egma connect` leaves one behind.
  *
  * The whole folder, made the way `egma init` makes it, because a partial one is
  * refused before a platform is even selected — a repository that names a

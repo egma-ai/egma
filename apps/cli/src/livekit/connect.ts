@@ -134,7 +134,7 @@ export function liveKitConnection(input: LiveKitRegistration): NewConnection {
  *
  * All ordinary platform endings remain values. `name-taken` now means what it
  * says and nothing more: the Egma agent name asked for is held by a different
- * vendor agent. Renaming this one is the answer, and the wizard says so rather
+ * vendor agent. Renaming this one is the answer, and the command says so rather
  * than joining two targets under one row.
  */
 export function connectLiveKit(

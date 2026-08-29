@@ -1,9 +1,9 @@
 /**
- * Own the repository's temporary LiveKit worker for one wizard run.
+ * Own the repository's temporary LiveKit worker for one followed run.
  *
  * The public `integrate-egma` skill ships the cross-platform helper. This
  * module supplies its secrets through the child environment, waits for its
- * explicit registration marker, relays redacted output to the wizard log, and
+ * explicit registration marker, relays redacted output to the caller, and
  * tears down the complete process group when the run ends.
  */
 
@@ -24,7 +24,7 @@ export type LocalLiveKitWorkerEnding =
   | { readonly kind: "failed"; readonly reason: string };
 
 export type LocalLiveKitWorker = {
-  /** Settles if the helper exits before the wizard finishes the run. */
+  /** Settles if the helper exits before the CLI finishes the run. */
   readonly ended: Promise<LocalLiveKitWorkerEnding>;
   /** Stop the worker and every runtime process below it. Safe to call twice. */
   stop(): Promise<void>;

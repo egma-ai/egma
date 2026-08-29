@@ -1,51 +1,42 @@
-/**
- * `egma` as a developer runs it: the built entry point, in a real subprocess.
- */
+/** The built CLI boundary: handoff, help, refusal, and version. */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import {
+  INTEGRATION_HANDOFF,
+  SKILLS_INSTALL_COMMAND,
+} from "../src/commands/setup.ts";
 import {
   CLI_ENTRY,
-  FAKE_AGENT,
   MANIFEST,
   PRETEND_OLD_NODE,
-  isAlive,
   makeWorkspace,
-  waitUntil,
   type Workspace,
 } from "./support/workspace.ts";
 
 const run = promisify(execFile);
-let platform: Platform;
 
-/**
- * The built command, with the platform named on the command itself.
- *
- * `--url` on every invocation rather than a shell that names one once: a flag
- * on the command is the only way to name a platform, so a check that reached
- * this one any other way would be checking something egma does not offer.
- */
 async function egma(
   args: readonly string[],
   workspace: Workspace,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   try {
-    const { stdout, stderr } = await run(
-      process.execPath,
-      [CLI_ENTRY, "--url", platform.url, ...args],
-      { cwd: workspace.dir, env: workspace.env() },
-    );
+    const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
+      cwd: workspace.dir,
+      env: workspace.env(),
+    });
     return { stdout, stderr, code: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number };
-    return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: failure.code ?? 1 };
+    return {
+      stdout: failure.stdout ?? "",
+      stderr: failure.stderr ?? "",
+      code: failure.code ?? 1,
+    };
   }
 }
 
@@ -53,20 +44,12 @@ describe("the egma command", () => {
   let workspace: Workspace;
 
   beforeEach(async () => {
-    platform = await startPlatform();
     workspace = await makeWorkspace({ "package.json": MANIFEST });
-    // These checks are about driving a coding agent, so the machine they run on
-    // is already signed in and login costs them nothing. Login itself is proved
-    // in the checks that are about login.
-    await workspace.signIn(platform.url);
   });
 
-  afterEach(async () => {
-    await platform.close();
-    await workspace.remove();
-  });
+  afterEach(async () => workspace.remove());
 
-  it("refuses an old Node in plain words before it does anything else", async () => {
+  it("refuses an old Node before it does anything else", async () => {
     const refused = await new Promise<{ stderr: string; code: number }>((resolve) => {
       const child = spawn(
         process.execPath,
@@ -84,221 +67,86 @@ describe("the egma command", () => {
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain("Egma needs Node 22 or newer");
     expect(refused.stderr).toContain("18.20.4");
-    // The refusal came first: not even --help was answered.
     expect(refused.stderr).not.toContain("Usage:");
   });
 
-  it("prints what it can do, and what version it is", async () => {
+  it("prints the coding-agent handoff without login or a terminal", async () => {
+    const result = await egma([], workspace);
+
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain("setup: skills-and-cli");
+    expect(result.stdout).toContain(`skills: ${SKILLS_INSTALL_COMMAND}`);
+    expect(result.stdout).toContain(`next: ${INTEGRATION_HANDOFF}`);
+    expect(result.stdout).toContain("status: ready-for-agent");
+    expect(result.stdout).not.toContain("approve_url:");
+    expect(result.stdout).not.toContain("waiting:");
+  });
+
+  it("keeps a named self-hosted URL in the agent handoff", async () => {
+    const result = await egma(["--url", "http://localhost:3101/"], workspace);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("platform: http://localhost:3101");
+    expect(result.stdout).toContain("Use http://localhost:3101 as the Egma platform URL.");
+
+    const refused = await egma(
+      ["--url", "https://developer:must-not-be-repeated@example.com"],
+      workspace,
+    );
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("--url is not a platform origin");
+    expect(refused.stderr).not.toContain("must-not-be-repeated");
+  });
+
+  it("documents the complete raw integration surface and no wizard controls", async () => {
     const help = await egma(["--help"], workspace);
+
     expect(help.code).toBe(0);
-    expect(help.stdout).toContain("Usage:");
-    expect(help.stdout).toContain("--coding-agent <id>");
-    // The one answer a run with nobody watching cannot be asked for.
-    expect(help.stdout).toContain("--existing-tests <path>");
-
-    // Every verb, and for the run verb the two things a coding agent has to
-    // know before it can act on one: how to start a run without waiting, and
-    // what each number it answers with means.
-    for (const verb of ["egma login", "egma connect", "egma init", "egma pull", "egma push"]) {
-      expect(help.stdout, verb).toContain(verb);
+    for (const command of [
+      "egma login",
+      "egma connect",
+      "egma init",
+      "egma personas",
+      "egma suite create",
+      "egma validate",
+      "egma pull",
+      "egma push",
+      "egma run",
+      "egma monitoring",
+      "egma self-host up",
+    ]) {
+      expect(help.stdout, command).toContain(command);
     }
-    expect(help.stdout).toContain("egma run <suite-directory> [options]");
-    expect(help.stdout).toContain("egma suite create <directory> --name <name>");
-    expect(help.stdout).not.toContain("--suite");
-    expect(help.stdout).toContain("--no-follow");
-    expect(help.stdout).toContain("What egma run answers with:");
-    expect(help.stdout).toContain("monitoring_key_id");
-    expect(help.stdout).toContain("9 remote monitoring is ready");
-    expect(help.stdout).toContain("egma self-host up");
-    expect(help.stdout).not.toContain("--replace-carrier");
-    expect(help.stdout).not.toContain("Twilio Auth Token");
-
-    // The test seams are not product surface, so neither is offered: not the
-    // one that starts a scripted coding agent, and not the one that stands an
-    // address in for egma's own.
-    expect(help.stdout).not.toContain("-- <command>");
-    expect(help.stdout).not.toContain("EGMA_TEST_DEFAULT_URL");
-
-    // One explicit way to name a platform, and it is offered as one. The
-    // whole-shell variable that used to sit beside it is a setting egma no
-    // longer has, and offering a setting that does nothing is worse than
-    // offering none.
-    expect(help.stdout).toContain("--url <address>");
-    expect(help.stdout).not.toContain("EGMA_URL");
-    // And what it does with init, which used to accept it and drop it.
-    expect(help.stdout).toContain("egma/config.yaml");
-
-    // The platform: line init prints is a fact about the repository, not about
-    // the flag: plain init in a repository that is already bound prints it too,
-    // so the help must not promise it only where --url was given.
-    expect(help.stdout).toContain("adds a platform: line whenever this repository");
-    expect(help.stdout).not.toContain("--url gave it");
+    for (const option of [
+      "--show-context",
+      "--modality",
+      "--access-variant",
+      "--worker-entrypoint",
+      "--worker-dependency-manifest",
+      "--worker-dispatch-name",
+    ]) {
+      expect(help.stdout, option).toContain(option);
+    }
+    expect(help.stdout).not.toContain("--headless");
+    expect(help.stdout).not.toContain("--coding-agent");
+    expect(help.stdout).not.toContain("--existing-tests");
+    expect(help.stdout).not.toContain("Agent Client Protocol");
 
     const version = await egma(["--version"], workspace);
-    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/u);
   });
 
-  it("says so when handed an option it does not know", async () => {
-    const result = await egma(["--turbo"], workspace);
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("--turbo");
-  });
+  it("refuses unknown options and secrets in command arguments", async () => {
+    const unknown = await egma(["--turbo"], workspace);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toContain("--turbo");
 
-  it("refuses to run the wizard where there is no terminal to agree in", async () => {
-    // Not a terminal: this is `npx egma | tee log`, where the keystroke that
-    // means yes can never be pressed.
-    const result = await egma(["--cwd", workspace.dir], workspace);
-
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("needs a terminal");
-    expect(result.stderr).toContain("--headless");
-    expect(result.stderr).toContain("--help");
-    // Nothing was driven: no agent was started, and nothing was said about one.
-    expect(result.stdout).toBe("");
-  });
-
-  it("drives the whole step, then stops plainly where a provider key is needed", async () => {
-    const script = await workspace.script({
-      steps: [
-        {
-          kind: "tool-call",
-          id: "t1",
-          title: "Read",
-          locations: [{ path: "package.json" }],
-        },
-        { kind: "read-file", path: "package.json", recordAs: "manifest" },
-        {
-          kind: "say",
-          text: [
-            "egma:found framework retell-sdk",
-            "egma:found prompts prompts/order-line.md",
-            "",
-          ].join("\n"),
-        },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
-    const result = await egma(
-      ["--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+    const secret = await egma(
+      ["connect", "--livekit-api-secret", "must-not-be-repeated"],
       workspace,
     );
-
-    const lines = result.stdout.trimEnd().split("\n");
-    expect(lines).toContain("◆ Read package.json");
-    expect(lines).toContain("┊ Framework   retell-sdk");
-
-    // Finding the agent is not reaching it. The walk goes on to ask for the
-    // key that would reach it, and a run with nobody watching and nothing in
-    // its environment has none to give — so it says that, and stops.
-    expect(lines).toContain("Paste your Retell API key (Retell dashboard → Settings → API keys).");
-    expect(result.code).toBe(1);
-    expect(lines.at(-1)).toBe(
-      "Egma could not finish: no Retell key was given, so there is nothing to test.",
-    );
-  });
-
-  it("prints what to paste, and exits cleanly, with no coding agent to drive", async () => {
-    const result = await egma(
-      [
-        "--headless",
-        "--cwd",
-        workspace.dir,
-        "--",
-        path.join(workspace.dir, "no-such-coding-agent"),
-      ],
-      workspace,
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
-    expect(result.stdout).toContain("Find the voice agent in this repository");
-    expect(result.stdout.trimEnd().split("\n").at(-1)).toContain(
-      "no coding agent on this machine",
-    );
-    // A message, not a crash.
-    expect(result.stderr).toBe("");
-  });
-
-  it("prints the same message when the requested coding agent is not installed", async () => {
-    const result = await egma(
-      ["--headless", "--cwd", workspace.dir, "--coding-agent", "not-a-real-agent"],
-      workspace,
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("not-a-real-agent");
-    expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
-  });
-
-  it("keeps the seam working that the tests themselves are driven by", async () => {
-    // `-- <command>` is how a test starts a scripted agent in place of a real
-    // one. It is not offered in the help text and it is not stable, but
-    // everything offline rides on it — so it is checked.
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:none There is no voice agent here.\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
-    const result = await egma(
-      ["--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      workspace,
-    );
-
-    expect(result.code).toBe(1);
-    expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "Egma could not find a voice agent. Use its folder or configure it in the UI.",
-    );
-  });
-
-  it("shuts the agent and everything it started down when it is interrupted", async () => {
-    const script = await workspace.script({
-      spawnChild: true,
-      steps: [
-        { kind: "tool-call", id: "t1", title: "Thinking about it" },
-        { kind: "wait", ms: 60_000 },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
-    const child = spawn(
-      process.execPath,
-      [
-        CLI_ENTRY,
-        "--url",
-        platform.url,
-        "--headless",
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        FAKE_AGENT,
-        script,
-      ],
-      { cwd: workspace.dir, env: workspace.env() },
-    );
-    let stdout = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-
-    expect(await waitUntil(() => stdout.includes("Thinking about it"))).toBe(true);
-
-    const reportFile = path.join(workspace.dir, "fake-agent-report.json");
-    const grandchild = (JSON.parse(await readFile(reportFile, "utf8")) as { childPid: number })
-      .childPid;
-    expect(isAlive(grandchild)).toBe(true);
-
-    child.kill("SIGINT");
-    const code = await new Promise<number>((resolve) => {
-      child.on("close", (value) => resolve(value ?? 0));
-    });
-
-    expect(code).toBe(130);
-    expect(stdout.trimEnd().split("\n").at(-1)).toContain("stopped before the task finished");
-    expect(await waitUntil(() => !isAlive(grandchild))).toBe(true);
+    expect(secret.code).toBe(1);
+    expect(secret.stderr).toContain("--livekit-api-secret");
+    expect(secret.stderr).not.toContain("must-not-be-repeated");
   });
 });

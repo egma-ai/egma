@@ -77,7 +77,7 @@ export async function openInBrowser(
       });
       child.on("error", () => settle(false));
       child.on("spawn", () => settle(true));
-      // The browser outlives the wizard, and a browser still running must never
+      // The browser outlives the CLI command, and a browser still running must never
       // be what keeps the terminal from closing.
       child.unref();
     } catch {

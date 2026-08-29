@@ -1,4 +1,4 @@
-/** Plain-line run output shared by `egma run` and the headless wizard. */
+/** Stable plain-line output for `egma run`. */
 
 import type { GradeProjection, PlatformGrade } from "../platform/runs.ts";
 import type { RunChange, RunProgress, SimulationRow } from "./follow.ts";

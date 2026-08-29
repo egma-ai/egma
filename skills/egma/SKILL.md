@@ -9,19 +9,23 @@ Egma puts the developer's voice agent under pressure and grades what it did.
 The repository holds an `egma/` folder of tests. The Egma platform holds their
 versioned copies and every run.
 
-Before running an Egma command, run:
+Use `egma` when it is installed. Otherwise use `npx --yes @egma/cli` as the
+command prefix; do not require a global install. Before running an operation,
+run:
 
 ```sh
-egma --help
+egma --help                          # installed command
+npx --yes @egma/cli --help           # clean-machine fallback
 ```
 
-Treat that output as the authority for current verbs, flags, and exit codes.
-For a read-only explanation of output the developer already supplied, no
-command is needed. Use this skill for the stable workflow around the commands.
+Use only one of those forms for the task. Treat its output as the authority for
+current verbs, flags, output fields, and exit codes. For a read-only explanation
+of output the developer already supplied, no command is needed. Use this skill
+for the stable post-onboarding workflow around the commands.
 
 ## Read the repository state
 
-Read `egma/config.yaml` before acting. Format 2 names one **project**, its
+Read `egma/config.yaml` before acting. Format 3 names one **project**, its
 **agents**, and the **connections** nested under each agent. Suites belong to
 the project and live below `egma/tests/`; a run selects one suite, agent, and
 connection together.
@@ -66,12 +70,11 @@ Format 3 is strict. Every connection has `modality: chat` or `modality: voice`.
 The CLI has no reader, migration, or alias for an older folder format. Report
 that refusal as written.
 
-When the developer asks to onboard or extend the repository, run the wizard.
-It authorizes the CLI before it discovers installed coding agents. The first
-generated suite has exactly four tests. A later wizard run can add a target or
-suite while keeping existing agents, connections, and suite directories.
-LiveKit monitoring writes safe SDK environment lines automatically; there is no
-separate environment-line approval.
+When the developer asks to onboard a repository, add its first voice agent, or
+set up monitoring, use the `integrate-egma` skill. That skill owns discovery,
+provider setup, the first suite, LiveKit source integration, and the human
+approval gates. This skill starts from an existing `egma/config.yaml` and does
+not reconstruct onboarding.
 
 Everything in the folder is safe to commit. Treat fields such as `format`,
 `version`, `identity_revision`, and persona ids as Egma-owned sync state.
@@ -86,7 +89,9 @@ egma push
 ```
 
 Run `egma pull` to bring the platform's current versions into the repository.
-Run `egma push` to send reviewed local changes back.
+Before `egma push`, run `egma validate`, show the validated local changes, and
+get explicit developer approval for the remote write. Then push the reviewed
+change.
 
 `push` validates and sends the complete repository as one change. It refuses a
 stale file when the platform has moved on. Preserve the other person's work:
@@ -118,6 +123,11 @@ Egma uses it. When there are several agents or several connections under the
 selected agent, use exact names or stable IDs. The local suite must exactly
 match the platform before Egma starts it. Each test produces one **simulation**
 per persona.
+
+Before starting the command, name the suite, agent, connection, modality, and
+expected simulation count and get explicit developer approval. For a phone
+connection, state that the run starts real phone simulations and can cost money
+immediately before asking. Never retry a phone run without fresh approval.
 
 The command prints identifiers, a results address, execution progress, and
 grading progress. It waits until execution and all requested trace grading are
@@ -169,9 +179,12 @@ it exposes a real voice-agent problem.
 
 - If the command says the developer is not signed in, run `egma login`.
 - If no `egma/` folder exists, confirm the working directory. Run `egma init`
-  only when the developer asks to onboard this repository.
+  only as part of an approved onboarding through the `integrate-egma` skill.
 - If `egma run <suite-directory>` reports `not-pushed` or `unknown`, run
-  `egma push`, resolve any refusal, and then start the run again.
+  `egma validate`, show the changes, get push approval, resolve any refusal,
+  and then ask again before starting the run.
+- If a failed or interrupted run printed a `run:` ID, the remote run exists.
+  Use that ID and its results address; do not create another run to recover it.
 - If the platform refuses a command, report its sentence as written and fix
   the named input.
 

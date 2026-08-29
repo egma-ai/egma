@@ -63,10 +63,10 @@ The Egma Python SDK has two separate entries:
 | `await mockable(agent, ctx, session)` | Serve mock tools during an Egma simulation | After the agent and `AgentSession` exist; before `AgentSession.start` |
 | `monitor_livekit(ctx)` | Send production evidence to Egma | First statement of the job entrypoint; before `ctx.connect()` |
 
-The task names the requested integration: testing, monitoring, or both. Ensure
-every requested entry is present and preserve every existing Egma entry. An
-integration task adds capabilities; it removes one only when the developer asks
-for that removal explicitly.
+The onboarding outcome names the requested integration: testing, monitoring,
+or both. Ensure every requested entry is present and preserve every existing
+Egma entry. An integration adds capabilities; it removes one only when the
+developer asks for that removal explicitly.
 
 The Python package is named `egma`. Require `egma>=0.2.0` and add it through the
 dependency file the repository already uses. `0.2.0` is the first release in
@@ -114,7 +114,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 The monitoring entry is synchronous and is the first statement of the
 entrypoint. Its process receives `EGMA_URL` and `EGMA_API_KEY`. Name those
-variables when needed. Egma owns their values and environment injection.
+variables when needed. `egma monitoring enable --platform livekit` owns the
+credential and reports the deployment handoff; the developer's runtime owns
+environment injection.
 
 ### Both entries
 
@@ -135,8 +137,9 @@ those points.
 
 ### Protect credentials
 
-Accept `EGMA_URL` and `EGMA_API_KEY` only through the process environment Egma
-supplies. Keep both values out of changed files and command output.
+Accept `EGMA_URL` and `EGMA_API_KEY` only through the process environment.
+Keep both values out of source changes and reports. Let the raw CLI own any
+safe environment-file write; leave environment files unread and unchanged.
 
 ## Name the worker
 

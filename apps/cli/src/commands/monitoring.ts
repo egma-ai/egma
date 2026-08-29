@@ -1,12 +1,11 @@
 /**
- * `egma monitoring enable | disable | status | record`: the wizard's
- * monitoring work, plus a record-only recovery, with nobody watching.
+ * `egma monitoring enable | disable | status | record`: promptless production
+ * monitoring, plus a record-only recovery.
  *
  * It asks nothing. What it prints is one fact per line, `name: value`, in a
  * shape that does not move, and the exit code is the branch — so a coding agent
  * can run it, read the answer, and act on it without a person relaying
- * anything. Underneath it is the same two flows the wizard's screens sit on,
- * because the wizard is never a second code path.
+ * anything.
  *
  * The Retell key comes in on standard input and **never** as a command
  * argument: arguments are readable by every process on the machine and are kept
@@ -117,7 +116,7 @@ export const CANNOT_TELL_PLATFORM =
 /** What a developer is told when the repository names no agent. */
 export const NO_AGENT_HERE =
   "This repository's egma/config.yaml names no agent, so Egma does not know " +
-  "which agent this is about. Run the wizard, or egma connect, first.";
+  "which agent this is about. Run egma connect first.";
 
 export type MonitoringCommandOptions = {
   /** Which Egma, and where this machine's key is. Resolved once, by the caller. */
@@ -606,7 +605,7 @@ async function enableRetell(
     signal: options.signal,
     say: (line) => options.out(`note: ${line}`),
     /*
-     * The wizard waits briefly for the first conversation because a person is
+     * The caller waits briefly for the first conversation because a person is
      * sitting in front of it and proof beats a promise. Nobody is sitting in
      * front of this, and a verb that held a script for twenty seconds to
      * report a fact the script can ask for whenever it likes would be paying
@@ -617,7 +616,7 @@ async function enableRetell(
     ...(agent === null ? {} : { agentId: agent.agentId }),
     agentName: options.name ?? agent?.agentName ?? null,
     askForKey: () => {
-      // The same two lines the wizard's screen draws, so a coding agent reading
+      // Stable fact lines let a coding agent read
       // this is told exactly what a person is told. There is nobody to ask
       // twice, so a second ask answers with nothing and the flow ends.
       if (asked) return Promise.resolve(null);
