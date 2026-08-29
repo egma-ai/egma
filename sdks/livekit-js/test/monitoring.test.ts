@@ -8,6 +8,7 @@ import {
   type Context,
   type Span,
 } from "@opentelemetry/api";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   NodeTracerProvider,
   type ReadableSpan,
@@ -185,7 +186,7 @@ describe("monitorLiveKit", () => {
       apiKey: PROJECT_KEY,
     });
     const state = monitoringStateForTests();
-    state?.liveKitFanout.add(cloudProcessor);
+    state?.registerSpanProcessor(cloudProcessor);
     const provider = state?.provider;
     provider?.getTracer("proof").startSpan("shared").end();
 
@@ -214,7 +215,7 @@ describe("monitorLiveKit", () => {
       apiKey: PROJECT_KEY,
     });
     const configured = monitoringStateForTests();
-    configured?.liveKitFanout.add(observer);
+    configured?.registerSpanProcessor(observer);
     configured?.provider.getTracer("proof").startSpan("shared").end();
 
     expect(ended[0]?.attributes["session.id"]).toBe("production-room");
@@ -232,6 +233,80 @@ describe("monitorLiveKit", () => {
         apiKey: PROJECT_KEY,
       }),
     ).toThrow(/existing OpenTelemetry tracer provider/u);
+  });
+
+  it("adds Egma beside compatible existing telemetry", async () => {
+    trace.disable();
+    vi.stubEnv("LIVEKIT_API_KEY", "devkey");
+    vi.stubEnv(
+      "LIVEKIT_API_SECRET",
+      "secretsecretsecretsecretsecretsecret",
+    );
+    const exported = vi
+      .spyOn(OTLPTraceExporter.prototype, "export")
+      .mockImplementation((_spans, callback) => callback({ code: 0 }));
+    const existingSpans: ReadableSpan[] = [];
+    const cloudSpans: ReadableSpan[] = [];
+    const existingProcessor: SpanProcessor = {
+      onStart(_span: Span, _parentContext: Context) {},
+      onEnd(span: ReadableSpan) {
+        existingSpans.push(span);
+      },
+      async forceFlush() {},
+      async shutdown() {},
+    };
+    const cloudProcessor: SpanProcessor = {
+      onStart(_span: Span, _parentContext: Context) {},
+      onEnd(span: ReadableSpan) {
+        cloudSpans.push(span);
+      },
+      async forceFlush() {},
+      async shutdown() {},
+    };
+    const createCloudSpanProcessor = vi.fn(() => cloudProcessor);
+    const fanout = new telemetry.FanoutSpanProcessor();
+    fanout.add(existingProcessor);
+    const provider = new NodeTracerProvider({ spanProcessors: [fanout] });
+    provider.register();
+    const registerSpanProcessor = (processor: SpanProcessor) =>
+      fanout.add(processor);
+
+    monitorLiveKit(asJobContext(context()), {
+      endpoint: "https://api.egma.ai",
+      apiKey: PROJECT_KEY,
+      existingTelemetry: {
+        provider,
+        registerSpanProcessor,
+        createCloudSpanProcessor,
+      },
+    });
+    await telemetry.setupCloudTracer({
+      roomId: "cloud-room-id",
+      jobId: "cloud-job-id",
+      cloudHostname: "example.livekit.cloud",
+      agentName: "appointment-agent",
+      enableTraces: true,
+      enableLogs: false,
+    });
+    provider.getTracer("proof").startSpan("shared-existing").end();
+    await provider.forceFlush();
+
+    expect(monitoringStateForTests()?.provider).toBe(provider);
+    expect(telemetry.tracer.getProvider()).toBe(provider);
+    expect(existingSpans.map((span) => span.name)).toEqual([
+      "shared-existing",
+    ]);
+    expect(existingSpans[0]?.attributes).toMatchObject({
+      "session.id": "production-room",
+      "lk.agent_name": "appointment-agent",
+    });
+    expect(createCloudSpanProcessor).toHaveBeenCalledOnce();
+    expect(cloudSpans.map((span) => span.name)).toEqual([
+      "shared-existing",
+    ]);
+    expect(exported).toHaveBeenCalledOnce();
+
+    await provider.shutdown();
   });
 
   it("detects a real provider behind OpenTelemetry's global proxy", async () => {

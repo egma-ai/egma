@@ -103,7 +103,7 @@ export function LiveKitMonitoringInstructions({
       </div>
 
       <Tabs defaultValue="python">
-        <TabsList aria-label="Worker language" variant="line">
+        <TabsList aria-label="Worker language">
           <TabsTrigger value="python">Python</TabsTrigger>
           <TabsTrigger value="javascript">JavaScript</TabsTrigger>
         </TabsList>

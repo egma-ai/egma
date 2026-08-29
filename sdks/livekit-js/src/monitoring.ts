@@ -27,9 +27,9 @@ type MonitoringState = {
   readonly endpoint: string;
   readonly apiKeyDigest: Buffer;
   readonly roomName: string;
-  readonly provider: NodeTracerProvider;
+  readonly provider: TracerProvider;
   readonly processor: BatchSpanProcessor;
-  readonly liveKitFanout: telemetry.FanoutSpanProcessor;
+  readonly registerSpanProcessor: (processor: SpanProcessor) => void;
 };
 
 let state: MonitoringState | undefined;
@@ -40,6 +40,19 @@ export type MonitorLiveKitOptions = {
   readonly endpoint?: string;
   /** Egma project API key. Defaults to `EGMA_API_KEY`. */
   readonly apiKey?: string;
+  /**
+   * The mutable seam for a tracer provider that another integration already
+   * installed. OpenTelemetry JS 2.x cannot add processors to a provider after
+   * construction, so the provider must have been built around a fan-out
+   * processor and this callback must add to that exact fan-out.
+   */
+  readonly existingTelemetry?: ExistingTelemetry;
+};
+
+export type ExistingTelemetry = {
+  readonly provider: TracerProvider;
+  readonly registerSpanProcessor: (processor: SpanProcessor) => void;
+  readonly createCloudSpanProcessor?: telemetry.SetTracerProviderOptions["createCloudSpanProcessor"];
 };
 
 /**
@@ -73,6 +86,7 @@ export function monitorLiveKit(
       apiKeyDigest,
       roomName,
       jobAgentName(ctx),
+      options.existingTelemetry,
     );
   } else if (
     state.endpoint !== endpoint ||
@@ -84,6 +98,13 @@ export function monitorLiveKit(
   } else if (state.roomName !== roomName) {
     throw new Error(
       "LiveKit monitoring is already configured for a different job in this process. Restart the worker so each LiveKit job keeps its own trace metadata.",
+    );
+  } else if (
+    options.existingTelemetry !== undefined &&
+    state.provider !== options.existingTelemetry.provider
+  ) {
+    throw new Error(
+      "LiveKit monitoring is already configured with a different OpenTelemetry tracer provider in this process. Restart the worker after changing tracing setup.",
     );
   }
 
@@ -175,10 +196,12 @@ function configureMonitoring(
   apiKeyDigest: Buffer,
   roomName: string,
   agentName: string,
+  suppliedTelemetry: ExistingTelemetry | undefined,
 ): MonitoringState {
-  refuseExistingProvider(
+  const existingTelemetry = compatibleExistingTelemetry(
     telemetry.tracer.getProvider(),
     trace.getTracerProvider(),
+    suppliedTelemetry,
   );
 
   let processor: BatchSpanProcessor | undefined;
@@ -188,15 +211,25 @@ function configureMonitoring(
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     processor = new BatchSpanProcessor(exporter);
-    const liveKitFanout = new telemetry.FanoutSpanProcessor();
-    const provider = new NodeTracerProvider({
-      resource: defaultResource().merge(
-        resourceFromAttributes({ [ATTR_SERVICE_NAME]: "livekit-agents" }),
-      ),
-      spanProcessors: [processor, liveKitFanout],
-    });
+    const ownedFanout = new telemetry.FanoutSpanProcessor();
+    let provider: TracerProvider;
+    let registerSpanProcessor: (added: SpanProcessor) => void;
 
-    provider.register();
+    if (existingTelemetry === undefined) {
+      const ownedProvider = new NodeTracerProvider({
+        resource: defaultResource().merge(
+          resourceFromAttributes({ [ATTR_SERVICE_NAME]: "livekit-agents" }),
+        ),
+        spanProcessors: [processor, ownedFanout],
+      });
+      ownedProvider.register();
+      provider = ownedProvider;
+      registerSpanProcessor = (added) => ownedFanout.add(added);
+    } else {
+      provider = existingTelemetry.provider;
+      registerSpanProcessor = existingTelemetry.registerSpanProcessor;
+      registerSpanProcessor(processor);
+    }
     telemetry.setTracerProvider(provider, {
       metadata: {
         "session.id": roomName,
@@ -204,9 +237,13 @@ function configureMonitoring(
           ? {}
           : { [telemetry.traceTypes.ATTR_AGENT_NAME]: agentName }),
       },
-      registerSpanProcessor: (added: SpanProcessor) => {
-        liveKitFanout.add(added);
-      },
+      registerSpanProcessor,
+      ...(existingTelemetry?.createCloudSpanProcessor === undefined
+        ? {}
+        : {
+            createCloudSpanProcessor:
+              existingTelemetry.createCloudSpanProcessor,
+          }),
     });
 
     return {
@@ -215,7 +252,7 @@ function configureMonitoring(
       roomName,
       provider,
       processor,
-      liveKitFanout,
+      registerSpanProcessor,
     };
   } catch {
     void processor?.shutdown().catch(() => undefined);
@@ -225,27 +262,42 @@ function configureMonitoring(
   }
 }
 
-function refuseExistingProvider(
+function compatibleExistingTelemetry(
   liveKitProvider: TracerProvider,
   globalProvider: TracerProvider,
-): void {
-  if (
-    isUnconfiguredProxyProvider(liveKitProvider) &&
-    isUnconfiguredProxyProvider(globalProvider)
-  ) {
-    return;
-  }
+  supplied: ExistingTelemetry | undefined,
+): ExistingTelemetry | undefined {
+  const configured = [liveKitProvider, globalProvider]
+    .map(configuredProvider)
+    .filter((provider): provider is TracerProvider => provider !== undefined);
+  const distinct = [...new Set(configured)];
 
-  throw new Error(
-    "LiveKit monitoring found an existing OpenTelemetry tracer provider that it cannot safely extend. Call monitorLiveKit before custom tracing setup so Egma and LiveKit Cloud can share one provider.",
+  if (distinct.length === 0) {
+    if (supplied === undefined) return undefined;
+    throw incompatibleProvider();
+  }
+  if (
+    distinct.length > 1 ||
+    supplied === undefined ||
+    distinct[0] !== supplied.provider
+  ) {
+    throw incompatibleProvider();
+  }
+  return supplied;
+}
+
+function incompatibleProvider(): Error {
+  return new Error(
+    "LiveKit monitoring found an existing OpenTelemetry tracer provider that it cannot safely extend. Pass existingTelemetry with that provider and its span-processor registrar, or call monitorLiveKit before custom tracing setup.",
   );
 }
 
-function isUnconfiguredProxyProvider(provider: TracerProvider): boolean {
-  return (
-    provider instanceof ProxyTracerProvider &&
-    provider.getDelegate() === UNCONFIGURED_TRACER_PROVIDER
-  );
+function configuredProvider(
+  provider: TracerProvider,
+): TracerProvider | undefined {
+  if (!(provider instanceof ProxyTracerProvider)) return provider;
+  const delegate = provider.getDelegate();
+  return delegate === UNCONFIGURED_TRACER_PROVIDER ? undefined : delegate;
 }
 
 function registerShutdownFlush(

@@ -12,7 +12,7 @@ Python's `mockable` entry for simulation tools. See
 [Current testing boundary](#current-testing-boundary).
 
 <Warning>
-  `@egma/livekit` is released to npm separately from the repository source.
+  Egma releases `@egma/livekit` to npm separately from the repository source.
   Before setup, run `npm view @egma/livekit version` and confirm that it prints
   `0.1.0` or newer. If npm returns `E404`, the package release is not complete
   and the install below will not work.
@@ -78,11 +78,35 @@ monitorLiveKit(ctx, {
 });
 ```
 
+If your process already exports OpenTelemetry spans, build that provider around
+LiveKit's mutable fan-out and pass the same provider and registrar to Egma:
+
+```typescript
+import { telemetry } from "@livekit/agents";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+
+const fanout = new telemetry.FanoutSpanProcessor();
+const provider = new NodeTracerProvider({
+  spanProcessors: [yourExistingProcessor, fanout],
+});
+provider.register();
+
+monitorLiveKit(ctx, {
+  existingTelemetry: {
+    provider,
+    registerSpanProcessor: (processor) => fanout.add(processor),
+  },
+});
+```
+
+OpenTelemetry JS 2.x cannot add a processor to an already-built provider. The
+registrar must add to the fan-out inside the exact provider you pass.
+
 The helper adds an OTLP/HTTP protobuf batch exporter and flushes its last batch
 when the job stops. It also leaves a fan-out point for LiveKit Cloud
-observability. If another integration installed an OpenTelemetry provider
-first, the helper stops with a safe setup error instead of replacing it. Call
-`monitorLiveKit` before other custom tracing setup.
+observability. It keeps compatible telemetry through `existingTelemetry`. If
+another integration installed a provider without that mutable seam, the helper
+stops with a safe setup error instead of replacing it.
 
 After you deploy the code and secrets, the first production conversation
 appears under **Monitoring** when the worker sends its spans. Egma cannot see a

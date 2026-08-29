@@ -26,6 +26,9 @@ describe("LiveKit monitoring instructions", () => {
     expect(
       screen.getByRole("tab", { name: "Python" }).getAttribute("aria-selected"),
     ).toBe("true");
+    expect(screen.getByRole("tablist").getAttribute("data-variant")).toBe(
+      "default",
+    );
 
     const copy = container.textContent ?? "";
     expect(copy).toContain("pip install 'egma>=0.2.0'");

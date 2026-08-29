@@ -54,10 +54,36 @@ monitorLiveKit(ctx, {
 });
 ```
 
+If your process already has OpenTelemetry export, build that provider around
+LiveKit's mutable fan-out and pass the same provider and registrar to Egma:
+
+```typescript
+import { telemetry } from "@livekit/agents";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+
+const fanout = new telemetry.FanoutSpanProcessor();
+const provider = new NodeTracerProvider({
+  spanProcessors: [yourExistingProcessor, fanout],
+});
+provider.register();
+
+monitorLiveKit(ctx, {
+  existingTelemetry: {
+    provider,
+    registerSpanProcessor: (processor) => fanout.add(processor),
+  },
+});
+```
+
+OpenTelemetry JS 2.x cannot add a processor to an already-built provider. The
+registrar is therefore part of the compatibility contract: it must add to the
+fan-out inside the exact provider you pass.
+
 The helper sends OTLP/HTTP protobuf batches to `/v1/traces` and flushes its
 last batch when the LiveKit job stops. It creates the shared tracer provider
 before the session starts and leaves a fan-out point for LiveKit Cloud
-observability. If another integration already installed a provider, it stops
+observability. It keeps compatible telemetry through `existingTelemetry`. If
+another integration installed a provider without that mutable seam, it stops
 with a safe setup error instead of replacing that provider.
 
 Rooms whose names start with `egma-sim-` are simulations. Their traces stay on
