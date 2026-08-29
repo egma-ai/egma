@@ -97,9 +97,23 @@ type Rejection = {
 };
 
 const EXPECTED_REJECTION: Record<string, Rejection> = {
+  // A version reference is the platform's own, and it is passed on
+  // untouched. One made of spaces is present by the letter and absent by
+  // the reading, and it would ask a platform for a version named "   ".
+  "spec/agent-version-blank.json": {
+    at: "/agent_version",
+    keyword: "pattern",
+  },
   "spec/chat-carrying-speech-key.json": {
     at: "/models/stt",
     keyword: "not",
+  },
+  // A rendered variable is a string. A number here would reach a platform
+  // as whichever spelling of it the sender's JSON writer happened to pick,
+  // so the wire refuses it rather than choosing one.
+  "spec/dynamic-variable-not-a-string.json": {
+    at: "/dynamic_variables/open_slots",
+    keyword: "type",
   },
   "spec/limits-missing.json": {
     at: "",
@@ -291,6 +305,62 @@ describe("the two schemas, as one contract", () => {
         }),
       );
     }
+  });
+
+  it("carries a named agent version and this simulation's variables, or neither", async () => {
+    // Both are optional and independent: a lane that conducts over a named
+    // version may carry no variables, and one that carries variables may
+    // take the platform's own default version. Absent is the ordinary case,
+    // and every other valid fixture is a spec without them.
+    const carried = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-retell-web-call.json",
+    );
+    expect(carried.agent_version).toBe(106);
+    expect(carried.dynamic_variables).toMatchObject({
+      egma_simulation: carried.simulation_id as string,
+    });
+
+    for (const dropped of [
+      [],
+      ["agent_version"],
+      ["dynamic_variables"],
+      ["agent_version", "dynamic_variables"],
+    ] as const) {
+      const spec = structuredClone(carried);
+      for (const name of dropped) delete spec[name];
+      expect(
+        validators.spec(spec),
+        `without ${dropped.join(" and ") || "nothing"}: ${ajv.errorsText(
+          validators.spec.errors,
+        )}`,
+      ).toBe(true);
+    }
+
+    // A version is whatever the platform calls its versions, and the two
+    // lanes that ride this field name them differently: a mocked run names
+    // the draft it branched by number, and a run over a moving reference
+    // names it in words. Neither is reinterpreted on the way through.
+    for (const version of [0, 106, "latest", "prod"]) {
+      const spec = structuredClone(carried);
+      spec.agent_version = version;
+      expect(
+        validators.spec(spec),
+        `${JSON.stringify(version)}: ${ajv.errorsText(validators.spec.errors)}`,
+      ).toBe(true);
+    }
+
+    // A variable set to nothing is not the same as a variable nobody set:
+    // an empty value renders empty rather than falling back to a default,
+    // so the wire has to be able to say it.
+    const emptied = structuredClone(carried);
+    emptied.dynamic_variables = { egma_simulation: "sim_1", caller_name: "" };
+    expect(
+      validators.spec(emptied),
+      ajv.errorsText(validators.spec.errors),
+    ).toBe(true);
   });
 
   it("keeps catalog membership out of the wire contract", async () => {

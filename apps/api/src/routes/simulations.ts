@@ -7,6 +7,7 @@ import {
   getRun,
   getSimulation,
   getSimulationExecutionEvidence,
+  mockToolCoverageRow,
   NotPermittedError,
   readTrace,
   readTraceGrading,
@@ -100,12 +101,7 @@ function describedTranscript(
 function describedMockToolCoverage(
   coverage: MockToolCoverage | null,
 ): Record<string, unknown> | null {
-  if (coverage === null) return null;
-  return {
-    discovered: [...coverage.discovered],
-    covered: [...coverage.covered],
-    uncovered: [...coverage.uncovered],
-  };
+  return coverage === null ? null : mockToolCoverageRow(coverage);
 }
 
 /** The exact grader selection frozen for this simulation's test. */
@@ -242,6 +238,9 @@ export async function simulationRoutes(
         startedAt: simulation.startedAt?.toISOString() ?? null,
         endedAt: simulation.endedAt?.toISOString() ?? null,
         providerReference: simulation.providerReference,
+        // What this one conversation was conducted against, off its own row.
+        // A result is read here, so it answers here — never by fetching the
+        // run to find out.
         hasRecording: simulation.recordingReference !== null,
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript

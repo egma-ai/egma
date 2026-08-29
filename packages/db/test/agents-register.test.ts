@@ -51,14 +51,17 @@ function registration(overrides: {
   readonly modality?: "chat" | "voice";
   readonly retellAgentId?: string;
   readonly apiKey?: string;
+  /** Which Retell vendor-id door this registration takes, chat API by default. */
+  readonly lane?: "retell_chat_api" | "retell_text_mode" | "retell_web_call";
 }): NewAgent {
+  const lane = overrides.lane ?? "retell_chat_api";
   return {
     name: overrides.name ?? "Front desk",
     agentPlatform: "retell",
     connection: {
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      connectionType: lane,
+      accessVariant: `${lane}.api_key`,
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -147,6 +150,147 @@ describe("two identical registrations arriving together", () => {
     const { rows } = await database.sql<{ count: string }>(
       "select count(*) as count from agent where project_id = $1 and name = $2",
       [acme.project, "Racing"],
+    );
+    expect(rows[0]?.count).toBe("1");
+  });
+
+  it("settle to one for the text-mode lane too, since it carries the reuse key", async () => {
+    // Text mode shares the reuse key the chat API carries — the vendor
+    // agent id — so the same advisory lock and committed read behind it settle
+    // a racing text mode registration to one agent, not a twin.
+    const racing = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        registerAgent(
+          actingIn(acme.project),
+          registration({
+            name: "Racing text mode",
+            lane: "retell_text_mode",
+            retellAgentId: "agent_text_mode_race",
+          }),
+        ),
+      ),
+    );
+
+    expect(new Set(racing.map((one) => one.agent.id)).size).toBe(1);
+    expect(new Set(racing.map((one) => one.connection?.id)).size).toBe(1);
+    const results = racing.map((one) => one.result);
+    expect(results.filter((one) => one === "created")).toHaveLength(1);
+    expect(results.filter((one) => one === "reused")).toHaveLength(3);
+
+    // One agent, and the one connection is text mode.
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from agent where project_id = $1 and name = $2",
+      [acme.project, "Racing text mode"],
+    );
+    expect(rows[0]?.count).toBe("1");
+    const connections = await listConnections(
+      actingIn(acme.project),
+      racing[0]!.agent.id,
+    );
+    expect(connections).toBeDefined();
+    expect((connections ?? []).map((one) => one.connectionType)).toEqual([
+      "retell_text_mode",
+    ]);
+  });
+});
+
+describe("the same Retell agent through two doors of its reuse family", () => {
+  /**
+   * One Retell agent's text mode (chat) and its web call (voice) both key on
+   * the vendor agent id, so registering the second lands on the first's Egma
+   * agent — a connection added, never a twin — whichever order they arrive in.
+   * This is the whole of one-agent-two-connections on the **web's fresh connect
+   * flow**, which submits a plain registration with no name-clash fallback of
+   * its own and so relies entirely on the server settling it here.
+   */
+  async function twoDoors(
+    label: string,
+    vendor: string,
+    firstLane: "retell_text_mode" | "retell_web_call",
+    secondLane: "retell_text_mode" | "retell_web_call",
+  ): Promise<void> {
+    const modalityOf = (lane: string) =>
+      lane === "retell_web_call" ? ("voice" as const) : ("chat" as const);
+
+    const first = await registerAgent(
+      actingIn(acme.project),
+      registration({
+        name: label,
+        lane: firstLane,
+        modality: modalityOf(firstLane),
+        retellAgentId: vendor,
+      }),
+    );
+    const second = await registerAgent(
+      actingIn(acme.project),
+      registration({
+        name: label,
+        lane: secondLane,
+        modality: modalityOf(secondLane),
+        retellAgentId: vendor,
+      }),
+    );
+
+    expect(first.result).toBe("created");
+    // The second door is added to the first door's agent, not a new one.
+    expect(second.result).toBe("connection_added");
+    expect(second.agent.id).toBe(first.agent.id);
+
+    const connections = await listConnections(actingIn(acme.project), first.agent.id);
+    expect(connections).toBeDefined();
+    expect((connections ?? []).map((one) => one.connectionType).sort()).toEqual(
+      [firstLane, secondLane].sort(),
+    );
+
+    // Exactly one Egma agent carries this label; there is no twin.
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from agent where project_id = $1 and name = $2",
+      [acme.project, label],
+    );
+    expect(rows[0]?.count).toBe("1");
+  }
+
+  it("attaches the web call after text mode, on one agent", async () => {
+    await twoDoors("Two doors A", "vendor_two_doors_a", "retell_text_mode", "retell_web_call");
+  });
+
+  it("attaches text mode after the web call, on one agent", async () => {
+    await twoDoors("Two doors B", "vendor_two_doors_b", "retell_web_call", "retell_text_mode");
+  });
+
+  it("settles a race across two doors of one agent to a single agent", async () => {
+    // The lock is on the vendor agent under its reuse key, not on the door, so
+    // text mode and a web call for one agent racing on different doors still
+    // wait behind one lock and settle to one agent — one created, one added.
+    const vendor = "vendor_two_doors_race";
+    const racing = await Promise.all([
+      registerAgent(
+        actingIn(acme.project),
+        registration({
+          name: "Two doors race",
+          lane: "retell_text_mode",
+          modality: "chat",
+          retellAgentId: vendor,
+        }),
+      ),
+      registerAgent(
+        actingIn(acme.project),
+        registration({
+          name: "Two doors race",
+          lane: "retell_web_call",
+          modality: "voice",
+          retellAgentId: vendor,
+        }),
+      ),
+    ]);
+
+    expect(new Set(racing.map((one) => one.agent.id)).size).toBe(1);
+    const results = racing.map((one) => one.result).sort();
+    expect(results).toEqual(["connection_added", "created"]);
+
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from agent where project_id = $1 and name = $2",
+      [acme.project, "Two doors race"],
     );
     expect(rows[0]?.count).toBe("1");
   });

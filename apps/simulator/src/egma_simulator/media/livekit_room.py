@@ -30,10 +30,10 @@ verbs every media driver has (see :mod:`egma_simulator.media`):
    Deleting is what ends everything the room held, including a dispatched
    worker.
 
-## The two ways in
+## The three ways in
 
-Step 1 is where the connection's two shapes differ, and they differ over
-one question: who mints the token that opens the room.
+Step 1 is where the connection's shapes differ, and they differ over one
+question: who mints the token that opens the room.
 
 - **egma mints it.** The connection carries the project's ``apiKey`` and
   ``apiSecret``. egma creates a fresh ``egma-sim-``-prefixed room, signs a
@@ -46,11 +46,18 @@ one question: who mints the token that opens the room.
   it cannot dispatch — that is the endpoint's job, and the reason a room
   nobody joined gives says so — and it cannot delete, so it leaves the
   room for the customer's own empty timeout to close.
+- **A platform minted it, opening the room itself.** The caller was handed
+  a ``given_token`` and the platform's own server URL — what a call created
+  through somebody's API comes back as — so egma asks nobody for anything:
+  it joins, and the token is spent on that one join. Getting the agent in
+  was the platform's own doing when it opened the room, and deleting is
+  beyond a token that only opens one; egma leaves and the platform closes
+  what it made.
 
-Above :class:`WayIn` the two are one code path. Everything after "a token
-and a room name exist" — joining, waiting, conducting, leaving — is the
-same code either way, which is what keeps the second shape from being a
-second driver.
+Above :class:`WayIn` the three are one code path. Everything after "a
+token and a room name exist" — joining, waiting, conducting, leaving — is
+the same code whichever it was, which is what keeps a second shape from
+being a second driver.
 
 Two deliberate differences from the driver that places a phone call:
 
@@ -203,6 +210,19 @@ endpoint is what puts it there.
 """
 
 ENDPOINT_CREDENTIAL_KEYS = frozenset({"headers"})
+PLATFORM_NAMED_ROOM = "the room the platform opened"
+"""What egma calls a room it did not name.
+
+The given-token shape joins a room somebody else made, and its real name
+belongs to them: egma is handed a way in and never told what the room is
+called. So this is a description and deliberately not an identifier —
+Pipecat prints the room name into every connect and disconnect line, and a
+name invented here would read like a room that could be looked up, in
+telemetry where no such room exists. What joins the two sides on this
+shape is the platform's own id for the exchange, which the plug carries as
+the provider reference.
+"""
+
 ENDPOINT_SCHEME = "https://"
 
 TOKEN_ALIASES = ("token", "participantToken", "accessToken")
@@ -426,13 +446,16 @@ def unreachable_refusal(what_failed: str, url: str, told: str) -> MediaBackendEr
 
 @dataclass(frozen=True)
 class RoomSettings:
-    """One LiveKit room's coordinates, as a connection block spells them.
+    """One LiveKit room's coordinates, however egma came by them.
 
-    Two shapes live in here, and which one a connection is in is decided
-    by one config key: a ``tokenEndpoint`` means egma asks the customer
-    for its way into the room instead of minting one. The fields the other
-    shape uses are left empty rather than absent, so everything below can
-    ask :attr:`mints_its_own` once and read the rest plainly.
+    Three shapes live in here, and they are three answers to one question:
+    who minted the token that opens the room. Egma mints it from the
+    project's key pair; or a ``tokenEndpoint`` means egma asks the customer
+    for one; or a ``given_token`` means egma was handed one already — by a
+    platform that opened the room itself, which is what a call created
+    through somebody's API comes back as. The fields the other shapes use
+    are left empty rather than absent, so everything below can ask
+    :attr:`mints_its_own` once and read the rest plainly.
     """
 
     url: str
@@ -471,15 +494,24 @@ class RoomSettings:
     )
     """What egma sends to authenticate itself to that endpoint."""
 
+    given_token: str = field(default="", repr=False)
+    """A way into a room that somebody else already opened.
+
+    Empty on both shapes that come by their own. Where it is set, the room
+    exists before egma knows about it, ``url`` is the platform's own server
+    rather than the customer's, and the token opens that one room for one
+    join — so it is registered as the secret it is.
+    """
+
     @property
     def mints_its_own(self) -> bool:
         """Whether egma holds the key pair that signs its own tokens.
 
-        The whole difference between the two shapes, asked once. Where it
-        is false egma has a token and nothing else: no room to create, no
+        The whole difference between the shapes, asked once. Where it is
+        false egma has a token and nothing else: no room to create, no
         worker to dispatch, and no room to delete when it is over.
         """
-        return not self.token_endpoint
+        return not (self.token_endpoint or self.given_token)
 
     @property
     def secrets(self) -> tuple[str, ...]:
@@ -492,7 +524,11 @@ class RoomSettings:
         """
         return tuple(
             held
-            for held in (self.api_secret, *self.endpoint_headers.values())
+            for held in (
+                self.api_secret,
+                self.given_token,
+                *self.endpoint_headers.values(),
+            )
             if held
         )
 
@@ -781,9 +817,14 @@ class RoomLifecycle:
         # modality mark the customer's worker reads. A room egma asks for
         # a token into is named after the simulation, because the endpoint
         # being asked has to be able to check the name against its own
-        # rules.
+        # rules. A room a platform opened is **not named here at all**: it
+        # has a name already, egma is never told it, and inventing one
+        # would put a string in every log line that exists in nobody's
+        # telemetry.
         self._room_name = (
-            self._fresh_room_name()
+            PLATFORM_NAMED_ROOM
+            if settings.given_token
+            else self._fresh_room_name()
             if settings.mints_its_own
             else room_name_for(simulation_id)
         )
@@ -795,8 +836,11 @@ class RoomLifecycle:
     @property
     def room_name(self) -> str:
         """The room this exchange is conducted in — one room, one
-        simulation, and what the report carries as the provider
-        reference."""
+        simulation, and what the report carries as the provider reference
+        on the two shapes where egma named it. On the shape where a
+        platform did, this is :data:`PLATFORM_NAMED_ROOM`: a description
+        rather than a name, and the provider reference is the platform's
+        own id for the exchange instead."""
         return self._room_name
 
     def _fresh_room_name(self) -> str:
@@ -865,10 +909,16 @@ class RoomLifecycle:
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.
 
-        Either egma makes the room and signs its own token for it, or it
-        asks the customer's endpoint for one — and everything after this
-        is the same either way.
+        Egma makes the room and signs its own token for it, or asks the
+        customer's endpoint for one, or was handed one for a room a
+        platform opened itself — and everything after this is the same
+        whichever it was.
         """
+        if self._settings.given_token:
+            # Nothing is reached for here: the room is already open and the
+            # way in was part of whatever opened it. One token, one join —
+            # these are spent on use, so there is no second one to ask for.
+            return WayIn(url=self._settings.url, token=self._settings.given_token)
         if not self._settings.mints_its_own:
             return await self._token_from_endpoint()
 
@@ -895,10 +945,11 @@ class RoomLifecycle:
         graded, and the customer's configured metadata would have no
         dispatch to ride.
 
-        A connection that asks an endpoint for its tokens asks for nothing
-        here at all. Dispatching takes the key pair egma deliberately was
-        not given, so putting a worker in the room is the endpoint's job
-        and egma's part is to be in the room when it arrives.
+        A connection that did not mint its own token asks for nothing here
+        at all. Dispatching takes the key pair egma deliberately was not
+        given, so putting a worker in the room is somebody else's job —
+        the token endpoint's, or the platform's that opened the room — and
+        egma's part is to be in the room when it arrives.
 
         On two of the three ways in the agent may have arrived already,
         so the room is asked who is in it before anybody starts waiting
@@ -929,15 +980,16 @@ class RoomLifecycle:
         above. A room left running would go on costing the customer, and
         the one call that could have stopped it is this one.
 
-        Two paths skip it. One is where no room was ever asked for,
-        because a delete for a room nobody made could only fail. The other
-        is the connection that asks an endpoint for its tokens: a token
-        minted to join one room carries no power to delete it, so egma
-        leaves and the room stands empty. What closes it then is the
+        Every path where no room was ever asked for skips it, because a
+        delete for a room nobody made could only fail — which is both
+        shapes that were handed their token. A token minted to join one
+        room carries no power to delete it, so egma leaves and the room
+        stands empty. What closes it then is whoever opened it: the
         customer's own empty timeout on the room — which is why the
-        hardening recipe asks for a short one on ``egma-sim-`` rooms.
-        Trying the delete anyway would spend a request to be refused and
-        put a line in the log about a failure that was never a failure.
+        hardening recipe asks for a short one on ``egma-sim-`` rooms — or
+        the platform that made the room for its own call. Trying the
+        delete anyway would spend a request to be refused and put a line
+        in the log about a failure that was never a failure.
         """
         room, self._room = self._room, None
         try:
@@ -1200,6 +1252,15 @@ class RoomLifecycle:
 
     def _nobody_came(self, seconds: float) -> str:
         """Why nobody turned up, worded for whoever has to go and look."""
+        if self._settings.given_token:
+            # The room and whoever was meant to be in it both belong to the
+            # platform that opened it. Egma joined and waited; that is the
+            # whole of what this driver can honestly say happened.
+            return (
+                f"no agent joined the room within {seconds:.0f}s — the "
+                f"platform opened it, handed Egma the way in, and never put "
+                f"an agent in it"
+            )
         if not self._settings.mints_its_own:
             # Whose job it was, said plainly. egma asked for a token and
             # joined with it; it holds no key pair, so it could not have

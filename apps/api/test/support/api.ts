@@ -110,6 +110,11 @@ export type TestApiOptions = {
   readonly orphanSweepIntervalMilliseconds?: number;
   /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
   readonly retellReach?: ServerOptions["retellReach"];
+  /**
+   * How the mock endpoint waits out a declared delay. A test hands in one that
+   * records what it was asked to wait, rather than waiting out real seconds.
+   */
+  readonly mockToolWait?: ServerOptions["mockToolWait"];
   /** The origin the API believes it is reached at, so registration can be seen. */
   readonly baseUrl?: string;
   /**
@@ -303,6 +308,9 @@ export async function createApi(
     ...(options.retellReach === undefined
       ? {}
       : { retellReach: options.retellReach }),
+    ...(options.mockToolWait === undefined
+      ? {}
+      : { mockToolWait: options.mockToolWait }),
     // Retell production ingestion is not needed in a route test. Its focused
     // tests drive one ingestion turn directly and choose when that turn runs.
     retellProductionIngestionIntervalMilliseconds: 60 * 60_000,

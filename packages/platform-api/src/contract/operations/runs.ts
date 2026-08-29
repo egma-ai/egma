@@ -63,6 +63,17 @@ export const mockToolSchema = {
   additionalProperties: false,
 } as const;
 
+/**
+ * How isolated one simulation was, in three lists: what the agent has, what
+ * Egma answered for, and what reached its real implementation.
+ *
+ * **Written by the LiveKit in-room seam and by nothing else.** There the agent
+ * declares its tools per conversation, so two simulations of one run can
+ * honestly differ and the stamp belongs at the simulation. The Retell lanes
+ * decide what they answer for once per run and mark each answered call on the
+ * transcript, so they leave it absent — which is the report saying nobody was
+ * ever asked, a different sentence from three empty lists.
+ */
 export const mockToolCoverageSchema = {
   type: "object",
   properties: {
@@ -71,6 +82,46 @@ export const mockToolCoverageSchema = {
     uncovered: arrayOf(stringSchema),
   },
   required: ["discovered", "covered", "uncovered"],
+  additionalProperties: false,
+} as const;
+
+/**
+ * The put-it-back note a mocked run leaves behind, as a reader sees it.
+ *
+ * It is on the run's header because it is a fact about the whole run: one
+ * temporary copy, one set of touched numbers, one engine the tools were read
+ * from. Each number's entry says where its binding pointed before Egma touched
+ * it and what Egma pinned it to — so a reader can see exactly what Egma
+ * promised to restore, and a sweep after a crash has the two values it needs to
+ * decide whether restoring is still the right thing to do.
+ */
+export const mockMetadataSchema = {
+  type: "object",
+  properties: {
+    engine: {
+      type: "object",
+      properties: {
+        type: stringSchema,
+        engineId: stringSchema,
+        version: nullable(integerSchema),
+      },
+      required: ["type", "engineId", "version"],
+      additionalProperties: false,
+    },
+    numbers: arrayOf({
+      type: "object",
+      properties: {
+        number: stringSchema,
+        was: {
+          oneOf: [stringSchema, integerSchema, { type: "null" }],
+        },
+        pinnedTo: integerSchema,
+      },
+      required: ["number", "was", "pinnedTo"],
+      additionalProperties: false,
+    }),
+  },
+  required: ["engine", "numbers"],
   additionalProperties: false,
 } as const;
 
@@ -140,6 +191,8 @@ const runHeaderSchema = {
     modality: modalitySchema,
     productLabel: stringSchema,
     environment: nullable(stringSchema),
+    agentVersion: nullable(integerSchema),
+    mockToolsEnabled: booleanSchema,
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -169,6 +222,8 @@ const runHeaderSchema = {
     "modality",
     "productLabel",
     "environment",
+    "agentVersion",
+    "mockToolsEnabled",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -185,10 +240,22 @@ const runHeaderSchema = {
   additionalProperties: false,
 } as const;
 
+/**
+ * One run asked for by name, which is where the temporary platform world is
+ * answered.
+ *
+ * It is on the detail read and on no list, deliberately: the world carries every
+ * touched number's inbound routing verbatim, and repeating all of it once per
+ * row of a two-hundred-run page would put somebody's telephone routing in front
+ * of a reader who asked for a list of runs.
+ */
 const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
+    tempMockAgentVersion: nullable(integerSchema),
+    tempMockAgentVersionCleanup: nullable(booleanSchema),
+    mockMetadata: nullable(mockMetadataSchema),
     connectionSnapshot: connectionSnapshotSchema,
     agent: nullable(identitySchema),
     connection: nullable({
@@ -202,6 +269,9 @@ const runDetailSchema = {
   },
   required: [
     ...runHeaderSchema.required,
+    "tempMockAgentVersion",
+    "tempMockAgentVersionCleanup",
+    "mockMetadata",
     "connectionSnapshot",
     "agent",
     "connection",
@@ -350,6 +420,11 @@ export const runOperations = {
     responses: {
       201: { description: "The bounded header for the new run.", schema: runHeaderSchema },
       ...commonWriteRefusals,
+      // A run over a lane that pins a version reads the agent's own platform
+      // before anything is written. A platform that would not answer is not
+      // the caller's mistake and is not fixed by changing the request — it is
+      // fixed by asking again — so it takes its own code and its own status.
+      503: refusalResponse,
     },
   }),
 

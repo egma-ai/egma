@@ -57,7 +57,7 @@ Running `npx @egma/cli` with no arguments opens the full interactive wizard. It 
     A start Egma cannot make is explained in plain words — what happened and what to do — and the walk exits with a nonzero code.
   </Step>
   <Step title="Connect your agent">
-    For Retell, Egma asks for your API key and lists the agents it can read. A chat agent uses the Retell Chat API. A voice agent uses one of its public phone numbers. For LiveKit, project credentials are the recommended room setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma uses credentials for discovery and sends them to the platform only when the selected connection needs sealed storage. Pipecat and Vapi setup are not supported yet.
+    For Retell, Egma asks for your API key, lists the voice agents it can read, and asks how it should test the one you choose: in text, over a web call it places, or down one of the agent's public phone numbers. Several lanes can be picked at once and land on one Egma agent. For LiveKit, project credentials are the recommended room setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma uses credentials for discovery and sends them to the platform only when the selected connection needs sealed storage. Pipecat and Vapi setup are not supported yet.
   </Step>
   <Step title="Generate a test suite">
     The wizard creates a real suite on Egma before it writes exactly four tests. It stores
@@ -171,5 +171,5 @@ To avoid repeating the URL, run `egma init --url http://localhost:3101` once. Th
 Pass `--headless` to skip the interactive terminal and receive plain lines instead. Combined with the right environment variables, the full sign-in and connect flow runs without any human in the loop:
 
 ```bash
-EGMA_RETELL_API_KEY=your_key EGMA_REACH=text npx @egma/cli --headless
+EGMA_RETELL_API_KEY=your_key EGMA_LANES=text npx @egma/cli --headless
 ```

@@ -80,6 +80,34 @@ export {
   type SnapshotDefault,
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
+/**
+ * The coverage stamp's serialization and the put-it-back note a mocked run
+ * leaves behind. Both are pure: they read and write no store.
+ */
+export {
+  mockToolCoverageFrom,
+  mockToolCoverageRow,
+  NO_MOCK_TOOL_COVERAGE,
+} from "./mock-tools/coverage.ts";
+export {
+  mockMetadataFrom,
+  mockMetadataRow,
+  type MockEngineNote,
+  type MockMetadata,
+  type MockNumberNote,
+} from "./mock-tools/record.ts";
+/**
+ * Which connection lanes branch a temporary copy when they are mocked. The
+ * gate beside them is not exported: it is a condition inside the claim, and
+ * nothing outside this package has a query to put it in.
+ */
+export {
+  connectionTypeBranchesMockDraft,
+  connectionTypeCarriesMockSwitch,
+  DRAFT_MOCK_CONNECTION_TYPES,
+  MOCK_SWITCHED_CONNECTION_TYPES,
+  type DraftMockConnectionType,
+} from "./mock-tools/lanes.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,
@@ -122,6 +150,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
+  connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   credentialRuleOf,

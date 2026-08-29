@@ -53,6 +53,8 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 /** The direct paths Egma's simulator can select to reach an agent. */
 export const CONNECTION_TYPES = [
   "retell_chat_api",
+  "retell_text_mode",
+  "retell_web_call",
   "phone_number",
   "livekit_room",
 ] as const;
@@ -61,6 +63,8 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",
+  "retell_text_mode.api_key",
+  "retell_web_call.api_key",
   "phone_number.public_e164",
   "livekit_room.project_credentials",
   "livekit_room.customer_token_endpoint",
@@ -104,14 +108,27 @@ export const agent = pgTable(
     agentPlatform: text("agent_platform").notNull(),
     platformAgentId: text("platform_agent_id"),
     /**
-     * The platform key egma pulls this agent's production conversations with,
-     * sealed in the same envelope a connection's credentials use and opened
-     * by the same one opener. **A monitoring-only credential**: a customer who
-     * chat-tests and pull-monitors one Retell account pastes the key twice,
-     * once per job, so the two custodies never entangle. Custody is per agent
-     * and duplication across agents of one account is accepted knowingly —
-     * sealing is randomized, so the copies are not even recognizable as the
-     * same key.
+     * The agent's sealed **platform key**, in the same envelope a connection's
+     * credentials use and opened by the same one opener.
+     *
+     * **Its role is wider than its column name.** It was a monitoring-only
+     * credential — the key egma pulls this agent's finished production
+     * conversations with — and it is now also the key that does the platform
+     * writes the mock-tools tick consents to: branching a temporary version at
+     * run start, writing the mocked tools onto it, deleting it at run end, and
+     * pinning and restoring a number's binding around the run. Nothing else
+     * widened: a connection's own key keeps its own job, which is opening the
+     * calls.
+     *
+     * The column keeps its name because renaming a shipped column is an add
+     * and a remove rather than one statement, and the name is not where the
+     * rule lives. The glossary carries the widened role.
+     *
+     * A customer who chat-tests and pull-monitors one Retell account pastes the
+     * key twice, once per job, so the two custodies never entangle. Custody is
+     * per agent and duplication across agents of one account is accepted
+     * knowingly — sealing is randomized, so the copies are not even
+     * recognizable as the same key.
      */
     monitoringApiKey: text("monitoring_api_key"),
     /** The last characters of the key, kept so a person can tell keys apart. */
@@ -229,6 +246,26 @@ export const connection = pgTable(
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
+    /**
+     * The switch: a run over this connection is conducted with Egma's mock
+     * tools in front of the agent's own.
+     *
+     * **On the connection rather than on the agent**, because the lane is what
+     * decides whether a mocked run is a thing Egma can conduct at all. A text
+     * exchange and a web call are conversations Egma creates against a named
+     * agent version, so a temporary version is reachable; a phone call is the
+     * real carrier leg to the customer's published number, and Egma never
+     * dials it for a mocked run. One switch above all three would govern one of
+     * them and quietly misdescribe the other two.
+     *
+     * Off by default and checked: only a `retell_text_mode` or
+     * `retell_web_call` connection may hold true. A text connection is created
+     * with it on — that lane carries its answers on each request and writes
+     * nothing to the customer's account — and a web-call connection turns it on
+     * only through the consent screen, where the platform identity and the
+     * sealed key it needs are checked at write time.
+     */
+    mockToolsEnabled: boolean("mock_tools_enabled").notNull().default(false),
     /** When this connection stopped being reachable for new work, or null. */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -250,6 +287,14 @@ export const connection = pgTable(
     check(
       "connection_credentials_hint_agrees",
       sql`(${table.credentials} is null) = (${table.credentialsHint} is null)`,
+    ),
+    // The switch can only be on where a mocked run is a conversation Egma
+    // creates itself. A ticked phone connection would be a box promising
+    // isolation that no run over it could keep.
+    check(
+      "connection_mock_tools_lanes",
+      sql`${table.mockToolsEnabled} = false
+        or ${table.connectionType} in ('retell_text_mode', 'retell_web_call')`,
     ),
     foreignKey({
       name: "connection_project_organization_fk",

@@ -40,6 +40,11 @@ const SURFACE = [
   "packages/db/src/access/tests.ts",
   "packages/db/src/access/runs.ts",
   "packages/db/src/mock-tools/resolve.ts",
+  "packages/db/src/mock-tools/coverage.ts",
+  "packages/db/src/mock-tools/record.ts",
+  "packages/db/src/mock-tools/lanes.ts",
+  "packages/db/migrations/0002_retell_lanes.sql",
+  "packages/db/migrations/0003_retell_mock_tools.sql",
   "packages/db/src/access/errors.ts",
   "apps/api/src/http/mock-tools.ts",
   "apps/api/src/routes/mock-tools.ts",
@@ -47,6 +52,13 @@ const SURFACE = [
   "apps/api/src/routes/runs.ts",
   "apps/api/src/routes/claims.ts",
   "apps/api/src/routes/reports.ts",
+  // The mocked world's public half, and the two halves of the transform that
+  // builds one on a platform: the endpoint the customer's agent calls, the
+  // engine read that finds the tools, and the swap that points them at egma.
+  // The endpoint is read by whoever debugs a mocked run from the outside.
+  "apps/api/src/routes/mock-endpoint.ts",
+  "packages/retell/src/tools.ts",
+  "packages/retell/src/mock-draft.ts",
   // The other ends of the same surface: the document the control plane hands
   // the simulator, the one the simulator hands back, and the simulator's own
   // side of the exchange that serves what they carry. A word that slipped into

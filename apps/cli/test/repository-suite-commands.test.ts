@@ -146,6 +146,7 @@ describe("complete repository suite commands", () => {
       status: "completed",
       agentId: "agt_one",
       connectionId: "con_one",
+      connectionType: "retell_text_mode",
       productLabel: "Retell",
       modality: "chat",
       expectedSimulationCount: 1,

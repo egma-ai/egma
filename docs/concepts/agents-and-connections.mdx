@@ -19,10 +19,10 @@ Every connection states five separate facts:
 | Fact | Meaning | Example |
 |---|---|---|
 | **Agent platform** | The product or framework the customer uses | Retell or LiveKit |
-| **Connection type** | The path the simulator uses to reach the agent | `retell_chat_api`, `phone_number`, `livekit_room` |
+| **Connection type** | The path the simulator uses to reach the agent | `retell_text_mode`, `retell_web_call`, `phone_number`, `livekit_room` |
 | **Access variant** | How Egma gets access to that path | API key, public E.164 number, project credentials, token endpoint |
 | **Modality** | The conversation form | `chat` or `voice` |
-| **Product label** | Display text derived by Egma | Retell chat, Retell phone, LiveKit token endpoint |
+| **Product label** | Display text derived by Egma | Retell text mode, Retell web call, Retell phone, LiveKit token endpoint |
 
 These facts do different jobs. The connection type selects simulator code. The
 access variant selects the configuration and credential rules inside that
@@ -34,7 +34,8 @@ The supported combinations are:
 
 | Agent platform | Connection type | Access variant | Modality | Product label |
 |---|---|---|---|---|
-| Retell | `retell_chat_api` | `retell_chat_api.api_key` | chat | Retell chat |
+| Retell | `retell_text_mode` | `retell_text_mode.api_key` | chat | Retell text mode |
+| Retell | `retell_web_call` | `retell_web_call.api_key` | voice | Retell web call |
 | Retell | `phone_number` | `phone_number.public_e164` | voice | Retell phone |
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
@@ -62,14 +63,25 @@ with its own access variants and supported modalities.
 
 ## Current connection types
 
-### Retell chat API
+### Retell text mode
 
-`retell_chat_api` uses Retell's Chat API. It is chat-only. The
-`retell_chat_api.api_key` variant stores a sealed Retell API key and the Retell
-chat agent ID.
+`retell_text_mode` runs a chat simulation of a Retell **voice** agent in text.
+No call is placed and nothing is dialled, so a whole suite runs in seconds. The
+`retell_text_mode.api_key` variant stores a sealed Retell API key and the Retell
+agent ID. New text-mode connections arrive with mock tools on: the lane writes
+nothing to your Retell account.
 
-This connection type does not stand for every way to reach a Retell agent. A
-Retell voice agent is reached through a `phone_number` connection today.
+### Retell web call
+
+`retell_web_call` is a voice call Egma places over the internet. The
+`retell_web_call.api_key` variant stores a sealed Retell API key and the Retell
+agent ID. Mock tools stay **off** on a web-call connection until you accept the
+consent screen, because a mocked run writes a temporary version to your Retell
+account.
+
+Egma registers Retell **voice** agents. Each of the three Retell connection
+types is one way of testing the same voice agent, and several of them can sit
+on one Egma agent at once.
 
 ### Phone number
 
@@ -129,7 +141,7 @@ room, so it is also the side that gives the worker anything to read.
 
 ## Create a connection through the API
 
-Create an agent with an inline Retell chat connection:
+Create an agent with an inline Retell text-mode connection:
 
 ```json
 {
@@ -137,8 +149,8 @@ Create an agent with an inline Retell chat connection:
   "agentPlatform": "retell",
   "connection": {
     "agentPlatform": "retell",
-    "connectionType": "retell_chat_api",
-    "accessVariant": "retell_chat_api.api_key",
+    "connectionType": "retell_text_mode",
+    "accessVariant": "retell_text_mode.api_key",
     "modality": "chat",
     "config": { "retellAgentId": "agent_abc123" },
     "credentials": { "apiKey": "key_..." }
@@ -175,10 +187,10 @@ Add several connections only when they reach the same logical agent:
 
 ```text
 agent: order-line (agt_01K...)
-  connection: Retell chat (con_01K...)
+  connection: Retell text mode (con_01K...)
     platform: Retell
-    kind: retell_chat_api
-    variant: retell_chat_api.api_key
+    kind: retell_text_mode
+    variant: retell_text_mode.api_key
     modality: chat
   connection: Retell phone (con_01K...)
     platform: Retell

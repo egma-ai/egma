@@ -28,12 +28,14 @@ import {
   keyAskLines,
   NO_NUMBERS_LINE,
   NUMBER_ASK_LINE,
-  REACH_ASK_LINE,
-  REACH_LINES,
+  LANE_ASK_LINE,
+  LANE_LINES,
+  LANE_NAMES,
+  laneNamed,
   registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
-  type Reach,
+  type Lane,
 } from "../retell/connect.ts";
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
 
@@ -79,28 +81,46 @@ export const KEY_VARIABLES = ["EGMA_RETELL_API_KEY", "RETELL_API_KEY"] as const;
 /** The environment variable that names which agent, when the account has several. */
 export const AGENT_VARIABLE = "EGMA_RETELL_AGENT_ID";
 
-/** The environment variable that says whether egma reaches the agent by text or phone. */
-export const REACH_VARIABLE = "EGMA_REACH";
+/** The environment variable that names the lanes egma should test the agent over. */
+export const LANES_VARIABLE = "EGMA_LANES";
 
 /** The environment variable that names the number to dial, when several reach the agent. */
 export const NUMBER_VARIABLE = "EGMA_PHONE_NUMBER";
 
-/** What a developer is told when what they said is not one of the two ways. */
-export function unknownReachRefusal(said: string): string {
+/** What a developer is told when a word they said is not a lane. */
+export function unknownLaneRefusal(said: string): string {
   return (
-    `"${said}" is not a way Egma reaches an agent. Say --reach text or ` +
-    `--reach phone, or set ${REACH_VARIABLE}.`
+    `"${said}" is not a way Egma tests an agent. Say --lanes with any of ` +
+    `text, web-call and phone — several of them separated by commas — or set ` +
+    `${LANES_VARIABLE}.`
   );
 }
 
-/** The way that was named, `null` when none was, or the word that was not one. */
-export function reachIn(
+/**
+ * The lanes that were named, `null` when none were, or the word that was not
+ * one.
+ *
+ * Several, separated by commas, because one voice agent can be tested several
+ * ways in one pass. One unreadable word fails the whole list rather than being
+ * quietly dropped: a typo that silently connected fewer lanes than the
+ * developer asked for is the failure this refusal exists to prevent.
+ */
+export function lanesIn(
   named: string | null | undefined,
-): { readonly kind: "reach"; readonly reach: Reach } | { readonly kind: "unknown"; readonly said: string } | null {
-  const said = (named ?? "").trim().toLowerCase();
+):
+  | { readonly kind: "lanes"; readonly lanes: readonly Lane[] }
+  | { readonly kind: "unknown"; readonly said: string }
+  | null {
+  const said = (named ?? "").trim();
   if (said === "") return null;
-  if (said === "text" || said === "phone") return { kind: "reach", reach: said };
-  return { kind: "unknown", said };
+  const lanes: Lane[] = [];
+  for (const word of said.split(",")) {
+    if (word.trim() === "") continue;
+    const lane = laneNamed(word);
+    if (lane === null) return { kind: "unknown", said: word.trim() };
+    if (!lanes.includes(lane)) lanes.push(lane);
+  }
+  return lanes.length === 0 ? null : { kind: "lanes", lanes };
 }
 
 /** Argument names that would put a secret in the process table. */
@@ -126,8 +146,8 @@ export type ConnectCommandOptions = {
   readonly cwd: string;
   /** `--retell-agent`, when one was named. */
   readonly agentId: string | null;
-  /** `--reach`: text or phone. Nothing is created when neither was said. */
-  readonly reach: string | null;
+  /** `--lanes`: text, web-call, phone, or several. Nothing is created when none was said. */
+  readonly lanes: string | null;
   /** `--phone-number`: which number to dial, when several reach the agent. */
   readonly phoneNumber: string | null;
   /** `--repo-prompt`: the file to compare what the provider runs against. */
@@ -187,8 +207,8 @@ function exitCodeFor(outcome: ConnectOutcome): number {
     case "no-agents":
       return CONNECT_EXIT.noAgents;
     case "unchosen":
-    case "unchosen-reach":
-    case "incompatible-reach":
+    case "unchosen-lanes":
+    case "incompatible-lane":
     case "unchosen-number":
       return CONNECT_EXIT.unchosen;
     case "no-numbers":
@@ -224,10 +244,10 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   // Said before anything is read, because a word egma does not know is the
   // developer's own typo and finding out after a key has been sent to Retell
   // would cost them the round trip.
-  const named = reachIn(options.reach ?? options.env[REACH_VARIABLE]);
+  const named = lanesIn(options.lanes ?? options.env[LANES_VARIABLE]);
   if (named !== null && named.kind === "unknown") {
     options.out("status: unchosen");
-    options.fail(unknownReachRefusal(named.said));
+    options.fail(unknownLaneRefusal(named.said));
     return CONNECT_EXIT.unchosen;
   }
 
@@ -298,12 +318,12 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     // coding agent reading this is told exactly what a person is told. There is
     // nobody here to answer it, so it is answered in the command or not at all
     // — and not at all creates nothing, which is the point.
-    chooseReach: (offered) => {
-      options.out(`note: ${REACH_ASK_LINE}`);
-      for (const way of offered) {
-        options.out(`reach_option: ${way} ${REACH_LINES[way]}`);
+    chooseLanes: (offered) => {
+      options.out(`note: ${LANE_ASK_LINE}`);
+      for (const lane of offered) {
+        options.out(`lane_option: ${lane} ${LANE_LINES[lane]}`);
       }
-      return Promise.resolve(named === null ? null : named.reach);
+      return Promise.resolve(named === null ? null : named.lanes);
     },
     chooseNumber: (numbers) => {
       options.out(`note: ${NUMBER_ASK_LINE}`);
@@ -349,10 +369,15 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`retell_response_engine: ${config.engine}`);
       options.out(`prompt_characters: ${config.prompt === null ? 0 : config.prompt.length}`);
       options.out(`tools: ${config.tools.length}`);
-      options.out(`reach: ${outcome.reach}`);
+      options.out(`lanes: ${outcome.lanes.join(",")}`);
+      for (const one of outcome.connections) {
+        options.out(
+          `lane_connection: ${one.lane} ${one.connection.id} ${one.connection.name} ${one.written}`,
+        );
+      }
       // The number, or the word that there is none. Absent would read as an
-      // older egma that never printed it; `none` says a Chat connection dials
-      // nothing, which is a fact about the connection rather than a gap.
+      // older egma that never printed it; `none` says a pass without the phone
+      // lane dials nothing, which is a fact about it rather than a gap.
       options.out(`phone_number: ${outcome.number ?? "none"}`);
       options.out(`agent_id: ${registered.agent.id}`);
       options.out(`agent_name: ${registered.agent.name}`);
@@ -397,16 +422,16 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
         `That key reaches ${outcome.agents.length} agents. Name one with --retell-agent, or with ${AGENT_VARIABLE}.`,
       );
       break;
-    case "unchosen-reach":
-      options.out("status: unchosen-reach");
+    case "unchosen-lanes":
+      options.out("status: unchosen-lanes");
       options.fail(
-        `Choose ${outcome.offered.map((reach) => `--reach ${reach}`).join(" or ")}, ` +
-          `or set ${REACH_VARIABLE}. Nothing was written.`,
+        `Say --lanes with any of ${outcome.offered.join(", ")} — several ` +
+          `separated by commas — or set ${LANES_VARIABLE}. Nothing was written.`,
       );
       break;
-    case "incompatible-reach":
-      options.out(`compatible_reach: ${outcome.compatible}`);
-      options.out("status: incompatible-reach");
+    case "incompatible-lane":
+      options.out(`compatible_lane: ${outcome.compatible}`);
+      options.out("status: incompatible-lane");
       options.fail(outcome.reason);
       break;
     case "unchosen-number":

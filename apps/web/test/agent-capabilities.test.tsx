@@ -59,10 +59,10 @@ function connection({
 }: {
   readonly id: string;
   readonly agentId: string;
-  readonly connectionType: "retell_chat_api" | "phone_number" | "livekit_room";
+  readonly connectionType: "retell_text_mode" | "phone_number" | "livekit_room";
 }) {
   const livekit = connectionType === "livekit_room";
-  const chat = connectionType === "retell_chat_api";
+  const chat = connectionType === "retell_text_mode";
   return {
     id,
     agentId,
@@ -73,13 +73,13 @@ function connection({
     accessVariant: livekit
       ? "livekit_room.project_credentials"
       : chat
-        ? "retell_chat_api.api_key"
+        ? "retell_text_mode.api_key"
         : "phone_number.public_e164",
     modality: chat ? "chat" : "voice",
     productLabel: livekit
       ? "LiveKit project credentials"
       : chat
-        ? "Retell chat"
+        ? "Retell text mode"
         : "Phone number",
     topology: livekit ? "agent-dials-out" : chat ? "hosted-broker" : "egma-dials-in",
     environment: null,
@@ -261,7 +261,7 @@ describe("Paper agent capability states", () => {
           connection({
             id: "con_chat",
             agentId: "agt_chat",
-            connectionType: "retell_chat_api",
+            connectionType: "retell_text_mode",
           }),
         ],
       }),

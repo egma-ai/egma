@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -177,6 +178,49 @@ export const run = pgTable(
      * `{ defaults: [], overrides: {} }`.
      */
     mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
+    /**
+     * The serving version this run conducted against, resolved once at its
+     * start and named on every request from then on.
+     *
+     * Retell's own default is "the newest version", and the newest version is
+     * exactly the one a concurrent edit has just made — so a suite that leaned
+     * on the default could be testing two different agents halfway through.
+     *
+     * Set on every text-mode and web-call run, mocked or not. Null on a phone
+     * run, where Egma names no version at all, and null on every lane whose
+     * platform has no versions to name.
+     */
+    agentVersion: integer("agent_version"),
+    /**
+     * The temporary copy this run branched, where it branched one.
+     *
+     * Null means no copy was made, which is what an unmocked run and every
+     * text-mode run are: text mode carries its answers on each request, so it
+     * writes nothing to the customer's account at all.
+     */
+    tempMockAgentVersion: integer("temp_mock_agent_version"),
+    /**
+     * Whether the account has been put back: null when no copy was made, false
+     * while a cleanup is owed, true once the account is as it was found.
+     *
+     * **A real column rather than a key inside `mock_metadata` beside it**,
+     * because the claim searches by it. Before a run branches anything, one
+     * indexed query asks whether this agent has a run whose cleanup is still
+     * owed; that cleanup is finished first, inside the claim, or the new run is
+     * refused rather than branched.
+     */
+    tempMockAgentVersionCleanup: boolean("temp_mock_agent_version_cleanup"),
+    /**
+     * The put-it-back note, and nothing else: the serving engine capture the
+     * verify step compares against, and each touched number's binding verbatim.
+     *
+     * A number's entry is `{ number, was, pinned_to }` — where the binding
+     * pointed before Egma touched it, and the numeric version Egma pinned it
+     * to. A restore reads where the number points **now** and writes only where
+     * it still points at `pinned_to`, so a late retry of a failed teardown can
+     * never move a binding the customer has since changed.
+     */
+    mockMetadata: jsonb("mock_metadata"),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
@@ -275,6 +319,31 @@ export const run = pgTable(
     // when it arrives; the id-ordered pair above already serves every list.
     index("run_agent_id_idx").on(table.agentId),
     index("run_suite_id_idx").on(table.suiteId),
+    // A version is a whole number of versions, on both of the version columns.
+    check(
+      "run_agent_version_is_a_version",
+      sql`${table.agentVersion} is null or ${table.agentVersion} >= 0`,
+    ),
+    check(
+      "run_temp_mock_agent_version_is_a_version",
+      sql`${table.tempMockAgentVersion} is null
+        or ${table.tempMockAgentVersion} >= 0`,
+    ),
+    // A copy that was branched always carries a cleanup flag — owed or
+    // settled. The other direction is deliberately open: the flag is written
+    // the moment the run claims the account, which is before there is anything
+    // to clean up.
+    check(
+      "run_temp_mock_agent_version_owes_cleanup",
+      sql`${table.tempMockAgentVersion} is null
+        or ${table.tempMockAgentVersionCleanup} is not null`,
+    ),
+    // The claim's own query, and the only read the cleanup flag is for: which
+    // runs of this agent still owe the account a cleanup. Partial, because the
+    // answer is almost always none.
+    index("run_mock_tools_cleanup_owed_idx")
+      .on(table.organizationId, table.agentId)
+      .where(sql`${table.tempMockAgentVersionCleanup} = false`),
   ],
 );
 

@@ -50,7 +50,6 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
-      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
   ],
@@ -72,8 +71,8 @@ const VOICE_AGENT: FakeRetellScript = {
 const TWO_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
-    { agent_id: "agent_0001", agent_name: "order-line", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
-    { agent_id: "agent_0002", agent_name: "after-hours", channel: "chat", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
+    { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
@@ -219,7 +218,11 @@ describe("the key screen", () => {
 
     // Text or phone, put to the person at the keyboard. Text is taken here;
     // the phone has a check of its own below.
-    await showing(run, "How should Egma reach this agent?", "[enter] reach it this way");
+    await showing(run, "How should Egma test this agent?", "[enter] test it these ways");
+    // Nothing starts ticked — one lane dials a real telephone — so the text
+    // lane is ticked with space before enter confirms the pick.
+    run.write(" ");
+    await showing(run, "[x] Text");
     run.write("\r");
 
     // The walk carries on to the one question the generate step asks. It is
@@ -259,7 +262,9 @@ describe("the existing-tests choice", () => {
     await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\r`);
-    await showing(run, "How should Egma reach this agent?");
+    await showing(run, "How should Egma test this agent?");
+    run.write(" ");
+    await showing(run, "[x] Text");
     run.write("\r");
 
     const choice = await showing(
@@ -353,7 +358,9 @@ describe("the picker", () => {
     await showing(run, "\u203a after-hours");
     run.write("\r");
 
-    await showing(run, "How should Egma reach this agent?");
+    await showing(run, "How should Egma test this agent?");
+    run.write(" ");
+    await showing(run, "[x] Text");
     run.write("\r");
 
     // Past the one question the generate step asks, and past its gate.
@@ -373,7 +380,7 @@ describe("the picker", () => {
   });
 });
 
-describe("the choice between text and phone", () => {
+describe("the one question, on a screen", () => {
   it("is a screen, and taking the phone creates the phone connection and no other", async () => {
     retell = await startFakeRetell(VOICE_AGENT);
     const run = await wizard();
@@ -384,15 +391,22 @@ describe("the choice between text and phone", () => {
 
     const offered = await showing(
       run,
-      "How should Egma reach this agent?",
-      "Phone — Egma dials one of the agent's numbers",
-      "Egma creates this connection only after you confirm it.",
+      "How should Egma test this agent?",
+      "Text — Egma talks to the agent in text",
+      "Web call — a voice call Egma places over the internet",
+      "Phone call — Egma dials the real number",
+      "Egma creates these connections only after you confirm them.",
     );
-    // Retell voice agents support only phone. It is the only row, and the
-    // developer must still confirm before Egma can dial it.
-    expect(offered).toContain("\u203a Phone");
-    expect(offered).not.toContain("Chat —");
-
+    // Three lanes, and **nothing is ticked before somebody ticks it**: one of
+    // them dials a real telephone. The cursor rests on the fastest lane, and
+    // resting there is not picking — the developer moves down to the phone
+    // lane and ticks it before Egma dials anything.
+    expect(offered).toContain("\u203a [ ] Text");
+    run.write("\u001B[B");
+    run.write("\u001B[B");
+    await showing(run, "› [ ] Phone call");
+    run.write(" ");
+    await showing(run, "[x] Phone call");
     run.write("\r");
 
     await chooseNoExistingTests(run);
@@ -434,7 +448,14 @@ describe("the choice between text and phone", () => {
     await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
-    await showing(run, "How should Egma reach this agent?");
+    await showing(run, "How should Egma test this agent?");
+    // The cursor rests on the fastest lane; move down twice to the one that
+    // dials, tick it, and confirm.
+    run.write("\u001B[B");
+    run.write("\u001B[B");
+    await showing(run, "› [ ] Phone call");
+    run.write(" ");
+    await showing(run, "[x] Phone call");
     run.write("\r");
 
     // Two numbers reach this agent, so there is a real choice and the wizard
@@ -477,11 +498,13 @@ describe("the choice between text and phone", () => {
     await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
-    await showing(run, "How should Egma reach this agent?", "[esc] neither");
+    await showing(run, "How should Egma test this agent?", "[esc] none");
     run.write("\u001B");
 
     expect(await run.exited).toBe(1);
-    expect(run.scrollback()).toContain("nobody chose phone, so nothing was created");
+    expect(run.scrollback()).toContain(
+      "nobody picked Text, Web call, Phone call, so nothing was created",
+    );
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });

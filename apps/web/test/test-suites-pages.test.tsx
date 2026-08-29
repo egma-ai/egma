@@ -155,6 +155,8 @@ function gridAnswers(options: {
 function runBuilderAnswers(options: {
   readonly role?: "admin" | "member" | "viewer";
   readonly started?: Stub | readonly Stub[];
+  /** The one connection this agent holds, when the walk needs a named lane. */
+  readonly connection?: Record<string, unknown>;
 } = {}): void {
   const started = options.started ?? {
     status: 201,
@@ -186,14 +188,16 @@ function runBuilderAnswers(options: {
       status: 200,
       body: {
         agent: { id: "agt_1", name: "Receptionist", archived: false },
-        connections: [{
-          id: "con_1",
-          name: "Production",
-          productLabel: "Retell",
-          modality: "voice",
-          environment: "production",
-          archived: false,
-        }],
+        connections: [
+          options.connection ?? {
+            id: "con_1",
+            name: "Production",
+            productLabel: "Retell",
+            modality: "voice",
+            environment: "production",
+            archived: false,
+          },
+        ],
       },
     },
     "/v1/tests": {
@@ -466,6 +470,67 @@ describe("the suite-first Tests route", () => {
     expect(screen.queryByText("Leave blank to use the test suite name.")).toBeNull();
     expect((within(sheet).getByRole("button", { name: "Start run" }) as HTMLButtonElement).disabled)
       .toBe(true);
+  });
+
+  it("says which lane a Retell run takes, and says nothing about a LiveKit one", async () => {
+    // The note reads one connection's mock-tools switch. A LiveKit room can
+    // never hold that switch, so reading its blank one as "off" would tell a
+    // person their run reaches real tools — false, because a LiveKit run mocks
+    // through the in-room seam. The note speaks for the three Retell lanes and
+    // for nothing else.
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    runBuilderAnswers({
+      connection: {
+        id: "con_1",
+        name: "Web call",
+        productLabel: "Retell web call",
+        connectionType: "retell_web_call",
+        modality: "voice",
+        mockToolsEnabled: false,
+        environment: null,
+        archived: false,
+      },
+    });
+
+    const { unmount } = render(<NewRunPage />);
+    const sheet = await screen.findByRole("dialog", { name: "Create a run" });
+    fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+      target: { value: "agt_1" },
+    });
+    await within(sheet).findByLabelText("Connection *");
+    fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+      target: { value: "con_1" },
+    });
+    expect(
+      sheet.querySelector('[data-slot="run-lane-note"]')?.textContent,
+    ).toContain("Mock tools are off for this connection");
+
+    unmount();
+    cleanup();
+    runBuilderAnswers({
+      connection: {
+        id: "con_1",
+        name: "Room",
+        productLabel: "LiveKit room",
+        connectionType: "livekit_room",
+        modality: "voice",
+        environment: null,
+        archived: false,
+      },
+    });
+
+    render(<NewRunPage />);
+    const room = await screen.findByRole("dialog", { name: "Create a run" });
+    fireEvent.change(within(room).getByLabelText("Agent *"), {
+      target: { value: "agt_1" },
+    });
+    await within(room).findByLabelText("Connection *");
+    fireEvent.change(within(room).getByLabelText("Connection *"), {
+      target: { value: "con_1" },
+    });
+    expect(screen.getByLabelText("Run name [optional]")).toBeTruthy();
+    expect(room.querySelector('[data-slot="run-lane-note"]')).toBeNull();
   });
 
   it.each(["Close", "Cancel"])(

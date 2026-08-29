@@ -27,6 +27,20 @@ export type MonitoringCapability =
   | "Stopped"
   | "Not configured"
   | "Configured via code";
+/**
+ * Whether any of this agent's lanes runs its simulations with mocked tools.
+ *
+ * **Never "every simulation": the switch is per connection.** A text lane can
+ * be mocked while the phone lane beside it reaches the customer's real backend,
+ * so an agent-wide claim would be false for the phone lane every time. This
+ * word summarises the lanes; the mock-tools surface shows each one.
+ *
+ * `Not available` is the honest third state rather than a fourth word for off:
+ * mocking is a Retell seam, and a LiveKit agent's tools already run in the
+ * customer's own process where the Egma SDK stands in front of them. Saying
+ * "Off" there would offer a switch that has nothing to switch.
+ */
+export type MockToolsCapability = "On" | "Off" | "Not available";
 
 /**
  * The provider that owns this agent's setup flow.
@@ -54,7 +68,8 @@ export function simulationCapabilityOf(
   const configured = agent.connections.some(
     (connection) =>
       connection.connectionType === "livekit_room" ||
-      connection.connectionType === "retell_chat_api" ||
+      connection.connectionType === "retell_text_mode" ||
+      connection.connectionType === "retell_web_call" ||
       (connection.connectionType === "phone_number" &&
         connection.agentPlatform === "retell"),
   );
@@ -76,8 +91,22 @@ export function monitoringCapabilityOf(
   return "Not configured";
 }
 
-function stateClass(state: SimulationCapability | MonitoringCapability): string {
-  if (state === "Configured" || state === "Active") {
+/** Whether this agent can have a mocked world at all, and whether it has one. */
+export function mockToolsCapabilityOf(
+  agent: ListedAgentWithConnections,
+): MockToolsCapability {
+  if (providerOf(agent) !== "retell") return "Not available";
+  // The switch is per connection now, so the agent's summary word is "any of
+  // its lanes has it on".
+  return agent.connections.some((connection) => connection.mockToolsEnabled)
+    ? "On"
+    : "Off";
+}
+
+function stateClass(
+  state: SimulationCapability | MonitoringCapability | MockToolsCapability,
+): string {
+  if (state === "Configured" || state === "Active" || state === "On") {
     return "text-success";
   }
   if (state === "Stopped" || state === "Configured via code") return "text-warning";
@@ -87,7 +116,7 @@ function stateClass(state: SimulationCapability | MonitoringCapability): string 
 export function CapabilityState({
   state,
 }: {
-  readonly state: SimulationCapability | MonitoringCapability;
+  readonly state: SimulationCapability | MonitoringCapability | MockToolsCapability;
 }) {
   return <span className={stateClass(state)}>{state}</span>;
 }
@@ -135,6 +164,7 @@ export function AgentDetailsSheet({
   stopping,
   stopRefused,
   onStopMonitoring,
+  onMockTools,
   onRename,
   onDelete,
   onClose,
@@ -148,6 +178,8 @@ export function AgentDetailsSheet({
   readonly stopping: boolean;
   readonly stopRefused: Refusal | null;
   readonly onStopMonitoring: () => void;
+  /** Open the panel that explains, discovers and ticks the mocked world. */
+  readonly onMockTools: () => void;
   readonly onRename: () => void;
   readonly onDelete: () => void;
   readonly onClose: () => void;
@@ -157,6 +189,7 @@ export function AgentDetailsSheet({
   const provider = providerOf(agent);
   const simulation = simulationCapabilityOf(agent);
   const monitoring = monitoringCapabilityOf(agent);
+  const mockTools = mockToolsCapabilityOf(agent);
   const setup = (goal: "simulation" | "monitoring") =>
     `${home}?sheet=connect&agent=${encodeURIComponent(agent.id)}&goal=${goal}&platform=${provider}`;
   const restoreFocus = useSheetReturnFocus(returnFocusTo);
@@ -283,6 +316,29 @@ export function AgentDetailsSheet({
                   )
                 }
               />
+              {mockTools === "Not available" ? null : (
+                <CapabilityRow
+                  label="Mock tools during simulations"
+                  state={<CapabilityState state={mockTools} />}
+                  detail={
+                    mockTools === "On"
+                      ? "A temporary version per run, deleted after. Your live agent is untouched."
+                      : "Simulations reach your real tools."
+                  }
+                  action={
+                    <Button
+                      className="h-auto min-h-0 p-0 text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
+                      disabled={!mayAuthor}
+                      onClick={onMockTools}
+                      type="button"
+                      variant="ghost"
+                      {...(whyNotChange === undefined ? {} : { why: whyNotChange })}
+                    >
+                      {mockTools === "On" ? "Review mock tools" : "Set up mock tools"}
+                    </Button>
+                  }
+                />
+              )}
             </div>
             {stopRefused === null ? null : (
               <p className="m-0 text-sm text-failure" role="alert">

@@ -118,6 +118,8 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
+                                    "retell_text_mode",
+                                    "retell_web_call",
                                     "phone_number"
                                   ]
                                 },
@@ -125,6 +127,8 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
+                                    "retell_text_mode.api_key",
+                                    "retell_web_call.api_key",
                                     "phone_number.public_e164"
                                   ]
                                 },
@@ -296,6 +300,8 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_text_mode",
+                              "retell_web_call",
                               "phone_number",
                               "livekit_room"
                             ]
@@ -304,6 +310,8 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_text_mode.api_key",
+                              "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
                               "livekit_room.customer_token_endpoint"
@@ -547,6 +555,8 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api",
+                          "retell_text_mode",
+                          "retell_web_call",
                           "phone_number",
                           "livekit_room"
                         ]
@@ -555,6 +565,8 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api.api_key",
+                          "retell_text_mode.api_key",
+                          "retell_web_call.api_key",
                           "phone_number.public_e164",
                           "livekit_room.project_credentials",
                           "livekit_room.customer_token_endpoint"
@@ -791,6 +803,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -799,6 +813,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -851,6 +867,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -889,6 +908,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1067,6 +1087,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -1075,6 +1097,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -1127,6 +1151,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1165,6 +1192,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1471,6 +1499,8 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
+                                    "retell_text_mode",
+                                    "retell_web_call",
                                     "phone_number",
                                     "livekit_room"
                                   ]
@@ -1479,6 +1509,8 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
+                                    "retell_text_mode.api_key",
+                                    "retell_web_call.api_key",
                                     "phone_number.public_e164",
                                     "livekit_room.project_credentials",
                                     "livekit_room.customer_token_endpoint"
@@ -1531,6 +1563,9 @@
                                     }
                                   ]
                                 },
+                                "mockToolsEnabled": {
+                                  "type": "boolean"
+                                },
                                 "archived": {
                                   "type": "boolean"
                                 },
@@ -1569,6 +1604,7 @@
                                 "config",
                                 "credentialPresent",
                                 "credentialsHint",
+                                "mockToolsEnabled",
                                 "archived",
                                 "archivedAt",
                                 "createdAt",
@@ -1881,6 +1917,8 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
+                              "retell_text_mode",
+                              "retell_web_call",
                               "phone_number",
                               "livekit_room"
                             ]
@@ -1889,6 +1927,8 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
+                              "retell_text_mode.api_key",
+                              "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
                               "livekit_room.customer_token_endpoint"
@@ -1941,6 +1981,9 @@
                               }
                             ]
                           },
+                          "mockToolsEnabled": {
+                            "type": "boolean"
+                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -1979,6 +2022,7 @@
                           "config",
                           "credentialPresent",
                           "credentialsHint",
+                          "mockToolsEnabled",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -2397,6 +2441,8 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api",
+                      "retell_text_mode",
+                      "retell_web_call",
                       "phone_number",
                       "livekit_room"
                     ]
@@ -2405,6 +2451,8 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api.api_key",
+                      "retell_text_mode.api_key",
+                      "retell_web_call.api_key",
                       "phone_number.public_e164",
                       "livekit_room.project_credentials",
                       "livekit_room.customer_token_endpoint"
@@ -2511,6 +2559,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -2519,6 +2569,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -2571,6 +2623,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2609,6 +2664,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2619,6 +2675,327 @@
                   },
                   "required": [
                     "connection"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/mock-tools:discover": {
+      "post": {
+        "operationId": "discoverMockTools",
+        "summary": "Discover the tools a mocked run would stand in front of",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seed": {
+                    "type": "boolean",
+                    "description": "Also seed a mock tool for every interceptable tool this project does not answer for yet. Never overwrites an authored answer: a known name keeps its row. Absent is a read."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What a mocked run over this agent would cover.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mockable": {
+                      "type": "boolean"
+                    },
+                    "refusal": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "custom_llm_engine",
+                                "keys_disagree",
+                                "platform_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "reason",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "engine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "retell-llm",
+                            "conversation-flow",
+                            "custom-llm"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "servingVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "coverage": {
+                            "type": "string",
+                            "enum": [
+                              "mocked",
+                              "notInterceptable",
+                              "notInThisVersion"
+                            ]
+                          },
+                          "answered": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type",
+                          "coverage",
+                          "answered"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "toolName": {
+                            "type": "string"
+                          },
+                          "toolType": {
+                            "type": "string"
+                          },
+                          "effect": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "toolName",
+                          "toolType",
+                          "effect"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "numbers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "number": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "verdicts": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "numeric",
+                                "environment-tag",
+                                "latest-published",
+                                "hijackable"
+                              ]
+                            }
+                          },
+                          "pin": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "number",
+                          "label",
+                          "verdicts",
+                          "pin"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "seeded": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "mockable",
+                    "refusal",
+                    "engine",
+                    "servingVersion",
+                    "tools",
+                    "warnings",
+                    "numbers",
+                    "seeded"
                   ],
                   "additionalProperties": false
                 }
@@ -3361,6 +3738,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3369,6 +3748,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -3421,6 +3802,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3459,6 +3843,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3606,6 +3991,10 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "mockToolsEnabled": {
+                    "type": "boolean",
+                    "description": "Turn mock tools on or off for runs over this connection. Absent leaves it as it is, so renaming a connection never changes the world its next run meets. Turning it on for a retell_web_call connection is refused where the agent holds no platform identity and key, because Egma would have nothing to branch a temporary copy with; a phone_number connection can never hold true."
                   }
                 },
                 "additionalProperties": false
@@ -3650,6 +4039,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3658,6 +4049,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -3710,6 +4103,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3748,6 +4144,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3949,6 +4346,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -3957,6 +4356,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -4009,6 +4410,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4047,6 +4451,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4290,6 +4695,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
+                            "retell_text_mode",
+                            "retell_web_call",
                             "phone_number",
                             "livekit_room"
                           ]
@@ -4298,6 +4705,8 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
+                            "retell_text_mode.api_key",
+                            "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
                             "livekit_room.customer_token_endpoint"
@@ -4350,6 +4759,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4388,6 +4800,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -14353,6 +14766,19 @@
                         }
                       ]
                     },
+                    "agentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -14473,6 +14899,8 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -14562,6 +14990,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14778,6 +15216,19 @@
                               }
                             ]
                           },
+                          "agentVersion": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "mockToolsEnabled": {
+                            "type": "boolean"
+                          },
                           "expectedSimulationCount": {
                             "type": "integer"
                           },
@@ -14898,6 +15349,8 @@
                           "modality",
                           "productLabel",
                           "environment",
+                          "agentVersion",
+                          "mockToolsEnabled",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15131,6 +15584,19 @@
                         }
                       ]
                     },
+                    "agentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -15228,6 +15694,103 @@
                         {
                           "type": "string",
                           "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tempMockAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tempMockAgentVersionCleanup": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockMetadata": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "engine": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string"
+                                },
+                                "engineId": {
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "engineId",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "numbers": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "number": {
+                                    "type": "string"
+                                  },
+                                  "was": {
+                                    "oneOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "pinnedTo": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "number",
+                                  "was",
+                                  "pinnedTo"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "engine",
+                            "numbers"
+                          ],
+                          "additionalProperties": false
                         },
                         {
                           "type": "null"
@@ -15363,6 +15926,8 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15375,6 +15940,9 @@
                     "createdAt",
                     "startedAt",
                     "finishedAt",
+                    "tempMockAgentVersion",
+                    "tempMockAgentVersionCleanup",
+                    "mockMetadata",
                     "connectionSnapshot",
                     "agent",
                     "connection"
@@ -16187,6 +16755,19 @@
                         }
                       ]
                     },
+                    "agentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
+                    },
                     "expectedSimulationCount": {
                       "type": "integer"
                     },
@@ -16307,6 +16888,8 @@
                     "modality",
                     "productLabel",
                     "environment",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",

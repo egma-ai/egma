@@ -29,6 +29,9 @@ import aiohttp
 import pytest
 from aiohttp import web
 from retell_stub import RetellStub, RunningStub, serving
+from text_mode_stub import RunningStub as RunningTextMode
+from text_mode_stub import TextModeStub
+from text_mode_stub import serving as serving_text_mode
 
 from egma_simulator.config import DEFAULT_S3_BUCKET, DEFAULT_S3_REGION
 from egma_simulator.contract import contract_dir
@@ -543,6 +546,39 @@ async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningSt
 
 
 @pytest.fixture
+async def start_text_mode_stub() -> (
+    AsyncIterator[Callable[..., Awaitable[RunningTextMode]]]
+):
+    """Start text-mode-shaped stubs on loopback; each stops with the test.
+
+    The keyword arguments are :class:`TextModeStub`'s script — the key it
+    honors, the exchanges it plays, the statuses it refuses the leading
+    requests with.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+
+        async def start(**script: object) -> RunningTextMode:
+            return await stack.enter_async_context(
+                serving_text_mode(TextModeStub(**script))
+            )
+
+        yield start
+
+
+@pytest.fixture
+def quick_text_mode_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse text mode's rate-limit backoff to milliseconds.
+
+    Only the waiting is shortened. How many times a throttled request is
+    tried again, and what happens when they run out, are exactly the
+    production ones.
+    """
+    from egma_simulator.plugs import retell_text_mode
+
+    monkeypatch.setattr(retell_text_mode, "FIRST_BACKOFF_SECONDS", 0.001)
+
+
+@pytest.fixture
 def quick_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """Collapse delivery backoff so retry behavior can be tested in milliseconds.
 
@@ -584,6 +620,8 @@ def a_spec(
     models: dict | None = None,
     mock_tools: list[dict] | None = None,
     platform: dict | None = None,
+    agent_version: object = None,
+    dynamic_variables: dict[str, str] | None = None,
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
     walls, one exchange. What differs between two specs is the connection
@@ -611,6 +649,13 @@ def a_spec(
         },
         "models": models or direct_models(modality=modality),
     }
+    if agent_version is not None:
+        # Absent rather than null for the reason below: a spec that named
+        # no version is what the control plane really sends for a run that
+        # takes the platform's own default.
+        spec["agent_version"] = agent_version
+    if dynamic_variables:
+        spec["dynamic_variables"] = dynamic_variables
     if mock_tools:
         spec["mock_tools"] = mock_tools
     if platform:
@@ -761,6 +806,50 @@ def retell_spec(
         max_turns=max_turns,
         max_duration_seconds=max_duration_seconds,
         models=models,
+    )
+
+
+def text_mode_spec(
+    simulation_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    agent_id: str = "agent_stubbed_voice_0001",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    agent_version: object = None,
+    dynamic_variables: dict[str, str] | None = None,
+    mock_tools: list[dict] | None = None,
+) -> dict:
+    """One spec against a Retell text mode connection, pointed wherever asked.
+
+    The connection block is exactly what the control plane stores for a
+    ``retell_text_mode`` connection — the voice agent's id in the config,
+    the key in the credentials — plus the base URL, which is what lets the
+    exchange land on a text-mode-shaped stub instead of the platform
+    itself. The version and the run's resolved answers ride the spec the
+    way a real run over this lane carries them: the version because it is
+    resolved once and named on every request, the answers because this is
+    the lane whose mock tools ride the request natively.
+    """
+    return a_spec(
+        simulation_id,
+        connection={
+            "agent_platform": "retell",
+            "connection_type": "retell_text_mode",
+            "access_variant": "retell_text_mode.api_key",
+            "config": {"retellAgentId": agent_id, "baseUrl": base_url},
+            "credentials": {"apiKey": api_key},
+        },
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+        agent_version=agent_version,
+        dynamic_variables=dynamic_variables,
+        mock_tools=mock_tools,
     )
 
 

@@ -118,14 +118,18 @@ class LiveKitRoom:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str,
+        agent_version: object = None,
+        dynamic_variables: object = None,
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
     ) -> None:
         # A room is reached with this connection's URL and authority. It does
         # not use the deployment's phone media bridge or the platform carrier
-        # resolved for a phone simulation.
-        del media
+        # resolved for a phone simulation. A worker is whatever the customer
+        # is running: LiveKit keeps no versions of it, and the only thing egma
+        # tells it is the dispatch context below.
+        del media, agent_version, dynamic_variables
 
         if modality != "voice":
             raise PlugError(

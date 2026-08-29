@@ -101,6 +101,29 @@ export const CODES = {
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
+  /**
+   * A run over a connection with mock tools switched on, whose temporary
+   * mocked version could not be built.
+   *
+   * **Its own code, because the alternative was conducting the run anyway.** The
+   * switch on that one connection promises the run's tool calls reach Egma's
+   * stand-ins and not the customer's backend; a run that quietly fell back to
+   * the real tools would be a green result over production. So the run is
+   * canceled and this is what the caller is told, with the platform's own reason
+   * in the sentence.
+   */
+  mock_tools_unbuildable: 422,
+  /**
+   * A second mocked run asked for while another run of the same agent still
+   * holds its one temporary version.
+   *
+   * **Its own code, and a conflict rather than an unprocessable one**, because
+   * nothing about the request is wrong: the same request will work once the
+   * other run finishes. Two mocked runs of one agent cannot overlap — each puts
+   * the agent's phone routing back as it found it, and the other's temporary
+   * version would be what that routing then points at.
+   */
+  mock_tools_agent_in_use: 409,
   too_many_requests: 429,
   /**
    * A fault, answered without relaying whatever the fault said.

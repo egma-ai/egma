@@ -1,0 +1,421 @@
+/**
+ * The account's telephone numbers, read for what they are bound to rather than
+ * for who answers them.
+ *
+ * `listNumbers` beside this one answers the setup wizard's question — which
+ * numbers reach this agent — and throws the rest of each binding away. That is
+ * the right shape for a wizard and the wrong shape for a run: a run has to put
+ * a binding back exactly as it found it, and a binding rebuilt from the two
+ * fields egma happened to read is a binding egma changed. So this read keeps
+ * every number's `inbound_agents` entries **verbatim**, and the restore below
+ * writes back the bytes that were recorded rather than a reconstruction.
+ */
+
+import {
+  ask,
+  failureIn,
+  parsed,
+  plain,
+  unreachableFrom,
+  type RetellCredential,
+  type RetellFailure,
+  type RetellReach,
+} from "./transport.ts";
+
+/** How many numbers one listing request asks for. */
+const PAGE_SIZE = 1000;
+
+/** A provider must finish a listing before it can hold this process forever. */
+const MAX_PAGES = 100;
+
+/**
+ * One inbound binding on a number, kept whole.
+ *
+ * `agentVersion` is lifted out because every verdict below reads it, and the
+ * whole entry rides beside it because the restore writes the whole entry. The
+ * two never disagree: the lifted value is read out of `verbatim` and is never
+ * written back into it.
+ */
+export type NumberBinding = {
+  readonly agentId: string;
+  /**
+   * What the number is pinned to: a version number, `latest`,
+   * `latest_published`, an environment tag's name, or `null` where Retell
+   * holds none at all.
+   */
+  readonly agentVersion: string | number | null;
+  /** The binding entry exactly as Retell answered it. */
+  readonly verbatim: Readonly<Record<string, unknown>>;
+};
+
+/** One number on the account, with every binding it carries kept whole. */
+export type RoutedNumber = {
+  /** E.164, exactly as Retell holds it. */
+  readonly number: string;
+  /** What the customer calls it, or `""` when they have never named it. */
+  readonly label: string;
+  readonly bindings: readonly NumberBinding[];
+};
+
+export type ListedRoutedNumbers =
+  | { readonly kind: "numbers"; readonly numbers: readonly RoutedNumber[] }
+  | RetellFailure;
+
+export type WroteNumberBindings =
+  | { readonly kind: "written" }
+  | RetellFailure;
+
+/**
+ * What one binding means for a run that is about to mint a new version.
+ *
+ * The four verdicts are the whole of the safety question, and they are here
+ * rather than at the call site so that "safe to branch under" means one thing
+ * in the guard, in the sweep, and in whatever asks next.
+ *
+ * - `numeric` — pinned to a version that exists; a new version cannot move it.
+ * - `environment-tag` — pinned through a tag; the tag assignment is the
+ *   customer's and is never touched, and a new version does not join a tag.
+ * - `latest-published` — safe **because a draft is never published**. That is
+ *   the one verdict that depends on a promise kept elsewhere, and the promise
+ *   is kept absolutely: nothing in this package publishes anything.
+ * - `hijackable` — `latest`, or nothing at all. Branching mints the highest
+ *   version, so a real caller would reach the new version the instant it
+ *   exists. This is the verdict that needs a pin.
+ */
+export const BINDING_VERDICTS = [
+  "numeric",
+  "environment-tag",
+  "latest-published",
+  "hijackable",
+] as const;
+export type BindingVerdict = (typeof BINDING_VERDICTS)[number];
+
+export function bindingVerdictOf(binding: NumberBinding): BindingVerdict {
+  const version = binding.agentVersion;
+  if (typeof version === "number") return "numeric";
+  if (version === null) return "hijackable";
+  const named = version.trim();
+  if (named === "" || named === "latest") return "hijackable";
+  if (named === "latest_published") return "latest-published";
+  // Anything else Retell accepts here is an environment tag's own name. Tags
+  // have no API at all, so egma can neither list them nor check one — and a
+  // name it cannot check is still not `latest`, which is the only thing this
+  // verdict has to decide.
+  return "environment-tag";
+}
+
+/** A binding entry, or `null` for a row that is not one. */
+function bindingFrom(row: unknown): NumberBinding | null {
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
+  const held = row as Record<string, unknown>;
+  const agentId = plain(held["agent_id"]);
+  if (agentId === "") return null;
+  const version = held["agent_version"];
+  return {
+    agentId,
+    agentVersion:
+      typeof version === "number" || typeof version === "string"
+        ? version
+        : null,
+    verbatim: held,
+  };
+}
+
+/** A listed number, or `null` for a row that is not one. */
+function routedNumberFrom(row: unknown): RoutedNumber | null {
+  if (typeof row !== "object" || row === null) return null;
+  const held = row as Record<string, unknown>;
+  const number = plain(held["phone_number"]);
+  if (number === "") return null;
+
+  const routed = Array.isArray(held["inbound_agents"])
+    ? (held["inbound_agents"] as unknown[])
+    : [];
+  const bindings: NumberBinding[] = [];
+  for (const entry of routed) {
+    const binding = bindingFrom(entry);
+    if (binding !== null) bindings.push(binding);
+  }
+
+  return { number, label: plain(held["nickname"]), bindings };
+}
+
+/**
+ * Every telephone number on the account, paged to the end.
+ *
+ * Paged to the end and never to the first page: a customer with a second page
+ * of numbers has one on it that rides `latest`, and a guard that stopped early
+ * would call the account safe while a real caller was one branch away from the
+ * mocked world.
+ */
+export async function listRoutedNumbers(
+  key: RetellCredential,
+  reach: RetellReach = {},
+): Promise<ListedRoutedNumbers> {
+  const numbers: RoutedNumber[] = [];
+  let paginationKey: string | undefined;
+  const seenPaginationKeys = new Set<string>();
+
+  try {
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        sort_order: "ascending",
+        ...(paginationKey === undefined
+          ? {}
+          : { pagination_key: paginationKey }),
+      });
+      const answer = await ask(key, reach, {
+        method: "GET",
+        path: `/v2/list-phone-numbers?${query.toString()}`,
+      });
+
+      const failure = failureIn(answer);
+      // A listing names no one thing, so a 404 here is the endpoint and not a
+      // missing number: it is reported as the refusal it is.
+      if (failure !== undefined) {
+        return failure.kind === "gone"
+          ? { kind: "refused", reason: "Retell refused the request (404)." }
+          : failure;
+      }
+
+      const held = parsed(answer);
+      const rows = held["items"];
+      const hasMore = held["has_more"];
+      if (!Array.isArray(rows) || typeof hasMore !== "boolean") {
+        return {
+          kind: "refused",
+          reason: "Retell answered a malformed phone-number page.",
+        };
+      }
+      for (const row of rows) {
+        const number = routedNumberFrom(row);
+        if (number !== null) numbers.push(number);
+      }
+
+      const next = plain(held["pagination_key"]);
+      if (!hasMore) return { kind: "numbers", numbers };
+      if (next === "" || seenPaginationKeys.has(next)) {
+        return {
+          kind: "refused",
+          reason: "Retell answered a phone-number page without a new cursor.",
+        };
+      }
+      seenPaginationKeys.add(next);
+      paginationKey = next;
+    }
+  } catch (cause) {
+    return unreachableFrom(cause);
+  }
+
+  return {
+    kind: "refused",
+    reason: "Retell answered too many phone-number pages.",
+  };
+}
+
+/**
+ * The numbers that route to one agent, each keeping **every** binding it has.
+ *
+ * The filter is on numbers and never on the entries inside one, and that is
+ * load-bearing rather than tidy: a number two agents share is put back as a
+ * whole array, so a read that dropped the other agent's entry would restore a
+ * number with that agent's routing deleted. Which entries are this agent's is
+ * `bindingsFor` below, asked where the verdicts are decided.
+ */
+export function numbersRouting(
+  numbers: readonly RoutedNumber[],
+  agentId: string,
+): readonly RoutedNumber[] {
+  const wanted = agentId.trim();
+  return numbers.filter((number) =>
+    number.bindings.some((binding) => binding.agentId === wanted),
+  );
+}
+
+/** The entries on one number that route to a given agent. */
+export function bindingsFor(
+  number: RoutedNumber,
+  agentId: string,
+): readonly NumberBinding[] {
+  const wanted = agentId.trim();
+  return number.bindings.filter((binding) => binding.agentId === wanted);
+}
+
+/**
+ * A number's whole `inbound_agents` array, written as given.
+ *
+ * The array is what Retell holds and the array is what goes back, so both
+ * writes below are one shape: neither ever sends a field egma invented, and a
+ * sibling field egma has never heard of survives the round trip untouched.
+ */
+async function writeInboundAgents(
+  key: RetellCredential,
+  number: string,
+  inboundAgents: readonly Readonly<Record<string, unknown>>[],
+  reach: RetellReach,
+): Promise<WroteNumberBindings> {
+  let answer;
+  try {
+    answer = await ask(key, reach, {
+      method: "PATCH",
+      // The `+` in an E.164 number is a space in a path segment unless it is
+      // encoded, which is how a number read a moment ago becomes a 404.
+      path: `/update-phone-number/${encodeURIComponent(number)}`,
+      body: { inbound_agents: inboundAgents },
+    });
+  } catch (cause) {
+    return unreachableFrom(cause);
+  }
+
+  const failure = failureIn(answer);
+  return failure ?? { kind: "written" };
+}
+
+/**
+ * Pin one number's **hijackable** bindings for this agent to a version that
+ * exists.
+ *
+ * Only the one field moves, and it moves on **only the entries that need it**:
+ * an entry whose verdict is `hijackable` — `latest` or unset. An entry this
+ * agent already pinned to a numeric version, or one riding an environment tag
+ * or the published pointer, is carried across whole. Under weighted routing an
+ * agent can have both a hijackable entry and a numeric sibling on one number,
+ * and moving the sibling to `latest` for the run would be the exact hijack this
+ * pin exists to prevent, done by egma's own hand.
+ *
+ * Every other agent's entry on the number is carried across whole for the same
+ * reason: a pin is a pause on one deploy habit and never an edit of the
+ * customer's routing.
+ */
+export async function pinNumberBinding(
+  key: RetellCredential,
+  pin: {
+    readonly number: string;
+    readonly agentId: string;
+    /** The numeric version the binding resolves to right now. */
+    readonly version: number;
+    /** Every binding the number carries, exactly as it was read. */
+    readonly bindings: readonly NumberBinding[];
+  },
+  reach: RetellReach = {},
+): Promise<WroteNumberBindings> {
+  const written = pin.bindings.map((binding) =>
+    binding.agentId === pin.agentId &&
+    bindingVerdictOf(binding) === "hijackable"
+      ? { ...binding.verbatim, agent_version: pin.version }
+      : binding.verbatim,
+  );
+  return writeInboundAgents(key, pin.number, written, reach);
+}
+
+/**
+ * One number's own document, with every binding it carries kept whole.
+ *
+ * The listing is how the account is surveyed; this is how one number is read
+ * again at the moment it matters — which is the restore below, where writing
+ * without reading first is the whole hazard.
+ */
+export async function readRoutedNumber(
+  key: RetellCredential,
+  number: string,
+  reach: RetellReach = {},
+): Promise<ReadRoutedNumber> {
+  let answer;
+  try {
+    answer = await ask(key, reach, {
+      method: "GET",
+      // The `+` in an E.164 number is a space in a path segment unless it is
+      // encoded, which is how a number read a moment ago becomes a 404.
+      path: `/get-phone-number/${encodeURIComponent(number)}`,
+    });
+  } catch (cause) {
+    return unreachableFrom(cause);
+  }
+  const failure = failureIn(answer);
+  if (failure !== undefined) return failure;
+  const held = routedNumberFrom(parsed(answer));
+  if (held === null) {
+    return { kind: "refused", reason: "Retell answered a malformed number." };
+  }
+  return { kind: "number", number: held };
+}
+
+export type ReadRoutedNumber =
+  | { readonly kind: "number"; readonly number: RoutedNumber }
+  | RetellFailure;
+
+/**
+ * What one restore did, or did not do, and why.
+ *
+ * `left-alone` is a success and not a failure. It is the second of the two
+ * rules that close the reviewed race: **never restore blind.** A teardown that
+ * failed once retries later, and by then the number may point somewhere else —
+ * the customer rebound it, or a newer run pinned it. Writing the recorded value
+ * back then would undo somebody else's deliberate change, and in the worst
+ * case would put a `latest` binding onto a newer run's temporary copy, sending
+ * real callers to a mocked agent. So a restore writes only where the binding
+ * still points exactly where this run's own note says it pinned it, and
+ * otherwise does nothing and says so.
+ */
+export type RestoredNumberBinding =
+  | { readonly kind: "restored" }
+  | { readonly kind: "left-alone"; readonly reason: string }
+  | RetellFailure;
+
+/**
+ * Put one number's binding back where this run's note says it found it —
+ * reading first, and writing only what still matches.
+ *
+ * The whole `inbound_agents` array is read again rather than replayed from a
+ * copy taken before the run: a sibling agent's entry, or a second number this
+ * agent answers, may have changed in between, and writing back a stale array
+ * would delete whatever changed. Only this agent's entries that still point at
+ * `pinnedTo` move, and they move back to `was`.
+ */
+export async function restoreNumberBinding(
+  key: RetellCredential,
+  restore: {
+    readonly number: string;
+    readonly agentId: string;
+    /** The numeric version this run pinned the binding to. */
+    readonly pinnedTo: number;
+    /** Where the binding pointed before this run touched it. */
+    readonly was: string | number | null;
+  },
+  reach: RetellReach = {},
+): Promise<RestoredNumberBinding> {
+  const read = await readRoutedNumber(key, restore.number, reach);
+  if (read.kind === "gone") {
+    return {
+      kind: "left-alone",
+      reason:
+        `${restore.number} is no longer on this Retell account, so there is ` +
+        "no binding to put back.",
+    };
+  }
+  if (read.kind !== "number") return read;
+
+  const mine = bindingsFor(read.number, restore.agentId);
+  const stillPinned = mine.some(
+    (binding) => binding.agentVersion === restore.pinnedTo,
+  );
+  if (!stillPinned) {
+    return {
+      kind: "left-alone",
+      reason:
+        `${restore.number} no longer points at version ${restore.pinnedTo}, ` +
+        "which is where Egma pinned it, so its binding has been changed by " +
+        "somebody else since. Egma wrote nothing rather than undoing that.",
+    };
+  }
+
+  const written = read.number.bindings.map((binding) =>
+    binding.agentId === restore.agentId &&
+    binding.agentVersion === restore.pinnedTo
+      ? { ...binding.verbatim, agent_version: restore.was }
+      : binding.verbatim,
+  );
+  const wrote = await writeInboundAgents(key, restore.number, written, reach);
+  return wrote.kind === "written" ? { kind: "restored" } : wrote;
+}

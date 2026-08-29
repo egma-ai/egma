@@ -78,7 +78,9 @@ describe("what a browser is told about a simulation connection", () => {
 
     // Three shapes, three rules, and each one is what its Restore demands: a
     // new credential, no credential, or an explicit choice between the two.
-    expect(ruleOf("retell_chat_api.api_key")).toBe("required");
+    // The chat-native door is dormant — no flow offers it — so the catalog a
+    // form is drawn from does not carry it. The text door is the offered one.
+    expect(ruleOf("retell_text_mode.api_key")).toBe("required");
     expect(ruleOf("phone_number.public_e164")).toBe("forbidden");
     expect(ruleOf("livekit_room.project_credentials")).toBe("required");
     expect(ruleOf("livekit_room.customer_token_endpoint")).toBe("required");

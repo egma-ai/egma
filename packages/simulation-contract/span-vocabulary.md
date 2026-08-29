@@ -93,6 +93,7 @@ disagree with it.
 | Attribute | On | Value |
 | --- | --- | --- |
 | `egma.turn.text` | `human_turn`, `agent_turn` | What was said, as text — spoken and transcribed on voice, sent verbatim on chat. May be empty for a turn that carried no words. |
+| `egma.turn.platform_notes` | `agent_turn` | What the agent's platform said about the turn that nobody said *in* it — a node transition it announced mid-answer, a message in a role Egma has never seen. A JSON array of strings, in the order the platform said them, and absent for every turn that has none, which is nearly all of them. It rides beside `egma.turn.text` rather than inside it because the turn's text is handed back to the persona as the transcript it answers, and because one scenario's chat and voice records are only comparable while neither carries words nobody spoke. Only a connection whose platform reports such things ever emits it. |
 | `egma.tool.name` | `tool_call` | The tool's name, exactly as the platform reported it. |
 | `egma.tool.arguments` | `tool_call` | The arguments, JSON-encoded, exactly as observed — absent where the platform reports the invocation but not its arguments. A string deliberately: the observed bytes are the fact worth keeping. |
 | `egma.tool.result` | `tool_call` | The answer the call was given, JSON-encoded, exactly as it was served. Present only where Egma itself authored the answer; absent for a call Egma merely watched go past, and absent for one Egma refused. |

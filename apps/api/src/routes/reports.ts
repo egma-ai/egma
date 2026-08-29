@@ -6,6 +6,7 @@ import {
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
+  type MockToolCoverage,
   type Simulation,
   type SimulationStanding,
   type SimulationSummaryFacts,
@@ -21,6 +22,10 @@ import {
   notTheService,
   unprocessable,
 } from "../http/refusals.ts";
+import {
+  settleOwedMockCleanups,
+  type MockedWorldReach,
+} from "../mocked-world.ts";
 
 /**
  * The report door: `POST /v1/simulations/:simulationId/reports`, where the
@@ -60,6 +65,12 @@ import {
 export type ReportRoutesOptions = {
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
+  /**
+   * What a run's mocked world is torn down through, when a landing was the last
+   * one its run was waiting for. Absent leaves the teardown to the next run's
+   * sweep, which is the same act.
+   */
+  readonly mockedWorldReach?: MockedWorldReach | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -141,10 +152,30 @@ function reportedMoments(facts: {
   return { startedAt, endedAt };
 }
 
+/**
+ * The stamp this landing writes: what the conductor reported, and nothing
+ * added to it.
+ *
+ * **One writer, deliberately.** A simulator that stands in the tool path — the
+ * LiveKit in-room seam — reports the three lists, because there the agent
+ * declares its tools per conversation and two simulations of one run can
+ * honestly differ. Every other lane reports none, and the stamp is left off,
+ * which is the report saying nobody was ever asked — a different sentence from
+ * three empty lists. The Retell lanes decide what they answer for once per run
+ * and mark each answered call on the transcript, so a per-simulation copy would
+ * be a second version of a fact that cannot differ.
+ */
+function coverageOf(
+  facts: NonNullable<StatusEvent["facts"]>,
+): MockToolCoverage | undefined {
+  return facts.mock_tool_coverage;
+}
+
 /** The terminal facts, as the landings take them. */
 function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   const facts = event.facts;
   if (facts === undefined) return {};
+  const coverage = coverageOf(facts);
   return {
     turnCount: facts.turn_count,
     ...(facts.provider_reference === null
@@ -153,14 +184,7 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
     ...(facts.audio === null
       ? {}
       : { recordingReference: facts.audio.recording }),
-    // Left off where the document left it off, rather than landed as three
-    // empty lists: absent is the report saying nobody was ever asked, and
-    // empty is the asking happening and nothing coming back. Writing one for
-    // the other would be this door inventing a fact the simulator declined to
-    // claim.
-    ...(facts.mock_tool_coverage === undefined
-      ? {}
-      : { mockToolCoverage: facts.mock_tool_coverage }),
+    ...(coverage === undefined ? {} : { mockToolCoverage: coverage }),
     // Absent when incoherent, so the landing's own stamps stand for both.
     ...(reportedMoments(facts) ?? {}),
   };
@@ -278,6 +302,31 @@ export async function reportRoutes(
       const applied = await applyStatusEvent(reply, simulationId, event);
       if (typeof applied !== "string") return applied;
       lastKnownStatus = applied;
+    }
+
+    // The teardown, when this document may have been the last thing a mocked
+    // run was waiting for.
+    //
+    // It settles only runs that have **finished**, so this is a cheap read for
+    // every landing and a delete plus a restore exactly once per mocked run.
+    // Nothing depends on it happening here: a run whose teardown never ran —
+    // because this deployment restarted, or because the platform was away — is
+    // finished by the next run's sweep, which is the same act in the same
+    // order. That is why a failure here is logged rather than answered: the
+    // simulator is waiting on a report about a conversation, and what Egma owes
+    // somebody's Retell account is not that conversation's problem.
+    if (
+      options.mockedWorldReach !== undefined &&
+      (lastKnownStatus === "completed" ||
+        lastKnownStatus === "failed" ||
+        lastKnownStatus === "canceled")
+    ) {
+      await settleOwedMockCleanups(
+        standing.auth,
+        standing.agentId,
+        options.mockedWorldReach,
+        request.log,
+      ).catch(() => undefined);
     }
 
     return landedOn(reply, simulationId, lastKnownStatus);

@@ -15,6 +15,20 @@ Its config keys, like every plug's, are its own:
   loopback, and a proxy stand in front of the platform for a deployment
   that needs one.
 
+Two facts about the simulation ride the same ``create-chat`` call when the
+claimed spec carries them, and change nothing when it does not:
+
+- the **agent version** to open the chat against, named explicitly so the
+  exchange cannot land on a version somebody created since — which is how a
+  run over a mocked world reaches that world's own draft;
+- the **dynamic variables** this simulation is conducted with, handed to
+  Retell as ``retell_llm_dynamic_variables`` for its own response engine to
+  render, byte for byte.
+
+A spec carrying neither produces exactly the request this plug has always
+sent: the field is absent from the body, not present and empty, because an
+empty one is a value Retell would render.
+
 Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
 seals — and are read for the ``Authorization`` header and nothing else.
 They are never logged, never returned, and never put into an exception
@@ -44,8 +58,14 @@ from typing import Any
 import aiohttp
 
 from ..client import UNREACHABLE
-from ..redaction import REDACTED
-from . import AgentReply, PlugError, ToolCall
+from . import (
+    AgentReply,
+    PlugError,
+    ToolCall,
+    named_version,
+    quotable,
+    rendered_variables,
+)
 
 DEFAULT_BASE_URL = "https://api.retellai.com"
 """Retell's own API, where a connection with no base URL is reached."""
@@ -61,16 +81,13 @@ TIMEOUT_SECONDS = 60.0
 on the agent's own model, and anything past it is a platform that has
 stopped answering rather than one thinking."""
 
-QUOTED_REFUSAL_CHARS = 200
-"""How much of a refusal's body is quoted into the reason: enough to carry
-the platform's own words about what was wrong, short of pasting a page."""
-
 _KNOWN_KEYS = {"retellAgentId", "baseUrl"}
 
-_CREDENTIAL_KEYS = {"apiKey"}
-"""Exactly what the control plane seals for a retell connection. Refused
-strictly, and for the same reason it is refused there: a secret handed over
-that nothing reads was handed over by mistake."""
+CREDENTIAL_KEYS = {"apiKey"}
+"""Exactly what the control plane seals for a retell connection, whichever
+way a simulation reaches one. Refused strictly, and for the same reason it
+is refused there: a secret handed over that nothing reads was handed over
+by mistake."""
 
 
 class RetellChat:
@@ -84,6 +101,8 @@ class RetellChat:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
+        agent_version: object = None,
+        dynamic_variables: object = None,
         mock_tools: object = None,
         media: object = None,
     ) -> None:
@@ -128,7 +147,7 @@ class RetellChat:
             raise PlugError(
                 "a retell connection needs credentials shaped {apiKey}"
             )
-        stray = set(credentials) - _CREDENTIAL_KEYS
+        stray = set(credentials) - CREDENTIAL_KEYS
         if stray:
             raise PlugError(
                 f"retell credentials hold no key(s) {sorted(stray)}; they are "
@@ -141,6 +160,8 @@ class RetellChat:
         self._agent_id = agent_id.strip()
         self._base_url = base_url.strip().rstrip("/")
         self._api_key = api_key.strip()
+        self._agent_version = named_version(agent_version)
+        self._dynamic_variables = rendered_variables(dynamic_variables)
         self._timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
         self._session: aiohttp.ClientSession | None = None
         self._chat_id: str | None = None
@@ -157,9 +178,7 @@ class RetellChat:
 
     async def open(self) -> str | None:
         self._session = aiohttp.ClientSession()
-        opened = await self._call(
-            "POST", "/create-chat", {"agent_id": self._agent_id}
-        )
+        opened = await self._call("POST", "/create-chat", self._opening())
         chat_id = opened.get("chat_id")
         if not isinstance(chat_id, str) or not chat_id:
             raise PlugError("retell opened a chat with no chat_id to hold it by")
@@ -205,12 +224,24 @@ class RetellChat:
         finally:
             await session.close()
 
+    def _opening(self) -> dict[str, Any]:
+        """The one request that opens the exchange.
+
+        Which agent, and — only where the spec said so — which version of it
+        and what this simulation is conducted with. Absent stays absent: a
+        version Retell was not asked for is a version it chooses itself, and
+        an empty variable block is not the same as none, because Retell
+        renders what it is given.
+        """
+        opening: dict = {"agent_id": self._agent_id}
+        if self._agent_version is not None:
+            opening["agent_version"] = self._agent_version
+        if self._dynamic_variables:
+            opening["retell_llm_dynamic_variables"] = self._dynamic_variables
+        return opening
+
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}
-
-    def _quotable(self, told: str) -> str:
-        """The platform's own words, minus the key, short enough to read."""
-        return told.replace(self._api_key, REDACTED)[:QUOTED_REFUSAL_CHARS]
 
     async def _call(self, method: str, path: str, payload: dict) -> dict:
         """One Retell call, or a refusal saying what happened without the key."""
@@ -232,13 +263,13 @@ class RetellChat:
         except UNREACHABLE as unreachable:
             raise PlugError(
                 f"retell was unreachable at {url}: "
-                f"{self._quotable(repr(unreachable))}"
+                f"{quotable(repr(unreachable), self._api_key)}"
             ) from unreachable
 
         if status // 100 != 2:
             raise PlugError(
                 f"retell answered {status} to {path} at {self._base_url}: "
-                f"{self._quotable(body)}"
+                f"{quotable(body, self._api_key)}"
             )
         try:
             document = json.loads(body)
