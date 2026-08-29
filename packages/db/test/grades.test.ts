@@ -261,7 +261,7 @@ describe("the immutable production selection receipt", () => {
       graderDefinitionVersion: 2,
       graderPassThreshold: 1,
       parameterValues: {
-        maximum_average_response_time_ms: 2_500,
+        maximum_response_time_ms: 2_500,
       },
     } as const;
     const written = await recordProductionGradingPlan(auth, {

@@ -173,7 +173,7 @@ const LATENCY: ProjectGrader = {
   scopeEditable: true,
   removable: true,
   scope: { simulations: [{ kind: "all" }], production: null },
-  settings: { maximum_average_response_time_ms: 3_000 },
+  settings: { maximum_response_time_ms: 3_000 },
   passThreshold: 1,
   ...DATES,
 };
@@ -225,8 +225,8 @@ const LATENCY_DEFINITION: GraderLibraryEntry = {
   requiredEvidence: ["turn_response_latency"],
   settingDefinitions: [
     {
-      key: "maximum_average_response_time_ms",
-      label: "Maximum average response time",
+      key: "maximum_response_time_ms",
+      label: "Maximum response time (p90)",
       valueType: "integer",
       defaultValue: 3_000,
       unit: "milliseconds",
@@ -719,10 +719,10 @@ describe("the project Graders surface", () => {
       ),
     ).toBeTruthy();
     expect(within(details).getByText("Turn response latency")).toBeTruthy();
-    expect(within(details).queryByLabelText("Maximum average response time")).toBeNull();
+    expect(within(details).queryByLabelText("Maximum response time (p90)")).toBeNull();
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
 
-    const maximum = within(details).getByLabelText("Maximum average response time");
+    const maximum = within(details).getByLabelText("Maximum response time (p90)");
     expect((maximum as HTMLInputElement).value).toBe("3");
     fireEvent.change(maximum, { target: { value: "2.5" } });
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
@@ -733,7 +733,7 @@ describe("the project Graders surface", () => {
         path: "/v1/grader-library/grl_latency/use?projectId=prj_1",
         body: {
           scope: { simulations: [], production: null },
-          settings: { maximum_average_response_time_ms: 2_500 },
+          settings: { maximum_response_time_ms: 2_500 },
           passThreshold: 1,
         },
       });
@@ -1003,7 +1003,7 @@ describe("the project Graders surface", () => {
     await waitFor(() => {
       expect(asked.find((one) => one.method === "PATCH")?.body).toEqual({
         scope: { simulations: [], production: null },
-        settings: { maximum_average_response_time_ms: 3_000 },
+        settings: { maximum_response_time_ms: 3_000 },
         passThreshold: 1,
       });
     });
@@ -1227,7 +1227,7 @@ describe("the project Graders surface", () => {
       within(sheet).getByText("Choose how this project will use the grader."),
     ).toBeTruthy();
     expect(
-      within(sheet).getByLabelText("Maximum average response time"),
+      within(sheet).getByLabelText("Maximum response time (p90)"),
     ).toBeTruthy();
   });
 

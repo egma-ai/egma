@@ -96,8 +96,9 @@ grades every completed simulation, does not grade production, and customers
 cannot edit its scope. Customers can edit its pass threshold.
 
 Response latency is an optional Egma grader. A project chooses whether to use
-it, where it applies, its Maximum average response time setting, and its pass
-threshold. A customer-created LLM grader is shared in that organization and is
+it, where it applies, its Maximum response time (p90) setting, and its pass
+threshold. It bounds the p90 of the conversation's turn response latencies,
+which is the reduction the simulation page also leads with. A customer-created LLM grader is shared in that organization and is
 active only in projects that choose it.
 
 ## Expected behaviors

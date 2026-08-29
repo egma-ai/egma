@@ -74,6 +74,17 @@ export const PREDEFINED_GRADERS = {
   responseLatency: "grl_01M0TQE5HBE1X9PDN9HFJC987Q",
 } as const;
 
+export const MAXIMUM_RESPONSE_TIME_PARAMETER = "maximum_response_time_ms";
+
+/**
+ * What this setting was called while Response latency graded the mean.
+ *
+ * Kept because it is stored data, not a name: every project that turned the
+ * grader on holds its answer under this key, and the boot door moves those
+ * answers to the key above rather than leaving a project with a setting the
+ * current contract does not name. Delete it only once no project grader row
+ * carries it.
+ */
 export const MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER =
   "maximum_average_response_time_ms";
 
@@ -100,14 +111,14 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
     id: PREDEFINED_GRADERS.responseLatency,
     name: "Response latency",
     description:
-      "Grades the average response time across measured turns against the maximum this project chooses.",
+      "Grades the p90 response time across measured turns against the maximum this project chooses.",
     type: "code",
     scopeEditable: true,
     prompt: null,
     parameterContract: [
       {
-        key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
-        label: "Maximum average response time",
+        key: MAXIMUM_RESPONSE_TIME_PARAMETER,
+        label: "Maximum response time (p90)",
         valueType: "integer",
         defaultValue: 3_000,
         unit: "milliseconds",

@@ -10,7 +10,7 @@ import {
   disconnectClickHouse,
   editProjectGrader,
   finishGradingJob,
-  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   readTraceGrades,
   readTraceGrading,
@@ -123,7 +123,7 @@ beforeAll(async () => {
         production: { sample_percent: 100 },
       },
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000,
       },
       passThreshold: 1,
     },
@@ -163,14 +163,14 @@ describe("the worker consumes one frozen trace plan", () => {
       graderDefinitionId: PREDEFINED_GRADERS.responseLatency,
       graderPassThreshold: 1,
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000,
       },
       definition: { type: "code" },
     }]);
 
     await editProjectGrader(auth, projectGraderId, {
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 1_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 1_000,
       },
     });
 
@@ -196,8 +196,8 @@ describe("the worker consumes one frozen trace plan", () => {
       gradingSequence: claim.sequenceBase + claim.attempts,
       result: "passed",
       details: {
-        observedAverageResponseTimeMs: 2_000,
-        maximumAverageResponseTimeMs: 3_000,
+        observedP90ResponseTimeMs: 2_000,
+        maximumResponseTimeMs: 3_000,
       },
     }]);
 
@@ -219,7 +219,7 @@ describe("the worker consumes one frozen trace plan", () => {
     expect(regrade.entries).toMatchObject([{
       projectGraderId,
       parameterValues: {
-        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+        [MAXIMUM_RESPONSE_TIME_PARAMETER]: 3_000,
       },
     }]);
     await gradeClaim(regrade, {
@@ -239,7 +239,7 @@ describe("the worker consumes one frozen trace plan", () => {
     expect(afterRegrade.history.map((grade) => grade.score)).toEqual([1, 1]);
     expect(afterRegrade.current).toMatchObject([{
       score: 1,
-      details: { maximumAverageResponseTimeMs: 3_000 },
+      details: { maximumResponseTimeMs: 3_000 },
     }]);
   });
 });
