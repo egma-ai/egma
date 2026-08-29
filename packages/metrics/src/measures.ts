@@ -61,8 +61,22 @@
  * egma nothing. Egma's own vocabulary never times them, so they carry the new
  * rule and origin rather than joining the timing list the simulator is held
  * to.
+ *
+ * **6** moves where `turn_response_latency` stops on a chat simulation. No
+ * measure joined or left, and the sentence beside it did not change: it has
+ * always been how long the agent took to answer. The chat lane was not
+ * measuring that. It timed its own call to the platform, and on a live room
+ * that call also has to establish the agent has no more to say before the
+ * persona may speak — up to a whole quiet period of waiting, all of it after
+ * the agent had answered. Egma's patience was being reported as the agent's
+ * speed. The lane now stops where the agent began answering, which is where
+ * the voice lane has always stopped and where the derivation below already
+ * read a stock LiveKit call. This number is here because a chat conversation
+ * measured at version 5 and the same one at version 6 give different samples,
+ * and fewer of them: a turn the agent never began answering now takes none,
+ * for the same reason a speechless one never did on voice.
  */
-export const MEASURE_CATALOG_VERSION = 5;
+export const MEASURE_CATALOG_VERSION = 6;
 
 /**
  * How a metric series can be reduced to one observed number.
@@ -240,7 +254,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     origin: "timing_span",
     fromSpans: timedByItsOwnSpan("turn_response_latency"),
     means:
-      "how long the agent took to answer, measured once for every turn the persona took",
+      "how long the agent took to answer: from the persona's turn going out to the agent beginning its answer, once for every turn the agent began answering",
     aggregations: EVERY_AGGREGATION,
   },
   {

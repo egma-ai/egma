@@ -371,7 +371,16 @@ class LiveKitChat:
         # The tool calls stay empty on purpose: what egma answered for is
         # already a span of its own, and what it did not answer for it
         # never saw.
-        return AgentReply(text=answer.text, ended=answer.ended, tool_calls=())
+        return AgentReply(
+            text=answer.text,
+            ended=answer.ended,
+            tool_calls=(),
+            # This lane is the reason the field exists. The call above
+            # returns only once the turn-end rule has fired and every
+            # stream has drained, which is later — sometimes five seconds
+            # later — than the moment the agent began answering.
+            answered_at=answer.answer_began_at,
+        )
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""

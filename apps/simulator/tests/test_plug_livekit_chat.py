@@ -1105,6 +1105,55 @@ async def test_a_stateless_agent_may_take_a_declared_tool_delay_inside_one_turn(
     copy of it. So this test holds the *number*: cut the quiet period and
     the pause grows past it, and the turn ends on the filler.
     """
+async def test_the_finish_line_is_the_answers_start_not_the_turns_end(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """``turn_response_latency`` stops where the agent began answering.
+
+    The measure runs between two events. Its starting line is the moment
+    the persona's turn went out; its finish line is the moment the agent
+    began replying. Everything after that is egma establishing the agent
+    has no more to say, so the persona may speak — real work, and egma's
+    own, not the agent's speed.
+
+    A stateless agent pays the whole quiet period for that, every turn.
+    This test holds the two apart: the call really does take the quiet
+    period, and the reported instant really is before it. Carrying the
+    wait was a production defect — an agent answering in about a second
+    read as 6890 ms on the page, which is the quiet period plus the
+    answer, and it was the number the Response latency grader judged.
+    """
+    hurry(monkeypatch)
+    monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
+    stub = ChatStub(greeting=None, replies=[["In person it is."]])
+    assert stub.agent_states is None, "this agent says nothing about itself"
+    plug = chat_room(stub)
+    assert await plug.open() is None
+
+    clock = asyncio.get_running_loop()
+    asked_at = clock.time()
+    answered = await plug.deliver("In person, please.")
+    returned_at = clock.time()
+
+    assert answered.answered_at is not None, (
+        "this lane can see when the agent began answering — a stream's "
+        "header is that moment — and a plug that reported nothing would "
+        "send the loop back to timing its own call"
+    )
+    to_the_answer = answered.answered_at - asked_at
+    to_the_return = returned_at - asked_at
+    assert to_the_return >= A_MEASURED_QUIET, (
+        "the quiet period was not actually paid, so this test is not "
+        "holding the two instants apart at all"
+    )
+    assert to_the_answer < A_MEASURED_QUIET, (
+        f"the answer began {to_the_answer:.3f}s in and the call returned "
+        f"{to_the_return:.3f}s in: the finish line has to be the first, or "
+        "every stateless agent is billed egma's whole quiet period"
+    )
+    await plug.close()
+
+
     hurry(monkeypatch)
     monkeypatch.setattr(chat_plug, "TURN_QUIET_SECONDS", A_MEASURED_QUIET)
     stub = ChatStub(

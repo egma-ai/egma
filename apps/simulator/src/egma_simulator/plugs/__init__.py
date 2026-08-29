@@ -187,6 +187,29 @@ class AgentReply:
     ways of reaching an agent say nothing about its tools, and a plug that
     cannot see them reports none rather than guessing."""
 
+    answered_at: float | None = None
+    """When the agent's answer *started*, on the running loop's clock.
+
+    The finish line of ``turn_response_latency``: its starting line is the
+    moment the persona's turn went out, and this is the moment the agent
+    began replying. The conversation loop measures between the two.
+
+    **Why a plug reports it rather than the loop timing the call.** For a
+    plug whose ``deliver`` is a request and its response, the two are the
+    same instant and this stays ``None``: the call returns when the answer
+    does, so the return *is* the finish line and the loop uses it. For a
+    plug that reads a live room, they are not the same. Egma there must
+    also decide the agent has no more to say before the persona may speak,
+    and that decision costs a wait — up to the whole quiet period on an
+    agent whose platform never publishes a finished state. That wait is
+    egma's own turn-taking cost. It falls after the finish line, and a
+    number that carried it reported egma's patience as the agent's speed.
+
+    ``None`` also where a turn had no answer to start: one that only
+    called a tool, or produced nothing at all. Then no sample is taken,
+    because there is no wait to measure rather than a wait of zero.
+    """
+
 
 class PlugError(Exception):
     """A plug refusing config it does not understand, a modality it cannot

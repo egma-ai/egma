@@ -1525,13 +1525,25 @@ async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
     # later flush, so nothing swept the tool call along with them.
     assert tool_flush < words_flush
 
-    # The whole answer went together — its measurement rode the same flush
-    # as the call it measured, which is what "a flush is an answer" means.
-    assert any(
+    # A wordless answer takes no latency sample at all, so there is none to
+    # ride with the tool call. `turn_response_latency` runs from the moment
+    # the persona's turn went out to the moment the agent began answering,
+    # and an answer that said nothing never began: a wait that did not
+    # happen is not a wait of zero. The voice lane has always answered this
+    # way, out of the audio, and the chat lane now matches it.
+    assert not any(
         record["flush"] == tool_flush
         and record["span"]["name"] == "turn_response_latency"
         for record in recorded
-    ), "the wordless answer's measurement was split from its tool call"
+    ), "a wordless answer measured a latency it has no finish line for"
+
+    # What "a flush is an answer" means is still held, by the answer that
+    # did say something: its measurement rode the same flush as its words.
+    assert any(
+        record["flush"] == words_flush
+        and record["span"]["name"] == "turn_response_latency"
+        for record in recorded
+    ), "the spoken answer's measurement was split from the words it measured"
 
     # The invariants the design rests on, unchanged by the extra flush.
     by_flush: dict[int, set[str]] = {}

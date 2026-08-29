@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import ConnectionPlug
+from .plugs import AgentReply, ConnectionPlug
 
 logger = logging.getLogger(__name__)
 
@@ -225,9 +225,25 @@ async def conduct(
                 return limit_by_turns()
             asked_at = loop.time()
             answer = await controls.guard(plug.deliver(reply.text))
-            if on_timing is not None:
-                await on_timing(
-                    "turn_response_latency", (loop.time() - asked_at) * 1000
+            returned_at = loop.time()
+            finish_line = _answer_started_at(
+                answer, asked_at=asked_at, returned_at=returned_at
+            )
+            if finish_line is not None:
+                answered_in = (finish_line - asked_at) * 1000
+                if on_timing is not None:
+                    await on_timing("turn_response_latency", answered_in)
+                # What egma spent after the finish line deciding the agent
+                # had no more to say. Logged rather than measured: it is
+                # egma's own turn-taking cost, and the catalog names what
+                # the agent did. Worth seeing, because a turn that spent
+                # seconds of it is a turn whose platform never published a
+                # finished state.
+                logger.debug(
+                    "turn answered in %.0f ms; egma then waited %.0f ms to "
+                    "establish the turn was over",
+                    answered_in,
+                    (returned_at - finish_line) * 1000,
                 )
             # What the agent did while answering, before what it said: a
             # tool call happened during the turn, and only a platform that
@@ -258,6 +274,47 @@ async def conduct(
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog
         await _close_quietly(plug, name)
+
+
+def _answer_started_at(
+    answer: AgentReply, *, asked_at: float, returned_at: float
+) -> float | None:
+    """The finish line of ``turn_response_latency``, for one answer.
+
+    The measure runs between two events. Its **starting line** is the
+    moment the persona's turn went out, which the loop above holds. Its
+    **finish line** is the moment the agent began answering, which is this
+    — and everything egma spends past it is egma's own cost, never the
+    agent's speed.
+
+    Three cases, in order:
+
+    - **The plug saw the answer start.** It reports the instant, and that
+      is the finish line. Only a plug reading a live room can see it, and
+      it is exactly the plug whose ``deliver`` returns much later than the
+      answer began: it must also establish the agent has no more to say
+      before the persona may speak, and that wait can be seconds.
+    - **The plug's ``deliver`` is a request and its response.** Then the
+      call returns when the answer does, the two instants are the same,
+      and the return is the finish line. Nothing is lost by using it.
+    - **The turn never began an answer.** A turn that only called a tool,
+      or produced nothing at all. There is no moment the agent started
+      replying, so no sample is taken. A wait that never happened is not
+      a wait of zero, and the voice lane answers the same way, out of the
+      audio, for the same reason.
+
+    A reported instant before the starting line is refused rather than
+    measured. Nothing egma ships can produce one — a stream is stamped
+    with the turn that was outstanding when it opened, and this turn's
+    streams open after its question went out — so this guards a future
+    plug rather than a present one. A measure that ran backwards would be
+    worse than a missing one: it can never fail a bound, so it would sit
+    in the series holding one trivially and drag every mean below it.
+    """
+    answered_at = answer.answered_at
+    if answered_at is not None:
+        return answered_at if answered_at >= asked_at else None
+    return returned_at if answer.text is not None else None
 
 
 async def _duration_watchdog(

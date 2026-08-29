@@ -77,7 +77,7 @@ async def conversation(
     return conducted, turns
 
 
-async def test_a_greeted_walk_alternates_and_the_persona_concludes():
+async def test_a_greeted_conversation_alternates_and_the_persona_concludes():
     conducted, turns = await conversation(
         scenario="First point. Second point.",
         plug_config={
@@ -101,7 +101,7 @@ async def test_a_greeted_walk_alternates_and_the_persona_concludes():
     )
 
 
-async def test_an_ungreeted_walk_opens_with_the_persona():
+async def test_an_ungreeted_conversation_opens_with_the_persona():
     _, turns = await conversation(
         scenario="Just this.", plug_config={"replies": ["Noted."]}
     )
@@ -125,7 +125,7 @@ async def test_the_agent_ending_with_final_words_is_the_agents_doing():
     assert conducted.reason == "the agent ended the exchange"
 
 
-async def test_the_agent_ending_silently_still_ends_the_walk():
+async def test_the_agent_ending_silently_still_ends_the_conversation():
     conducted, turns = await conversation(
         plug_config={"replies": [], "ends_after_replies": True}
     )
@@ -133,7 +133,7 @@ async def test_the_agent_ending_silently_still_ends_the_walk():
     assert conducted.ending == "agent_ended"
 
 
-async def test_the_turn_limit_clips_the_walk_and_names_itself():
+async def test_the_turn_limit_clips_the_conversation_and_names_itself():
     conducted, turns = await conversation(
         scenario="One. Two. Three. Four.",
         plug_config={"replies": ["R1.", "R2."]},
@@ -162,7 +162,7 @@ async def test_an_even_turn_limit_ends_before_an_unanswerable_turn():
     assert conducted.ending == "limit_reached"
 
 
-async def test_the_duration_limit_ends_the_walk_and_names_itself():
+async def test_the_duration_limit_ends_the_conversation_and_names_itself():
     conducted, turns = await conversation(
         scenario=" ".join(f"Sentence {n}." for n in range(1, 21)),
         plug_config={"turn_seconds": 0.1},
@@ -188,7 +188,7 @@ async def test_the_two_limits_report_distinguishably():
     assert "duration limit" in by_duration.reason
 
 
-async def test_a_cancel_directive_stops_the_walk_mid_exchange():
+async def test_a_cancel_directive_stops_the_conversation_mid_exchange():
     controls = ConversationControls()
 
     async def cancel_soon() -> None:
@@ -208,7 +208,7 @@ async def test_a_cancel_directive_stops_the_walk_mid_exchange():
     assert 0 < len(turns) < 40
 
 
-async def test_a_cancel_after_the_walk_finished_changes_nothing():
+async def test_a_cancel_after_the_conversation_finished_changes_nothing():
     controls = ConversationControls()
     conducted, turns = await conversation(
         scenario="Only this.",
@@ -296,7 +296,7 @@ async def test_a_fault_opening_the_exchange_propagates():
     assert plug.closed == 1
 
 
-async def test_the_walk_measures_each_answered_turn():
+async def test_the_loop_measures_each_answered_turn():
     measures: list[tuple[str, float]] = []
 
     async def on_timing(measure: str, milliseconds: float) -> None:
@@ -313,7 +313,122 @@ async def test_the_walk_measures_each_answered_turn():
     assert all(milliseconds >= 0 for _, milliseconds in measures)
 
 
-async def test_the_walk_carries_the_plugs_provider_reference():
+class SlowToFinishPlug:
+    """A plug whose answer starts long before its ``deliver`` returns.
+
+    The room-shaped lane, in miniature: the agent begins replying at once,
+    and egma then spends real time establishing the turn is over before
+    the persona may speak. A stub is right here because what is under test
+    is the loop's arithmetic, not any driver's.
+    """
+
+    provider_reference = None
+
+    def __init__(self, *, answers_in: float, waits: float, replies: int = 2) -> None:
+        self._answers_in = answers_in
+        self._waits = waits
+        self._replies = replies
+
+    async def open(self) -> str | None:
+        return None
+
+    async def deliver(self, text: str) -> AgentReply:
+        clock = asyncio.get_running_loop()
+        await asyncio.sleep(self._answers_in)
+        answered_at = clock.time()
+        await asyncio.sleep(self._waits)
+        self._replies -= 1
+        return AgentReply(
+            text="Go on.", ended=self._replies <= 0, answered_at=answered_at
+        )
+
+    async def close(self) -> None:
+        return None
+
+
+class WordlessPlug:
+    """An agent turn that only called a tool: no words, and no moment it
+    began saying any."""
+
+    provider_reference = None
+
+    def __init__(self, *, replies: int = 2) -> None:
+        self._replies = replies
+
+    async def open(self) -> str | None:
+        return None
+
+    async def deliver(self, text: str) -> AgentReply:
+        self._replies -= 1
+        return AgentReply(text=None, ended=self._replies <= 0)
+
+    async def close(self) -> None:
+        return None
+
+
+async def timings_of(plug) -> list[float]:
+    measures: list[tuple[str, float]] = []
+
+    async def on_timing(measure: str, milliseconds: float) -> None:
+        measures.append((measure, milliseconds))
+
+    await conversation(scenario="One. Two.", plug=plug, on_timing=on_timing)
+    return [
+        milliseconds
+        for name, milliseconds in measures
+        if name == "turn_response_latency"
+    ]
+
+
+ANSWERS_IN = 0.05
+THEN_WAITS = 0.30
+
+
+async def test_the_finish_line_is_where_the_answer_started():
+    """A plug that saw the answer start is measured to that moment.
+
+    The wait after it is egma establishing the agent has no more to say,
+    which is egma's own turn-taking cost. Measuring through it reported
+    egma's patience as the agent's speed, and on a real run that turned
+    about a second of agent into 6890 ms on the page.
+    """
+    measured = await timings_of(
+        SlowToFinishPlug(answers_in=ANSWERS_IN, waits=THEN_WAITS)
+    )
+
+    assert measured, "an answered turn takes a sample"
+    whole_call = (ANSWERS_IN + THEN_WAITS) * 1000
+    for milliseconds in measured:
+        assert milliseconds < whole_call / 2, (
+            f"{milliseconds:.0f} ms against an answer that started at "
+            f"{ANSWERS_IN * 1000:.0f} ms and a call that returned at "
+            f"{whole_call:.0f} ms: the wait after the finish line is in the "
+            "measure, which is the defect this holds shut"
+        )
+        assert milliseconds >= ANSWERS_IN * 1000 * 0.5, (
+            "the sample is below the time the answer actually took to "
+            "start, so the starting line has moved too"
+        )
+
+
+async def test_a_plug_that_cannot_see_the_answer_start_is_timed_by_its_call():
+    """Where ``deliver`` is a request and its response, the two instants
+    are the same and the return is the finish line. Nothing is lost, and
+    the lanes that answer this way keep measuring exactly as before."""
+    measured = await timings_of(ObservantPlug(replies=2))
+
+    assert measured, "a request-and-response plug still measures every turn"
+    assert all(milliseconds >= 0 for milliseconds in measured)
+
+
+async def test_a_turn_that_began_no_answer_takes_no_sample():
+    """A turn that only called a tool has no moment the agent started
+    replying. A wait that never happened is not a wait of zero, so no
+    sample is taken — which is how the voice lane already answers."""
+    assert await timings_of(WordlessPlug(replies=2)) == []
+
+
+async def test_the_loop_carries_the_plugs_provider_reference():
     conducted, _ = await conversation(
         plug_config={
             "replies": ["Done."],
