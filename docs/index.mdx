@@ -44,9 +44,10 @@ behaviors you expect.
     ```
   </Step>
   <Step title="Connect and author">
-    The `integrate-egma` skill keeps discovery read-only, shows the exact setup
-    for approval, and uses named commands to connect Retell or LiveKit. It lists
-    valid personas, creates one suite, and writes three or four grounded tests.
+    The `integrate-egma` skill keeps discovery read-only, resolves the exact
+    setup from live facts, and uses named commands to connect Retell or LiveKit.
+    It lists valid personas, creates one suite, and writes the smallest grounded
+    test set.
 
     ```bash
     egma personas
@@ -55,9 +56,9 @@ behaviors you expect.
     ```
   </Step>
   <Step title="Publish and run">
-    After separate publish and run approvals, your coding agent pushes the
-    complete repository and follows one suite. Phone runs include a cost warning
-    before approval.
+    Your end-to-end prompt already asks the coding agent to push the complete
+    repository and follow one suite. A real phone run includes a cost warning
+    and waits for approval.
 
     ```bash
     egma push

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+/** CLI-owned runtime for one repository-local LiveKit worker. */
+
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

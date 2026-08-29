@@ -5,8 +5,8 @@ description: "Install Egma's public skills, let your coding agent inspect the re
 ---
 
 Egma onboarding runs inside the coding agent you already use. Public skills
-tell it how to inspect a voice-agent repository and which steps the developer
-must approve. Named CLI commands perform each operation without asking terminal
+tell it how to inspect a voice-agent repository and when human input is truly
+required. Named CLI commands perform each operation without asking terminal
 questions.
 
 <Note>
@@ -38,8 +38,9 @@ npx --yes skills add egma-ai/egma \
 
 Then give your coding agent this handoff:
 
-> Use the integrate-egma skill to inspect this repository, integrate its voice
-> agent with Egma, and run the first reviewed test suite.
+> Use the integrate-egma skill to complete the requested Egma simulation
+> testing, production monitoring, or both for this repository's voice agent end
+> to end.
 
 Use `egma` in the examples below after you install it. On a clean machine, the
 coding agent can use `npx --yes @egma/cli` as the command prefix instead.
@@ -106,9 +107,9 @@ Choose one outcome:
   no simulation connection, suite, tests, or run.
 - **Both** completes the testing and monitoring outcomes for the same agent.
 
-Before any remote write, the coding agent shows the exact Egma platform, agent,
-provider target, modality, access method, and resources it plans to create or
-reuse. Approve that setup only when every item is correct.
+The coding agent resolves the exact Egma platform, agent, provider target,
+modality, access method, and resources from repository evidence and live CLI
+facts. It asks only when those facts leave a material choice.
 
 ## 4. Connect the agent for testing
 
@@ -169,8 +170,9 @@ egma connect --platform livekit \
 ```
 
 It prints `required_field` and `required_secret` facts. All three calls write
-nothing. The coding agent shows the choices and requirements to you before it
-runs the approved complete command.
+nothing. The coding agent uses values already available in the repository or
+environment and asks only for a missing value, real ambiguity, or an unsafe
+conflict before it runs the complete command.
 
 For the recommended project-credentials variant:
 
@@ -233,7 +235,7 @@ not contact LiveKit.
 Every complete Retell or LiveKit connect prints `registration_name` before the
 remote request. If the reply becomes unclear before a registration receipt, the
 coding agent does not repeat setup or search the Egma UI for IDs. It uses the
-provider-public facts from the approved setup. For Retell it runs:
+provider-public facts from the settled setup. For Retell it runs:
 
 ```bash
 egma connect record \
@@ -254,13 +256,13 @@ egma connect record \
   --dispatch-name <registered-worker-name> \
   [--modality <chat|voice>] \
   [--access-variant <id>] \
-  [--metadata <approved-json>] \
+  [--metadata <json>] \
   [--name <registration_name>]
 ```
 
 For a token-endpoint target, replace `--dispatch-name` with
 `--token-endpoint <https-url>`. The LiveKit command needs exactly one of those
-flags. Pass `--metadata` when the approved setup included it; omitting the flag
+flags. Pass `--metadata` when the settled setup included it; omitting the flag
 requires a target with no metadata. In both provider commands, `--name` only
 prefers the attempted Egma name.
 It does not define the target. If several equivalent connections remain, the
@@ -271,8 +273,8 @@ Provider-public recovery makes no remote write and needs no provider credential.
 It writes the equivalent target to local `egma/config.yaml`. Exact receipt IDs
 are the other recovery mode and write the proven target to the same file.
 `registration-not-found` means Egma has no equivalent public target; it does
-not mean that an exact name is absent. The coding agent explains the result and
-asks for fresh setup approval before it repeats the original command.
+not mean that an exact name is absent. The coding agent repeats the original
+command only after the public identity is no longer ambiguous.
 
 ## 5. Create the first suite from valid personas
 
@@ -286,7 +288,7 @@ Each `persona:` line contains JSON with the persona's stable `id` and display
 `name`. New tests use only those values. If the project already contains remote
 suites, the coding agent runs `egma pull` before creating anything.
 
-Create one approved suite:
+Let the CLI create the first suite:
 
 ```bash
 egma suite create receptionist-core --name "Receptionist core"
@@ -301,10 +303,10 @@ succeeded even though the CLI received no clear answer. If it ends with
 either case, the coding agent runs `egma pull` before another create attempt and
 uses the pulled suite when it exists.
 
-The coding agent writes three or four distinct, grounded tests. It converts any
-existing cases you supplied before it adds new coverage. Each Markdown test
-names at least one persona and contains a scenario plus judgeable expected
-behaviors.
+The coding agent writes the smallest grounded suite that proves the requested
+path. It converts any existing cases you supplied before it adds new coverage.
+Each Markdown test names at least one persona and contains a scenario plus
+judgeable expected behaviors.
 
 For LiveKit testing, the coding agent also:
 
@@ -335,11 +337,9 @@ The coding agent fixes the named files until the command ends with:
 status: valid
 ```
 
-It then reads every changed file back and shows you the exact source,
-dependency, config, suite, test, and mock-tool changes. This is a new approval
-boundary: setup approval did not approve the authored files.
-
-After you approve publishing, the coding agent runs:
+It then reads every changed file back and reviews the exact source, dependency,
+config, suite, test, and mock-tool changes. The end-to-end prompt already asks
+it to publish them, so it runs:
 
 ```bash
 egma push
@@ -347,14 +347,14 @@ egma push
 
 `push` uploads the complete repository as one atomic project change. If Egma
 has a newer version, the CLI uploads nothing. The coding agent pulls, reconciles,
-validates, shows the new diff, and asks for publish approval again.
+validates, reviews the new diff, and continues without losing either side.
 
-## 7. Approve and run the suite
+## 7. Run the suite
 
 Before starting a run, the coding agent names the suite, agent, connection,
-modality, and expected simulation count. You approve this run separately. For
-a phone connection, the coding agent warns immediately before approval that the
-command places real phone calls and can cost money.
+modality, and expected simulation count. The end-to-end prompt already asks for
+this run. For a real phone connection, the coding agent warns that the command
+places calls and can cost money, then waits for approval.
 
 For Retell or an already-running LiveKit deployment:
 
@@ -370,8 +370,8 @@ requested reach terminal states.
 
 Immediately before the start request, `egma run` prints an
 `idempotency-key:`. If the response becomes unclear and the output contains no
-`run:` receipt, keep the exact suite, target, run name, and test versions, ask
-for fresh run approval, and replay only that start with the printed key:
+`run:` receipt, keep the exact suite, target, run name, and test versions and
+replay only that start with the printed key:
 
 ```bash
 egma run receptionist-core \
@@ -404,19 +404,17 @@ remote run, and always stops the local worker when the followed run completes,
 fails, or when you interrupt it. Do not combine `--no-follow` with these worker
 flags.
 
-Before you approve this run, the coding agent also discloses any preparation
-writes that the CLI may need. The CLI may install or upgrade LiveKit CLI 2.18.2
-or newer through Homebrew on macOS, `winget` on Windows, or LiveKit's downloaded
-Linux installer. It may create `.venv` in the worker project and use
-`uv pip install` or Python `pip install` with the declared `pyproject.toml` or
-`requirements.txt`. Approve these machine, project, and dependency-environment
-writes as part of the run, or prepare them yourself before the coding agent
-continues.
+The copied end-to-end prompt authorizes normal worker preparation. The
+integration skill adds the latest unpinned Egma Python SDK through the
+repository's package manager. The CLI may install or upgrade LiveKit CLI 2.18.2
+or newer, create `.venv`, and install declared dependencies with `uv` or Python
+`pip`. The coding agent reports these changes and pauses only for an unsafe
+conflict.
 
 ## 8. Enable monitoring if you requested it
 
-Skip this section for a testing-only integration. Monitoring has its own
-approval because it changes production ingestion.
+Skip this section for a testing-only integration. A monitoring or both prompt
+already authorizes this production-ingestion setup.
 
 For Retell, the coding agent sends the key on standard input:
 
@@ -429,8 +427,7 @@ egma monitoring status
 ```
 
 For LiveKit, the coding agent first adds `monitor_livekit(ctx)` to the selected
-worker and runs its focused checks. After you approve the exact monitoring
-target:
+worker and runs its focused checks, then enables the exact monitoring target:
 
 ```bash
 egma monitoring enable --platform livekit
@@ -458,7 +455,7 @@ egma pull
 # edit and review tests
 egma validate
 egma push
-# get run approval
+# run the suite
 egma run <suite-directory>
 ```
 

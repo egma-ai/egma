@@ -540,9 +540,6 @@ describe("which egma a command talks to", () => {
     const THE_SDK_CONTRACT = [
       // Egma's own code writes the two lines into the customer's `.env`.
       "src/monitoring/env-file.ts",
-      // The coding-agent skill names them in its by-hand fallback, and still
-      // never reads or writes an environment file.
-      "skills/integrate-egma/references/integrate-livekit.md",
     ];
 
     const naming: string[] = [];

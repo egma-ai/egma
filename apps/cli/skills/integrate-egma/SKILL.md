@@ -1,72 +1,53 @@
 ---
 name: integrate-egma
-description: Onboard a repository's Retell or LiveKit voice agent with Egma for simulation testing, production monitoring, or both. Use when finding or connecting the agent, creating its first suite, wiring a LiveKit worker, or reaching the first run through skills and the raw CLI.
+description: Set up a repository's Retell or LiveKit voice agent with Egma for simulation testing, production monitoring, or both. Use for first-time discovery, provider connection, the first suite and run, or the required LiveKit worker changes; use the egma skill for later work in an existing Egma repository.
 ---
 
 # Integrate Egma
 
-Run this workflow inside the coding agent the developer is already using. This
-skill and Egma's raw CLI are the complete integration surface.
+This skill coordinates the first complete Egma integration inside the coding
+agent the developer is already using.
 
-## Choose the requested outcome
+## Route the request
 
-Complete only the phase the task requests. For a full onboarding, read
-[references/onboard.md](references/onboard.md) and follow it through the
-requested terminal state:
+- For a full setup or a resumed setup for simulation testing, production
+  monitoring, or both, read [references/onboard.md](references/onboard.md) in
+  full before running a command and follow its private state map to completion.
+- For only a LiveKit worker source change, read
+  [references/livekit-worker.md](references/livekit-worker.md).
+- Use the `write-egma-tests` skill for test files and the mocked world.
+- Use the `egma` skill after the first connection and suite exist for repository
+  validation, synchronization, runs, and result interpretation.
 
-- **testing** ends with one reviewed suite pushed and one run followed;
-- **monitoring** ends with production monitoring enabled and its status read;
-- **both** completes both outcomes for the same voice agent.
+## Trust the live interface
 
-When the request does not choose one, ask the developer to choose testing,
-monitoring, or both. Do not silently turn monitoring into testing or start a
-run for a monitoring-only request.
+Use `egma` when installed and `npx --yes @egma/cli` otherwise. Read the current
+help for the active verb, then branch on its printed facts, status, exit code,
+receipts, and recovery commands. Those outputs own changing command syntax and
+platform choices; this skill owns the integration order and safety boundaries.
 
-## Bootstrap the raw CLI
+Let the CLI create and update `egma/config.yaml`, suite manifests, and other
+Egma-owned scaffold. Do not hand-write IDs or YAML that a command owns.
 
-Use `egma` when it is installed. Otherwise use `npx --yes @egma/cli` as the
-command prefix; do not require a global install. Bare `egma` only prints the
-skill installation and coding-agent handoff. It does not sign in or perform an
-onboarding operation. Use command-specific `--help` when an option needs
-confirmation, and treat the help, output fields, and exit codes as the current
-authority. In a full onboarding, `login` is the first operational command.
+## Use the authority already given
 
-## Route each phase
+An end-to-end setup prompt authorizes the normal local edits and remote setup,
+publish, chat-run, and monitoring operations needed to finish that outcome. Do
+not stop for repeated approval between states; the `egma` skill's normal
+publish and chat-run steps are part of the same authority.
 
-- For repository discovery, read
-  [references/find-voice-agent.md](references/find-voice-agent.md).
-- For a Retell testing connection, read
-  [references/connect-retell.md](references/connect-retell.md).
-- For a LiveKit testing connection, read
-  [references/connect-livekit.md](references/connect-livekit.md).
-- Before changing a LiveKit worker, read
-  [references/integrate-livekit.md](references/integrate-livekit.md).
-- For LiveKit testing, read
-  [references/author-livekit-mocks.md](references/author-livekit-mocks.md)
-  after the first tests exist.
-- When a run needs a local LiveKit worker, read
-  [references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md).
-- For the test files themselves, use the `write-egma-tests` skill after the
-  suite exists and Egma has listed valid personas.
+Pause only when the developer must approve browser login, supply a credential,
+choose among genuinely different agents or provider options, resolve an unsafe
+conflict, or authorize a real phone run that can cost money. Immediately before
+a phone run, name its target and simulation count, warn that it can cost money,
+and wait for explicit approval.
 
-Read only the references for the active platform and phase.
+Keep credentials in the secure input or process environment named by the CLI.
+Never place them in arguments, source, diffs, or reports, and do not read or
+edit environment files. When LiveKit monitoring asks the CLI to make its
+documented safe ignored-file write, let the CLI own it and report only the
+non-secret receipt.
 
-## Keep the human boundary explicit
-
-Keep discovery read-only. Use committed source for repository facts. Keep
-credentials in standard input or the process environment. Do not read or edit
-an `.env` file yourself. The only exception is the CLI's documented safe write
-during LiveKit monitoring setup; let the CLI own that write and do not inspect
-its values. The CLI reports only the protected file path, key ID, and masked
-hint. Never repeat a credential in a command, transcript, diff, or report.
-
-Before a remote write, name the platform, agent, connection or monitoring
-target, modality, and resources the command will create or update. Continue
-only after the developer approves that exact setup. After local authoring,
-show the validated files and ask separately before `egma push`. Ask again
-before `egma run`; for a phone connection, state that it starts real phone
-simulations and can cost money immediately before asking.
-
-Finish only when every requested outcome has a command receipt, every local
-change has been read back, and no unrequested repository or remote resource
-changed.
+Finish when every requested outcome has a terminal command receipt, every
+source change passes the repository's focused checks, and no unrelated local or
+remote resource changed.

@@ -152,5 +152,5 @@ Read every changed file back. A test file is complete only when:
 
 Run `egma validate` after reading the changed files back. Fix every named local
 problem and repeat it until validation succeeds. Stop after the requested local
-files are valid. `egma push` and `egma run <suite-directory>` are separate
-remote actions and require the developer's explicit next approval.
+files are valid unless the active task also asks to publish or run them. An
+end-to-end setup request already includes those normal next steps.

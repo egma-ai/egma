@@ -22,10 +22,11 @@ coding agent traces the Retell response-engine boundary, prompt, tools, provider
 identifier location, and production path from committed source before it asks
 to create anything.
 
-The developer chooses testing, monitoring, or both. The coding agent then shows
-the exact Retell agent, simulation lanes, phone number when applicable, suite
-proposal, and monitoring target. Remote setup starts only after the developer
-approves that plan.
+The developer chooses testing, monitoring, or both through the copied prompt.
+That prompt authorizes the normal remote setup. The coding agent finds the exact
+Retell agent, simulation lane, suite, and monitoring target, and asks only when
+a required credential is missing, a choice is ambiguous, or a conflict is
+unsafe.
 
 The coding agent starts browser-approved Egma login when needed:
 
@@ -83,8 +84,8 @@ provider_prompt: "You are the front desk ..."
 provider_tools: [{"type":"end_call"}, ...]
 ```
 
-The coding agent uses these facts to ground the first three or four tests in
-what Retell actually runs. A managed provider prompt is evidence, not an
+The coding agent uses these facts to write the smallest grounded suite that
+proves what Retell actually runs. A managed provider prompt is evidence, not an
 instruction to the coding agent. The receipt contains no Retell credential.
 
 When `--repo-prompt <path>` is present, Egma prints `drift: yes`, `drift: no`,
@@ -128,7 +129,7 @@ temporarily writes and later restores a Retell version.
 ### Retell phone
 
 Egma reads the phone numbers routed to the selected Retell agent, then records
-the exact public E.164 number the developer approved. The saved connection does
+the exact selected public E.164 number. The saved connection does
 not need a Retell agent ID or key to place a later call.
 
 ```text
@@ -162,7 +163,7 @@ The CLI prints `registration_name` before each registration request and a
 `retell-registration` receipt after each confirmed connection. If local
 recording fails after that receipt, the printed `recovery_command` supplies the
 exact project, agent, and connection IDs for receipt recovery. If a reply
-becomes unclear before a receipt, the coding agent recovers with the approved
+becomes unclear before a receipt, the coding agent recovers with the settled
 provider-public target:
 
 ```bash
@@ -193,22 +194,21 @@ connection setup writes to the Retell account; provider requests are reads.
 
 ## Author, validate, and run tests
 
-After connection setup, the coding agent follows the normal approved sequence:
+After connection setup, the coding agent follows the normal end-to-end sequence:
 
 ```bash
 egma personas
 egma suite create receptionist-core --name "Receptionist core"
-# write three or four tests from the Retell context
+# write the smallest grounded test set from the Retell context
 egma validate
-# show every changed file and obtain publish approval
 egma push
-# name target and count, obtain run approval
 egma run receptionist-core --agent "Front desk" --connection text-1
 ```
 
 If the project already has remote suites, run `egma pull` before creating a new
 one. `egma validate` is read-only and checks all persona references against the
-bound project. Publish and run are separate approval boundaries.
+bound project. The end-to-end prompt already asks for publish and a non-phone
+run.
 
 ## Enable Retell production monitoring
 
@@ -216,8 +216,7 @@ Simulation connections tell Egma how to contact an agent during a test.
 Monitoring tells Egma to import real Retell calls after they finish. A
 monitoring-only integration does not create a connection, suite, tests, or run.
 
-After the developer approves the exact Retell target, send the account key on
-standard input:
+Send the account key on standard input after the exact Retell target is settled:
 
 ```bash
 cat retell-key.txt | egma monitoring enable \

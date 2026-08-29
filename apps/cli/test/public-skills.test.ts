@@ -100,111 +100,116 @@ describe("the public skill source", () => {
     expect(test.mockTools.map((tool) => tool.tool)).toEqual(["check_availability"]);
   });
 
-  it("keeps integration phases in short, selected references", async () => {
+  it("keeps one complete integration state map behind two selected references", async () => {
     const root = path.join(SOURCE_ROOT, "integrate-egma");
-    const operating = await readFile(
-      path.join(SOURCE_ROOT, "egma", "SKILL.md"),
-      "utf8",
-    );
     const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
     const onboarding = await readFile(
       path.join(root, "references", "onboard.md"),
       "utf8",
     );
-    const finding = await readFile(
-      path.join(root, "references", "find-voice-agent.md"),
-      "utf8",
-    );
-    const retell = await readFile(
-      path.join(root, "references", "connect-retell.md"),
-      "utf8",
-    );
-    const connectLiveKit = await readFile(
-      path.join(root, "references", "connect-livekit.md"),
-      "utf8",
-    );
-    const authorLiveKitMocks = await readFile(
-      path.join(root, "references", "author-livekit-mocks.md"),
-      "utf8",
-    );
-    const integrating = await readFile(
-      path.join(root, "references", "integrate-livekit.md"),
-      "utf8",
-    );
-    const livekit = await readFile(
-      path.join(root, "references", "run-livekit-agent-locally.md"),
-      "utf8",
-    );
-    const helper = await readFile(
-      path.join(root, "scripts", "livekit-local.mjs"),
+    const liveKitWorker = await readFile(
+      path.join(root, "references", "livekit-worker.md"),
       "utf8",
     );
 
-    expect(skill).toContain("Complete only the phase the task requests");
+    expect(await filesUnder(path.join(root, "references"))).toEqual([
+      "livekit-worker.md",
+      "onboard.md",
+    ]);
     expect(skill).toContain("[references/onboard.md](references/onboard.md)");
-    expect(skill).toContain("[references/find-voice-agent.md](references/find-voice-agent.md)");
-    expect(skill).toContain("[references/connect-retell.md](references/connect-retell.md)");
     expect(skill).toContain(
-      "[references/integrate-livekit.md](references/integrate-livekit.md)",
+      "[references/livekit-worker.md](references/livekit-worker.md)",
     );
-    expect(skill).toContain(
-      "[references/run-livekit-agent-locally.md](references/run-livekit-agent-locally.md)",
+
+    expect(skill).toMatch(
+      /An end-to-end setup prompt authorizes[\s\S]*Do\s+not stop for repeated approval/u,
     );
-    expect(skill).toContain("Do not read or edit");
-    expect(skill).toContain("CLI's documented safe write");
-    expect([finding, retell, integrating, livekit].join("\n")).not.toContain("`.env");
-    expect(skill).not.toMatch(CLI_MARKER);
-    expect(finding).toContain("Pipecat");
-    expect(finding).toContain("Vapi");
-    expect(finding).toContain("Dispatch name");
-    expect(finding).toContain("Entrypoint");
-    expect(finding).toContain("Confirm that `HEAD` exists");
-    expect(finding).toContain("all-untracked working tree");
-    expect(retell).toContain("retell-sdk");
-    expect(onboarding).toContain("The coding agent runs `<egma> login`");
-    expect(onboarding).toMatch(/Browser approval is the developer's\s+action/u);
-    expect(onboarding).toContain("<egma> personas");
-    expect(onboarding).toContain("<egma> validate");
-    expect(onboarding).toContain("--idempotency-key <printed-key>");
-    expect(operating).toContain("--idempotency-key <printed-key>");
-    expect(onboarding).toMatch(/suite `unreachable`:[\s\S]*Run `egma pull`/u);
-    expect(onboarding).toContain("connect `repository-record-failed`");
-    expect(onboarding).toContain("proves exact receipt IDs");
-    expect(onboarding).toContain("`--retell-agent <provider-id>`");
-    expect(onboarding).toContain("one `--lanes <one>` value");
-    expect(onboarding).toContain("`--livekit-url <wss-url>`");
-    expect(onboarding).toContain("`--dispatch-name <worker>`");
-    expect(onboarding).toContain("`--token-endpoint <https-url>`");
-    expect(onboarding).toContain("`--metadata <approved-json>`");
-    expect(onboarding).toContain(
-      "`registration-not-found` means no equivalent public target exists",
+    expect(onboarding).toMatch(
+      /The original end-to-end prompt already authorizes[\s\S]*continue without another approval request/u,
     );
-    expect(onboarding).toContain("never ask the developer to inspect the Egma UI for IDs");
-    expect(onboarding).toContain("but no secret");
-    expect(onboarding).toMatch(/Ask for\s+explicit publish approval/u);
-    expect(connectLiveKit).toContain("EGMA_LIVEKIT_API_KEY");
-    expect(connectLiveKit).toContain("use `chat` when it is offered");
-    expect(connectLiveKit).toMatch(/Always\s+present every offered access variant/u);
-    expect(connectLiveKit).toContain("receipt: livekit-registration");
-    expect(connectLiveKit).toContain("<egma> connect record");
-    expect(connectLiveKit).toContain("--livekit-url <approved-wss-url>");
-    expect(retell).toContain("--retell-agent <selected-provider-id>");
-    expect(retell).toContain("--lanes <text|web-call|phone>");
-    expect(authorLiveKitMocks).toContain("AgentTask.complete");
-    expect(integrating).toContain("`BackgroundAudioPlayer`");
-    expect(integrating).toContain("it does not stop a separate publisher");
-    expect(integrating).toContain(
-      "egma @ https://github.com/egma-ai/egma/archive/ee0a8fb58a6a095ccd5313f7b3f2c94569f026f1.zip#subdirectory=sdks/python",
+
+    expect(skill).toMatch(
+      /Those outputs own changing command syntax and\s+platform choices/u,
     );
-    expect(integrating).toContain("a bare package-index requirement, machine-local");
-    expect(livekit).toContain("LiveKit CLI 2.18.2 or newer");
-    expect(livekit).toContain("create `.venv`");
-    expect(livekit).toContain("`winget` on Windows");
-    expect(livekit).toContain("`uv pip install`");
-    expect(livekit).toContain("egma:livekit-worker ready");
-    expect(helper).toContain("const MINIMUM_VERSION = [2, 18, 2]");
-    expect(finding).not.toMatch(CLI_MARKER);
-    expect(retell).not.toMatch(CLI_MARKER);
+    expect(skill).toMatch(
+      /Let the CLI create and update `egma\/config\.yaml`, suite manifests, and other\s+Egma-owned scaffold/u,
+    );
+    expect(onboarding).toContain("stable IDs and receipts define identity");
+    expect(onboarding).toMatch(
+      /The CLI owns the repository binding, agent and connection records, suite\s+manifest, and all stable IDs/u,
+    );
+
+    expect(onboarding).toMatch(
+      /For both outcomes, create the simulation connection first, then enable\s+monitoring on that recorded agent/u,
+    );
+    expect(onboarding).toMatch(
+      /both to `monitoring-setup` after execution and grading are terminal/u,
+    );
+
+    const stateLines = onboarding
+      .split("\n")
+      .filter((line) => /^- `[^`]+` — /u.test(line));
+    expect(
+      stateLines.map((line) => /^- `(?<state>[^`]+)`/u.exec(line)?.groups?.state),
+    ).toEqual([
+      "login",
+      "discovery",
+      "connection-setup",
+      "test-writing",
+      "publish",
+      "run",
+      "monitoring-setup",
+      "complete",
+      "no-agent",
+      "unsupported-platform",
+    ]);
+    for (const line of stateLines) {
+      expect(line.match(/[.!?](?=\s|$)/gu) ?? [], line).toHaveLength(1);
+    }
+
+    const operating = await readFile(path.join(SOURCE_ROOT, "egma", "SKILL.md"), "utf8");
+    expect(operating).not.toContain("The folder has this shape");
+    expect(operating).not.toContain("```yaml");
+    expect(operating).toMatch(
+      /Do not invent a\s+folder shape, manifest field, version, or stable ID/u,
+    );
+
+    expect(liveKitWorker).toMatch(
+      /Run the read-only LiveKit source-contract command listed by the current\s+`egma --help`/u,
+    );
+    expect(liveKitWorker).toContain(
+      "egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python",
+    );
+    expect(liveKitWorker).toMatch(/Do not add an SDK version, tag, or commit/u);
+    expect([skill, onboarding, liveKitWorker].join("\n")).not.toMatch(
+      /https:\/\/github\.com\/egma-ai\/egma\/archive\//u,
+    );
+    expect(liveKitWorker).not.toMatch(/[a-f0-9]{40}/u);
+
+    expect(onboarding).toMatch(/Retell or LiveKit/u);
+    expect(onboarding).toMatch(
+      /Report\s+Pipecat or Vapi accurately even though the CLI cannot connect them yet/u,
+    );
+    expect(liveKitWorker).toContain("`@livekit/agents`");
+    expect(liveKitWorker).toMatch(/Egma SDK hooks are not supported there yet/u);
+
+    expect(skill).toMatch(
+      /Pause only when the developer must approve browser login, supply a credential/u,
+    );
+    expect(skill).toMatch(
+      /Immediately before\s+a phone run[\s\S]*wait for explicit approval/u,
+    );
+    expect(skill).toMatch(
+      /Keep credentials[\s\S]*Never place them in arguments, source, diffs, or reports[\s\S]*do not read or\s+edit environment files/u,
+    );
+
+    expect(liveKitWorker).toContain("`BackgroundAudioPlayer`");
+    expect(liveKitWorker).toMatch(/Start\s+each publisher only outside the chat branch/u);
+    expect(liveKitWorker).toMatch(
+      /Disabling session audio does not\s+silence an independent publisher/u,
+    );
+
+    expect([skill, onboarding, liveKitWorker].join("\n")).not.toMatch(CLI_MARKER);
   });
 
   it("keeps the documented complete test in the shape the real parser reads", async () => {
@@ -263,7 +268,7 @@ describe("npx skills compatibility", () => {
     }
   });
 
-  it("installs every integration reference and helper", async () => {
+  it("installs the complete minimal integration skill", async () => {
     const project = await mkdtemp(path.join(tmpdir(), "egma-public-skill-install-"));
     temporary.push(project);
 
@@ -293,20 +298,20 @@ describe("npx skills compatibility", () => {
       },
     );
 
-    for (const file of [
+    const installed = path.join(project, ".agents", "skills", "integrate-egma");
+    const files = [
+      "SKILL.md",
+      path.join("agents", "openai.yaml"),
+      path.join("references", "livekit-worker.md"),
       path.join("references", "onboard.md"),
-      path.join("references", "find-voice-agent.md"),
-      path.join("references", "connect-retell.md"),
-      path.join("references", "connect-livekit.md"),
-      path.join("references", "integrate-livekit.md"),
-      path.join("references", "author-livekit-mocks.md"),
-      path.join("references", "run-livekit-agent-locally.md"),
-      path.join("scripts", "livekit-local.mjs"),
-    ]) {
+    ];
+    expect(await filesUnder(installed)).toEqual(files);
+
+    for (const file of files) {
       const relative = path.join("integrate-egma", file);
-      expect(
-        await readFile(path.join(project, ".agents", "skills", relative)),
-      ).toEqual(await readFile(path.join(SOURCE_ROOT, relative)));
+      expect(await readFile(path.join(project, ".agents", "skills", relative))).toEqual(
+        await readFile(path.join(SOURCE_ROOT, relative)),
+      );
     }
   });
 });

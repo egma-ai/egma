@@ -92,9 +92,10 @@ npx --yes @egma/cli
 
 The coding agent uses the `integrate-egma` skill and named promptless commands.
 It starts `egma login`; you approve the request in a browser. It then performs
-read-only discovery, shows the exact remote plan for approval, authors and
-validates local files, asks separately before publish and run, and confirms
-monitoring status when you request monitoring.
+read-only discovery, resolves the exact target from repository and CLI facts,
+authors and validates local files, publishes and runs when requested, and
+confirms monitoring status. It asks only for a missing human input, an unsafe
+conflict, or approval before a real phone run that can cost money.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">

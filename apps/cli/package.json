@@ -25,6 +25,7 @@
   "files": [
     "dist",
     "!dist/.tsbuildinfo",
+    "runtime",
     "skills",
     "NOTICE",
     "README.md"

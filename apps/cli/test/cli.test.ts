@@ -76,6 +76,9 @@ describe("the egma command", () => {
     expect(result).toMatchObject({ code: 0, stderr: "" });
     expect(result.stdout).toContain("setup: skills-and-cli");
     expect(result.stdout).toContain(`skills: ${SKILLS_INSTALL_COMMAND}`);
+    expect(result.stdout).toContain(
+      "If integrate-egma is already available to this coding agent, keep it",
+    );
     expect(result.stdout).toContain(`next: ${INTEGRATION_HANDOFF}`);
     expect(result.stdout).toContain("status: ready-for-agent");
     expect(result.stdout).not.toContain("approve_url:");
@@ -113,6 +116,7 @@ describe("the egma command", () => {
       "egma push",
       "egma run",
       "egma monitoring",
+      "egma livekit",
       "egma self-host up",
     ]) {
       expect(help.stdout, command).toContain(command);
@@ -135,6 +139,21 @@ describe("the egma command", () => {
 
     const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/u);
+  });
+
+  it("prints the versioned LiveKit source contract without login", async () => {
+    const result = await egma(["livekit"], workspace);
+
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout).toContain("integration: livekit-python");
+    expect(result.stdout).toContain(
+      "testing_call: await mockable(agent, ctx, session)",
+    );
+    expect(result.stdout).toContain("monitoring_call: monitor_livekit(ctx)");
+    expect(result.stdout).toContain("chat_rule:");
+    expect(result.stdout).toContain("status: ready");
+    expect(result.stdout).not.toContain("dependency:");
+    expect(result.stdout).not.toContain("approve_url:");
   });
 
   it("refuses unknown options and secrets in command arguments", async () => {

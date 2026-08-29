@@ -43,8 +43,9 @@ npx --yes skills add egma-ai/egma \
 
 Then give your coding agent the printed handoff:
 
-> Use the integrate-egma skill to inspect this repository, integrate its voice
-> agent with Egma, and run the first reviewed test suite.
+> Use the integrate-egma skill to complete the requested Egma simulation
+> testing, production monitoring, or both for this repository's voice agent end
+> to end.
 
 For a self-hosted instance, add `--url` to the bare command. The output includes
 the selected platform in the handoff:
@@ -59,31 +60,31 @@ owns the Markdown test format.
 
 ## The complete integration sequence
 
-The coding agent follows one explicit sequence. The developer keeps control of
-every write that can change a remote resource or spend money.
+The copied end-to-end prompt authorizes the normal repository edits, remote
+setup, publish, chat run, and monitoring work needed for its requested outcome.
+The coding agent does not stop for repeated confirmation between these states.
 
 1. The coding agent runs `egma login`. Egma opens the approval address, and the
    developer approves the request in the browser.
 2. The coding agent inspects committed source without changing it. It identifies
    one voice agent, its platform, prompt, tools, entrypoint, and production path.
-3. The developer chooses **testing**, **monitoring**, or **both**.
-4. The coding agent shows the exact proposed remote setup. The developer approves
-   that setup before `connect` or `monitoring enable` runs.
+3. The pasted prompt selects **testing**, **monitoring**, or **both**. The coding
+   agent asks only when the request or repository leaves a real choice.
+4. The coding agent resolves the exact remote target from repository and CLI
+   facts before `connect` or `monitoring enable` runs.
 5. For testing, the coding agent connects the agent, lists valid personas,
-   creates one suite, writes three or four grounded tests, and adds the LiveKit
+   creates one suite, writes the smallest grounded test set, and adds the LiveKit
    mocked world when the target is LiveKit.
 6. The coding agent runs repository checks and `egma validate`, reads every
    changed file back, and shows the complete change.
-7. The developer gives separate publish approval. The coding agent runs
-   `egma push`.
+7. The coding agent runs `egma push` as part of the requested end-to-end work.
 8. The coding agent names the suite, agent, connection, modality, and simulation
-   count. It also names any local-worker tool, virtual-environment, and
-   dependency writes. The developer gives separate run approval. A phone run
-   includes an immediate warning that it places real calls and can cost money.
+   count. A real phone run is the exception: the coding agent warns that it
+   places real calls and can cost money, then waits for approval.
 9. The coding agent runs and follows the suite. For a repository-local LiveKit
    worker, the same `egma run` command starts, owns, and always stops the worker.
-10. For monitoring or both, the developer approves the exact monitoring target.
-    The coding agent runs `egma monitoring enable`, then reads
+10. For monitoring or both, the coding agent runs `egma monitoring enable` on
+    the settled agent, then reads
     `egma monitoring status`.
 
 A monitoring-only integration skips the simulation connection, suite, test
@@ -251,7 +252,7 @@ not contact LiveKit.
 
 Every complete connect command prints `registration_name` before each remote
 registration request. If a Retell or LiveKit reply becomes unclear before a
-receipt, use the approved provider-public identity without repeating setup.
+receipt, use the settled provider-public identity without repeating setup.
 For Retell, provide the provider agent ID and exactly one lane:
 
 ```bash
@@ -273,13 +274,13 @@ egma connect record \
   --dispatch-name <registered-worker-name> \
   [--modality <chat|voice>] \
   [--access-variant <id>] \
-  [--metadata <approved-json>] \
+  [--metadata <json>] \
   [--name <registration_name>]
 ```
 
 For a token-endpoint target, replace `--dispatch-name` with
 `--token-endpoint <https-url>`; provide exactly one of those flags. Pass
-`--metadata` when the approved setup included it; omitting the flag requires a
+`--metadata` when the settled setup included it; omitting the flag requires a
 target with no metadata. `--name` only prefers a matching Egma agent name; it
 is not identity. If several
 equivalent connections remain, the command prints `connection_option` lines so
@@ -315,7 +316,7 @@ before the response failed. If create returns `status: local-write-failed`, the
 printed remote suite definitely exists. Run `egma pull` before any other create
 attempt, then use the pulled suite when it exists.
 
-The coding agent then writes three or four grounded Markdown tests under
+The coding agent then writes the smallest grounded Markdown test set under
 `egma/tests/receptionist-core/`. For LiveKit testing it also connects the Egma
 SDK test entry and writes the project-wide external-dependency answers in
 `egma/mock-tools.md`, with test-specific overrides only where a case needs a
@@ -348,7 +349,7 @@ egma validate
 It prints `status: valid` only after the complete repository passes. On an
 error it names every issue and writes nothing.
 
-After the developer reviews the changed files and gives publish approval:
+When the active task asks to publish the reviewed files:
 
 ```bash
 egma push
@@ -356,7 +357,8 @@ egma push
 
 `push` validates and uploads the complete repository as one project change. A
 version conflict uploads nothing. Run `egma pull`, reconcile the remote change,
-validate again, show the new diff, and get new publish approval before retrying.
+validate again, review the new diff, and retry when the task still asks to
+publish.
 
 ## Run a suite
 
@@ -380,8 +382,7 @@ CLI-owned local worker.
 
 After preflight and before the start `POST`, the command prints an
 `idempotency-key:`. If the start response becomes unclear and output contains
-no `run:` receipt, get fresh run approval and repeat the exact same start with
-that key:
+no `run:` receipt, repeat the exact same start with that key:
 
 ```bash
 egma run receptionist-core \
@@ -418,14 +419,12 @@ always stops the worker when the followed run completes, fails, or is
 interrupted. The worker credentials are read only from `LIVEKIT_URL`,
 `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
 
-Before run approval, disclose the preparation writes that this repository may
-need. The CLI may install or upgrade LiveKit CLI 2.18.2 or newer through
-Homebrew on macOS, `winget` on Windows, or LiveKit's downloaded Linux
-installer. It may create `.venv` in the worker project and run `uv pip install`
-or Python `pip install` against the declared `pyproject.toml` or
-`requirements.txt` when that environment lacks Egma Python SDK 0.2.0 or newer.
-The developer approves these machine, project, and dependency-environment
-writes or prepares them before the run.
+The copied end-to-end prompt authorizes normal worker preparation. The
+integration skill adds the latest unpinned Egma Python SDK through the
+repository's package manager. The CLI may install or upgrade LiveKit CLI 2.18.2
+or newer, create `.venv`, and install the declared dependencies with `uv` or
+Python `pip`. The coding agent reports these changes and pauses only for an
+unsafe conflict.
 
 ## Enable production monitoring
 
@@ -443,7 +442,7 @@ egma monitoring status
 ```
 
 For LiveKit, the coding agent first adds `monitor_livekit(ctx)` to the selected
-worker. After the developer approves the exact monitoring target:
+worker, then enables the exact monitoring target:
 
 ```bash
 egma monitoring enable --platform livekit

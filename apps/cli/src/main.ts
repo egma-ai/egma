@@ -16,6 +16,7 @@ import {
 import type { FolderCommandOptions } from "./commands/folder-verbs.ts";
 import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
+import { runLiveKitContractCommand } from "./commands/livekit.ts";
 import {
   MONITORING_ACTIONS,
   runMonitoringCommand,
@@ -63,6 +64,7 @@ export const VERBS = [
   "personas",
   "validate",
   "monitoring",
+  "livekit",
 ] as const;
 
 export const RETELL_URL_VARIABLE = "EGMA_RETELL_URL";
@@ -282,6 +284,7 @@ export function helpText(): string {
     "  egma run <suite-directory> [options]   Run and follow one complete suite.",
     "  egma monitoring <enable|disable|status|record> [options]",
     "                                         Manage production monitoring.",
+    "  egma livekit                          Print the current worker source contract.",
     "  egma self-host up                      Start a local Egma platform.",
     "",
     "Common options:",
@@ -678,6 +681,13 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = await runFolderVerb(invocation.verb, invocation, {
       url: "",
       credentialsFile: credentialsFileIn(process.env),
+    });
+    return;
+  }
+
+  if (invocation.verb === "livekit") {
+    process.exitCode = runLiveKitContractCommand({
+      out: (line) => process.stdout.write(`${line}\n`),
     });
     return;
   }

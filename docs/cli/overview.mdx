@@ -6,7 +6,8 @@ description: "Use Egma's public Agent Skills for repository work and named CLI c
 
 The Egma CLI is a deterministic command surface for coding agents. Public
 Agent Skills explain how to discover a voice agent, author grounded tests, and
-stop for developer approval. Named commands perform each local or remote action.
+pause only for a required human action. Named commands perform each local or
+remote action.
 
 Every named command asks no terminal questions. It prints one fact per line and
 uses its exit code as the next branch. This workflow needs no private agent
@@ -44,39 +45,38 @@ npx --yes skills add egma-ai/egma \
 
 Give your coding agent the printed handoff:
 
-> Use the integrate-egma skill to inspect this repository, integrate its voice
-> agent with Egma, and run the first reviewed test suite.
+> Use the integrate-egma skill to complete the requested Egma simulation
+> testing, production monitoring, or both for this repository's voice agent end
+> to end.
 
 The three skills divide the work by purpose:
 
 | Skill | Responsibility |
 |---|---|
-| `integrate-egma` | First-time repository discovery, Retell or LiveKit setup, approval gates, the first suite, a first run, and monitoring |
+| `integrate-egma` | First-time repository discovery, Retell or LiveKit setup, human-only pauses, the first suite, a first run, and monitoring |
 | `write-egma-tests` | Egma Markdown test authoring, personas, expected behaviors, and test-level mock tools |
 | `egma` | Post-onboarding pull, validate, push, run, and grade interpretation |
 
 ## Human and command boundaries
 
 The coding agent performs repository work. Egma performs platform operations.
-The developer keeps the decisions that have external effects.
+The pasted end-to-end prompt authorizes its normal local and remote work.
 
 | Boundary | Owner |
 |---|---|
 | Inspect committed source and propose one target | Coding agent using `integrate-egma` |
 | Approve login request | Developer in the browser |
-| Choose testing, monitoring, or both | Developer |
-| Show the exact resource plan | Coding agent |
-| Approve connection or monitoring setup | Developer |
+| State testing, monitoring, or both in the copied prompt | Developer |
+| Resolve the exact resource plan | Coding agent |
 | Create or read platform resources | Named Egma command |
 | Author and validate local files | Coding agent plus `egma validate` |
-| Approve publication | Developer |
 | Upload the repository | `egma push` |
-| Approve a run and any phone cost | Developer |
+| Approve a real phone run and its cost | Developer |
 | Start and follow a run | `egma run` |
 
-Setup approval does not approve authored files. Publish approval does not
-approve a run. Monitoring has its own approval. A changed target, modality, or
-access method needs a new setup approval.
+The coding agent asks only for browser authorization, a missing credential, a
+choice it cannot safely infer, an unsafe conflict, or a real phone run that can
+cost money.
 
 ## Full onboarding flow
 
@@ -90,30 +90,29 @@ access method needs a new setup approval.
     the platform, prompt, tools, entrypoint, dispatch name, production path, and
     provider identifier boundary.
   </Step>
-  <Step title="Choose the outcome">
-    The developer chooses testing, monitoring, or both. Monitoring-only skips
+  <Step title="Read the requested outcome">
+    The copied prompt says testing, monitoring, or both. Monitoring-only skips
     the simulation connection, suite, tests, publish, and run.
   </Step>
-  <Step title="Approve remote setup">
-    The coding agent shows the exact Egma platform, voice agent, provider target,
-    connection modality and access method, suite proposal, and monitoring target
-    that apply. The developer approves before the first write.
+  <Step title="Resolve remote setup">
+    The coding agent uses repository evidence and live CLI facts to resolve the
+    exact platform, voice agent, provider target, connection, and monitoring
+    target. It asks only when those facts leave a material choice.
   </Step>
   <Step title="Connect for testing">
     The coding agent runs `egma connect --platform retell --show-context` so the
     test author receives the provider-managed prompt and tools. For LiveKit, it
     reads modalities first, repeats the command with `--modality` to read access
     variants, and repeats it with `--modality` plus `--access-variant` to read
-    required fields and secrets. These incomplete calls write nothing. It runs
-    the complete command only after the developer approves every value. The
+    required fields and secrets. These incomplete calls write nothing. The
     complete command prints `registration_name` before its remote request and
     a registration receipt after Egma confirms the write. If the response is
     unclear or the local record fails, the coding agent runs
     `egma connect record`. It either proves exact receipt IDs or matches the
-    approved provider-public identity. Retell recovery uses the provider agent,
+    settled provider-public identity. Retell recovery uses the provider agent,
     exactly one lane, and a phone number for phone. LiveKit recovery uses the
     server URL and exactly one dispatch name or token endpoint. It also matches
-    the approved metadata exactly; omission means the setup had none. The
+    the settled metadata exactly; omission means the setup had none. The
     attempted `registration_name` is only an optional preference. The command makes no
     remote write and writes the proven or equivalent target to local
     `egma/config.yaml`. `registration-not-found` means no equivalent public
@@ -124,7 +123,7 @@ access method needs a new setup approval.
   <Step title="Create the first suite">
     `egma personas` supplies the only valid persona names and IDs. If remote
     suites already exist, the coding agent pulls first. It then creates one
-    suite and writes three or four grounded tests. After an unreachable create
+    suite and writes the smallest grounded test set. After an unreachable create
     response or a local manifest failure, it pulls before any new create.
   </Step>
   <Step title="Integrate the LiveKit test path">
@@ -134,19 +133,18 @@ access method needs a new setup approval.
   </Step>
   <Step title="Validate and review">
     The coding agent runs focused repository checks and `egma validate`, reads
-    every changed file back, and shows the complete diff. The developer gives
-    separate publish approval before `egma push`.
+    every changed file back, and publishes it as part of the end-to-end request.
   </Step>
-  <Step title="Approve and run">
+  <Step title="Run the suite">
     The coding agent names the suite, agent, connection, modality, and expected
-    simulation count. The developer approves. A phone run includes a cost
-    warning. `egma run` follows the complete run; its worker flags can own a
+    simulation count. A real phone run includes a cost warning and waits for
+    approval. `egma run` follows the complete run; its worker flags can own a
     repository-local LiveKit worker for the same command. The command prints an
     idempotency key before the start request. A replay of the exact same unclear
-    start uses that key only after fresh run approval.
+    start uses that key without creating a second run.
   </Step>
-  <Step title="Enable monitoring after approval">
-    After separate approval, `egma monitoring enable` configures the selected
+  <Step title="Enable monitoring">
+    `egma monitoring enable` configures the selected
     Retell or LiveKit production path. LiveKit enable writes its new secret only
     to a regular `.env` that Git ignores; it never prints that secret. The
     coding agent runs `egma monitoring status` to read the final state.
@@ -172,6 +170,7 @@ access method needs a new setup approval.
 | `egma monitoring status` | Reads the monitoring binding and latest arrival state |
 | `egma monitoring disable` | Stops Retell polling while keeping stored evidence and binding |
 | `egma monitoring record` | Recovers only a failed local record after remote setup succeeded |
+| `egma livekit` | Prints the current LiveKit SDK and worker source contract without signing in |
 | `egma self-host up` | Starts a complete local Egma platform |
 
 See [Commands](/cli/commands) for exact flags, environment variables, output,
@@ -222,8 +221,8 @@ egma connect --platform livekit \
 
 The three calls print `modality_option`, `access_variant_option`, then
 `required_field` and `required_secret` facts in that order. They exit on the
-missing input and write nothing. After approval, the complete call uses the
-public flags that the chosen catalog entry requests:
+missing input and write nothing. The coding agent uses existing credentials and
+the public fields that the chosen catalog entry requests:
 
 - `--name <name>`
 - `--modality <chat|voice>`
@@ -251,15 +250,15 @@ egma run receptionist-core \
 The CLI starts the worker, waits for registration, starts the remote run, and
 always stops the worker. It refuses `--no-follow` when it owns the worker.
 
-Before run approval, the coding agent discloses any setup writes. The CLI may
-install or upgrade LiveKit CLI through Homebrew, `winget`, or LiveKit's Linux
-installer. It may also create the worker project's `.venv` and install the
-declared dependencies with `uv` or Python `pip`. The developer approves those
-writes or prepares the environment first.
+The copied end-to-end prompt authorizes normal worker preparation. The
+integration skill adds the latest unpinned Egma Python SDK through the
+repository's package manager. The CLI may install or upgrade LiveKit CLI,
+create the worker project's `.venv`, and install the declared dependencies with
+`uv` or Python `pip`. The coding agent pauses only for an unsafe conflict.
 
 Every run prints `idempotency-key:` before the start `POST`. Use that key only
-to replay the exact same start after an unclear response, and ask for fresh run
-approval first. Never reuse it after changing inputs or for a new run.
+to replay the exact same start after an unclear response. Ask again first only
+for a real phone run. Never reuse it after changing inputs or for a new run.
 
 ## Point at a self-hosted instance
 
@@ -285,5 +284,5 @@ the instance. Later commands resolve the URL from `egma/config.yaml`.
 Named commands already have plain output and no terminal questions. Supply all
 required choices as flags or environment variables, branch on the exit code,
 and read the `status:` line. Login still needs a developer to approve the
-device request in a browser. Remote writes and paid runs should retain the same
-approval boundaries in automated workflows.
+device request in a browser. A copied end-to-end prompt authorizes normal
+repository and remote writes; a real phone run still needs immediate approval.

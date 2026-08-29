@@ -126,8 +126,8 @@ the customer's endpoint owns those actions.
 
 ## Create connections with skills and the CLI
 
-The public `integrate-egma` skill keeps repository discovery read-only and asks
-the developer to approve the exact remote plan before `connect` runs.
+The public `integrate-egma` skill keeps repository discovery read-only. The
+copied end-to-end prompt authorizes normal connection setup after discovery.
 
 Retell setup includes provider context for test grounding:
 
@@ -152,8 +152,8 @@ egma connect --platform livekit \
   --access-variant livekit_room.project_credentials
 ```
 
-After the developer approves the exact values, the coding agent supplies the
-public fields and secrets in one complete call:
+The coding agent supplies the exact public fields and existing secrets in one
+complete call; it asks only when a required value is missing or ambiguous:
 
 ```bash
 EGMA_LIVEKIT_API_KEY=... \
@@ -248,9 +248,9 @@ Monitoring credentials and simulation connection credentials are separate.
 Rotating or disabling one path does not change the other. Turning Retell
 monitoring on or off never creates or changes a simulation connection.
 
-The coding agent obtains separate developer approval immediately before
-`egma monitoring enable`, then confirms the result with
+The copied monitoring or both prompt already authorizes
+`egma monitoring enable`. The coding agent confirms the result with
 `egma monitoring status`. A monitoring-only integration stops there. A both
-integration completes the approved test run and the monitoring status.
+integration completes the test run and the monitoring status.
 
 See [Production telemetry](/concepts/telemetry) for the evidence path.

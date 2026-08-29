@@ -46,7 +46,7 @@ argument. LiveKit monitoring mints its own Egma project key.
 
 ## `egma`
 
-Prints the public skill install command and the exact coding-agent handoff.
+Prints the public skill install command and the coding-agent handoff.
 
 ```bash
 egma [--url <address>]
@@ -55,13 +55,8 @@ egma [--url <address>]
 The bare command does not sign in, inspect source, start another process, edit
 files, create remote resources, or run tests.
 
-```text
-setup: skills-and-cli
-note: Your coding agent will do the full integration through the public skills and promptless commands.
-skills: npx --yes skills add egma-ai/egma --skill integrate-egma --skill write-egma-tests --skill egma
-next: Use the integrate-egma skill to inspect this repository, integrate its voice agent with Egma, and run the first reviewed test suite.
-status: ready-for-agent
-```
+The live output is the authority. It prints `setup:`, the current `skills:`
+install command, the complete `next:` handoff, and `status: ready-for-agent`.
 
 When you pass `--url`, output also includes `platform:` and adds that platform
 to the handoff. Exit code `0` confirms that the command printed the handoff.
@@ -177,8 +172,10 @@ egma connect --platform livekit \
 ```
 
 This pass prints `required_field` and `required_secret` facts. It also writes
-nothing. Use only the values and fields that the selected Egma instance returns,
-then run the complete command after the developer approves them.
+nothing. Use only the values and fields that the selected Egma instance returns.
+Use existing credentials and run the complete command when the repository or a
+single option makes the target exact; ask the developer only for missing input,
+real ambiguity, or an unsafe conflict.
 
 Project credentials:
 
@@ -286,13 +283,13 @@ egma connect record \
   --dispatch-name <registered-worker-name> \
   [--modality <chat|voice>] \
   [--access-variant <id>] \
-  [--metadata <approved-json>] \
+  [--metadata <json>] \
   [--name <registration_name>]
 ```
 
 For a token-endpoint target, replace `--dispatch-name` with
 `--token-endpoint <https-url>`; provide exactly one of those flags. Pass
-`--metadata` when the approved setup included it; omission requires a target
+`--metadata` when the settled setup included it; omission requires a target
 with no metadata. `--modality`, `--access-variant`, and `--name` narrow or
 prefer a match but do not replace the required provider-public identity. If several equivalent
 connections remain, the command prints `connection_option` lines and exits
@@ -437,7 +434,8 @@ egma push
 ```
 
 If any item conflicts with a newer remote version, the CLI uploads nothing. Pull,
-reconcile, validate, review, and get new publish approval before retrying.
+reconcile, validate, review, and retry when the active task still asks to
+publish.
 
 | Exit | Meaning |
 |---|---|
@@ -474,8 +472,8 @@ change the exit code; execution and grading-system errors do.
 
 After local and remote preflight succeeds, the command prints
 `idempotency-key:` before it sends the start `POST`. Keep that key when the
-start response becomes unclear. Ask the developer for fresh run approval, then
-repeat the exact same start with the printed value:
+start response becomes unclear. Repeat the exact same start with the printed
+value:
 
 ```bash
 egma run receptionist-core \
@@ -529,18 +527,19 @@ worker on completion, failure, or interruption. The three flags are
 all-or-nothing. The CLI refuses `--no-follow` because it must retain worker
 custody until the run finishes.
 
-Worker preparation can change the machine and the worker project. Before run
-approval, disclose which of these actions the repository may need:
+Worker preparation can change the machine and the worker project. The copied
+end-to-end prompt authorizes these normal preparation steps:
 
 - install or upgrade LiveKit CLI to 2.18.2 or newer through Homebrew on macOS,
   `winget` on Windows, or LiveKit's downloaded Linux installer;
 - create `.venv` in the worker project when no usable environment exists; and
+- create or update the worker's dependency declaration with the latest unpinned
+  Egma Python SDK, as directed by the integration skill; and
 - run `uv pip install` or Python `pip install` against the declared
-  `pyproject.toml` or `requirements.txt` when the environment lacks Egma Python
-  SDK 0.2.0 or newer.
+  `pyproject.toml` or `requirements.txt` when the environment cannot import it.
 
-Obtain approval for those writes before `egma run`. If the developer declines,
-let them prepare the CLI and Python environment, then run the command again.
+Report the changes with the final result. Pause only when the repository has an
+unsafe conflict or the run uses a real phone connection that may cost money.
 
 ## `egma monitoring`
 

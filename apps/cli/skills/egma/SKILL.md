@@ -25,60 +25,16 @@ for the stable post-onboarding workflow around the commands.
 
 ## Read the repository state
 
-Read `egma/config.yaml` before acting. Format 3 names one **project**, its
-**agents**, and the **connections** nested under each agent. Suites belong to
-the project and live below `egma/tests/`; a run selects one suite, agent, and
-connection together.
-
-The folder has this shape:
-
-```text
-egma/
-  config.yaml     format 3 platform, project, agents, and connection modalities
-  mock-tools.md   what Egma answers for the agent's tools with
-  tests/
-    release/      one local directory per suite
-      suite.yaml  stable suite id and mutable display name
-      *.md        zero or more tests in this suite
-    regression/   another suite in the same project
-      suite.yaml
-      *.md
-```
-
-The config hierarchy is:
-
-```yaml
-format: 3
-platform:
-  origin: https://app.egma.ai
-project:
-  id: prj_...
-  name: Voice agents
-agents:
-  - id: agt_...
-    name: Front desk
-    connections:
-      - id: con_...
-        name: livekit_voice-1
-        modality: voice
-  - id: agt_...
-    name: After hours
-    connections: []
-```
-
-Format 3 is strict. Every connection has `modality: chat` or `modality: voice`.
-The CLI has no reader, migration, or alias for an older folder format. Report
-that refusal as written.
-
 When the developer asks to onboard a repository, add its first voice agent, or
-set up monitoring, use the `integrate-egma` skill. That skill owns discovery,
-provider setup, the first suite, LiveKit source integration, and the human
-approval gates. This skill starts from an existing `egma/config.yaml` and does
-not reconstruct onboarding.
+set up monitoring, use the `integrate-egma` skill. It owns discovery, provider
+setup, the first suite, LiveKit source integration, and the human input
+boundaries.
 
-Everything in the folder is safe to commit. Treat fields such as `format`,
-`version`, `identity_revision`, and persona ids as Egma-owned sync state.
-Preserve them when editing an existing file. For test authoring, follow the
+For an existing integration, read the current help for the operation and let
+the CLI inspect, create, and update its own repository files. Do not invent a
+folder shape, manifest field, version, or stable ID. Everything the CLI writes
+inside the repository is safe to commit. Preserve its sync fields and other
+people's tests when resolving a refusal. For test authoring, follow the
 `write-egma-tests` skill when it is available.
 
 ## Keep the folder and Egma in step
@@ -89,9 +45,9 @@ egma push
 ```
 
 Run `egma pull` to bring the platform's current versions into the repository.
-Before `egma push`, run `egma validate`, show the validated local changes, and
-get explicit developer approval for the remote write. Then push the reviewed
-change.
+Before `egma push`, run `egma validate` and review the validated local changes.
+Push when the active task asks for publishing. An end-to-end setup request
+already includes this normal publish step; do not stop to ask again.
 
 `push` validates and sends the complete repository as one change. It refuses a
 stale file when the platform has moved on. Preserve the other person's work:
@@ -125,9 +81,9 @@ match the platform before Egma starts it. Each test produces one **simulation**
 per persona.
 
 Before starting the command, name the suite, agent, connection, modality, and
-expected simulation count and get explicit developer approval. For a phone
-connection, state that the run starts real phone simulations and can cost money
-immediately before asking. Never retry a phone run without fresh approval.
+expected simulation count. Run it when the active task asks for a run. An
+end-to-end setup request already includes a chat or web-call run. A real phone
+run can cost money, so ask immediately before every phone run and retry.
 
 The command prints `idempotency-key` before it sends the start request, then
 prints identifiers, a results address, execution progress, and grading
@@ -180,17 +136,17 @@ it exposes a real voice-agent problem.
 
 - If the command says the developer is not signed in, run `egma login`.
 - If no `egma/` folder exists, confirm the working directory. Run `egma init`
-  only as part of an approved onboarding through the `integrate-egma` skill.
+  only as part of end-to-end onboarding through the `integrate-egma` skill.
 - If `egma run <suite-directory>` reports `not-pushed` or `unknown`, run
-  `egma validate`, show the changes, get push approval, resolve any refusal,
-  and then ask again before starting the run.
+  `egma validate`, review the changes, resolve any refusal, and continue when
+  the active task already asks for publishing and a run.
 - If a failed or interrupted run printed a `run:` ID, the remote run exists.
   Use that ID and its results address; do not create another run to recover it.
 - If a run transport failure printed an `idempotency-key` but no `run:` ID,
-  the remote result is unclear. Get fresh run approval, then repeat the exact
+  the remote result is unclear. Repeat the exact
   same suite, agent, connection, test versions, and run name with
   `--idempotency-key <printed-key>`. Never reuse that key for changed inputs or
-  a new intended run.
+  a new intended run. Ask again first only when it is a real phone run.
 - If the platform refuses a command, report its sentence as written and fix
   the named input.
 

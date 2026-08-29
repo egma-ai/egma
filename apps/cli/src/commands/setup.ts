@@ -14,7 +14,7 @@ export const SKILLS_INSTALL_COMMAND =
   "npx --yes skills add egma-ai/egma --skill integrate-egma --skill write-egma-tests --skill egma";
 
 export const INTEGRATION_HANDOFF =
-  "Use the integrate-egma skill to inspect this repository, integrate its voice agent with Egma, and run the first reviewed test suite.";
+  "Use the integrate-egma skill to complete the requested Egma simulation testing, production monitoring, or both for this repository's voice agent end to end.";
 
 export type SetupCommandOptions = {
   readonly platformUrl?: string | null;
@@ -29,6 +29,9 @@ export function runSetupCommand(options: SetupCommandOptions): number {
   const platform = options.platformUrl?.trim() ?? "";
   if (platform !== "") options.out(`platform: ${platform}`);
   options.out(`skills: ${SKILLS_INSTALL_COMMAND}`);
+  options.out(
+    "note: If integrate-egma is already available to this coding agent, keep it and do not reinstall it.",
+  );
   options.out(
     `next: ${INTEGRATION_HANDOFF}${
       platform === "" ? "" : ` Use ${platform} as the Egma platform URL.`

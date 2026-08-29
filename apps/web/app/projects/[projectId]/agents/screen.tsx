@@ -617,28 +617,9 @@ export function AgentsScreen({
 
       {sheet?.kind === "connect" ? (
         <ConnectAgentSheet
-          projectId={projectId}
-          agents={items}
-          {...(sheet.agentId === undefined ? {} : { agentId: sheet.agentId })}
-          {...(sheet.goal === undefined ? {} : { goal: sheet.goal })}
-          {...(sheet.platform === undefined ? {} : { platform: sheet.platform })}
-          onboarding={sheet.onboarding === true}
           mayAuthor={mayAuthor}
           role={role}
           onClose={close}
-          onConnected={() => {
-            /*
-             * **A save closes onto the list, and nothing navigates.**
-             *
-             * There is no agent page to land on any more: the row is the agent,
-             * and the row this save just wrote is right there behind the panel.
-             * `replace` rather than `push`, because the address behind is the
-             * panel that was just finished with — Back should be the list it
-             * was opened from, not the form opening again.
-             */
-            router.replace(home);
-            refresh();
-          }}
         />
       ) : null}
 
