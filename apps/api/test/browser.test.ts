@@ -3534,7 +3534,15 @@ describe("the complete product, walked in order in a second project", () => {
       // still missing — here, the persona nobody has named yet.
       await saysWithin(walk, "Needs one persona.");
       await walk.getByRole("button", { name: "+ Add a persona" }).click();
-      await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
+      /*
+       * The persona row is an option, not a checkbox, and that is the pattern
+       * rather than a detail. The picker is a combobox now — a field that
+       * narrows a listbox — and ARIA forbids an interactive descendant inside
+       * an `option`, so the box drawn in the row is hidden from assistive
+       * technology and the row itself carries `aria-checked`. This drives what
+       * a screen reader would drive.
+       */
+      await walk.getByRole("option", { name: "Impatient Rita" }).click();
       await walk.getByRole("button", { name: "Done" }).click();
       await walk.getByRole("button", { name: "Save test" }).click();
 

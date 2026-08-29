@@ -17,6 +17,18 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { LANE_X } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
@@ -289,22 +301,105 @@ function Arriving({
 /**
  * The persona picker, and this is its only home.
  *
- * It opens inside the woken Personas cell — search, checkboxes, Done — because
- * the cell is where the answer is read. Personas arrive once per open and are
- * narrowed in the browser, which is what the list does everywhere else on this
- * screen.
+ * It opens from the woken Personas cell — search, tick boxes, Done — because
+ * the cell is where the answer is read.
+ *
+ * **It is the kit's popover now, and that is what deleted the grid's worst
+ * trade.** The panel used to be an absolutely positioned box inside the cell,
+ * which any scroll container clips, so the grid switched its own sideways
+ * scrolling off for as long as a picker was open — and on a phone that switch
+ * threw away the reader's place in the table. `PopoverContent` is drawn in a
+ * portal, so nothing clips it and the grid scrolls at all times.
+ *
+ * **The click-outside rule is Radix's, and it is the same rule spelled once.**
+ * The hand-written listener had to measure "elsewhere" against an owner id,
+ * because a marker with no owner made *another* row's trigger count as inside
+ * this panel: the picking moved to that row, Done never ran, and the personas
+ * ticked here went with no save and no word said. A popover only knows itself,
+ * so pressing another row's trigger dismisses this one first — which closes it
+ * the way Done does, keeping the ticks — and the press then opens that row's.
+ * The owner id is gone from this component because Radix is what holds the
+ * rule now, and `tests-grid` keeps its own `picking` only to know which cell to
+ * commit.
+ *
+ * The reading lives in `PersonaChoices`, inside the panel, because Radix mounts
+ * the panel's children when it opens. A row that is never opened must not send
+ * the project's whole persona list over the wire, and there is one of these per
+ * row.
  */
 function PersonaPicker({
   projectId,
-  owner,
+  chosen,
+  known,
+  onChange,
+  open,
+  onOpenChange,
+}: {
+  readonly projectId: string;
+  readonly chosen: readonly string[];
+  readonly known: ReadonlyMap<string, Named>;
+  readonly onChange: (ids: readonly string[], named: ReadonlyMap<string, Named>) => void;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <button
+          className={ADD_LINE}
+          type="button"
+          /* The cell owns its own caret; opening must not move it first. */
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          + Add a persona
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        /* Never wider than the screen it has to fit on, as `ui/menu.tsx` is. */
+        className="w-[min(300px,calc(100vw-var(--space-8)))] p-0"
+        aria-label="Choose personas"
+        /*
+         * **Focus leaving does not shut this panel; a press elsewhere does.**
+         * A popover closes on both by default, and the first one is wrong here:
+         * the cell this hangs off keeps a caret of its own — the entry row puts
+         * one in Name as soon as it wakes — so focus lands back outside the
+         * panel a tick after it opens and Radix reads that as an exit. The
+         * panel shut itself before anybody could tick a name.
+         *
+         * A press outside still closes it, which is the rule that matters: that
+         * is the save, and it is what carries the ticks to the platform. Escape
+         * still closes it too.
+         */
+        onFocusOutside={(event) => event.preventDefault()}
+      >
+        <PersonaChoices
+          projectId={projectId}
+          chosen={chosen}
+          known={known}
+          onChange={onChange}
+          onDone={() => onOpenChange(false)}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * What the open picker holds: the search, the people, and the way out.
+ *
+ * It is its own component so that the read below runs when a panel opens
+ * rather than when the grid draws, which is the difference between one request
+ * and one per row.
+ */
+function PersonaChoices({
+  projectId,
   chosen,
   known,
   onChange,
   onDone,
 }: {
   readonly projectId: string;
-  /** Whose picking this is: the owning test's id, or `"entry"` for the row. */
-  readonly owner: string;
   readonly chosen: readonly string[];
   readonly known: ReadonlyMap<string, Named>;
   readonly onChange: (ids: readonly string[], named: ReadonlyMap<string, Named>) => void;
@@ -315,44 +410,6 @@ function PersonaPicker({
   const [refused, setRefused] = useState<string | null>(null);
   /** Whether egma holds more than this picker read. Said out loud if so. */
   const [truncated, setTruncated] = useState(false);
-  /** The newest way out, so the listener below never closes over a stale one. */
-  const done = useRef(onDone);
-  useEffect(() => {
-    done.current = onDone;
-  });
-
-  /*
-   * **A click anywhere else closes this picker, and it closes it the way Done
-   * does** — the choices ticked so far are kept, because ticking a checkbox has
-   * already changed the draft. A picker that stayed open under a click that
-   * plainly meant "elsewhere" left the only way out a button somebody had to
-   * find, which is the defect the founder named on 2026-08-25.
-   *
-   * `mousedown` rather than `click`, so the close happens before focus moves —
-   * the same instant Done would have.
-   *
-   * **"Elsewhere" is measured against this picker's owner, not against the
-   * marker alone.** `data-persona-picker` sits on this surface *and* on every
-   * "+ Add a persona" trigger, so a marker with no owner in it made the *other*
-   * row's trigger count as inside: the picking moved to that row, Done never
-   * ran, and the personas ticked here went with no save and no word said. Only
-   * this owner's own marks are inside. Every other target — the other trigger
-   * included — runs Done first, and the trigger's own click then opens its own
-   * picker, because a mousedown lands before the click it belongs to.
-   */
-  useEffect(() => {
-    function elsewhere(event: MouseEvent): void {
-      const target = event.target;
-      const marked =
-        target instanceof Element
-          ? target.closest("[data-persona-picker]")
-          : null;
-      if (marked?.getAttribute("data-persona-picker") === owner) return;
-      done.current();
-    }
-    document.addEventListener("mousedown", elsewhere);
-    return () => document.removeEventListener("mousedown", elsewhere);
-  }, [owner]);
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -404,6 +461,9 @@ function PersonaPicker({
     }
 
     void readEveryone();
+    return () => {
+      live = false;
+    };
   }, [projectId]);
 
   const wanted = search.trim().toLocaleLowerCase();
@@ -421,29 +481,33 @@ function PersonaPicker({
   }
 
   return (
-    <Arriving
-      className="absolute top-full left-0 z-20 mt-1 w-[300px] origin-top border border-border bg-surface shadow-popover"
-      role="dialog"
-      aria-label="Choose personas"
-      data-persona-picker={owner}
-    >
-      <div className="border-b border-border">
-        <input
-          className={cn(QUIET_INPUT, "h-9 px-2.5")}
-          aria-label="Search personas"
-          placeholder="Search personas"
-          value={search}
-          autoComplete="off"
-          onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              onDone();
-            }
-          }}
-        />
-      </div>
-      <div className="max-h-[240px] overflow-y-auto">
+    /*
+     * **`label` names the search field, not the list, and that is `cmdk`'s
+     * doing rather than a choice made here.** It renders the prop into a hidden
+     * element and points the field's `aria-labelledby` at it — always, even
+     * with no label given, which is why an `aria-label` on the field is
+     * overridden and silently does nothing. So the words that describe the
+     * typing have to arrive through this prop. The panel around it is a dialog
+     * and carries "Choose personas" of its own, so nothing is left unnamed.
+     */
+    <Command label="Search personas">
+      <CommandInput
+        /*
+         * The caret starts here, and that is load-bearing rather than a
+         * courtesy. Radix puts focus on the panel itself when it opens, and the
+         * panel's own children then re-render as the persona pages arrive —
+         * which drops focus to the body, reads to Radix as focus leaving the
+         * panel, and shuts it. Landing the caret on the field holds it on
+         * something that outlives the list, and it is where somebody opening a
+         * search panel expects to be typing.
+         */
+        autoFocus
+        /* A placeholder is not a name: it leaves with the first keystroke. */
+        placeholder="Search personas"
+        value={search}
+        onValueChange={setSearch}
+      />
+      <CommandList>
         {refused !== null ? (
           <p className="m-0 px-2.5 py-2 text-sm text-failure">{refused}</p>
         ) : people === null ? (
@@ -457,22 +521,34 @@ function PersonaPicker({
               : `No personas match “${search.trim()}”.`}
           </p>
         ) : (
-          listed.map((one) => (
-            <label
-              className="flex min-h-9 cursor-pointer items-center gap-2.5 px-2.5 text-sm text-foreground pointer-hover:bg-surface-soft"
-              key={one.id}
-            >
-              <Checkbox
-                checked={chosen.includes(one.id)}
-                onChange={() => toggle(one)}
-              />
-              <span className="min-w-0 truncate">{one.name}</span>
-            </label>
-          ))
+          <CommandGroup>
+            {listed.map((one) => (
+              <CommandItem
+                key={one.id}
+                value={one.id}
+                /*
+                 * The row is the control, so the row says whether it is ticked.
+                 * `cmdk` has already spent `aria-selected` on the arrow keys'
+                 * highlight, and the box below is a picture of this state
+                 * rather than a second control announcing it again.
+                 */
+                aria-checked={chosen.includes(one.id)}
+                onSelect={() => toggle(one)}
+              >
+                <Checkbox
+                  checked={chosen.includes(one.id)}
+                  readOnly
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 truncate">{one.name}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
         )}
-      </div>
+      </CommandList>
       {truncated ? (
-        // The search below runs in the browser, so it reaches what was read
+        // The search above runs in the browser, so it reaches what was read
         // and nothing beyond it. The sentence says that rather than promising
         // a search that would quietly come back empty.
         <p className="m-0 border-t border-border px-2.5 py-1.5 text-sm text-muted-foreground">
@@ -484,10 +560,9 @@ function PersonaPicker({
           Done
         </button>
       </div>
-    </Arriving>
+    </Command>
   );
 }
-
 /**
  * The lines a cell keeps once nobody is typing into them.
  *
@@ -741,20 +816,8 @@ function CellBody({
     >
       <span className={TEXT}>{personaNames(draft.personas, known)}</span>
       {woken ? (
-        <button
-          className={ADD_LINE}
-          type="button"
-          data-persona-picker={owner}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => onPick(!picking)}
-        >
-          + Add a persona
-        </button>
-      ) : null}
-      {woken && picking ? (
         <PersonaPicker
           projectId={projectId}
-          owner={owner}
           chosen={draft.personas}
           known={known}
           onChange={(ids, named) => {
@@ -763,9 +826,13 @@ function CellBody({
             onChange({ ...draft, personas: ids });
             onKnown(named);
           }}
-          onDone={() => {
-            onPick(false);
-            onCommit();
+          open={picking}
+          onOpenChange={(open) => {
+            onPick(open);
+            // Shutting is the commit, however it was shut — Done, Escape, or a
+            // press anywhere else. That is the rule the hand-written listener
+            // was written to keep, and closing is the only path to it.
+            if (!open) onCommit();
           }}
         />
       ) : null}
@@ -1229,6 +1296,19 @@ export function TestsGrid(props: GridProps) {
                 ) {
                   return;
                 }
+                /*
+                 * **A cell whose own picker is open has not been left.** The
+                 * panel is drawn in a portal now, so it is not a descendant of
+                 * this cell and the test above reads focus moving into it as
+                 * focus going away — which committed the cell and tore the
+                 * panel down under the person about to tick a name. Asking
+                 * whether this cell is the one picking is the same question
+                 * without depending on where focus landed, which a browser may
+                 * not say: `relatedTarget` is null on plenty of real blurs.
+                 *
+                 * Shutting the picker is what commits, and it commits there.
+                 */
+                if (picking === test.id) return;
                 void commit(test, field);
               }
             : undefined
@@ -1338,30 +1418,17 @@ export function TestsGrid(props: GridProps) {
           ) : (
             <div className="relative flex flex-col gap-0.5">
               <span className={TEXT}>{personaNames(entry.personas, known)}</span>
-              <button
-                className={ADD_LINE}
-                type="button"
-                data-persona-picker="entry"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() =>
-                  setPicking(picking === "entry" ? null : "entry")
-                }
-              >
-                + Add a persona
-              </button>
-              {picking === "entry" ? (
-                <PersonaPicker
-                  projectId={projectId}
-                  owner="entry"
-                  chosen={entry.personas}
-                  known={known}
-                  onChange={(ids, named) => {
-                    setEntry({ ...entry, personas: ids });
-                    setKnown(named);
-                  }}
-                  onDone={() => setPicking(null)}
-                />
-              ) : null}
+              <PersonaPicker
+                projectId={projectId}
+                chosen={entry.personas}
+                known={known}
+                onChange={(ids, named) => {
+                  setEntry({ ...entry, personas: ids });
+                  setKnown(named);
+                }}
+                open={picking === "entry"}
+                onOpenChange={(open) => setPicking(open ? "entry" : null)}
+              />
             </div>
           )}
         </div>
@@ -1396,18 +1463,16 @@ export function TestsGrid(props: GridProps) {
         to fall back to, so under `--tests-grid-min-width` the columns stopped
         holding a readable word. A phone scrolls it; a tablet and up does not.
 
-        **It stops scrolling while a persona picker is open, and that is not a
-        detail.** The shared table may hold its rows in a scrolling panel
-        because its ⋮ opens in a portal; this grid's picker is an absolutely
-        positioned panel inside the cell it belongs to, and a scroll container
-        clips exactly that. `overflow-x: auto` also computes `overflow-y` to
-        `auto`, so the naive wrapper would have cut a 240px picker off at the
-        table's own bottom edge. The choice is one class or the other, never
-        both: while a picker is open the grid may overflow, and when it shuts
-        the grid scrolls again. On a phone the toggle also resets the sideways
-        scroll — the price of this grid having no narrow layout yet.
+        **It scrolls at all times now, and it used not to.** The persona picker
+        was an absolutely positioned panel inside the cell it belongs to, and a
+        scroll container clips exactly that — so this wrapper switched between
+        `overflow-x: auto` and `overflow-visible` to keep an open picker whole,
+        and on a phone the switch threw away the reader's place in the table.
+        The picker is the kit's popover now and is drawn in a portal, the way
+        the shared table's ⋮ always was, so nothing here has to move out of its
+        way.
       */}
-      <div className={picking === null ? "overflow-x-auto" : "overflow-visible"}>
+      <div className="overflow-x-auto">
       <table className="w-full min-w-(--tests-grid-min-width) table-fixed border-collapse border border-border bg-surface text-sm">
         <caption className="sr-only">Tests in this suite</caption>
         <colgroup>

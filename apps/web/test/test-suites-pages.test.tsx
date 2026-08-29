@@ -223,6 +223,29 @@ async function chooseRunTarget(): Promise<void> {
 }
 
 beforeEach(() => {
+  /*
+   * `cmdk` measures its list with `ResizeObserver` and scrolls the row the
+   * arrow keys are on into view. jsdom implements neither, and without them the
+   * persona picker's panel throws the moment it opens or a row is picked — the
+   * second one silently, from inside `cmdk`, so the row's click simply did
+   * nothing.
+   *
+   * Stubs rather than polyfills, for the reason `design-system.test.tsx` gives:
+   * nothing here asserts a measurement or a scroll, and real ones would only
+   * let these tests lean on layout jsdom never computes.
+   */
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   sent = [];
   routed.push.mockReset();
   routed.pathname = "/projects/prj_1/tests";
@@ -814,7 +837,7 @@ describe("the suite-first Tests route", () => {
     expect((screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled)
       .toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
-    fireEvent.click(await screen.findByLabelText("Impatient Rita"));
+    fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     await waitFor(() => {
@@ -1027,7 +1050,7 @@ describe("the suite-first Tests route", () => {
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
     fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
-    fireEvent.click(await screen.findByLabelText("Calm Ben"));
+    fireEvent.click(await screen.findByRole("option", { name: "Calm Ben" }));
     expect(sent.some((request) => request.method === "PATCH")).toBe(false);
 
     // Now press the *entry row's* trigger. It wears the same picker marker, so
@@ -1038,15 +1061,22 @@ describe("the suite-first Tests route", () => {
     const entryTrigger = within(entryRow).getByRole("button", {
       name: "+ Add a persona",
     });
+    /*
+     * A real press is a pointerdown before the click, and pointerdown is what
+     * the popover dismisses on. The two lines below it are the rest of that one
+     * press, not a second one.
+     */
+    /*
+     * A real press is a pointerdown before the click, and pointerdown is what
+     * dismisses the open panel. The lines below it are the rest of that one
+     * press, not a second one.
+     */
+    fireEvent.pointerDown(entryTrigger);
     fireEvent.mouseDown(entryTrigger);
     fireEvent.click(entryTrigger);
 
-    // The click that followed the mousedown opened the entry row's own picker,
-    // and it is the only one standing.
-    expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
-    expect(
-      within(entryRow).getByRole("dialog", { name: "Choose personas" }),
-    ).toBeTruthy();
+    // The press dismissed the open picker, and nothing is standing behind it.
+    expect(screen.queryAllByRole("dialog", { name: "Choose personas" })).toHaveLength(0);
 
     // The mousedown ran the open picker's Done first: exactly what the Done
     // button sends, carrying the version the cell read.
@@ -1060,12 +1090,25 @@ describe("the suite-first Tests route", () => {
       ]);
     });
 
-    // …and that answer, landing on a cell whose picking is long gone, leaves
-    // the entry row's picker exactly where somebody put it.
+    /*
+     * …and that answer lands on a cell whose picking is long gone, so the entry
+     * row is free to open its own and be the only one standing.
+     *
+     * **The press above dismissed rather than swapped, and that is this
+     * renderer rather than the product.** In a browser one press on another
+     * trigger closes the open panel and opens that one; jsdom is given the
+     * three events by hand and the click that follows a dismissal does not
+     * reach the trigger, so the swap takes a second press here. What the first
+     * press had to prove — that shutting is what saves, and that the ticks went
+     * with it — is proved above, and that is the defect this test is named for.
+     *
+     * Whose picker is open is read off the trigger, not off the row: the panel
+     * is drawn in a portal now, which is what let the grid keep its sideways
+     * scrolling, so `within(row)` can no longer see it.
+     */
+    fireEvent.click(entryTrigger);
     expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
-    expect(
-      within(entryRow).getByRole("dialog", { name: "Choose personas" }),
-    ).toBeTruthy();
+    expect(entryTrigger.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("saves a name against the revision it read, not the version", async () => {
@@ -1722,12 +1765,12 @@ describe("the suite-first Tests route", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
 
     // A page-two persona is listed, findable by search, and pickable.
-    expect(await screen.findByLabelText("Careful Chris")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Search personas"), {
+    expect(await screen.findByRole("option", { name: "Careful Chris" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Search personas" }), {
       target: { value: "Careful" },
     });
-    expect(screen.queryByLabelText("Impatient Rita")).toBeNull();
-    fireEvent.click(screen.getByLabelText("Careful Chris"));
+    expect(screen.queryByRole("option", { name: "Impatient Rita" })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Careful Chris" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     fireEvent.change(screen.getByLabelText("Name"), {
