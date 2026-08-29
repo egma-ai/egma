@@ -13,4 +13,6 @@ The first open-source platform purpose-built to help teams shipping voice agents
 
 # design system
 
+Always iterate on UI design in Paper, through the Paper MCP. The repo's `.mcp.json` connects it — Paper Desktop must be open on this machine, because its MCP server runs locally at `http://127.0.0.1:29979/mcp`. Draw new UI directions as artboards on the Paper canvas and read existing boards with the Paper tools before you write UI code. A cloud session cannot reach Paper's local server: say so, draw the exploration as a design canvas artifact instead, and move the chosen boards into Paper from a local session.
+
 Before any visual or interaction change, read `DESIGN.md` in full. It is the product design source of truth. Do not change its locked palette, styling architecture, or the Egma logo without explicit developer approval. Treat its type, component shape, dark mode, and motion rules as current product rules. In UI review, flag code that does not follow `DESIGN.md`.
