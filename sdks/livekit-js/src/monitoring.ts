@@ -26,6 +26,7 @@ const UNCONFIGURED_TRACER_PROVIDER = new ProxyTracerProvider().getDelegate();
 type MonitoringState = {
   readonly endpoint: string;
   readonly apiKeyDigest: Buffer;
+  readonly roomName: string;
   readonly provider: NodeTracerProvider;
   readonly processor: BatchSpanProcessor;
   readonly liveKitFanout: telemetry.FanoutSpanProcessor;
@@ -45,8 +46,8 @@ export type MonitorLiveKitOptions = {
  * Send this LiveKit worker's production spans to Egma.
  *
  * Call this as the first statement of the job entrypoint, before
- * `AgentSession.start`. Repeated calls with the same settings reuse one
- * process-wide exporter. Each job gets one final flush callback.
+ * `AgentSession.start`. Repeated calls for the same job reuse one process-wide
+ * exporter. Each job gets one final flush callback.
  */
 export function monitorLiveKit(
   ctx: JobContext,
@@ -66,13 +67,23 @@ export function monitorLiveKit(
   const apiKeyDigest = createHash("sha256").update(apiKey).digest();
 
   if (state === undefined) {
-    state = configureMonitoring(endpoint, apiKey, apiKeyDigest);
+    state = configureMonitoring(
+      endpoint,
+      apiKey,
+      apiKeyDigest,
+      roomName,
+      jobAgentName(ctx),
+    );
   } else if (
     state.endpoint !== endpoint ||
     !timingSafeEqual(state.apiKeyDigest, apiKeyDigest)
   ) {
     throw new Error(
       "LiveKit monitoring is already configured with different settings in this process. Restart the worker after changing EGMA_URL or EGMA_API_KEY.",
+    );
+  } else if (state.roomName !== roomName) {
+    throw new Error(
+      "LiveKit monitoring is already configured for a different job in this process. Restart the worker so each LiveKit job keeps its own trace metadata.",
     );
   }
 
@@ -99,6 +110,11 @@ function contextShutdownCallback(
     );
   }
   return callback.bind(ctx);
+}
+
+function jobAgentName(ctx: JobContext): string {
+  const agentName = ctx?.job?.agentName;
+  return typeof agentName === "string" ? agentName : "";
 }
 
 function setting(explicit: string | undefined, environmentName: string): string {
@@ -157,6 +173,8 @@ function configureMonitoring(
   endpoint: string,
   apiKey: string,
   apiKeyDigest: Buffer,
+  roomName: string,
+  agentName: string,
 ): MonitoringState {
   refuseExistingProvider(
     telemetry.tracer.getProvider(),
@@ -180,12 +198,25 @@ function configureMonitoring(
 
     provider.register();
     telemetry.setTracerProvider(provider, {
+      metadata: {
+        "session.id": roomName,
+        ...(agentName === ""
+          ? {}
+          : { [telemetry.traceTypes.ATTR_AGENT_NAME]: agentName }),
+      },
       registerSpanProcessor: (added: SpanProcessor) => {
         liveKitFanout.add(added);
       },
     });
 
-    return { endpoint, apiKeyDigest, provider, processor, liveKitFanout };
+    return {
+      endpoint,
+      apiKeyDigest,
+      roomName,
+      provider,
+      processor,
+      liveKitFanout,
+    };
   } catch {
     void processor?.shutdown().catch(() => undefined);
     throw new Error(

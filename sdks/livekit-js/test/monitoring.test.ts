@@ -27,14 +27,17 @@ import {
 const PROJECT_KEY = `egma_sk_${"a".repeat(43)}`;
 
 type StubContext = {
-  job: { room: { name: string } };
+  job: { room: { name: string }; agentName: string };
   callbacks: Array<() => Promise<void>>;
   addShutdownCallback(callback: () => Promise<void>): void;
 };
 
-function context(roomName = "production-room"): StubContext {
+function context(
+  roomName = "production-room",
+  agentName = "appointment-agent",
+): StubContext {
   return {
-    job: { room: { name: roomName } },
+    job: { room: { name: roomName }, agentName },
     callbacks: [],
     addShutdownCallback(callback) {
       this.callbacks.push(callback);
@@ -118,26 +121,50 @@ describe("monitorLiveKit", () => {
     expect(monitoringStateForTests()).toBeDefined();
   });
 
-  it("uses the exact OTLP endpoint and reuses one process exporter", () => {
+  it("uses the exact OTLP endpoint and reuses one job's process exporter", () => {
     const { global } = unusedProviders();
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
     vi.stubEnv("EGMA_URL", "https://api.egma.ai/");
     vi.stubEnv("EGMA_API_KEY", PROJECT_KEY);
     const first = context();
-    const second = context("another-production-room");
 
     monitorLiveKit(asJobContext(first));
     monitorLiveKit(asJobContext(first));
-    monitorLiveKit(asJobContext(second));
 
     expect(monitoringStateForTests()?.endpoint).toBe(
       "https://api.egma.ai/v1/traces",
     );
     expect(first.callbacks).toHaveLength(1);
-    expect(second.callbacks).toHaveLength(1);
+    expect(monitoringStateForTests()?.roomName).toBe("production-room");
     expect(telemetry.tracer.getProvider()).toBe(
       monitoringStateForTests()?.provider,
     );
+  });
+
+  it("refuses a different job in the same process without exposing either room", () => {
+    const { global } = unusedProviders();
+    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
+    const firstRoom = "private-first-room";
+    const secondRoom = "private-second-room";
+    monitorLiveKit(asJobContext(context(firstRoom)), {
+      endpoint: "https://api.egma.ai",
+      apiKey: PROJECT_KEY,
+    });
+
+    let message = "";
+    try {
+      monitorLiveKit(asJobContext(context(secondRoom)), {
+        endpoint: "https://api.egma.ai",
+        apiKey: PROJECT_KEY,
+      });
+    } catch (error) {
+      message = String(error);
+    }
+
+    expect(message).toContain("different job");
+    expect(message).toContain("Restart");
+    expect(message).not.toContain(firstRoom);
+    expect(message).not.toContain(secondRoom);
   });
 
   it("lets LiveKit Cloud add its processors to the shared provider", () => {
@@ -163,6 +190,35 @@ describe("monitorLiveKit", () => {
     provider?.getTracer("proof").startSpan("shared").end();
 
     expect(ended.map((span) => span.name)).toEqual(["shared"]);
+    expect(ended[0]?.attributes).toMatchObject({
+      "session.id": "production-room",
+      "lk.agent_name": "appointment-agent",
+    });
+  });
+
+  it("omits an empty LiveKit agent name from span metadata", () => {
+    const { global } = unusedProviders();
+    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
+    const ended: ReadableSpan[] = [];
+    const observer: SpanProcessor = {
+      onStart(_span: Span, _parentContext: Context) {},
+      onEnd(span: ReadableSpan) {
+        ended.push(span);
+      },
+      async forceFlush() {},
+      async shutdown() {},
+    };
+
+    monitorLiveKit(asJobContext(context("production-room", "")), {
+      endpoint: "https://api.egma.ai",
+      apiKey: PROJECT_KEY,
+    });
+    const configured = monitoringStateForTests();
+    configured?.liveKitFanout.add(observer);
+    configured?.provider.getTracer("proof").startSpan("shared").end();
+
+    expect(ended[0]?.attributes["session.id"]).toBe("production-room");
+    expect(ended[0]?.attributes).not.toHaveProperty("lk.agent_name");
   });
 
   it("refuses to erase tracing that another integration already configured", () => {

@@ -113,7 +113,11 @@ const ENVIRONMENT_ATTRIBUTES = [
  * on the root span. Absence is normal: several providers give nothing to join
  * on.
  */
-const PROVIDER_CALL_ID_ATTRIBUTES = ["session.id", "lk.room_name"];
+const PROVIDER_CALL_ID_ATTRIBUTES = [
+  "session.id",
+  "lk.pii.room_name",
+  "lk.room_name",
+];
 
 /**
  * How LiveKit names the timed things inside a trace.
@@ -157,15 +161,18 @@ const LIVEKIT_KINDS: Readonly<Record<string, string>> = {
 };
 
 /** Where LiveKit puts what a turn's speaker actually said. */
-const LIVEKIT_TURN_TEXT: Readonly<Record<string, string>> = {
-  user_turn: "lk.user_transcript",
-  agent_turn: "lk.response.text",
+const LIVEKIT_TURN_TEXT: Readonly<Record<string, readonly string[]>> = {
+  user_turn: ["lk.pii.user_transcript", "lk.user_transcript"],
+  agent_turn: ["lk.pii.response.text", "lk.response.text"],
 };
 
 const LIVEKIT_TOOL = {
-  name: "lk.function_tool.name",
-  arguments: "lk.function_tool.arguments",
-  result: "lk.function_tool.output",
+  name: ["lk.function_tool.name"],
+  arguments: [
+    "lk.pii.function_tool.arguments",
+    "lk.function_tool.arguments",
+  ],
+  result: ["lk.pii.function_tool.output", "lk.function_tool.output"],
 } as const;
 
 /**
@@ -228,9 +235,9 @@ const SIMULATOR_TURN_TEXT = "egma.turn.text";
  * a column earns its place by being queried, and nothing queries these yet.
  */
 const SIMULATOR_TOOL = {
-  name: "egma.tool.name",
-  arguments: "egma.tool.arguments",
-  result: "egma.tool.result",
+  name: ["egma.tool.name"],
+  arguments: ["egma.tool.arguments"],
+  result: ["egma.tool.result"],
 } as const;
 
 /**
@@ -256,7 +263,10 @@ const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
 // `lk.agent_label` is preserved in the provider payload. Its product meaning
 // is not settled, so it must not be relabelled as platform-agent identity.
 const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
-const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
+const PLATFORM_AGENT_VERSION_ATTRIBUTES = [
+  "lk.deployment_id",
+  "lk.agent_version",
+];
 const CONNECTION_TYPE_ATTRIBUTES = ["egma.connection_type"];
 
 /**
@@ -414,8 +424,8 @@ function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
 
 function textFor(scope: OtlpScope | undefined, span: OtlpSpan): string {
   if (scope?.name === LIVEKIT_SCOPE) {
-    const key = LIVEKIT_TURN_TEXT[span.name ?? ""];
-    return key === undefined ? "" : attribute(span.attributes, key);
+    const keys = LIVEKIT_TURN_TEXT[span.name ?? ""];
+    return keys === undefined ? "" : firstAttribute([span.attributes], keys);
   }
   if (scope?.name === SIMULATOR_SCOPE) {
     return SIMULATOR_TURN_NAMES.has(span.name ?? "")
@@ -433,7 +443,11 @@ function textFor(scope: OtlpScope | undefined, span: OtlpSpan): string {
 const TOOL_KEYS_BY_SCOPE: Readonly<
   Record<
     string,
-    { readonly name: string; readonly arguments: string; readonly result?: string }
+    {
+      readonly name: readonly string[];
+      readonly arguments: readonly string[];
+      readonly result?: readonly string[];
+    }
   >
 > = {
   [LIVEKIT_SCOPE]: LIVEKIT_TOOL,
@@ -624,13 +638,18 @@ export function normaliseOtlpExport(
           // Nothing here holds audio, and neither emitter offers a reference
           // to any yet. A guess would be worse than an empty column.
           audioUrl: "",
-          toolName: tool === undefined ? "" : attribute(attributes, tool.name),
+          toolName:
+            tool === undefined
+              ? ""
+              : firstAttribute([attributes], tool.name),
           toolArguments:
-            tool === undefined ? "" : attribute(attributes, tool.arguments),
+            tool === undefined
+              ? ""
+              : firstAttribute([attributes], tool.arguments),
           toolResult:
             tool?.result === undefined
               ? ""
-              : attribute(attributes, tool.result),
+              : firstAttribute([attributes], tool.result),
           providerCallId: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],
             PROVIDER_CALL_ID_ATTRIBUTES,
