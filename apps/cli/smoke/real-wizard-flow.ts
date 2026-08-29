@@ -333,12 +333,13 @@ async function register(
   say("");
   say("── registering the voice agent ───────────────────────────");
 
-  // Text, said in the command: egma creates the connection it is told to and
-  // never guesses between the two, so this walk says which one it means. The
-  // phone path is proven where a real number and a real carrier are, and this
-  // walk has neither.
+  // One lane, said in the command: `--lanes` takes any of text, web-call and
+  // phone, several of them separated by commas, and egma creates exactly the
+  // connections it is told to rather than guessing between them. Text alone
+  // here — the phone lane is proven where a real number and a real carrier
+  // are, and this walk has neither.
   let ran = await egma(
-    ["connect", "--url", instance.origin, "--cwd", repository, "--reach", "text"],
+    ["connect", "--url", instance.origin, "--cwd", repository, "--lanes", "text"],
     { env, stdin: `${vendor.key}\n` },
   );
 
@@ -356,7 +357,7 @@ async function register(
         instance.origin,
         "--cwd",
         repository,
-        "--reach",
+        "--lanes",
         "text",
         "--retell-agent",
         listed,
@@ -386,7 +387,7 @@ async function register(
     first(ran.said, "connection_modality") === "chat",
     `the text connection is a chat one (${first(ran.said, "connection_modality")})`,
   );
-  check(first(ran.said, "reach") === "text", "egma made the connection it was told to");
+  check(first(ran.said, "lanes") === "text", "egma made the connection it was told to");
   check(
     first(ran.said, "phone_number") === "none",
     "a text connection dials nothing, and says so",

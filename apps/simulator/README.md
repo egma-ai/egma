@@ -426,16 +426,23 @@ never comes and one that joins and publishes nothing, an agent that
 leaves mid-exchange, and the room deleted however it ended. The
 customer's api secret is a sentinel there too.
 
-One real conversation with a real Retell chat agent is opt-in, and skips
-when the environment is silent, so nothing in CI waits on an account:
+One real chat simulation of a real Retell **voice** agent in text mode is
+opt-in, and skips when the environment is silent, so nothing in CI waits on
+an account:
 
 ```bash
 TEST_RETELL_API_KEY=key_... \
 TEST_RETELL_AGENT_ID=agent_... \
-uv run --frozen pytest tests/test_live_retell.py -v
+TEST_MODEL_API_KEY=sk-... \
+uv run --frozen pytest tests/test_live_text_mode.py -v -s
 ```
 
-`TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
+The agent must be a voice agent on a conversation flow or a Retell LLM: a
+custom-LLM agent holds its words and tools on the customer's own service,
+where this lane reaches neither, and is refused. `TEST_MODEL_API_KEY` is the
+persona's own brain, so the caller reasons for real rather than reading a
+script. `TEST_RETELL_SCENARIO` tunes what the persona calls about, and
+`TEST_RETELL_BASE_URL` points the test somewhere other than Retell.
 
 Real speech is opt-in the same way. Each test skips without its credentials,
 and CI runs none of them:

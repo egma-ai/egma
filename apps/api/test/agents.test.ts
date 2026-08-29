@@ -1061,6 +1061,86 @@ describe("discovering simulation agents", () => {
     expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
   });
 
+  /**
+   * The mint the mock-tools consent screen makes, over the API seam and with
+   * no browser in it.
+   *
+   * **This is the body that surface sends, key for key.** The screen mints the
+   * web-call lane for an agent that has none, so that turning mock tools on can
+   * never refuse a person with a step the product cannot perform. It carries no
+   * credential and no config: the agent already holds its sealed key, the route
+   * lends that copy to the confirmation, and Retell's own answer is what the
+   * connection's config is written from. A payload that named neither the
+   * Retell agent nor a key shipped once and could only ever be refused, so the
+   * round trip is proven here rather than assumed.
+   */
+  it("mints the web-call lane from the consent screen's own body, with no key and no config", async () => {
+    api = await createApi("retell_web_call_minted_by_consent");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    // The agent as the consent screen finds it: bound to its Retell agent,
+    // holding its sealed key, and with no web-call lane on it.
+    const first = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-sealed-once-WXYZ" },
+      },
+    );
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+
+    const minted = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_web_call",
+        accessVariant: "retell_web_call.api_key",
+        modality: "voice",
+        platformAgentId: "agent_voice_1",
+      },
+    );
+
+    expect(minted.status, JSON.stringify(minted.body)).toBe(201);
+    const lane = connectionOf(minted);
+    expect(lane.connectionType).toBe("retell_web_call");
+    expect(lane.accessVariant).toBe("retell_web_call.api_key");
+    expect(lane.modality).toBe("voice");
+    // Written from what Retell answered, and carrying the key the run needs to
+    // open the call — the copy the route lent, never one the browser sent.
+    expect(lane.config).toEqual({ retellAgentId: "agent_voice_1" });
+    expect(lane.credentialPresent).toBe(true);
+    // Off until the switch is written, which is the second half of the one yes.
+    expect(lane.mockToolsEnabled).toBe(false);
+
+    const switched = await patch(
+      `/v1/agents/${agentId}/connections/${String(lane.id)}?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      { mockToolsEnabled: true },
+    );
+    expect(switched.status, JSON.stringify(switched.body)).toBe(200);
+    expect(connectionOf(switched).mockToolsEnabled).toBe(true);
+
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(
+      (after.body.connections as readonly Record<string, unknown>[]).map(
+        (one) => one.connectionType,
+      ),
+    ).toEqual(["phone_number", "retell_web_call"]);
+  });
+
   it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
     api = await createApi("retell_discovery_rerouted_connection");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

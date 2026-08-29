@@ -93,8 +93,8 @@ const CLASSES = [
   },
   {
     key: "notInThisVersion",
-    title: "Not in this version",
-    lead: "Egma could stand in front of these and does not yet.",
+    title: "Egma does not answer these yet",
+    lead: "Egma could stand in front of these and does not yet. They still run for real.",
   },
 ] as const;
 
@@ -245,9 +245,12 @@ export function MockToolsSheet({
   /**
    * Write one connection's switch.
    *
-   * **Every enable of a web-call lane comes through the consent screen**, which
-   * is the only caller that passes `consented`. The text lane needs none: it
-   * writes nothing to the customer's Retell account.
+   * **Every enable of a web-call lane comes through the consent screen.** This
+   * writes what it is asked to write; the switch's own click handler is what
+   * sends a web-call enable to the consent screen instead of here, and
+   * `acceptConsent` is what calls this once the screen is accepted. The text
+   * lane needs no consent at all: it writes nothing to the customer's Retell
+   * account.
    */
   async function setLaneSwitch(
     connectionId: string,
@@ -285,8 +288,11 @@ export function MockToolsSheet({
    * turn its switch on.
    *
    * The mint is what makes the old impossible refusal impossible. It carries no
-   * credential of its own — the agent's sealed platform key is what a mocked
-   * run branches with, and the API refuses the enable where that is missing.
+   * credential of its own — it names the agent Retell knows, and the API lends
+   * the key already sealed on the egma agent to confirm it. The API refuses the
+   * enable where either is missing, and the same two facts are what let this
+   * screen open at all: discovery refuses without them, and a refused discovery
+   * disables every switch here.
    */
   async function acceptConsent(): Promise<void> {
     if (saving !== null || !mayAuthor || consenting === null) return;
@@ -294,6 +300,11 @@ export function MockToolsSheet({
       await setLaneSwitch(consenting, true);
       return;
     }
+    // Discovery refuses an agent with no platform identity, and a refused
+    // discovery leaves `mayMock` false, so this button is never live without
+    // one. The guard is here for the type and for nothing else.
+    const { platformAgentId } = agent;
+    if (platformAgentId === null) return;
 
     setSaving("mint");
     setRefused(null);
@@ -306,7 +317,11 @@ export function MockToolsSheet({
           connectionType: "retell_web_call",
           accessVariant: "retell_web_call.api_key",
           modality: "voice",
-          config: {},
+          // The web-call lane names the Retell agent it reaches. The API
+          // confirms the id with the agent's sealed key and writes the
+          // connection's own config from what Retell answered, so sending a
+          // config here would be a second opinion about the same fact.
+          platformAgentId,
         },
         { client: platformClient },
       ),

@@ -57,16 +57,19 @@
  *                         what proves a second walk over the same provider
  *                         agent finds the registration the first one made
  *                         rather than minting a second identity for it.
- *   --reach <text|phone>  Which way to take at the choice the wizard offers.
- *                         Default: text. `phone` selects a destination number
- *                         Retell routes to the chosen agent and asserts that
- *                         the connection egma made holds that number and
- *                         nothing else — no provider identifier, no credential.
+ *   --lanes <text|phone>  Which lane to tick at the one question the wizard
+ *                         asks: how should Egma test this agent. Default: text.
+ *                         `phone` selects a destination number Retell routes to
+ *                         the chosen agent and asserts that the connection egma
+ *                         made holds that number and nothing else — no provider
+ *                         identifier, no credential. The wizard itself takes
+ *                         several lanes at once and egma connect takes them
+ *                         comma separated; this walk ticks one.
  *   --retell-agent-name <text>
  *                         Take the agent whose name contains this, rather than
  *                         the first on the account. What pins a walk to one
  *                         agent on an account that holds several.
- *   --phone-number <e164> With --reach phone: which number to dial, when Retell
+ *   --phone-number <e164> With --lanes phone: which number to dial, when Retell
  *                         routes more than one to the chosen agent.
  *   --require-target      Turn a skip into a failure, for a machine that is
  *                         supposed to have all of this. `EGMA_SMOKE_REQUIRE_TARGET=1`
@@ -121,16 +124,16 @@ const BUDGET = {
   login: 3 * 60_000,
   key: 15 * 60_000,
   agent: 2 * 60_000,
-  reach: 2 * 60_000,
+  lane: 2 * 60_000,
   existing: 2 * 60_000,
   gate: 25 * 60_000,
   run: 5 * 60_000,
   exit: 5 * 60_000,
 };
 
-/** Which way this run takes at the choice the wizard offers. */
-function reachWanted(): "text" | "phone" {
-  return (argumentAfter("--reach") ?? "text").trim() === "phone" ? "phone" : "text";
+/** Which lane this run ticks at the one question the wizard asks. */
+function laneWanted(): "text" | "phone" {
+  return (argumentAfter("--lanes") ?? "text").trim() === "phone" ? "phone" : "text";
 }
 
 function requiresTarget(): boolean {
@@ -327,7 +330,7 @@ type WalkOutcome = {
   /** Whether the account offered a choice of agents, and how many. */
   readonly chosenFrom: number;
   /** Which way this walk took, and what it took it with. */
-  readonly reach: "text" | "phone";
+  readonly lane: "text" | "phone";
   /**
    * Whether the wizard's coding-agent discovery pointed at the prompts this run
    * was aimed at, or had to be corrected at the picker. Real information about
@@ -448,7 +451,7 @@ async function walkOnce(options: {
   let chosenFrom = 1;
   let promptsFound: string | null = null;
   let agentCorrected = false;
-  const reach = reachWanted();
+  const lane = laneWanted();
   const wantedAgent = (argumentAfter("--retell-agent-name") ?? "").trim();
   const wantedNumber = (argumentAfter("--phone-number") ?? "").trim();
 
@@ -511,24 +514,24 @@ async function walkOnce(options: {
     }
 
     /* [human 3c] text or phone, and for the phone the number to dial */
-    await showing(terminal, "the choice of reach", BUDGET.reach, "How should Egma reach this agent?");
-    if (reach === "phone") {
+    await showing(terminal, "the choice of lane", BUDGET.lane, "How should Egma test this agent?");
+    if (lane === "phone") {
       terminal.write("\u001B[B");
-      await showing(terminal, "the phone row", BUDGET.reach, "\u203a Phone");
+      await showing(terminal, "the phone row", BUDGET.lane, "\u203a Phone");
     }
     terminal.write("\r");
 
-    if (reach === "phone") {
+    if (lane === "phone") {
       // The number screen appears only when Retell routes several to the agent.
       const picked = await terminal.waitFor(
         () =>
           terminal.screen().includes("Which number should Egma dial?") ||
           terminal.screen().includes("Do you already have test cases"),
-        BUDGET.reach,
+        BUDGET.lane,
       );
       if (!picked) {
         throw new Error(
-          `the wizard never got past the choice of reach\n\nlast screen:\n${redact(terminal.screen())}`,
+          `the wizard never got past the choice of lane\n\nlast screen:\n${redact(terminal.screen())}`,
         );
       }
       if (terminal.screen().includes("Which number should Egma dial?")) {
@@ -633,7 +636,7 @@ async function walkOnce(options: {
       credentials: held,
       repository,
       chosenFrom,
-      reach,
+      lane,
       promptsFound,
       agentCorrected,
       runId,
@@ -691,7 +694,7 @@ async function assertWhatLanded(options: {
   const connection = connections.at(-1);
   check(connections.length >= 1, `a connection is attached to it (${connections.length})`);
 
-  if (outcome.reach === "phone") {
+  if (outcome.lane === "phone") {
     // **Only the connection that was chosen.** Creating both is the bug the
     // choice exists to kill, so the count is asserted rather than the last row.
     check(
@@ -960,7 +963,7 @@ async function main(): Promise<void> {
     `  its own env:   ${Object.keys(launch.env).length === 0 ? "nothing added" : Object.entries(launch.env).map(([name, value]) => `${name}=${value}`).join(", ")}`,
   );
   say(`  walks:         ${walks}`);
-  say(`  reach:         ${reachWanted()}`);
+  say(`  lane:          ${laneWanted()}`);
   say(`  Retell:        read-only, through a gate on this machine`);
   say("");
 
@@ -1012,7 +1015,7 @@ async function main(): Promise<void> {
       }
       say("");
       say("── what the coding agent found, and which way was taken ──");
-      say(`  reach:    ${outcome.reach}`);
+      say(`  lane:     ${outcome.lane}`);
       say(`  prompts:  ${redact(outcome.promptsFound ?? "nothing reported")}`);
       say(
         `  agent:    ${outcome.agentCorrected ? "corrected at the picker" : "taken as discovery left it"}`,

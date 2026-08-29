@@ -325,7 +325,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const selectedRetellAgent = visibleRetellAgents.find(
     (one) => one.platformAgentId === retellAgentId,
   );
-  const selectedModality = retellModality(selectedRetellAgent);
   const selectedRoutes =
     plan === null ? [] : retellCandidatesForPlan(plan, selectedRetellAgent);
   // The phone chooser lists numbers and nothing else. The web-call candidate
@@ -944,7 +943,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 }
                 lead={
                   boundRetellPlatformAgentId === null
-                    ? "This Retell account does not contain a voice or chat agent."
+                    ? "This Retell account does not contain a voice agent."
                     : "Egma could not find the Retell agent already connected here in this account."
                 }
               />
@@ -972,9 +971,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                             (phones === 1
                               ? " phone number available"
                               : " phone numbers available"))
-                      : modality === "chat"
-                        ? "Chat agent · available for simulations"
-                        : "No supported connection available";
+                      : "No supported connection available";
                   return (
                     <ChoiceCard
                       key={one.platformAgentId}
@@ -988,8 +985,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               </RadioGroup>
             )}
             <InfoBox>
-              Voice agents use a phone number. Chat agents connect through the
-              Retell Chat API.
+              Egma lists your Retell voice agents. You choose how to test the
+              one you pick next.
             </InfoBox>
           </div>
         );

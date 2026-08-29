@@ -145,30 +145,36 @@ take, and a key for an account with no agents on it, are told apart by name and
 each is worth one more try. One agent on the account is shown for confirmation
 with nothing to answer; several get a list to choose from.
 
-The agent's configuration — its prompt, its voice, its tools — is pulled. Egma
-then shows the connection that matches the Retell agent's channel and asks you
-to confirm it:
+Egma lists your Retell **voice** agents, and no others. The agent's
+configuration — its prompt, its voice, its tools — is pulled. Egma then asks the
+one question, how it should test that agent, and offers three lanes:
 
 ```
-◇ How should Egma reach this agent?
-  › Phone — Egma dials one of the agent's numbers and talks to it over the
-    telephone network, the way the people who call it do.
+◇ How should Egma test this agent?
+  Pick as many as you want.
 
-  Egma creates this connection only after you confirm it.
+  › [ ] Text — Egma talks to the agent in text. No call is placed, and a run
+        takes seconds.
+    [ ] Web call — a voice call Egma places over the internet.
+    [ ] Phone call — Egma dials the real number, so a run has true telephone
+        latency and reaches your real tools.
+
+  Egma creates these connections only after you confirm them.
 ```
 
-Retell voice agents use a Phone Number connection with the Voice modality.
-Retell chat agents use a Retell Chat API connection with the Chat modality. The
-CLI flag for the chat reach is `--reach text`. An explicit choice that does not
-match the agent stops before Egma writes a connection or a local binding.
+**Several lanes may be picked at once.** Each one becomes its own connection on
+the same Egma agent, and one test suite runs over all of them. Nothing is
+ticked until you tick it, and an empty answer creates nothing. In the terminal
+you tick a row with space and confirm with enter; on the command line you say
+`--lanes` with the lane names separated by commas, as in `--lanes text,phone`.
 
-For a voice agent, Egma lists the numbers Retell routes to that agent. You pick
-one, and the
-connection it writes holds that number and the Retell platform label. It holds
-no Retell agent ID or credential, because the phone adapter needs neither. A
-Retell chat agent uses a separate Retell Chat API connection, with its Retell
-agent ID and sealed API key. Egma does not offer that chat path for a voice
-agent.
+Each lane writes its own connection. Text writes a Retell text mode connection
+holding the Retell agent ID and a sealed API key. A web call writes a Retell web
+call connection holding the same two, and it is the lane a mocked run is
+conducted over. A phone call makes Egma list the numbers Retell routes to that
+agent; you pick one, and the connection it writes holds that number and the
+Retell platform label — no Retell agent ID and no credential, because the phone
+adapter needs neither.
 
 Egma uses Retell's answer to verify the selected agent and connection. It does
 not copy the full provider document into the agent record. Nothing in this step
@@ -243,18 +249,20 @@ EGMA_RETELL_API_KEY=… egma connect
 nothing new. With several agents on the account it lists them and refuses to
 guess; name one with `--retell-agent`.
 
-It refuses to guess the reach as well. Say `--reach text` or `--reach phone`
-(or set `EGMA_REACH`); with neither, it creates nothing at all and exits 5 —
-Egma will not decide on your behalf whether to dial somebody's telephone. With
-`--reach phone` and several numbers routed to the agent, name one with
-`--phone-number` or `EGMA_PHONE_NUMBER`.
+It refuses to guess the lanes as well. Say `--lanes` with any of `text`,
+`web-call` and `phone` — several of them separated by commas, as in
+`--lanes text,phone` — or set `EGMA_LANES`; with neither, it creates nothing at
+all and exits 5, because Egma will not decide on your behalf whether to dial
+somebody's telephone. A word that is not a lane fails the whole list rather than
+being dropped quietly. With `phone` among the lanes and several numbers routed
+to the agent, name one with `--phone-number` or `EGMA_PHONE_NUMBER`.
 
 **Running it twice over the same Retell agent is safe.** Egma reuses the agent
-and the same selected connection when it can prove both identities. It reports
-`created`, `reused`, or `connection_added` on the `registration:` line. A
-Retell voice agent stays on a phone connection; this repeat behavior does not
-turn it into a Retell chat connection. `agent_registration:` and
-`connection_registration:` state what happened to each record.
+and the connections it can prove the identity of. It reports `created`,
+`reused`, or `connection_added` on the `registration:` line. A second pass
+naming a lane that is already there reuses that lane rather than writing it
+twice. `agent_registration:` and `connection_registration:` state what happened
+to each record.
 
 ```
 url: http://localhost:3101
@@ -263,7 +271,9 @@ retell_agent_id: agent_…
 retell_response_engine: retell-llm
 prompt_characters: 2140
 tools: 7
-reach: phone
+lanes: text,phone
+lane_connection: text con_01K… retell_text_mode-1 created
+lane_connection: phone con_01K… phone_number-1 created
 phone_number: +14155550111
 agent_id: agt_01K…
 agent_name: order-line
@@ -283,7 +293,7 @@ status: connected
 
 0 connected   2 the key was refused   3 no agents on that account
 4 Retell or Egma did not answer, or refused
-5 a choice only you can make was not made: which agent, text or phone, or
+5 a choice only you can make was not made: which agent, which lanes, or
   which number   6 no key given   7 not signed in to Egma
 8 Retell routes no number to that agent   130 stopped part way
 ```
@@ -750,11 +760,13 @@ egma monitoring record --agent <id> [--monitoring-key-id <id>]
                        waiting for execution or grading. The run carries on on Egma.
   --retell-agent <id>  With connect: which agent, when the Retell account
                        holds more than one.
-  --reach <text|phone> With connect and a headless wizard: how Egma should
-                       reach the agent. Egma creates the one you choose and
-                       never both, and creates nothing when neither is said.
+  --lanes <list>       With connect and a headless wizard: how Egma should
+                       test the selected Retell agent. Any of text,
+                       web-call and phone, separated by commas — several
+                       lanes land as connections on one Egma agent in one
+                       pass. Egma creates nothing when none is said.
   --phone-number <e164>
-                       With --reach phone: which of the agent's numbers to
+                       With the phone lane: which of the agent's numbers to
                        dial, when Retell routes more than one to it.
   --repo-prompt <path> With connect: the prompt file in this repository, so
                        Egma can say whether it and Retell have drifted apart.
@@ -794,8 +806,7 @@ Environment:
                        read too, so an environment that already has one needs
                        nothing new.
   EGMA_RETELL_AGENT_ID Which Retell agent, same as --retell-agent.
-  EGMA_REACH           text for a Retell Chat connection, or phone for a
-                       Phone connection; same as --reach.
+  EGMA_LANES           Which lanes to test over, same as --lanes.
   EGMA_PHONE_NUMBER    Which number to dial, same as --phone-number.
   EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
   EGMA_EXISTING_TESTS  Your existing test cases, same as --existing-tests.

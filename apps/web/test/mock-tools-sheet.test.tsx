@@ -331,8 +331,14 @@ describe("the mock-tools panel", () => {
       screen.getByRole("heading", { name: "Cannot be intercepted" }),
     ).toBeDefined();
     expect(
-      screen.getByRole("heading", { name: "Not in this version" }),
+      screen.getByRole("heading", { name: "Egma does not answer these yet" }),
     ).toBeDefined();
+    // Both classes Egma does not answer for say the same plain thing: the tool
+    // still runs. An MCP tool the agent really declares lands in the second
+    // one, and a person reading it must never take "not yet" for "not at all".
+    expect(
+      screen.getAllByText(/They still run for real\./u).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("get_availability")).toBeDefined();
     expect(screen.getAllByText("transfer_to_front_desk").length).toBeGreaterThan(0);
     expect(screen.getByText("inventory")).toBeDefined();
@@ -463,10 +469,20 @@ describe("the mock-tools panel", () => {
         one.method === "POST" &&
         one.path === "/v1/agents/agt_retell/connections",
     );
-    expect(minted?.body).toMatchObject({
+    /*
+     * **The whole payload, not a subset of it.** This shipped once as a body
+     * the API could only refuse — the right lane and no `platformAgentId` —
+     * and a `toMatchObject` over three keys said nothing about the two that
+     * mattered. So the mint is asserted key for key: the lane, the Retell
+     * agent it reaches, and no `config`, because the API writes that from what
+     * Retell answered and a second opinion here could disagree with it.
+     */
+    expect(minted?.body).toEqual({
+      agentPlatform: "retell",
       connectionType: "retell_web_call",
       accessVariant: "retell_web_call.api_key",
       modality: "voice",
+      platformAgentId: "agent_b0e2",
     });
     await waitFor(() => {
       expect(seen.some((one) => one.method === "PATCH")).toBe(true);
