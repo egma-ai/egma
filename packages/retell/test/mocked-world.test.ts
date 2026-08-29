@@ -5,11 +5,11 @@ import {
   bindingDecisionsFor,
   buildMockedWorld,
   finishMockedWorld,
-  mockedWorldIsSettled,
+  mockRunIsSettled,
   mockToolUrl,
   SIMULATION_VARIABLE,
   versionReferenceIn,
-  type MockedWorldRecord,
+  type MockRunRecord,
   type RetellCredential,
 } from "../src/index.ts";
 
@@ -171,6 +171,14 @@ function account(options: AccountOptions = {}): Account {
       return json({ items: [...numbers.values()], has_more: false });
     }
 
+    if (method === "GET" && path.startsWith("/get-phone-number/")) {
+      // The restore reads the number before it writes, so the account has to
+      // be able to answer for one number as well as for the listing.
+      const held = decodeURIComponent(path.slice("/get-phone-number/".length));
+      const number = numbers.get(held);
+      return number === undefined ? json({ error: "gone" }, 404) : json(number);
+    }
+
     if (method === "PATCH" && path.startsWith("/update-phone-number/")) {
       const held = decodeURIComponent(path.slice("/update-phone-number/".length));
       const number = numbers.get(held);
@@ -280,16 +288,16 @@ const REACH = (fetchImpl: typeof fetch) => ({
   fetchImpl,
 });
 
-/** Every world the build wrote down, in the order it wrote them. */
+/** Every record the build wrote down, in the order it wrote them. */
 function recorder(): {
-  readonly record: (world: MockedWorldRecord) => Promise<void>;
-  readonly written: MockedWorldRecord[];
-  readonly last: () => MockedWorldRecord;
+  readonly record: (state: MockRunRecord) => Promise<void>;
+  readonly written: MockRunRecord[];
+  readonly last: () => MockRunRecord;
 } {
-  const written: MockedWorldRecord[] = [];
+  const written: MockRunRecord[] = [];
   return {
-    record: async (world) => {
-      written.push(structuredClone(world));
+    record: async (state) => {
+      written.push(structuredClone(state));
     },
     written,
     last: () => {
@@ -452,8 +460,8 @@ describe("building the world over a conversation flow", () => {
 
     expect(built.kind, JSON.stringify(built)).toBe("built");
     if (built.kind !== "built") return;
-    expect(built.world.servingVersion).toBe(105);
-    expect(built.world.draftVersion).toBe(106);
+    expect(built.agentVersion).toBe(105);
+    expect(built.state.tempMockAgentVersion).toBe(106);
 
     // The draft's custom tools point at Egma, carrying the run and the
     // simulation variable Retell fills per call.
@@ -478,7 +486,7 @@ describe("building the world over a conversation flow", () => {
     );
 
     // The stamp is honest about all three classes.
-    expect(built.world.coverage).toEqual({
+    expect(built.coverage).toEqual({
       mocked: ["get_availability", "book_appointment", "price list/lookup?v=2"],
       notInterceptable: [
         "normalise_phone",
@@ -555,18 +563,22 @@ describe("the pin, and the routing it promises to put back", () => {
       { agent_id: AGENT, agent_version: 105, weight: 3, a_field_egma_never_read: "keep me" },
       { agent_id: OTHER_AGENT, agent_version: 7 },
     ]);
-    expect(built.world.numbers[0]?.pinned).toBe(true);
+    // The note says where the binding pointed and what Egma pinned it to —
+    // the two values a restore reads before it decides to write.
+    expect(built.state.mockMetadata?.numbers).toEqual([
+      { number: "+12567332874", was: "latest", pinnedTo: 105 },
+    ]);
 
     const finished = await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world, record: kept.record },
+      { agentId: AGENT, state: built.state, record: kept.record },
       REACH(retell.fetchImpl),
     );
 
     expect(finished.unfinished).toEqual([]);
     // Restored, not reconstructed: the field Egma never read is still there.
     expect(retell.bindingsOf("+12567332874")).toEqual(original);
-    expect(mockedWorldIsSettled(finished.world)).toBe(true);
+    expect(mockRunIsSettled(finished.state)).toBe(true);
   });
 
   it("never touches a tag assignment", async () => {
@@ -584,7 +596,7 @@ describe("the pin, and the routing it promises to put back", () => {
     if (built.kind !== "built") return;
     await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world, record: async () => undefined },
+      { agentId: AGENT, state: built.state, record: async () => undefined },
       REACH(retell.fetchImpl),
     );
 
@@ -619,7 +631,7 @@ describe("the pin, and the routing it promises to put back", () => {
     expect(built.kind, JSON.stringify(built)).toBe("built");
     if (built.kind !== "built") return;
     // The run tests what a real caller reaches, worked out from the numbers.
-    expect(built.world.servingVersion).toBe(105);
+    expect(built.agentVersion).toBe(105);
     // And the pin preserves the other number's behaviour exactly.
     expect(retell.bindingsOf("+12567332875")[0]?.["agent_version"]).toBe(110);
     expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
@@ -658,7 +670,7 @@ describe("the pin, and the routing it promises to put back", () => {
 
     await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world, record: async () => undefined },
+      { agentId: AGENT, state: built.state, record: async () => undefined },
       REACH(retell.fetchImpl),
     );
     // And the whole array is restored, byte for byte.
@@ -674,14 +686,23 @@ describe("the pin, and the routing it promises to put back", () => {
       REACH(retell.fetchImpl),
     );
 
-    // The first record is written before a single write goes out, and it
-    // already says the number will be pinned — so a crash between the two
-    // leaves a restore of bytes that are already there rather than a pin
-    // nobody knows about.
+    // The very first record is written before a single request goes out, and
+    // it already owes a cleanup: a crash anywhere after it is a run the next
+    // claim finds by one indexed query.
     const first = kept.written[0];
-    expect(first?.draftVersion).toBeNull();
-    expect(first?.numbers[0]?.pinned).toBe(true);
-    expect(first?.numbers[0]?.bindings).toEqual(RIDES_LATEST);
+    expect(first?.tempMockAgentVersion).toBeNull();
+    expect(first?.tempMockAgentVersionCleanup).toBe(false);
+
+    // And the pin is written down before it is made, so a crash between the
+    // two leaves a restore that finds the binding untouched and leaves it
+    // alone, rather than a pin nobody knows about.
+    const beforeThePin = kept.written.find(
+      (one) => (one.mockMetadata?.numbers.length ?? 0) > 0,
+    );
+    expect(beforeThePin?.tempMockAgentVersion).toBeNull();
+    expect(beforeThePin?.mockMetadata?.numbers).toEqual([
+      { number: "+12567332874", was: "latest", pinnedTo: 105 },
+    ]);
   });
 });
 
@@ -712,10 +733,10 @@ describe("the fork guard", () => {
     );
 
     // The stray version it did mint is on the record, so the teardown deletes it.
-    expect(built.world?.draftVersion).toBe(106);
+    expect(built.state?.tempMockAgentVersion).toBe(106);
     await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world!, record: kept.record },
+      { agentId: AGENT, state: built.state!, record: kept.record },
       REACH(retell.fetchImpl),
     );
     expect(retell.versions.has(106)).toBe(false);
@@ -755,7 +776,7 @@ describe("the serving-version guard", () => {
     expect(built.kind).toBe("refused");
     if (built.kind !== "refused") return;
     expect(built.reason).toContain("names no response engine version");
-    expect(built.world).toBeNull();
+    expect(built.state).toBeNull();
 
     // Nothing was read or written past the version resolve: no engine read, no
     // branch, no engine write. The false hijack alarm and the corrupting repair
@@ -824,7 +845,7 @@ describe("the custom-LLM refusal", () => {
     if (built.kind !== "refused") return;
     expect(built.reason).toContain("custom LLM");
     expect(built.reason).toContain("your own service");
-    expect(built.world).toBeNull();
+    expect(built.state).toBeNull();
     expect(retell.seen.some((one) => one.method === "POST")).toBe(false);
   });
 });
@@ -844,7 +865,7 @@ describe("the teardown, and the sweep that finishes it", () => {
     const before = retell.seen.length;
     await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world, record: kept.record },
+      { agentId: AGENT, state: built.state, record: kept.record },
       REACH(retell.fetchImpl),
     );
     const during = retell.seen.slice(before);
@@ -874,7 +895,7 @@ describe("the teardown, and the sweep that finishes it", () => {
 
     const finished = await finishMockedWorld(
       key,
-      { agentId: AGENT, world: built.world, record: kept.record },
+      { agentId: AGENT, state: built.state, record: kept.record },
       REACH(retell.fetchImpl),
     );
 
@@ -882,8 +903,8 @@ describe("the teardown, and the sweep that finishes it", () => {
     // Still pinned, and still owed. A number left on `latest` beside a live
     // draft is the one state that hurts a customer.
     expect(retell.bindingsOf("+12567332874")[0]?.["agent_version"]).toBe(105);
-    expect(finished.world.numbers[0]?.pinned).toBe(true);
-    expect(mockedWorldIsSettled(finished.world)).toBe(false);
+    expect(finished.state.mockMetadata?.numbers).toHaveLength(1);
+    expect(mockRunIsSettled(finished.state)).toBe(false);
   });
 
   it("sweeps what a crashed run left, from that run's own recorded bindings", async () => {
@@ -900,36 +921,40 @@ describe("the teardown, and the sweep that finishes it", () => {
     if (built.kind !== "built") return;
 
     // A second process, days later, holding only what was written down.
-    const crashed: MockedWorldRecord = structuredClone(built.world);
+    const crashed: MockRunRecord = structuredClone(built.state);
     const swept = await finishMockedWorld(
       key,
-      { agentId: AGENT, world: crashed, record: kept.record },
+      { agentId: AGENT, state: crashed, record: kept.record },
       REACH(retell.fetchImpl),
     );
 
     expect(swept.unfinished).toEqual([]);
     expect(retell.versions.has(106)).toBe(false);
     expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_LATEST);
-    expect(mockedWorldIsSettled(swept.world)).toBe(true);
+    expect(mockRunIsSettled(swept.state)).toBe(true);
   });
 
   it("reads a version that is already gone as a delete that is already done", async () => {
     const retell = account();
-    const world: MockedWorldRecord = {
-      servingVersion: 105,
-      draftVersion: 999,
-      engine: { type: "conversation-flow", engineId: FLOW, version: 999 },
-      numbers: [],
-      coverage: { mocked: [], notInterceptable: [], notInThisVersion: [] },
+    const state: MockRunRecord = {
+      tempMockAgentVersion: 999,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: {
+        engine: { type: "conversation-flow", engineId: FLOW, version: 999 },
+        numbers: [],
+      },
     };
 
     const swept = await finishMockedWorld(
       key,
-      { agentId: AGENT, world, record: async () => undefined },
+      { agentId: AGENT, state, record: async () => undefined },
       REACH(retell.fetchImpl),
     );
 
     expect(swept.unfinished).toEqual([]);
-    expect(swept.world.draftVersion).toBeNull();
+    // The version number stays — it is what the run branched. What says the
+    // account is back is the cleanup flag.
+    expect(swept.state.tempMockAgentVersion).toBe(999);
+    expect(swept.state.tempMockAgentVersionCleanup).toBe(true);
   });
 });

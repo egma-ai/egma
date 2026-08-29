@@ -82,7 +82,7 @@ function sentinelsIn(document: unknown): readonly string[] {
 }
 
 describe("the mocked draft's transform", () => {
-  it("changes a conversation flow's URLs and headers, and nothing else", () => {
+  it("changes a conversation flow's URLs, headers and query params, and nothing else", () => {
     const { tools } = mockedToolsFor(flow, TARGET);
     const written = tools["tools"] as readonly Record<string, unknown>[];
     const original = flow.document["tools"] as readonly Record<
@@ -102,11 +102,15 @@ describe("the mocked draft's transform", () => {
         mockToolUrl(TARGET, before["name"] as string),
       );
       expect(after["headers"]).toEqual({});
-      // Everything that is not one of the two is byte-identical.
+      // Emptied beside the headers, and for the same reason: a static query
+      // param is a backend constant, and secrets travel in them.
+      expect(after["query_params"]).toEqual({});
+      // Everything that is not one of the three is byte-identical.
       const strip = (one: Record<string, unknown>) => {
-        const { url, headers, ...rest } = one;
+        const { url, headers, query_params, ...rest } = one;
         void url;
         void headers;
+        void query_params;
         return rest;
       };
       expect(JSON.stringify(strip(after))).toBe(JSON.stringify(strip(before)));
@@ -129,7 +133,6 @@ describe("the mocked draft's transform", () => {
         "parameters",
         "tool_id",
         "method",
-        "query_params",
         "response_variables",
         "timeout_ms",
         "args_at_root",
@@ -201,12 +204,13 @@ describe("the mocked draft's transform", () => {
    * `headers` moved on an intercepted one, that a built-in is the same object it
    * arrived as, and that every state's own non-tool fields survive the trip.
    */
-  it("changes nothing but URLs and headers anywhere in a Retell LLM", () => {
+  it("changes nothing but URLs, headers and query params in a Retell LLM", () => {
     const { tools } = mockedToolsFor(llm, TARGET);
     const strip = (one: Record<string, unknown>) => {
-      const { url, headers, ...rest } = one;
+      const { url, headers, query_params, ...rest } = one;
       void url;
       void headers;
+      void query_params;
       return rest;
     };
 
@@ -228,6 +232,10 @@ describe("the mocked draft's transform", () => {
           mockToolUrl(TARGET, was["name"] as string),
         );
         expect(after["headers"], `${where}[${index}] headers`).toEqual({});
+        expect(
+          after["query_params"],
+          `${where}[${index}] query params`,
+        ).toEqual({});
         expect(JSON.stringify(strip(after)), `${where}[${index}]`).toBe(
           JSON.stringify(strip(was)),
         );
@@ -332,6 +340,8 @@ describe("the mocked draft's transform", () => {
     const first = (tools["tools"] as Record<string, unknown>[])[0];
     expect(Object.hasOwn(first as object, "headers")).toBe(true);
     expect(first?.["headers"]).toEqual({});
+    expect(Object.hasOwn(first as object, "query_params")).toBe(true);
+    expect(first?.["query_params"]).toEqual({});
   });
 
   it("sends none of them to Retell either, on the wire or in a refusal", async () => {

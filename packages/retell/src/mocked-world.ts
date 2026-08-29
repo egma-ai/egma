@@ -778,10 +778,7 @@ export async function finishMockedWorld(
     // `gone` is a success here and nowhere else in this file: a version that is
     // not there is a version serving nobody, which is the whole of what the
     // delete is for.
-    if (deleted.kind === "deleted" || deleted.kind === "gone") {
-      state = { ...state, tempMockAgentVersion: null };
-      await input.record(state);
-    } else {
+    if (deleted.kind !== "deleted" && deleted.kind !== "gone") {
       unfinished.push(
         sentenceOf(
           deleted,
@@ -792,6 +789,11 @@ export async function finishMockedWorld(
       // the copy, and the copy is still there.
       return { state, unfinished, leftAlone };
     }
+    // The version number stays on the record: it is what this run branched,
+    // and a reader asking what a run did months later still deserves the
+    // answer. What says whether it still exists is the cleanup flag, and a
+    // retry that deletes an already-deleted version is answered `gone`, which
+    // is a success here.
   }
 
   const notes = state.mockMetadata?.numbers ?? [];
