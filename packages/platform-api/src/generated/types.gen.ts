@@ -4348,6 +4348,7 @@ export type GetRunResponses = {
         createdAt: string;
         startedAt: string | null;
         finishedAt: string | null;
+        eventThrough: number;
         tempMockAgentVersion: number | null;
         tempMockAgentVersionCleanup: boolean | null;
         mockMetadata: {
@@ -4527,7 +4528,6 @@ export type ListRunEventsResponses = {
             executionFailure: string | null;
         }>;
         next: number;
-        observedThrough: number;
         caughtUp: boolean;
         done: boolean;
     };

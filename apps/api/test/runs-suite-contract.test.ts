@@ -243,19 +243,23 @@ describe("run authorization", () => {
     expect(
       (await start(ready, viewer.secret, memberAttempt)).statusCode,
     ).toBe(403);
-    expect(
-      (await request(api.app, "GET", `/v1/runs/${runId}`, viewer.secret))
-        .statusCode,
-    ).toBe(200);
+    const detail = await request(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}`,
+      viewer.secret,
+    );
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body.eventThrough).toBe(0);
     expect(await listedRunIds(viewer.secret, "pageSize=50")).toContain(runId);
-    expect(
-      (await request(
-        api.app,
-        "GET",
-        `/v1/runs/${runId}/events?after=0`,
-        viewer.secret,
-      )).statusCode,
-    ).toBe(200);
+    const events = await request(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}/events?after=0`,
+      viewer.secret,
+    );
+    expect(events.statusCode, JSON.stringify(events.body)).toBe(200);
+    expect(events.body.next).toBe(detail.body.eventThrough);
     expect(
       (await request(
         api.app,

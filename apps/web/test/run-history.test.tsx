@@ -127,6 +127,7 @@ function runHeader(overrides: Record<string, unknown> = {}) {
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
     ...runHeader(),
+    eventThrough: 0,
     connectionSnapshot: {
       agentPlatform: "retell",
       connectionType: "retell_chat_api",
@@ -954,7 +955,6 @@ describe("one run after suites", () => {
           body: {
             events: [],
             next: 0,
-            observedThrough: 0,
             caughtUp: true,
             done: false,
           },
@@ -977,7 +977,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1016,6 +1015,7 @@ describe("one run after suites", () => {
     const notify = vi.spyOn(toast, "error");
     const activeRun = runDetail({
       status: "running",
+      eventThrough: 1,
       finishedAt: null,
       expectedSimulationCount: 2,
       simulationCounts: { ...NO_SIMULATIONS, running: 2 },
@@ -1067,7 +1067,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1089,6 +1088,9 @@ describe("one run after suites", () => {
     const notify = vi.spyOn(toast, "error");
     const activeRun = runDetail({
       status: "running",
+      // The page became visible with 200 historical events. Failure 201 then
+      // landed before the first bounded feed request could reach it.
+      eventThrough: 200,
       finishedAt: null,
       expectedSimulationCount: 2,
       simulationCounts: { ...NO_SIMULATIONS, running: 2 },
@@ -1151,9 +1153,6 @@ describe("one run after suites", () => {
           body: {
             events: history,
             next: 200,
-            observedThrough: 200,
-            // Event 201 landed after the boundary read but before the page
-            // query, so this response knows another page exists.
             caughtUp: false,
             done: false,
           },
@@ -1175,7 +1174,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 201,
-            observedThrough: 201,
             caughtUp: true,
             done: false,
           },
@@ -1193,6 +1191,92 @@ describe("one run after suites", () => {
     );
     expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
       id: "run_1:201",
+      description:
+        "Reschedules service · Patient caller: The media connection closed unexpectedly.",
+    });
+  });
+
+  it("keeps the first detail boundary while a feed request is delayed", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const firstDetail = runDetail({
+      status: "running",
+      eventThrough: 0,
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 1,
+      gradedCount: 0,
+    });
+    const refreshedDetail = { ...firstDetail, eventThrough: 1 };
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    answers({
+      ...detailStubs(
+        firstDetail,
+        {
+          status: 200,
+          body: { simulations: [first, second], nextPageToken: null },
+        },
+        "never",
+      ),
+      "/v1/runs/run_1": [
+        { status: 200, body: firstDetail },
+        { status: 200, body: refreshedDetail },
+      ],
+      "/v1/runs/run_1/events": [
+        // The first feed request stays open. Grading polling refreshes the run
+        // detail to eventThrough 1 and restarts the follower.
+        "never",
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(notify).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:1",
       description:
         "Reschedules service · Patient caller: The media connection closed unexpectedly.",
     });
@@ -1261,9 +1345,8 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            // The failure landed after this first response captured its
-            // history boundary, while the simulation list was still loading.
-            observedThrough: 0,
+            // The failure landed after the run detail captured its history
+            // boundary, while the simulation list was still loading.
             caughtUp: true,
             done: false,
           },
@@ -1373,7 +1456,6 @@ describe("one run after suites", () => {
           body: {
             events: [],
             next: 0,
-            observedThrough: 0,
             caughtUp: true,
             done: false,
           },
@@ -1396,7 +1478,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1465,7 +1546,6 @@ describe("one run after suites", () => {
           body: {
             events: [],
             next: 0,
-            observedThrough: 0,
             caughtUp: true,
             done: false,
           },
@@ -1502,7 +1582,6 @@ describe("one run after suites", () => {
             },
           ],
           next: 1,
-          observedThrough: 1,
           caughtUp: true,
           done: false,
         }),
@@ -1726,7 +1805,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1943,7 +2021,6 @@ describe("one run after suites", () => {
           body: {
             events: [],
             next: 0,
-            observedThrough: 0,
             caughtUp: true,
             done: false,
           },
@@ -1964,7 +2041,6 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
-            observedThrough: 1,
             caughtUp: true,
             done: false,
           },

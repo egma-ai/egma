@@ -232,6 +232,21 @@ function RunDetailView({
     setMoreSimulationsRefused(null);
   }, [runId, projectId]);
 
+  /*
+   * Lock history to the first run detail that makes this page visible. A quiet
+   * detail refresh can finish while the first feed request is still waiting;
+   * it must not move the boundary forward and hide a failure that happened
+   * after the person opened the page.
+   *
+   * This effect is declared before the follower effect. React therefore locks
+   * the boundary before this ready run can start its first feed request.
+   */
+  useEffect(() => {
+    if (run !== null && failureToastHistoryThrough.current === null) {
+      failureToastHistoryThrough.current = run.eventThrough;
+    }
+  }, [run]);
+
   /**
    * And the pending failure and the open control, which are a **separate**
    * clear.
@@ -340,10 +355,12 @@ function RunDetailView({
     // it has and asks again; the numbers it already applied are still right.
     if (asked.status !== "ready") return false;
 
-    const { events, next, observedThrough, done } = asked.value;
-    const historyThrough =
-      failureToastHistoryThrough.current ?? observedThrough;
-    failureToastHistoryThrough.current = historyThrough;
+    const { events, next, done } = asked.value;
+    const historyThrough = failureToastHistoryThrough.current;
+    // The ready run-detail effect above normally makes this impossible. If a
+    // future refactor changes effect order, keep the page quiet and re-read the
+    // same feed page instead of guessing which failures are historical.
+    if (historyThrough === null) return false;
 
     /*
      * **Which events are new is decided here, once, and never inside a state

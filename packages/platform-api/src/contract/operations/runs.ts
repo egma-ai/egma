@@ -253,6 +253,7 @@ const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
+    eventThrough: integerSchema,
     tempMockAgentVersion: nullable(integerSchema),
     tempMockAgentVersionCleanup: nullable(booleanSchema),
     mockMetadata: nullable(mockMetadataSchema),
@@ -269,6 +270,7 @@ const runDetailSchema = {
   },
   required: [
     ...runHeaderSchema.required,
+    "eventThrough",
     "tempMockAgentVersion",
     "tempMockAgentVersionCleanup",
     "mockMetadata",
@@ -530,11 +532,10 @@ export const runOperations = {
           properties: {
             events: arrayOf(runEventSchema),
             next: integerSchema,
-            observedThrough: integerSchema,
             caughtUp: booleanSchema,
             done: booleanSchema,
           },
-          required: ["events", "next", "observedThrough", "caughtUp", "done"],
+          required: ["events", "next", "caughtUp", "done"],
           additionalProperties: false,
         },
       },

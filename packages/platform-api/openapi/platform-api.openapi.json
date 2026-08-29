@@ -15695,6 +15695,9 @@
                         }
                       ]
                     },
+                    "eventThrough": {
+                      "type": "integer"
+                    },
                     "tempMockAgentVersion": {
                       "anyOf": [
                         {
@@ -15935,6 +15938,7 @@
                     "createdAt",
                     "startedAt",
                     "finishedAt",
+                    "eventThrough",
                     "tempMockAgentVersion",
                     "tempMockAgentVersionCleanup",
                     "mockMetadata",
@@ -16562,9 +16566,6 @@
                     "next": {
                       "type": "integer"
                     },
-                    "observedThrough": {
-                      "type": "integer"
-                    },
                     "caughtUp": {
                       "type": "boolean"
                     },
@@ -16575,7 +16576,6 @@
                   "required": [
                     "events",
                     "next",
-                    "observedThrough",
                     "caughtUp",
                     "done"
                   ],
