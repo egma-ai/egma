@@ -594,8 +594,6 @@ describe("the lifecycle lands", () => {
       discovered: ["check_calendar", "send_confirmation"],
       covered: ["check_calendar"],
       uncovered: ["send_confirmation"],
-      notInterceptable: [],
-      notInThisVersion: [],
     });
 
     // And readable by whoever asks for the run — the different-units rule
@@ -614,8 +612,6 @@ describe("the lifecycle lands", () => {
       discovered: ["check_calendar", "send_confirmation"],
       covered: ["check_calendar"],
       uncovered: ["send_confirmation"],
-      notInterceptable: [],
-      notInThisVersion: [],
     });
   });
 
@@ -657,8 +653,6 @@ describe("the lifecycle lands", () => {
       discovered: [],
       covered: [],
       uncovered: [],
-      notInterceptable: [],
-      notInThisVersion: [],
     });
   });
 

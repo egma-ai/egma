@@ -35,6 +35,31 @@ import type { ConnectionType } from "../schema/agents.ts";
 import { run } from "../schema/runs.ts";
 
 /**
+ * The connection types whose runs are governed by `connection.mock_tools_enabled`.
+ *
+ * The same two the schema's CHECK admits, and the boundary of what this switch
+ * decides: on a Retell lane Egma chooses whether to stand in front of the
+ * agent's tools, so the switch is the choice. Every other lane keeps the
+ * behaviour it has — the LiveKit in-room seam serves what the run resolved
+ * because Egma *is* in the tool path there by construction, and a phone call
+ * reaches the customer's real tools by design. Aligning LiveKit onto this
+ * switch is a separate decision and is out of scope by name.
+ */
+export const MOCK_SWITCHED_CONNECTION_TYPES = [
+  "retell_text_mode",
+  "retell_web_call",
+] as const satisfies readonly ConnectionType[];
+
+/** Whether the connection's own switch decides what a run over it serves. */
+export function connectionTypeCarriesMockSwitch(
+  connectionType: string,
+): boolean {
+  return (MOCK_SWITCHED_CONNECTION_TYPES as readonly string[]).includes(
+    connectionType,
+  );
+}
+
+/**
  * The connection types a mocked run over which branches a temporary copy of
  * the customer's agent.
  *

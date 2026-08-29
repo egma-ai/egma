@@ -103,7 +103,9 @@ export {
  */
 export {
   connectionTypeBranchesMockDraft,
+  connectionTypeCarriesMockSwitch,
   DRAFT_MOCK_CONNECTION_TYPES,
+  MOCK_SWITCHED_CONNECTION_TYPES,
   type DraftMockConnectionType,
 } from "./mock-tools/lanes.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */

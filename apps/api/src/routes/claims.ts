@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   claimSimulations,
   catalogEntry,
+  connectionTypeCarriesMockSwitch,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
@@ -499,14 +500,19 @@ async function assembledSpec(
     claim.testVersionId,
   );
 
-  // **Whether this run is mocked at all is read from its own snapshot**, on
-  // every lane. The switch lives on the connection, and the run froze it at
-  // start — so a switch unticked mid-run leaves this run in the world it began
-  // in, and a text run started with the switch off carries no answers and goes
-  // real. Nothing consults the connection row here.
-  const mockTools = (
-    run.connectionSnapshot.mockToolsEnabled ? resolved : []
-  ).map((mock) => ({
+  // **Whether this run is mocked is read from its own snapshot**, on every
+  // lane the switch governs. The switch lives on the connection, and the run
+  // froze it at start — so a switch unticked mid-run leaves this run in the
+  // world it began in, and a text run started with the switch off carries no
+  // answers and goes real. Nothing consults the connection row here.
+  //
+  // A lane the switch does not govern keeps the behaviour it has: the LiveKit
+  // in-room seam serves what the run resolved because Egma *is* in the tool
+  // path there by construction.
+  const mocked =
+    !connectionTypeCarriesMockSwitch(run.connectionSnapshot.connectionType) ||
+    run.connectionSnapshot.mockToolsEnabled;
+  const mockTools = (mocked ? resolved : []).map((mock) => ({
     tool_name: mock.toolName,
     answer: mock.answer,
     // Carried on every lane, and deliberately never spent on a chat one: a
