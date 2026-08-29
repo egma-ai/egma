@@ -22,12 +22,13 @@ grader selects simulations only, so it does not grade production traffic.
 Production evidence reaches Egma in one of two ways, and which one depends on
 the agent platform.
 
-- **Retell is pulled.** Open **Monitoring → Start monitoring**, enter one Retell
-  platform API key, and choose which Retell agent your Egma agent is. Egma seals
-  the key on that agent, turns on its **pull production calls** switch, imports
-  the previous 30 days, and then polls about every 30 seconds. The switch lives
-  on the agent, so each agent is started and stopped on its own. See
-  [Retell](/integrations/retell).
+- **Retell is pulled.** Open **Agents → Connect an agent** and copy the
+  **Monitoring** or **Both** prompt into the coding agent that is working in
+  your repository. It uses the current CLI to select the exact Retell agent,
+  stores the key on that agent, and enables **pull production calls**. Egma
+  imports the previous 30 days and then polls about every 30 seconds. The
+  switch lives on the agent, so each agent is started and stopped on its own.
+  See [Retell](/integrations/retell).
 - **LiveKit is pushed.** Install the Egma Python SDK and call
   `monitor_livekit(ctx)` before `AgentSession.start`. The worker sends OTLP to
   `POST /v1/traces`. There is nothing to switch on: the conversations appear as

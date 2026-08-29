@@ -55,6 +55,10 @@ export type RunCommandOptions = FolderCommandOptions & {
   /** Reuse this exact key only when retrying the same start action. */
   readonly idempotencyKey?: string;
   readonly noFollow?: boolean;
+  /** Preserve the CLI-owned local worker when printing an uncertain-start retry. */
+  readonly workerEntrypoint?: string;
+  readonly workerDependencyManifest?: string;
+  readonly workerDispatchName?: string;
   readonly signal?: AbortSignal;
   readonly everyMs?: number;
 };
@@ -83,6 +87,57 @@ function reportSelection(options: RunCommandOptions, selection: Selection): void
   options.out(`suite-name: ${selection.suiteName}`);
   options.out(`directory: egma/tests/${selection.suiteDirectory}`);
   for (const one of selection.pinned) options.out(`pin: ${one.name} ${one.versionId}`);
+}
+
+/** One POSIX-shell argument, including empty text and embedded apostrophes. */
+function shellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+/** The same start request, addressed by stable ids and its original key. */
+function runRecoveryCommand(
+  options: RunCommandOptions,
+  input: {
+    readonly suiteDirectory: string;
+    readonly agentId: string;
+    readonly connectionId: string;
+    readonly idempotencyKey: string;
+  },
+): string {
+  const words = [
+    "egma",
+    "run",
+    shellArgument(input.suiteDirectory),
+    "--cwd",
+    shellArgument(options.cwd),
+    "--url",
+    shellArgument(options.access.url),
+    "--agent",
+    shellArgument(input.agentId),
+    "--connection",
+    shellArgument(input.connectionId),
+  ];
+  if (options.name !== undefined) {
+    words.push("--name", shellArgument(options.name));
+  }
+  if (options.workerEntrypoint !== undefined) {
+    words.push("--worker-entrypoint", shellArgument(options.workerEntrypoint));
+  }
+  if (options.workerDependencyManifest !== undefined) {
+    words.push(
+      "--worker-dependency-manifest",
+      shellArgument(options.workerDependencyManifest),
+    );
+  }
+  if (options.workerDispatchName !== undefined) {
+    words.push(
+      "--worker-dispatch-name",
+      shellArgument(options.workerDispatchName),
+    );
+  }
+  if (options.noFollow === true) words.push("--no-follow");
+  words.push("--idempotency-key", shellArgument(input.idempotencyKey));
+  return words.join(" ");
 }
 
 /** Prove a run can start before an optional local worker does any setup. */
@@ -178,6 +233,19 @@ export async function prepareRunCommand(
           options.fetchImpl,
         );
       } catch (cause) {
+        if (
+          cause instanceof PlatformUnreachableError ||
+          cause instanceof PlatformRefusedError
+        ) {
+          options.out(
+            `recovery_command: ${runRecoveryCommand(options, {
+              suiteDirectory: selection.suiteDirectory,
+              agentId: target.agent.id,
+              connectionId: target.connection.id,
+              idempotencyKey,
+            })}`,
+          );
+        }
         return unreachable(options, cause);
       }
       if (answer.kind === "refused") {

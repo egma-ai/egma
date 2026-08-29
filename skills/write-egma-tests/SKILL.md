@@ -1,6 +1,6 @@
 ---
 name: write-egma-tests
-description: Write, edit, or convert notes into Egma Markdown test files under egma/tests/, including personas and test-level mock-tool answers.
+description: Write, edit, or convert notes into Egma Markdown tests, including personas and test-level mock-tool answers.
 ---
 
 # Write Egma tests
@@ -8,27 +8,25 @@ description: Write, edit, or convert notes into Egma Markdown test files under e
 An Egma **test** describes one situation for a voice agent and the expected
 behaviors that must hold. Egma executes it as one **simulation** per persona.
 
-Write one Markdown file per test in one existing direct suite directory under
-`egma/tests/`.
-
-For the read-only CLI commands in this skill, use `egma` when installed and
-`npx --yes @egma/cli` otherwise. The examples use the installed form.
+Write one Markdown file per test in the direct suite directory that the CLI
+created. Use `egma` when installed and `npx --yes @egma/cli` otherwise. Read
+current help before using an operation; it owns command syntax and file
+locations.
 
 ## Read before writing
 
-1. Read `egma/config.yaml`. Use the suite directory named by the task. If none
-   is named, inspect only the direct suite manifests. If more than one exists,
-   ask which suite. If none exists, stop and report that onboarding must create
-   one with `egma suite create <directory> --name <name>` before this focused
-   authoring skill can write tests.
-2. Read the selected suite's `suite.yaml` and only the existing tests needed to
-   avoid duplicates or preserve content the task changes.
+1. Let the CLI inspect its repository state and locate the suite named by the
+   task. If more than one suite remains possible, ask which suite. If none
+   exists, use `integrate-egma` so the CLI creates the scaffold before this
+   focused authoring skill writes tests.
+2. Read the selected CLI-created suite metadata and only the existing tests
+   needed to avoid duplicates or preserve content the task changes.
 3. Read the voice agent's committed prompts and tool definitions when the task
    depends on them.
-4. Reuse the format 4 file shape and persona values supplied by Egma, supplied
-   in the task, or already present in the repository. If no valid persona value
-   is present, run the read-only `egma personas` command and use only a returned
-   name or stable ID.
+4. Reuse the test-file shape and persona values supplied by the current CLI,
+   supplied in the task, or already present in the repository. If no valid
+   persona value is present, use the current read-only persona-list operation
+   and only a returned name or stable ID.
 5. Leave `.env` files unread. Work from committed source and the facts supplied
    by the developer.
 
@@ -150,7 +148,8 @@ Read every changed file back. A test file is complete only when:
 - every mock-tool block is a JSON object with exactly one of `answer` or `error`
   and, when present, a whole-number `delay_ms` from 0 through 30000.
 
-Run `egma validate` after reading the changed files back. Fix every named local
-problem and repeat it until validation succeeds. Stop after the requested local
-files are valid unless the active task also asks to publish or run them. An
-end-to-end setup request already includes those normal next steps.
+Use the current local validation operation after reading the changed files
+back. Fix every named local problem and repeat it until validation succeeds.
+Stop after the requested local files are valid unless the active task also asks
+to publish or run them. An end-to-end setup request already includes those
+normal next steps.

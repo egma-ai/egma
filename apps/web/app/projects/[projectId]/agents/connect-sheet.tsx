@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 import {
   Sheet,
   SheetBody,
@@ -14,66 +15,68 @@ import { Loading, NotFound } from "@/ui/page-state.tsx";
 
 import { CopyBlock } from "./copy-block.tsx";
 
-export type ConnectAgentGoal = "simulation" | "monitoring" | "both";
-export type ConnectAgentPlatform = "retell" | "livekit";
-
 type ConnectAgentSheetProps = {
   readonly mayAuthor: boolean;
   readonly role: string | null;
   readonly onClose: () => void;
 };
 
-const SHARED_HANDOFF =
+function sharedHandoff(platformUrl: string): string {
+  return (
+  `Use ${platformUrl} as the Egma platform URL. ` +
   "Start by running `egma` if available or `npx --yes @egma/cli` otherwise. " +
   "Follow the coding-agent handoff. Use existing credentials. " +
   "Ask the developer only for browser authorization, a missing credential, " +
   "a choice that cannot be safely inferred, an unsafe conflict, or approval " +
-  "before a real phone run that may cost money.";
+  "before a real phone run that may cost money."
+  );
+}
 
-export const SIMULATION_AGENT_PROMPT =
-  "Set up Egma simulation testing for this repository's voice agent end to end. " +
-  SHARED_HANDOFF;
-
-export const MONITORING_AGENT_PROMPT =
-  "Set up Egma production monitoring for this repository's voice agent end to end. " +
-  SHARED_HANDOFF;
-
-export const BOTH_AGENT_PROMPT =
-  "Set up Egma simulation testing and production monitoring for this " +
-  "repository's voice agent end to end. " +
-  SHARED_HANDOFF;
-
-const PROMPTS = [
-  {
-    id: "simulation",
-    title: "Simulation",
-    value: SIMULATION_AGENT_PROMPT,
-  },
-  {
-    id: "monitoring",
-    title: "Monitoring",
-    value: MONITORING_AGENT_PROMPT,
-  },
-  {
-    id: "both",
-    title: "Both",
-    value: BOTH_AGENT_PROMPT,
-  },
-] as const;
+export function agentSetupPrompts(platformUrl: string) {
+  const handoff = sharedHandoff(platformUrl);
+  return [
+    {
+      id: "simulation",
+      title: "Simulation",
+      value:
+        "Set up Egma simulation testing for this repository's voice agent end to end. " +
+        handoff,
+    },
+    {
+      id: "monitoring",
+      title: "Monitoring",
+      value:
+        "Set up Egma production monitoring for this repository's voice agent end to end. " +
+        handoff,
+    },
+    {
+      id: "both",
+      title: "Both",
+      value:
+        "Set up Egma simulation testing and production monitoring for this " +
+        "repository's voice agent end to end. " +
+        handoff,
+    },
+  ] as const;
+}
 
 /**
  * Hand setup to the coding agent that already owns the repository.
  *
  * Old links can still select this sheet, but their query values do not narrow
- * the handoff: all three outcomes stay visible, and the coding agent discovers
- * the platform and existing credentials from the repository; this sheet
- * performs no platform operation itself.
+ * the handoff: all three outcomes stay visible. The prompt carries this
+ * platform address, and the coding agent discovers the repository, provider,
+ * and existing credential state; this sheet performs no platform operation.
  */
 export function ConnectAgentSheet({
   mayAuthor,
   role,
   onClose,
 }: ConnectAgentSheetProps) {
+  const [platformUrl, setPlatformUrl] = useState<string | null>(null);
+
+  useEffect(() => setPlatformUrl(window.location.origin), []);
+
   return (
     <Sheet
       open
@@ -91,7 +94,7 @@ export function ConnectAgentSheet({
         </SheetHeader>
 
         <SheetBody>
-          {role === null ? (
+          {role === null || platformUrl === null ? (
             <Loading what="what you can do here" />
           ) : !mayAuthor ? (
             <NotFound
@@ -109,7 +112,7 @@ export function ConnectAgentSheet({
               </p>
 
               <div className="flex flex-col gap-4">
-                {PROMPTS.map((prompt) => (
+                {agentSetupPrompts(platformUrl).map((prompt) => (
                   <section
                     className="flex flex-col gap-3 border border-border p-4"
                     aria-labelledby={`connect-prompt-${prompt.id}`}

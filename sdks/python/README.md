@@ -27,9 +27,10 @@ For a LiveKit agent on Python 3.11 or newer.
 
 ## Production monitoring
 
-Open **Monitoring → Start monitoring** and choose **LiveKit**. That page
-shows the same SDK, key, and helper steps below. It is instructions only: a
-LiveKit agent pushes its own spans, so there is nothing to switch on in Egma.
+Open **Agents → Connect an agent** and copy the **Monitoring** or **Both**
+prompt into the coding agent that is working in your repository. It installs
+the latest SDK and completes these worker, key, and deployment steps. A LiveKit
+agent pushes its own spans, so there is nothing to switch on in Egma.
 
 Set the Egma API origin and an existing project API key in the agent's
 environment:

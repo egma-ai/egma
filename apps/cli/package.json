@@ -37,7 +37,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "node tools/clean-dist.mjs && tsc -b",
+    "prepack": "pnpm build",
     "prepublishOnly": "pnpm -w build",
     "smoke:platform": "node smoke/real-platform-login.ts",
     "smoke:retell": "node smoke/real-retell-connect.ts"

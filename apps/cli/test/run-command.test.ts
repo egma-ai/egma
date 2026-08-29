@@ -325,6 +325,48 @@ describe("runRunCommand operational exit behavior", () => {
     expect(retried.startedWith?.idempotencyKey).toBe("retry_release_01");
   });
 
+  it("prints the complete safe retry command when a start result is unknown", async () => {
+    const lines: string[] = [];
+    const fetchImpl: typeof fetch = async (request, init) => {
+      const url = String(request);
+      if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
+        return new JsonResponse(
+          JSON.stringify({ id: SUITE_ID, projectId: PROJECT_ID, name: "Release" }),
+        );
+      }
+      if (url.startsWith(`${URL}/v1/tests?`)) {
+        return new JsonResponse(
+          JSON.stringify({ tests: [platformTest()], nextPageToken: null }),
+        );
+      }
+      if (url === `${URL}/v1/runs` && init?.method === "POST") {
+        throw new Error("the response was lost");
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+
+    const code = await runRunCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      name: "Tonight's release",
+      idempotencyKey: "retry_release_01",
+      noFollow: true,
+      out: (line) => lines.push(line),
+      fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl,
+    });
+
+    expect(code).toBe(4);
+    expect(lines).toContain(
+      `recovery_command: egma run 'release' --cwd '${workspace.dir}' ` +
+        `--url '${URL}' --agent 'agt_one' --connection 'con_one' ` +
+        `--name 'Tonight'"'"'s release' --no-follow ` +
+        `--idempotency-key 'retry_release_01'`,
+    );
+    expect(lines).toContain("status: unreachable");
+  });
+
   it("refuses a blank retry key before any platform request", async () => {
     const lines: string[] = [];
     let requests = 0;

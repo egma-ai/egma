@@ -1,21 +1,11 @@
 import { projectPath } from "../../../../lib/project-context.ts";
 
 /**
- * The shared agent-setup address used by every Monitoring entry point.
+ * The shared coding-agent handoff used by every Monitoring entry point.
  *
- * The Agents page owns the flow. Monitoring only states the user's goal and,
- * when one is already known, the agent the flow should start from. The query
- * is durable UI state: a copied link opens Connect agent with Monitoring
- * selected.
+ * The sheet always shows all three outcomes. Monitoring does not encode a
+ * hidden selection or an old wizard step in its address.
  */
-export function monitoringSetupPath(
-  projectId: string,
-  agentId?: string,
-): string {
-  const query = new URLSearchParams();
-  query.set("sheet", "connect");
-  if (agentId !== undefined) query.set("agent", agentId);
-  query.set("goal", "monitoring");
-
-  return `${projectPath(projectId, "agents")}?${query.toString()}`;
+export function monitoringSetupPath(projectId: string): string {
+  return `${projectPath(projectId, "agents")}?sheet=connect`;
 }

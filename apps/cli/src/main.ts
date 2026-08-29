@@ -451,6 +451,18 @@ async function runFolderVerb(
             ...(invocation.idempotencyKey === null
               ? {}
               : { idempotencyKey: invocation.idempotencyKey }),
+            ...(invocation.workerEntrypoint === null
+              ? {}
+              : { workerEntrypoint: invocation.workerEntrypoint }),
+            ...(invocation.workerDependencyManifest === null
+              ? {}
+              : {
+                  workerDependencyManifest:
+                    invocation.workerDependencyManifest,
+                }),
+            ...(invocation.workerDispatchName === null
+              ? {}
+              : { workerDispatchName: invocation.workerDispatchName }),
             noFollow: invocation.noFollow,
           }),
       );

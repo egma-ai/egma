@@ -39,11 +39,7 @@ import {
   monitoringCapabilityOf,
   simulationCapabilityOf,
 } from "./agent-details-sheet.tsx";
-import {
-  ConnectAgentSheet,
-  type ConnectAgentGoal,
-  type ConnectAgentPlatform,
-} from "./connect-sheet.tsx";
+import { ConnectAgentSheet } from "./connect-sheet.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
 import { MockToolsSheet } from "./mock-tools-sheet.tsx";
 import { RenameAgentSheet } from "./rename-sheet.tsx";
@@ -86,13 +82,7 @@ import { RenameAgentSheet } from "./rename-sheet.tsx";
 
 /** The panel a route insists on, whatever the query string says. */
 export type ForcedSheet =
-  | {
-      readonly kind: "connect";
-      readonly agentId?: string;
-      readonly goal?: ConnectAgentGoal;
-      readonly platform?: ConnectAgentPlatform;
-      readonly onboarding?: boolean;
-    }
+  | { readonly kind: "connect" }
   | { readonly kind: "agent"; readonly agentId: string }
   | { readonly kind: "connection"; readonly agentId: string; readonly connectionId: string };
 
@@ -772,14 +762,7 @@ function openSheet(
   const agentId = query.get("agent");
   const connectionId = query.get("connection");
   if (kind === "connect") {
-    const goal = connectGoal(query.get("goal"));
-    const platform = connectPlatform(query.get("platform"));
-    return {
-      kind: "connect",
-      ...(agentId === null ? {} : { agentId }),
-      ...(goal === undefined ? {} : { goal }),
-      ...(platform === undefined ? {} : { platform }),
-    };
+    return { kind: "connect" };
   }
   if (kind === "agent" && agentId !== null) {
     return { kind: "agent", agentId };
@@ -788,16 +771,4 @@ function openSheet(
     return { kind: "connection", agentId, connectionId };
   }
   return null;
-}
-
-/** Only providers implemented by this setup flow can become sheet state. */
-function connectPlatform(value: string | null): ConnectAgentPlatform | undefined {
-  return value === "retell" || value === "livekit" ? value : undefined;
-}
-
-/** Only the three public setup goals can become sheet state. */
-function connectGoal(value: string | null): ConnectAgentGoal | undefined {
-  return value === "simulation" || value === "monitoring" || value === "both"
-    ? value
-    : undefined;
 }

@@ -19,12 +19,14 @@ import {
   folderPathsIn,
   serializeSuiteManifest,
 } from "../src/folder/egma-folder.ts";
+import { serializeTestFile } from "../src/folder/test-file.ts";
 import type {
   LocalLiveKitWorkerEnding,
   StartLocalLiveKitWorker,
   StartLocalLiveKitWorkerOptions,
 } from "../src/livekit/local-worker.ts";
 import { makeWorkspace } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 function options(
   overrides: Partial<RunWithOptionalLocalLiveKitWorkerOptions> = {},
@@ -370,6 +372,138 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
         'Egma test "Books a visit" is missing from egma/tests/release.',
       );
       expect(made.lines).not.toContain("worker-status: starting");
+    } finally {
+      await repository.remove();
+    }
+  });
+
+  it("keeps every local worker flag in an uncertain-start recovery command", async () => {
+    const repository = await makeWorkspace();
+    try {
+      const url = "https://egma.example";
+      const projectId = "prj_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const suiteId = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const testId = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const versionId = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const revision = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const scenario = "The caller asks for Tuesday.";
+      const behavior = "The agent books Tuesday.";
+      await repository.signIn(url);
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          project: { id: projectId, name: "Northside" },
+          agents: [
+            {
+              id: "agt_one",
+              name: "Receptionist",
+              connections: [
+                { id: "con_one", name: "Chat", modality: "chat" },
+              ],
+            },
+          ],
+        },
+      });
+      const release = path.join(folderPathsIn(repository.dir).tests, "release");
+      await mkdir(release);
+      await writeFile(
+        path.join(release, "suite.yaml"),
+        serializeSuiteManifest({ id: suiteId, name: "Release" }),
+      );
+      await writeFile(
+        path.join(release, "books-a-visit.md"),
+        serializeTestFile(
+          aTestFile({
+            name: "Books a visit",
+            scenario,
+            expectedBehaviors: blocking(behavior),
+            version: versionId,
+            identityRevision: revision,
+          }),
+        ),
+      );
+
+      const worker = controlledWorker();
+      const made = options({
+        cwd: repository.dir,
+        workerEntrypoint: "src/agent.py",
+        workerDependencyManifest: "pyproject.toml",
+        workerDispatchName: "front-desk",
+        env: {
+          LIVEKIT_URL: "wss://project.livekit.cloud",
+          LIVEKIT_API_KEY: "key",
+          LIVEKIT_API_SECRET: "secret",
+        },
+        startWorker: worker.start,
+      });
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const requested = String(input);
+        const json = (body: unknown): Response =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        if (requested === `${url}/v1/test-suites/${suiteId}`) {
+          return json({ id: suiteId, projectId, name: "Release" });
+        }
+        if (requested.startsWith(`${url}/v1/tests?`)) {
+          return json({
+            tests: [
+              {
+                id: testId,
+                projectId,
+                suiteId,
+                name: "Books a visit",
+                description: "",
+                scenario,
+                expectedBehaviors: [behavior],
+                personas: [],
+                mockTools: [],
+                versionId,
+                version: 1,
+                revision,
+              },
+            ],
+            nextPageToken: null,
+          });
+        }
+        if (requested === `${url}/v1/runs` && init?.method === "POST") {
+          throw new Error("the start response was lost");
+        }
+        throw new Error(`unexpected request: ${requested}`);
+      };
+
+      const code = await runWithOptionalLocalLiveKitWorker(
+        made.value,
+        async () =>
+          await prepareRunCommand({
+            access: { url, credentialsFile: repository.credentialsFile },
+            cwd: repository.dir,
+            suiteDirectory: "release",
+            idempotencyKey: "retry_worker_01",
+            workerEntrypoint: "src/agent.py",
+            workerDependencyManifest: "pyproject.toml",
+            workerDispatchName: "front-desk",
+            out: made.value.out,
+            fail: made.value.fail,
+            fetchImpl,
+          }),
+      );
+
+      expect(code).toBe(4);
+      expect(worker.stopCount()).toBe(1);
+      const recovery = made.lines.find((line) =>
+        line.startsWith("recovery_command: "),
+      );
+      expect(recovery).toContain("--worker-entrypoint 'src/agent.py'");
+      expect(recovery).toContain(
+        "--worker-dependency-manifest 'pyproject.toml'",
+      );
+      expect(recovery).toContain("--worker-dispatch-name 'front-desk'");
+      expect(recovery).toContain("--idempotency-key 'retry_worker_01'");
+      expect(made.lines).toContain("worker-status: ready");
+      expect(made.lines).toContain("worker-status: stopped");
     } finally {
       await repository.remove();
     }

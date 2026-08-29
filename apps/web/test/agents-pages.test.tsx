@@ -1038,13 +1038,23 @@ describe("reading an agent's reach from the list", () => {
  * an old link carries one goal or platform in its query.
  */
 describe("coding-agent setup handoff", () => {
+  const handoff =
+    `Use ${window.location.origin} as the Egma platform URL. ` +
+    "Start by running `egma` if available or `npx --yes @egma/cli` otherwise. " +
+    "Follow the coding-agent handoff. Use existing credentials. " +
+    "Ask the developer only for browser authorization, a missing credential, " +
+    "a choice that cannot be safely inferred, an unsafe conflict, or approval " +
+    "before a real phone run that may cost money.";
   const prompts = {
     simulation:
-      "Set up Egma simulation testing for this repository's voice agent end to end. Start by running `egma` if available or `npx --yes @egma/cli` otherwise. Follow the coding-agent handoff. Use existing credentials. Ask the developer only for browser authorization, a missing credential, a choice that cannot be safely inferred, an unsafe conflict, or approval before a real phone run that may cost money.",
+      "Set up Egma simulation testing for this repository's voice agent end to end. " +
+      handoff,
     monitoring:
-      "Set up Egma production monitoring for this repository's voice agent end to end. Start by running `egma` if available or `npx --yes @egma/cli` otherwise. Follow the coding-agent handoff. Use existing credentials. Ask the developer only for browser authorization, a missing credential, a choice that cannot be safely inferred, an unsafe conflict, or approval before a real phone run that may cost money.",
+      "Set up Egma production monitoring for this repository's voice agent end to end. " +
+      handoff,
     both:
-      "Set up Egma simulation testing and production monitoring for this repository's voice agent end to end. Start by running `egma` if available or `npx --yes @egma/cli` otherwise. Follow the coding-agent handoff. Use existing credentials. Ask the developer only for browser authorization, a missing credential, a choice that cannot be safely inferred, an unsafe conflict, or approval before a real phone run that may cost money.",
+      "Set up Egma simulation testing and production monitoring for this repository's voice agent end to end. " +
+      handoff,
   } as const;
 
   function handoffAnswers(role = "member"): void {

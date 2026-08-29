@@ -62,6 +62,15 @@ function markdownExamples(skill: string): readonly string[] {
 }
 
 describe("the public skill source", () => {
+  it("cleans retired compiled surfaces before a package is built", async () => {
+    const manifest = JSON.parse(
+      await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
+    ) as { readonly scripts?: Record<string, string> };
+
+    expect(manifest.scripts?.build).toContain("tools/clean-dist.mjs");
+    expect(manifest.scripts?.prepack).toBe("pnpm build");
+  });
+
   it("has only the intentional public skills, in standard folders", async () => {
     expect((await readdir(SOURCE_ROOT)).sort()).toEqual([...PUBLIC_SKILLS]);
 
@@ -168,14 +177,26 @@ describe("the public skill source", () => {
     }
 
     const operating = await readFile(path.join(SOURCE_ROOT, "egma", "SKILL.md"), "utf8");
+    const authoring = await readFile(
+      path.join(SOURCE_ROOT, "write-egma-tests", "SKILL.md"),
+      "utf8",
+    );
     expect(operating).not.toContain("The folder has this shape");
     expect(operating).not.toContain("```yaml");
     expect(operating).toMatch(
       /Do not invent a\s+folder shape, manifest field, version, or stable ID/u,
     );
+    expect([operating, authoring].join("\n")).not.toMatch(
+      /egma (?:pull|push|validate|run|suite create|personas)(?:\s|$)/u,
+    );
+    expect(authoring).not.toContain("egma/config.yaml");
+    expect(authoring).not.toContain("suite.yaml");
 
     expect(liveKitWorker).toMatch(
       /Run the read-only LiveKit source-contract command listed by the current\s+`egma --help`/u,
+    );
+    expect(liveKitWorker).not.toMatch(
+      /egma-sim-chat-|ctx\.job\.room\.name|AgentSession\.start|ctx\.connect\(\)/u,
     );
     expect(liveKitWorker).toContain(
       "egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python",
