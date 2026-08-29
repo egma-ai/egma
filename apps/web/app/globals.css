@@ -132,17 +132,73 @@
  */
 :is([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]):focus-visible { outline-offset: -2px; }
 
+/*
+ * The open select picker, where the browser lets the product draw it.
+ *
+ * **Opting into `base-select` makes the picker the product's box to size, and
+ * the first version of this block did not size it.** Before the opt-in the
+ * browser drew its own popup and the operating system bounded and scrolled it.
+ * After the opt-in the picker is a real box in the top layer, and Chrome's
+ * defaults for a box nobody sized are `max-height: stretch` with
+ * `position-try-order: most-block-size` — read together, "make it as tall as
+ * the space allows". A project with thirty test suites therefore opened a
+ * picker 584px tall in a 700px window, its lower edge flush with the window
+ * and its last row sliced in half. It did scroll. Nothing said so, and a row
+ * cut by the window edge reads as a broken render rather than as an invitation
+ * to keep going. A short list never showed it, which is why it reached
+ * production.
+ *
+ * **So the picker is bounded the way every other menu in this product is
+ * bounded.** `ui/menu.tsx` caps its panel to the space available less a gap
+ * and scrolls the rest; that rule was written for the Radix popover and simply
+ * never carried across to the one menu the browser draws. The cap here is
+ * eight rows, and it is held under `min()` with half the viewport so a short
+ * window cannot be handed a picker taller than the room the picker has. Below
+ * 32rem of viewport there is no cap at all and Chrome's `stretch` takes it
+ * back, which is the right answer when eight rows would not have fitted
+ * anyway. Every placement was measured open, at six viewport heights against a
+ * trigger at the top, the middle and the foot of each: all eighteen stay
+ * inside the window.
+ *
+ * **The block margins are equal, and an unequal pair was tried first.** The
+ * idea was a small gap under the trigger and a larger one at the window edge.
+ * It does not survive the flip: when Chrome places the picker above a trigger
+ * near the foot of the window, the two swap, so the large gap lands against
+ * the trigger and the small one against the window edge — the flush edge this
+ * change exists to remove, moved to the top. Measured across twenty-five
+ * placements, the unequal pair left 1px at the window edge in its worst case,
+ * an equal 12px left 1px, and an equal 8px left 5px with 7px still under the
+ * trigger. So 8px, both sides. `stretch` subtracts margins, so the gap is real
+ * rather than drawn. (Raised by Greptile on the pull request, and its reading
+ * of the flip was right.)
+ *
+ * `overscroll-behavior` keeps a wheel that reaches the end of the list from
+ * carrying on into the page behind the open picker.
+ *
+ * `align-items` belongs to the select and not to the picker: the picker's
+ * computed `display` is `block`, so the declaration did nothing there.
+ */
 @layer base {
   @supports (appearance: base-select) {
-    select, ::picker(select) { appearance: base-select; align-items: center; }
+    select, ::picker(select) { appearance: base-select; }
+    select { align-items: center; }
     ::picker(select) {
-      margin-block: 4px;
+      margin-block: var(--space-2);
       padding: var(--space-1);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       background: var(--surface);
       box-shadow: var(--shadow-menu);
       color: var(--foreground);
+      overscroll-behavior: contain;
+    }
+    /*
+     * Eight rows, and never more than the room there is. Under 32rem of window
+     * the cap is dropped rather than fought with: Chrome's own `stretch` fits
+     * the picker to the space, which is all a window that short can offer.
+     */
+    @media (min-height: 32rem) {
+      ::picker(select) { max-height: min(18rem, calc(50dvh - 2rem)); }
     }
     select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
     select option:checked { background: var(--surface-active); }

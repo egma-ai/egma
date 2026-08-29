@@ -59,8 +59,11 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-30 min-w-56 overflow-hidden rounded-card border border-border bg-popover p-1",
+          "z-30 min-w-56 rounded-card border border-border bg-popover p-1",
           "text-popover-foreground shadow-popover outline-none",
+          /* Bounded for the same reason `popover.tsx` is; see the note there. */
+          "max-h-[calc(var(--radix-dropdown-menu-content-available-height)-var(--space-2))]",
+          "overflow-x-hidden overflow-y-auto",
           className,
         )}
         {...props}
@@ -228,8 +231,10 @@ function DropdownMenuSubContent({
     <DropdownMenuPrimitive.SubContent
       data-slot="dropdown-menu-sub-content"
       className={cn(
-        "z-30 min-w-40 overflow-hidden rounded-card border border-border bg-popover p-1",
+        "z-30 min-w-40 rounded-card border border-border bg-popover p-1",
         "text-popover-foreground shadow-popover outline-none",
+        "max-h-[calc(var(--radix-dropdown-menu-content-available-height)-var(--space-2))]",
+        "overflow-x-hidden overflow-y-auto",
         className,
       )}
       {...props}
