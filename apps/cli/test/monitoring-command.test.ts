@@ -759,7 +759,7 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(platform.device.keys).toContain(minted.secret);
   });
 
-  it("mints a project key, writes the two lines, and prints them", async () => {
+  it("mints a project key, writes it safely, and never prints the secret", async () => {
     await gitRepository([ENV_FILE_NAME]);
 
     const result = await egma([
@@ -794,14 +794,13 @@ describe("egma monitoring enable, on LiveKit", () => {
       `EGMA_URL=${platform.url}`,
       `EGMA_API_KEY=${minted.secret}`,
     ]);
-    // The lines are the deliverable, so they are printed for the deployment.
-    expect(every(result.stdout, "env")).toEqual([
-      `export EGMA_URL=${platform.url}`,
-      `export EGMA_API_KEY=${minted.secret}`,
-    ]);
+    expect(every(result.stdout, "env")).toEqual([]);
+    expect(result.stdout).not.toContain(minted.secret);
+    expect(result.stderr).not.toContain(minted.secret);
   });
 
   it("keeps the LiveKit key receipt when the final local record fails", async () => {
+    await gitRepository([ENV_FILE_NAME]);
     const unlock = await lockEgmaFolder();
     let result: Result;
     try {
@@ -820,7 +819,9 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(result.stderr).toContain(
       `--monitoring-key-id ${said.monitoring_key_id ?? ""}`,
     );
-    expect(every(result.stdout, "env")).toHaveLength(2);
+    const minted = platform.keys.minted[0]!;
+    expect(every(result.stdout, "env")).toHaveLength(0);
+    expect(result.stdout).not.toContain(minted.secret);
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.keys.minted).toHaveLength(1);
 
@@ -949,6 +950,7 @@ describe("egma monitoring enable, on LiveKit", () => {
   });
 
   it("records another member's active worker and retries the local write", async () => {
+    await gitRepository([ENV_FILE_NAME]);
     const agent = await unmonitoredAgent("livekit", "another-members-worker");
     const seeded = await wireLiveKit({ agent });
     expect(seeded).toMatchObject({ kind: "wired" });
@@ -1067,15 +1069,19 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(mode & 0o077).toBe(0);
   });
 
-  it("refuses to write the file Git does not ignore, and prints the lines", async () => {
+  it("revokes the key when Git does not ignore the environment file", async () => {
     await gitRepository(["node_modules"]);
 
     const result = await egma(["monitoring", "enable", "--platform", "livekit"]);
 
-    expect(result.code).toBe(MONITORING_EXIT.done);
-    expect(facts(result.stdout).env_file).toBe("none");
+    expect(result.code).toBe(MONITORING_EXIT.unreachable);
+    expect(facts(result.stdout).status).toBe("failed");
     expect(facts(result.stdout).reason).toContain("Git does not ignore");
-    expect(every(result.stdout, "env")).toHaveLength(2);
+    expect(every(result.stdout, "env")).toHaveLength(0);
+    const minted = platform.keys.minted[0]!;
+    expect(minted.revokedAt).not.toBeNull();
+    expect(result.stdout).not.toContain(minted.secret);
+    expect(result.stderr).not.toContain(minted.secret);
     await expectNoEnvironmentFile();
   });
 });
@@ -1088,6 +1094,7 @@ describe("which platform runs this agent", () => {
    * registered agent can reach.
    */
   it("is read from the agent's own binding when it has one", async () => {
+    await gitRepository([ENV_FILE_NAME]);
     await egma(["monitoring", "enable", "--platform", "livekit", "--name", "front-desk"]);
     const agent = platform.registered.agents[0]!;
     await onboarded({ id: agent.id, name: agent.name });

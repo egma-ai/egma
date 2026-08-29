@@ -40,9 +40,11 @@ Current supported combinations include:
 | LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
-The LiveKit rows available on one deployment come from its current connection
-catalog. `egma connect --platform livekit` reads that catalog and writes
-nothing when the required choices are absent.
+The current connection catalog supplies the LiveKit rows available on one
+deployment. The CLI reads it iteratively: the bare LiveKit connect call lists
+modalities, `--modality` adds access-variant choices, and `--modality` plus
+`--access-variant` adds required field and secret facts. These incomplete calls
+write nothing.
 
 ## Platform and connection type are independent
 
@@ -64,8 +66,8 @@ changing the meaning of agent platform.
 
 ### Retell text mode
 
-`retell_text_mode` conducts a chat simulation with a Retell voice agent. No
-call is placed. The `retell_text_mode.api_key` variant stores the Retell agent
+`retell_text_mode` conducts a chat simulation with a Retell voice agent. Egma
+places no call. The `retell_text_mode.api_key` variant stores the Retell agent
 ID and a sealed API key.
 
 Text-mode connections start with mock tools on. Answers ride on the request, so
@@ -106,8 +108,8 @@ platforms.
 
 #### What a LiveKit worker reads
 
-A project-credentials connection can include `metadata` as a JSON object written
-inside a string. Egma gives the same bytes to both LiveKit metadata channels:
+A project-credentials connection can store a `metadata` JSON object inside a
+string. Egma gives the same bytes to both LiveKit metadata channels:
 
 | Channel | Worker path | When |
 |---|---|---|
@@ -115,7 +117,7 @@ inside a string. Egma gives the same bytes to both LiveKit metadata channels:
 | Dispatch metadata | `ctx.job.metadata` | Every named-worker dispatch |
 
 Egma adds no scenario, persona, expected behavior, or mock-tool answer to this
-metadata. A worker must not receive the test script it is being tested against.
+metadata. A worker must not receive the test script that defines its simulation.
 The room name tells the Egma SDK that the worker is in a simulation.
 
 The customer-token-endpoint variant takes no dispatch name or metadata. Without
@@ -137,12 +139,23 @@ EGMA_RETELL_API_KEY=... egma connect \
   --lanes text
 ```
 
-LiveKit setup first reads the platform catalog, then uses the exact approved
-values with secrets in the environment:
+LiveKit setup first reads modalities, then access variants, then required
+fields and secrets. Each incomplete call writes nothing:
 
 ```bash
 egma connect --platform livekit
 
+egma connect --platform livekit --modality voice
+
+egma connect --platform livekit \
+  --modality voice \
+  --access-variant livekit_room.project_credentials
+```
+
+After the developer approves the exact values, the coding agent supplies the
+public fields and secrets in one complete call:
+
+```bash
 EGMA_LIVEKIT_API_KEY=... \
 EGMA_LIVEKIT_API_SECRET=... \
 egma connect \
@@ -154,8 +167,8 @@ egma connect \
   --dispatch-name receptionist
 ```
 
-A connection receipt is also recorded in `egma/config.yaml`. Provider secrets
-never enter that file.
+The CLI also records the connection receipt in `egma/config.yaml`. Provider
+secrets never enter that file.
 
 ## Create a connection through the API
 
@@ -197,8 +210,8 @@ Use `POST /v1/agents/:agentId/connections` for the second request.
 </Note>
 
 Responses include the five connection facts, `id`, topology, environment, safe
-configuration, and a credential hint when relevant. Stored secrets are never
-returned.
+configuration, and a credential hint when relevant. Egma never returns stored
+secrets.
 
 ## One agent can have several connections
 

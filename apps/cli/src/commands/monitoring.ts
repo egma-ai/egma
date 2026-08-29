@@ -737,11 +737,7 @@ async function enableLiveKit(
       options.out(`agent_registration: ${wired.created ? "created" : "reused"}`);
       options.out(`monitoring_key_id: ${wired.keyId}`);
       options.out(`api_key: ${wired.keyLooksLike}`);
-      options.out(`env_file: ${wired.env.kind === "written" ? wired.env.file : "none"}`);
-      if (wired.env.kind === "refused") options.out(`reason: ${wired.env.reason}`);
-      // The deliverable, whether the file was written or not: wherever this
-      // worker really runs, these two lines are what it needs.
-      for (const line of wired.lines) options.out(`env: ${line}`);
+      options.out(`env_file: ${wired.env.file}`);
       const localFailure = await recordMonitoringReceipt(
         options,
         platform,

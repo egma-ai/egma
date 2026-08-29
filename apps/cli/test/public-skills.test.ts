@@ -102,6 +102,10 @@ describe("the public skill source", () => {
 
   it("keeps integration phases in short, selected references", async () => {
     const root = path.join(SOURCE_ROOT, "integrate-egma");
+    const operating = await readFile(
+      path.join(SOURCE_ROOT, "egma", "SKILL.md"),
+      "utf8",
+    );
     const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
     const onboarding = await readFile(
       path.join(root, "references", "onboard.md"),
@@ -159,10 +163,34 @@ describe("the public skill source", () => {
     expect(onboarding).toMatch(/Browser approval is the developer's\s+action/u);
     expect(onboarding).toContain("<egma> personas");
     expect(onboarding).toContain("<egma> validate");
+    expect(onboarding).toContain("--idempotency-key <printed-key>");
+    expect(operating).toContain("--idempotency-key <printed-key>");
+    expect(onboarding).toMatch(/suite `unreachable`:[\s\S]*Run `egma pull`/u);
+    expect(onboarding).toContain("connect `repository-record-failed`");
+    expect(onboarding).toContain("proves exact receipt IDs");
+    expect(onboarding).toContain("`--retell-agent <provider-id>`");
+    expect(onboarding).toContain("one `--lanes <one>` value");
+    expect(onboarding).toContain("`--livekit-url <wss-url>`");
+    expect(onboarding).toContain("`--dispatch-name <worker>`");
+    expect(onboarding).toContain("`--token-endpoint <https-url>`");
+    expect(onboarding).toContain("`--metadata <approved-json>`");
+    expect(onboarding).toContain(
+      "`registration-not-found` means no equivalent public target exists",
+    );
+    expect(onboarding).toContain("never ask the developer to inspect the Egma UI for IDs");
+    expect(onboarding).toContain("but no secret");
     expect(onboarding).toMatch(/Ask for\s+explicit publish approval/u);
     expect(connectLiveKit).toContain("EGMA_LIVEKIT_API_KEY");
+    expect(connectLiveKit).toContain("receipt: livekit-registration");
+    expect(connectLiveKit).toContain("<egma> connect record");
+    expect(connectLiveKit).toContain("--livekit-url <approved-wss-url>");
+    expect(retell).toContain("--retell-agent <selected-provider-id>");
+    expect(retell).toContain("--lanes <text|web-call|phone>");
     expect(authorLiveKitMocks).toContain("AgentTask.complete");
     expect(livekit).toContain("LiveKit CLI 2.18.2 or newer");
+    expect(livekit).toContain("create `.venv`");
+    expect(livekit).toContain("`winget` on Windows");
+    expect(livekit).toContain("`uv pip install`");
     expect(livekit).toContain("egma:livekit-worker ready");
     expect(helper).toContain("const MINIMUM_VERSION = [2, 18, 2]");
     expect(finding).not.toMatch(CLI_MARKER);

@@ -129,12 +129,13 @@ expected simulation count and get explicit developer approval. For a phone
 connection, state that the run starts real phone simulations and can cost money
 immediately before asking. Never retry a phone run without fresh approval.
 
-The command prints identifiers, a results address, execution progress, and
-grading progress. It waits until execution and all requested trace grading are
-terminal. A simulation that failed or was canceled before it produced a
-completed trace has no grading work to wait for. Use the printed address when
-detailed evidence is needed. If the address is missing, ask for the saved
-command output; do not start another run only to recover it.
+The command prints `idempotency-key` before it sends the start request, then
+prints identifiers, a results address, execution progress, and grading
+progress. Keep that key with the receipt. It waits until execution and all
+requested trace grading are terminal. A simulation that failed or was canceled
+before it produced a completed trace has no grading work to wait for. Use the
+printed address when detailed evidence is needed. If the address is missing,
+ask for the saved command output; do not start another run only to recover it.
 
 Use `--no-follow` when the developer asks to start the run and return without
 waiting:
@@ -185,6 +186,11 @@ it exposes a real voice-agent problem.
   and then ask again before starting the run.
 - If a failed or interrupted run printed a `run:` ID, the remote run exists.
   Use that ID and its results address; do not create another run to recover it.
+- If a run transport failure printed an `idempotency-key` but no `run:` ID,
+  the remote result is unclear. Get fresh run approval, then repeat the exact
+  same suite, agent, connection, test versions, and run name with
+  `--idempotency-key <printed-key>`. Never reuse that key for changed inputs or
+  a new intended run.
 - If the platform refuses a command, report its sentence as written and fix
   the named input.
 

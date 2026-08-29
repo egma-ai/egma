@@ -7,10 +7,19 @@ and choices.
 
 ## Read the offered choices
 
-Run `<egma> connect --platform livekit` with no provider fields to read its
-`modality_option`, `access_variant_option`, and `required_field` lines. This
-incomplete command writes nothing. Present multiple modalities or access
-variants to the developer and use only the exact selected value.
+Read the catalog in promptless, read-only steps:
+
+1. Run `<egma> connect --platform livekit` to read its `modality_option`
+   lines.
+2. Repeat it with `--modality <offered-modality>` to read the
+   `access_variant_option` lines for that modality.
+3. Repeat it with the chosen `--modality` and `--access-variant` to read every
+   `required_field` and `required_secret` fact for that catalog entry.
+
+Each incomplete command exits with an unchosen or missing-input status and
+writes nothing. Present multiple modalities or access variants to the
+developer and use only the exact selected value. Do not add credentials until
+the fields and exact remote setup have been approved.
 
 Read `<egma> connect --help` for the current option names. A complete command
 has this shape:
@@ -47,3 +56,55 @@ Finish when the receipt reports `status: connected`, the intended agent and
 connection IDs, modality, access variant, and `grounded_in: repository`. Keep
 the receipt as identity evidence. It contains no provider prompt or tool
 context and must contain no credential value.
+
+The CLI prints `receipt: livekit-registration`, `project_id`, and the complete
+agent and connection facts as soon as Egma confirms remote registration. It
+prints them before it reads the project or updates `egma/config.yaml`. If a
+later local step fails, keep those facts and run the printed recovery command:
+
+```text
+<egma> connect record \
+  --platform livekit \
+  --project-id <project_id> \
+  --agent-id <agent_id> \
+  --connection-id <connection_id>
+```
+
+That command authenticates, reads and proves the exact remote project, agent,
+and LiveKit room connection, then writes their current names and modality to
+local `egma/config.yaml`. It takes no provider credential and makes no remote
+write. Do not repeat the complete connection command after
+`status: repository-record-failed`.
+
+The complete command prints `registration_name` immediately before its remote
+registration request. If the command becomes unreachable before it prints a
+registration receipt, do not choose a new name, repeat the setup, or inspect the
+Egma UI for IDs. Use the same provider-public target that the developer
+approved:
+
+```text
+<egma> connect record \
+  --platform livekit \
+  --livekit-url <approved-wss-url> \
+  --dispatch-name <registered-worker-name> \
+  [--modality <chat|voice>] \
+  [--access-variant <offered-access-variant>] \
+  [--metadata <approved-json>] \
+  [--name <last-registration_name>]
+```
+
+For a token-endpoint target, replace `--dispatch-name` with
+`--token-endpoint <https-url>`. Pass exactly one of those flags. The modality
+and access variant are optional match refinements. Pass `--metadata` exactly
+when the approved setup included it; omission requires a target with none.
+`--name` only prefers a matching Egma agent name; it does not define the
+LiveKit target. If several
+equivalent connections remain, match the approved access variant and modality
+against the printed `connection_option` lines and repeat with that
+`--connection-id`.
+
+Provider-public recovery makes no remote write and writes the equivalent target
+to local `egma/config.yaml`. `registration-not-found` means Egma has no
+equivalent public LiveKit target. It does not mean that the attempted name is
+absent. Explain that result, get fresh setup approval, and only then repeat the
+original command.

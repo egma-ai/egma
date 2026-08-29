@@ -17,16 +17,14 @@
  *   asked, because a hand-rolled reading of `.gitignore` would disagree with it
  *   over negations, nested files and the developer's own global excludes — and
  *   the disagreement would surface as Egma writing a secret into a file Git was
- *   about to take. Cannot tell is treated as not ignored: the printed lines are
- *   a working answer, and a wrong guess here is not recoverable.
+ *   about to take. Cannot tell is treated as not ignored. The caller revokes
+ *   the fresh key when this function refuses the write.
  * - **Idempotent.** A second run replaces the value in place rather than
  *   appending beside it, so the file never ends up with two answers to one
  *   question and a worker reading whichever the loader saw last.
- * - **Always print the lines.** The `.env` serves the machine the repository is
- *   checked out on. Wherever the worker actually runs — a container, a
- *   platform's dashboard, a CI secret store — the developer needs the same two
- *   lines to put there, and they are the deliverable whether the write happened
- *   or not.
+ * - **Never print the lines.** The `.env` serves the machine without placing a
+ *   live secret in the coding-agent transcript. The developer can move the
+ *   credential from that protected file into the real deployment boundary.
  */
 
 import { execFile } from "node:child_process";
@@ -62,11 +60,6 @@ export function envLines(values: EnvValues): readonly string[] {
   ];
 }
 
-/** The same two lines as a shell would export them, for a deployment. */
-export function exportLines(values: EnvValues): readonly string[] {
-  return envLines(values).map((line) => `export ${line}`);
-}
-
 export type EnvWrite =
   | {
       readonly kind: "written";
@@ -78,8 +71,8 @@ export type EnvWrite =
   /**
    * Nothing was written, and why — in words that say what to do instead.
    *
-   * Never fatal on its own: the lines are printed either way, so a refusal here
-   * costs the developer one copy and paste rather than the walk.
+   * The caller treats this as fatal for setup and revokes the fresh key, so no
+   * undelivered credential remains active.
    */
   | { readonly kind: "refused"; readonly reason: string };
 
@@ -145,14 +138,12 @@ function refusalFor(answer: Exclude<IgnoreAnswer, "ignored">): string {
     return (
       `Git does not ignore ${ENV_FILE_NAME} here, so Egma did not write the ` +
       `key into it — a key in a committed file is a key in every clone. Add ` +
-      `${ENV_FILE_NAME} to .gitignore and run this again, or put the two lines ` +
-      `below wherever this worker gets its environment.`
+      `${ENV_FILE_NAME} to .gitignore and run this command again.`
     );
   }
   return (
     `Egma could not ask Git whether ${ENV_FILE_NAME} is ignored here, so it ` +
-    `did not write the key into it. Put the two lines below wherever this ` +
-    `worker gets its environment.`
+    `did not write the key into it. Fix Git access, then run this command again.`
   );
 }
 
@@ -190,8 +181,8 @@ export async function writeEnvFile(
    * Only an ordinary file, or no file, takes a live key. A symlink is the
    * developer pointing the name somewhere else, and following it would put the
    * key wherever that is — outside the repository the ignore check was asked
-   * about. The link is not replaced either: it is theirs, and the printed lines
-   * are the working answer.
+   * about. The link is not replaced either: it is theirs, and the caller
+   * revokes the unused key.
    */
   try {
     const standing = await lstat(file);
@@ -200,8 +191,8 @@ export async function writeEnvFile(
         kind: "refused",
         reason:
           `${ENV_FILE_NAME} here is ${standing.isSymbolicLink() ? "a symbolic link" : "not an ordinary file"}, ` +
-          "so Egma did not write the key into it. Put the two lines below " +
-          "wherever this worker gets its environment.",
+        "so Egma did not write the key into it. Replace it with an ignored " +
+          "ordinary file, then run this command again.",
       };
     }
   } catch (cause) {
@@ -211,7 +202,7 @@ export async function writeEnvFile(
         reason:
           `Egma could not look at ${ENV_FILE_NAME}: ` +
           `${cause instanceof Error ? cause.message : String(cause)}. ` +
-          "Put the two lines below wherever this worker gets its environment.",
+          "Fix that file, then run this command again.",
       };
     }
   }
@@ -226,7 +217,7 @@ export async function writeEnvFile(
         reason:
           `Egma could not read ${ENV_FILE_NAME}: ` +
           `${cause instanceof Error ? cause.message : String(cause)}. ` +
-          "Put the two lines below wherever this worker gets its environment.",
+          "Fix that file, then run this command again.",
       };
     }
   }
@@ -303,7 +294,7 @@ export async function writeEnvFile(
   // filesystem by definition, still one motion. Out here the stranded-file
   // window is back, so Git is asked about the staging name first: unless an
   // interruption would strand an *ignored* file, Egma refuses to write at all,
-  // and the printed lines are the working answer.
+  // and the caller revokes the unused key.
   let failed = inGitDirectory === null ? null : await swap(inGitDirectory);
   if (inGitDirectory === null || failed?.code === "EXDEV") {
     if ((await gitIgnores(repository, `.${stagedName}`)) !== "ignored") {
@@ -313,8 +304,8 @@ export async function writeEnvFile(
           `Egma had no safe place to stage ${ENV_FILE_NAME} here: its git ` +
           `directory could not take the staging file, and Git does not ignore ` +
           `the fallback staging name, so an interruption could have left the ` +
-          `key in a committable file. Put the two lines below wherever this ` +
-          `worker gets its environment.`,
+          `key in a committable file. Fix the repository ignore rules, then ` +
+          `run this command again.`,
       };
     }
     failed = await swap(besideTheFile);
@@ -324,8 +315,7 @@ export async function writeEnvFile(
       kind: "refused",
       reason:
         `Egma could not write ${ENV_FILE_NAME}: ` +
-        `${failed.message}. ` +
-        "Put the two lines below wherever this worker gets its environment.",
+        `${failed.message}. Fix that file, then run this command again.`,
     };
   }
 

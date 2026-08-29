@@ -54,9 +54,13 @@ Use only the command for the discovered platform. Read
 credentials through standard input or the process environment. When the
 command returns an unchosen status, present its listed options and ask the
 developer; do not infer from a similar name or select a paid lane. For Retell,
-keep the context receipt for test grounding. It may contain the
-provider-managed prompt and tools, but it must not contain credentials.
-LiveKit test grounding comes from committed repository evidence.
+explain the full custody before asking for the key: Egma seals a copy on the
+agent so production monitoring can be enabled later without asking for the key
+again; text and web-call connections also keep a sealed simulation copy; a
+phone connection keeps no key; and the key never lands in the repository. Keep
+the context receipt for test grounding. It may contain the provider-managed
+prompt and tools, but it must not contain credentials. LiveKit test grounding
+comes from committed repository evidence.
 
 Monitoring-only does not need a simulation connection, suite, tests, or run.
 Skip to step 8 after the approved source integration.
@@ -124,8 +128,9 @@ For Retell and for an already-running LiveKit deployment, run:
 For a local LiveKit worker, use
 [run-livekit-agent-locally.md](run-livekit-agent-locally.md) and pass the three
 worker flags to the same `egma run` command. Follow the run until execution and
-grading are terminal. Report behavior verdicts as product findings and command
-failures as operational failures.
+grading are terminal. Keep the printed `idempotency-key` with the run receipt.
+Report behavior verdicts as product findings and command failures as
+operational failures.
 
 ## 8. Enable monitoring when requested
 
@@ -140,9 +145,14 @@ the discovered platform:
 ```
 
 Use the command's listed choices when more than one provider agent exists.
-Retell credentials stay on standard input. On LiveKit, let the CLI own its safe
-environment-file write and printed deployment handoff; do not open an
-environment file or copy credential values into the report.
+Send the Retell credential through standard input. Egma seals it on the agent
+under the custody disclosed in step 3. On LiveKit, let the CLI own its safe
+ignored environment-file write. The receipt prints the file path, stable key
+ID, and masked hint, but no secret. Do not open the environment file or copy
+credential values into the report. The developer moves those values into the
+real deployment environment. If the CLI cannot write the file safely, it tries
+to revoke the new key and fails setup. If it cannot confirm revocation, stop
+and ask the developer to revoke the named key before any retry.
 
 Then run `<egma> monitoring status` for the exact Egma agent and report whether
 production ingestion is enabled. A both outcome is complete only when the run
@@ -159,19 +169,56 @@ Use the exit code and `status:` field as the branch:
 - `unchosen` or a status beginning `unchosen-`: show the printed options, ask
   the developer, and repeat with the exact chosen ID or value.
 - `missing-fields`, `invalid-field`, or `name-taken`: correct the named public
-  input. Get new setup approval when the target or resource name changes.
+  input. A LiveKit `name-taken` after an unclear earlier response may identify
+  the remote agent from that attempt. Before choosing a new name, run
+  provider-public recovery for the approved LiveKit URL and dispatch name or
+  token endpoint. Pass the last `registration_name` only as a preference. Reuse
+  the equivalent remote registration when it exists. Get new setup approval
+  when the target or resource name changes.
 - `no-key`, `invalid-key`, `no-credentials`, or `invalid-credentials`: ask the
   developer to correct the named secure input; never print or inspect it.
 - `no-agents`, `no-numbers`, or no available persona: stop and report the
   missing provider resource. Do not manufacture one.
-- suite `local-write-failed`: run `egma pull`; do not create a second suite.
+- suite `local-write-failed`: keep the printed suite ID, then run `egma pull`;
+  do not create a second suite.
+- suite `unreachable`: the create response may have been lost after Egma
+  created the suite. Run `egma pull` before any retry and compare it with the
+  pre-create working copy. Reuse the new approved suite when its identity is
+  clear. If no new suite appears, explain that result and get fresh setup
+  approval before retrying. If identity remains ambiguous, stop instead of
+  creating another suite.
+- connect `repository-record-failed`, or a Retell connect that ends
+  non-connected after a registration receipt: run every printed
+  `recovery_command`. Each command proves exact receipt IDs and writes that
+  target to local `egma/config.yaml` without a remote write or provider secret.
+- Retell or LiveKit connect `unreachable` before its registration receipt:
+  treat the remote result as unknown and do not repeat the setup. Retell
+  recovery uses `--platform retell`, `--retell-agent <provider-id>`, and exactly
+  one `--lanes <one>` value; add `--phone-number <e164>` for phone. LiveKit
+  recovery uses `--platform livekit`, `--livekit-url <wss-url>`, and exactly one
+  of `--dispatch-name <worker>` and `--token-endpoint <https-url>`. Retell may
+  add `--name <last-registration_name>` as a preference. LiveKit may also add
+  that name preference, modality, and access variant, and must pass
+  `--metadata <approved-json>` exactly when setup used it. Omission requires a
+  target with no metadata. If several equivalent
+  connections remain, match the approved target against `connection_option`
+  output and repeat with that `--connection-id`. This recovery makes no remote
+  write and writes the equivalent target to local `egma/config.yaml`.
+  `registration-not-found` means no equivalent public target exists, not that
+  an exact name is absent. Explain the result and get fresh setup approval
+  before repeating the original command. Use command output for any connection
+  choice; never ask the developer to inspect the Egma UI for IDs.
 - validation `invalid-repository` or `invalid-personas`: fix every named local
   file; no remote retry is needed.
 - push `turned-away`, or a `refused` status that reports a version conflict:
   pull, reconcile, validate, review, and approve again.
 - run interruption or transport failure: first check whether output contains a
   `run:` ID. A run ID means the remote run exists; do not create another just
-  to recover progress or its results address.
+  to recover progress or its results address. When no run ID exists, keep the
+  printed `idempotency-key`. After fresh run approval, repeat the exact same
+  suite, agent, connection, test versions, and run name with
+  `--idempotency-key <printed-key>`. Never reuse that key for changed inputs or
+  a new intended run.
 - local-worker refusal before a `run:` ID: fix only the named environment,
   entrypoint, manifest, dependency, or LiveKit CLI problem, then get fresh run
   approval. No remote run exists yet.

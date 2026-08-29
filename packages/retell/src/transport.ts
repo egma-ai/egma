@@ -36,7 +36,7 @@ export type RetellReach = {
  */
 export function plain(value: unknown): string {
   return typeof value === "string"
-    ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim()
+    ? value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "").trim()
     : "";
 }
 

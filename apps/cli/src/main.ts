@@ -90,6 +90,7 @@ export type Invocation = {
   readonly metadata: string | null;
   readonly agentName: string | null;
   readonly connectionName: string | null;
+  readonly connectAction: string | null;
   readonly suiteAction: string | null;
   readonly monitoringAction: string | null;
   readonly platformWord: string | null;
@@ -100,6 +101,11 @@ export type Invocation = {
   readonly workerEntrypoint: string | null;
   readonly workerDependencyManifest: string | null;
   readonly workerDispatchName: string | null;
+  readonly receiptProjectId: string | null;
+  readonly receiptAgentId: string | null;
+  readonly receiptConnectionId: string | null;
+  readonly idempotencyKey: string | null;
+  readonly idempotencyKeyProvided: boolean;
   readonly unknown: readonly string[];
 };
 
@@ -129,6 +135,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let metadata: string | null = null;
   let agentName: string | null = null;
   let connectionName: string | null = null;
+  let connectAction: string | null = null;
   let suiteAction: string | null = null;
   let monitoringAction: string | null = null;
   let platformWord: string | null = null;
@@ -139,6 +146,11 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let workerEntrypoint: string | null = null;
   let workerDependencyManifest: string | null = null;
   let workerDispatchName: string | null = null;
+  let receiptProjectId: string | null = null;
+  let receiptAgentId: string | null = null;
+  let receiptConnectionId: string | null = null;
+  let idempotencyKey: string | null = null;
+  let idempotencyKeyProvided = false;
   const unknown: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -165,6 +177,19 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--name") name = argv[(index += 1)] ?? null;
     else if (argument === "--platform") platformWord = argv[(index += 1)] ?? null;
     else if (argument === "--platform-agent") platformAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--project-id") {
+      const value = argv[index + 1];
+      receiptProjectId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptProjectId !== "") index += 1;
+    } else if (argument === "--agent-id") {
+      const value = argv[index + 1];
+      receiptAgentId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptAgentId !== "") index += 1;
+    } else if (argument === "--connection-id") {
+      const value = argv[index + 1];
+      receiptConnectionId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptConnectionId !== "") index += 1;
+    }
     else if (argument === "--monitoring-key-id") {
       monitoringKeyId = argv[(index += 1)] ?? null;
     } else if (argument === "--worker-entrypoint") {
@@ -173,7 +198,15 @@ export function parseArgs(argv: readonly string[]): Invocation {
       workerDependencyManifest = argv[(index += 1)] ?? null;
     } else if (argument === "--worker-dispatch-name") {
       workerDispatchName = argv[(index += 1)] ?? null;
+    } else if (argument === "--idempotency-key") {
+      idempotencyKeyProvided = true;
+      const value = argv[index + 1];
+      if (value !== undefined && !value.startsWith("-")) {
+        idempotencyKey = value;
+        index += 1;
+      }
     } else if (verb === null && isVerb(argument)) verb = argument;
+    else if (verb === "connect" && connectAction === null) connectAction = argument;
     else if (verb === "suite" && suiteAction === null) suiteAction = argument;
     else if (verb === "monitoring" && monitoringAction === null) {
       monitoringAction = argument;
@@ -206,6 +239,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
     metadata,
     agentName,
     connectionName,
+    connectAction,
     suiteAction,
     monitoringAction,
     platformWord,
@@ -216,6 +250,11 @@ export function parseArgs(argv: readonly string[]): Invocation {
     workerEntrypoint,
     workerDependencyManifest,
     workerDispatchName,
+    receiptProjectId,
+    receiptAgentId,
+    receiptConnectionId,
+    idempotencyKey,
+    idempotencyKeyProvided,
     unknown,
   };
 }
@@ -232,6 +271,7 @@ export function helpText(): string {
     "  egma [options]                         Print the coding-agent handoff.",
     "  egma login [options]                   Sign this machine in.",
     "  egma connect [options]                 Register a Retell or LiveKit agent.",
+    "  egma connect record [selector]         Recover a repository record.",
     "  egma init [options]                    Create the repository egma/ folder.",
     "  egma personas                          List project personas for test files.",
     "  egma suite create <directory> --name <name>",
@@ -269,10 +309,25 @@ export function helpText(): string {
     "  --token-endpoint <https-url>   Customer token endpoint, when selected.",
     "  --metadata <json>              Optional room metadata object.",
     "",
+    "Connect recovery (no remote write):",
+    "  record --project-id <id> --agent-id <id> --connection-id <id>",
+    "                                 Record one complete stable receipt.",
+    "  record --platform retell --retell-agent <id> --lanes <one>",
+    "                                 Find the equivalent Retell target; phone also",
+    "                                 needs --phone-number.",
+    "  record --platform livekit --livekit-url <url>",
+    "         (--dispatch-name <name> | --token-endpoint <url>)",
+    "                                 Find the equivalent LiveKit target.",
+    "  --metadata <json>              Require approved room metadata; omit only",
+    "                                 when setup had no metadata.",
+    "  --name <registration-name>     Prefer that matching Egma agent.",
+    "  --connection-id <id>           Choose one listed public-identity match.",
+    "",
     "Run options:",
     "  --agent <name-or-id>                 Select a configured agent.",
     "  --connection <name-or-id>            Select its configured connection.",
     "  --name <name>                        Optional run name.",
+    "  --idempotency-key <value>            Reuse one start after an unclear reply.",
     "  --no-follow                          Return after the run starts.",
     "  --worker-entrypoint <path>           Start this local LiveKit worker.",
     "  --worker-dependency-manifest <path>  Its dependency manifest.",
@@ -300,7 +355,7 @@ export function helpText(): string {
     "  0 connected   2 the key was refused   3 no provider agents",
     "  4 provider or Egma refused   5 a required choice is missing",
     "  6 provider credentials are missing   7 not signed in",
-    "  8 no routed Retell number   130 interrupted",
+    "  8 no routed Retell number   9 repository record failed   130 interrupted",
     "",
     "Every named command asks no questions, prints one fact per line, and uses",
     "its exit code as the branch. Credentials never belong in command arguments.",
@@ -390,6 +445,9 @@ async function runFolderVerb(
               ? {}
               : { connection: invocation.connectionName }),
             ...(invocation.name === null ? {} : { name: invocation.name }),
+            ...(invocation.idempotencyKey === null
+              ? {}
+              : { idempotencyKey: invocation.idempotencyKey }),
             noFollow: invocation.noFollow,
             signal,
           }),
@@ -466,6 +524,10 @@ async function runConnect(invocation: Invocation, access: PlatformAccess): Promi
       phoneNumber: invocation.phoneNumber,
       repoPrompt: invocation.repoPrompt,
       platform: invocation.platformWord,
+      action: invocation.connectAction,
+      projectId: invocation.receiptProjectId,
+      receiptAgentId: invocation.receiptAgentId,
+      receiptConnectionId: invocation.receiptConnectionId,
       showContext: invocation.showContext,
       modality: invocation.modality,
       accessVariant: invocation.accessVariant,
@@ -500,6 +562,21 @@ function invalidInvocation(invocation: Invocation): string | null {
   ) {
     return unknownActionRefusal(invocation.monitoringAction ?? "");
   }
+  if (
+    invocation.verb === "connect" &&
+    invocation.connectAction !== null &&
+    invocation.connectAction !== "record"
+  ) {
+    return "Egma supports `egma connect record` only for remote registration recovery.";
+  }
+  if (
+    (invocation.verb !== "connect" || invocation.connectAction !== "record") &&
+    (invocation.receiptProjectId !== null ||
+      invocation.receiptAgentId !== null ||
+      invocation.receiptConnectionId !== null)
+  ) {
+    return "Use --project-id, --agent-id, and --connection-id with egma connect record.";
+  }
   if (invocation.verb === "suite" && invocation.suiteAction !== "create") {
     return "Egma supports `egma suite create <directory> --name <name>`.";
   }
@@ -511,6 +588,13 @@ function invalidInvocation(invocation: Invocation): string | null {
   }
   if (invocation.verb === "run" && invocation.suiteDirectory === null) {
     return "Name one local suite directory: egma run <suite-directory>.";
+  }
+  if (
+    invocation.verb === "run" &&
+    invocation.idempotencyKeyProvided &&
+    (invocation.idempotencyKey === null || invocation.idempotencyKey.trim() === "")
+  ) {
+    return "Give --idempotency-key one non-empty value.";
   }
   if (invocation.unknown.length > 0) {
     const named = (invocation.unknown[0] as string).split("=")[0] as string;

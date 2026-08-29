@@ -1,5 +1,6 @@
 /** The raw LiveKit connection path, with no terminal interaction. */
 
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -232,7 +233,13 @@ function fakePlatform(onRegister?: (body: RegistrationBody) => void | Promise<vo
       return new JsonResponse(
         {
           result: "created",
-          agent: { id: AGENT_ID, name: body.name, projectId: PROJECT_ID },
+          agent: {
+            id: AGENT_ID,
+            name: body.name,
+            projectId: PROJECT_ID,
+            agentPlatform: "livekit",
+            platformAgentId: null,
+          },
           connection: {
             id: CONNECTION_ID,
             name: `livekit_${body.connection.modality}-1`,
@@ -248,8 +255,55 @@ function fakePlatform(onRegister?: (body: RegistrationBody) => void | Promise<vo
         { status: 201 },
       );
     }
+    if (requested.pathname === "/v1/agents") {
+      return new JsonResponse({
+        agents: registrations.map((registered) => ({
+          id: AGENT_ID,
+          name: registered.name,
+          projectId: PROJECT_ID,
+          agentPlatform: "livekit",
+          platformAgentId: null,
+          connections: [],
+        })),
+        nextPageToken: null,
+      });
+    }
     if (requested.pathname === `/v1/projects/${PROJECT_ID}`) {
       return new JsonResponse({ id: PROJECT_ID, name: "Fixture project" });
+    }
+    if (requested.pathname === `/v1/agents/${AGENT_ID}`) {
+      const registered = registrations.at(-1);
+      if (registered === undefined) {
+        return new JsonResponse({ message: "not found" }, { status: 404 });
+      }
+      const productLabel =
+        registered.connection.accessVariant === LIVEKIT_TOKEN_ENDPOINT_VARIANT
+          ? "LiveKit token endpoint"
+          : registered.connection.modality === "chat"
+            ? "LiveKit chat"
+            : "LiveKit project credentials";
+      return new JsonResponse({
+        agent: {
+          id: AGENT_ID,
+          name: registered.name,
+          projectId: PROJECT_ID,
+          agentPlatform: "livekit",
+          platformAgentId: null,
+        },
+        connections: [
+          {
+            id: CONNECTION_ID,
+            name: `livekit_${registered.connection.modality}-1`,
+            agentPlatform: "livekit",
+            connectionType: "livekit_room",
+            accessVariant: registered.connection.accessVariant,
+            modality: registered.connection.modality,
+            productLabel,
+            credentialsHint: "safe-hint",
+            config: registered.connection.config,
+          },
+        ],
+      });
     }
     return new JsonResponse({ message: "unexpected request" }, { status: 404 });
   };
@@ -391,6 +445,613 @@ describe("egma connect --platform livekit", () => {
     );
     expect(result.out.join("\n")).not.toContain("private-token");
     expect(result.out.at(-1)).toBe("status: connected");
+  });
+
+  it("recovers the repository record from a remote receipt without registering again", async () => {
+    const platform = fakePlatform();
+    let refuseFirstProjectRead = true;
+    const interruptedRead: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname === `/v1/projects/${PROJECT_ID}` &&
+        refuseFirstProjectRead
+      ) {
+        refuseFirstProjectRead = false;
+        throw new TypeError("the project read lost its connection");
+      }
+      return await platform.fetchImpl(input, init);
+    };
+
+    const registered = await run(
+      {
+        modality: "chat",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      interruptedRead,
+    );
+
+    expect(registered.code).toBe(CONNECT_EXIT.repositoryRecordFailed);
+    expect(registered.out).toContain("receipt: livekit-registration");
+    expect(registered.out).toContain(`project_id: ${PROJECT_ID}`);
+    expect(registered.out).toContain(`agent_id: ${AGENT_ID}`);
+    expect(registered.out).toContain("agent_name: front-desk");
+    expect(registered.out).toContain(`connection_id: ${CONNECTION_ID}`);
+    expect(registered.out).toContain("connection_name: livekit_chat-1");
+    expect(registered.out).toContain("connection_modality: chat");
+    expect(registered.out).toContain(
+      `recovery_command: egma connect record --platform livekit --project-id ${PROJECT_ID} ` +
+        `--agent-id ${AGENT_ID} --connection-id ${CONNECTION_ID} --url "${URL}"`,
+    );
+    expect(registered.out.at(-2)).toBe("status: repository-record-failed");
+    expect(platform.registrations).toHaveLength(1);
+
+    const recovered = await run(
+      {
+        action: "record",
+        projectId: PROJECT_ID,
+        receiptAgentId: AGENT_ID,
+        receiptConnectionId: CONNECTION_ID,
+      },
+      interruptedRead,
+    );
+
+    expect(recovered.code, recovered.fail.join("\n")).toBe(CONNECT_EXIT.connected);
+    expect(recovered.out).toContain("project_name: Fixture project");
+    expect(recovered.out).toContain("status: recorded");
+    expect(platform.registrations).toHaveLength(1);
+    expect(await readConfig(folderPathsIn(workspace.dir).config)).toEqual({
+      format: 3,
+      platform: { origin: URL },
+      project: { id: PROJECT_ID, name: "Fixture project" },
+      agents: [
+        {
+          id: AGENT_ID,
+          name: "front-desk",
+          connections: [
+            {
+              id: CONNECTION_ID,
+              name: "livekit_chat-1",
+              modality: "chat",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("keeps repository errors inside one recovery fact line", async () => {
+    const platform = fakePlatform();
+    const registered = await run(
+      {
+        modality: "chat",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      platform.fetchImpl,
+    );
+    expect(registered.code).toBe(CONNECT_EXIT.connected);
+
+    const unsafeCwd = path.join(workspace.dir, "broken\u2028status: forged");
+    await mkdir(unsafeCwd);
+    await writeFile(path.join(unsafeCwd, "egma"), "not a directory", "utf8");
+
+    const recovered = await run(
+      {
+        action: "record",
+        cwd: unsafeCwd,
+        projectId: PROJECT_ID,
+        receiptAgentId: AGENT_ID,
+        receiptConnectionId: CONNECTION_ID,
+      },
+      platform.fetchImpl,
+    );
+
+    expect(recovered.code).toBe(CONNECT_EXIT.repositoryRecordFailed);
+    expect(recovered.out.join("\n")).not.toContain("\u2028");
+    expect(recovered.out).not.toContain("status: forged");
+    expect(recovered.out).toContain("status: repository-record-failed");
+    expect(platform.registrations).toHaveLength(1);
+  });
+
+  it("finds an uncertain token-endpoint registration by its public target", async () => {
+    const platform = fakePlatform();
+    let loseRegistrationResponse = true;
+    const uncertain: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname === "/v1/agents" &&
+        init?.method === "POST" &&
+        loseRegistrationResponse
+      ) {
+        loseRegistrationResponse = false;
+        await platform.fetchImpl(input, init);
+        throw new TypeError("the registration response was lost");
+      }
+      return await platform.fetchImpl(input, init);
+    };
+
+    const first = await run(
+      {
+        modality: "voice",
+        accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://tokens.example/livekit",
+        env: { [LIVEKIT_TOKEN_HEADERS_VARIABLE]: HEADERS },
+      },
+      uncertain,
+    );
+
+    expect(first.code).toBe(CONNECT_EXIT.unreachable);
+    expect(first.out).not.toContain("receipt: livekit-registration");
+    expect(platform.registrations).toHaveLength(1);
+
+    const recovered = await run(
+      {
+        action: "record",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://tokens.example/livekit",
+        modality: "voice",
+        accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+      },
+      uncertain,
+    );
+    expect(recovered.code, recovered.fail.join("\n")).toBe(CONNECT_EXIT.connected);
+    expect(recovered.out).toContain(`agent_id: ${AGENT_ID}`);
+    expect(recovered.out).toContain(`connection_id: ${CONNECTION_ID}`);
+    expect(recovered.out).toContain("status: recorded");
+    expect(platform.registrations).toHaveLength(1);
+  });
+
+  it("requires exact metadata when it recovers a LiveKit public target", async () => {
+    const platform = fakePlatform();
+    let loseRegistrationResponse = true;
+    const uncertain: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname === "/v1/agents" &&
+        init?.method === "POST" &&
+        loseRegistrationResponse
+      ) {
+        loseRegistrationResponse = false;
+        await platform.fetchImpl(input, init);
+        throw new TypeError("the registration response was lost");
+      }
+      return await platform.fetchImpl(input, init);
+    };
+
+    const first = await run(
+      {
+        modality: "chat",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        metadata: '{"tenant":"acme"}',
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      uncertain,
+    );
+    expect(first.code).toBe(CONNECT_EXIT.unreachable);
+    expect(platform.registrations).toHaveLength(1);
+
+    for (const metadata of [null, '{"tenant":"other"}']) {
+      const mismatch = await run(
+        {
+          action: "record",
+          livekitUrl: "wss://acme.livekit.cloud",
+          dispatchName: "receptionist",
+          modality: "chat",
+          metadata,
+        },
+        uncertain,
+      );
+      expect(mismatch.code).toBe(CONNECT_EXIT.unreachable);
+      expect(mismatch.out).toContain("status: registration-not-found");
+    }
+
+    const recovered = await run(
+      {
+        action: "record",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        modality: "chat",
+        metadata: '{"tenant":"acme"}',
+      },
+      uncertain,
+    );
+    expect(recovered.code, recovered.fail.join("\n")).toBe(CONNECT_EXIT.connected);
+    expect(recovered.out).toContain("status: recorded");
+    expect(platform.registrations).toHaveLength(1);
+  });
+
+  it("refuses public-target recovery when the chosen connection changes on the second read", async () => {
+    let agentReads = 0;
+    let projectReads = 0;
+    const changedAfterMatch: typeof fetch = async (input) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents") {
+        return new JsonResponse({
+          agents: [
+            {
+              id: AGENT_ID,
+              name: "front-desk",
+              projectId: PROJECT_ID,
+              agentPlatform: "livekit",
+              platformAgentId: null,
+            },
+          ],
+          nextPageToken: null,
+        });
+      }
+      if (requested.pathname === `/v1/agents/${AGENT_ID}`) {
+        agentReads += 1;
+        return new JsonResponse({
+          agent: {
+            id: AGENT_ID,
+            name: "front-desk",
+            projectId: PROJECT_ID,
+            agentPlatform: "livekit",
+            platformAgentId: null,
+          },
+          connections: [
+            {
+              id: CONNECTION_ID,
+              name: "livekit_voice-1",
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
+              modality: "voice",
+              productLabel: "LiveKit project credentials",
+              credentialsHint: "safe-hint",
+              config: {
+                url: "wss://acme.livekit.cloud",
+                agentName: agentReads === 1 ? "receptionist" : "changed-worker",
+              },
+            },
+          ],
+        });
+      }
+      if (requested.pathname === `/v1/projects/${PROJECT_ID}`) {
+        projectReads += 1;
+        return new JsonResponse({ id: PROJECT_ID, name: "Fixture project" });
+      }
+      return new JsonResponse({ message: "unexpected request" }, { status: 404 });
+    };
+
+    const recovered = await run(
+      {
+        action: "record",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        modality: "voice",
+      },
+      changedAfterMatch,
+    );
+
+    expect(recovered.code).toBe(CONNECT_EXIT.unreachable);
+    expect(agentReads).toBe(2);
+    expect(projectReads).toBe(0);
+    expect(recovered.out).toContain("status: registration-not-found");
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("refuses a Retell recovery whose agent and connection name different provider agents", async () => {
+    const wantedRetellAgentId = "agent_wanted";
+    let projectReads = 0;
+    const contradictoryBinding: typeof fetch = async (input) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents") {
+        return new JsonResponse({
+          agents: [
+            {
+              id: AGENT_ID,
+              name: "front-desk",
+              projectId: PROJECT_ID,
+              agentPlatform: "retell",
+              platformAgentId: "agent_other",
+            },
+          ],
+          nextPageToken: null,
+        });
+      }
+      if (requested.pathname === `/v1/agents/${AGENT_ID}`) {
+        return new JsonResponse({
+          agent: {
+            id: AGENT_ID,
+            name: "front-desk",
+            projectId: PROJECT_ID,
+            agentPlatform: "retell",
+            platformAgentId: "agent_other",
+          },
+          connections: [
+            {
+              id: CONNECTION_ID,
+              name: "retell_text-1",
+              agentPlatform: "retell",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
+              modality: "chat",
+              productLabel: "Retell text mode",
+              credentialsHint: "safe-hint",
+              config: { retellAgentId: wantedRetellAgentId },
+            },
+          ],
+        });
+      }
+      if (requested.pathname === `/v1/projects/${PROJECT_ID}`) {
+        projectReads += 1;
+        return new JsonResponse({ id: PROJECT_ID, name: "Fixture project" });
+      }
+      return new JsonResponse({ message: "unexpected request" }, { status: 404 });
+    };
+
+    const recovered = await run(
+      {
+        action: "record",
+        platform: "retell",
+        agentId: wantedRetellAgentId,
+        lanes: "text",
+      },
+      contradictoryBinding,
+    );
+
+    expect(recovered.code).toBe(CONNECT_EXIT.unreachable);
+    expect(projectReads).toBe(0);
+    expect(recovered.out).toContain("status: registration-not-found");
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("prints no recovery receipt for a malformed registration answer", async () => {
+    const platform = fakePlatform();
+    const malformed: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+        return new JsonResponse(
+          {
+            result: "created",
+            agent: {
+              id: "",
+              name: "front-desk",
+              projectId: PROJECT_ID,
+              agentPlatform: "livekit",
+              platformAgentId: null,
+            },
+            connection: { id: "", agentPlatform: "retell" },
+          },
+          { status: 201 },
+        );
+      }
+      return await platform.fetchImpl(input, init);
+    };
+
+    const result = await run(
+      {
+        modality: "chat",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      malformed,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt:");
+    expect(result.out).toContain("status: refused");
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).resolves.toMatchObject({
+      format: 3,
+      platform: { origin: URL },
+    });
+  });
+
+  it.each([
+    "front-desk\nreceipt: forged",
+    "front-desk\u2028status: connected",
+    "x".repeat(201),
+  ])("rejects an unsafe registration name before the write: %j", async (name) => {
+    const platform = fakePlatform();
+    const result = await run(
+      {
+        modality: "chat",
+        name,
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      platform.fetchImpl,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(result.out).not.toContain("registration_name:");
+    expect(result.out).not.toContain("receipt:");
+    expect(platform.registrations).toHaveLength(0);
+  });
+
+  it("prints no receipt when a complete-shaped answer names another LiveKit target", async () => {
+    const platform = fakePlatform();
+    const wrongTarget: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+        return new JsonResponse(
+          {
+            result: "created",
+            agent: {
+              id: AGENT_ID,
+              name: "front-desk",
+              projectId: PROJECT_ID,
+              agentPlatform: "livekit",
+              platformAgentId: null,
+            },
+            connection: {
+              id: CONNECTION_ID,
+              name: "livekit_chat-1",
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
+              modality: "chat",
+              productLabel: "LiveKit chat",
+              credentialsHint: "WXYZ",
+              config: {
+                url: "wss://other.livekit.cloud",
+                agentName: "other-worker",
+              },
+            },
+          },
+          { status: 201 },
+        );
+      }
+      return await platform.fetchImpl(input, init);
+    };
+
+    const result = await run(
+      {
+        modality: "chat",
+        name: "front-desk",
+        livekitUrl: "wss://acme.livekit.cloud",
+        dispatchName: "receptionist",
+        env: {
+          [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+          [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+        },
+      },
+      wrongTarget,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt:");
+    expect(result.out).toContain("status: refused");
+  });
+
+  it.each([
+    {
+      label: "changed",
+      requestedMetadata: '{"tenant":"acme"}',
+      returnedMetadata: '{"tenant":"other"}' as string | undefined,
+    },
+    {
+      label: "missing",
+      requestedMetadata: '{"tenant":"acme"}',
+      returnedMetadata: undefined,
+    },
+    {
+      label: "unexpected",
+      requestedMetadata: null,
+      returnedMetadata: '{"tenant":"acme"}' as string | undefined,
+    },
+  ])(
+    "prints no receipt when a complete-shaped answer has $label metadata",
+    async ({ requestedMetadata, returnedMetadata }) => {
+      const platform = fakePlatform();
+      const changedMetadata: typeof fetch = async (input, init) => {
+        const requested = new globalThis.URL(String(input));
+        if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+          const response = await platform.fetchImpl(input, init);
+          const body = (await response.json()) as {
+            readonly [key: string]: unknown;
+            readonly connection: {
+              readonly [key: string]: unknown;
+              readonly config: Readonly<Record<string, string>>;
+            };
+          };
+          const config = { ...body.connection.config };
+          delete config["metadata"];
+          if (returnedMetadata !== undefined) config["metadata"] = returnedMetadata;
+          return new JsonResponse(
+            {
+              ...body,
+              connection: { ...body.connection, config },
+            },
+            { status: response.status },
+          );
+        }
+        return await platform.fetchImpl(input, init);
+      };
+
+      const result = await run(
+        {
+          modality: "chat",
+          name: "front-desk",
+          livekitUrl: "wss://acme.livekit.cloud",
+          dispatchName: "receptionist",
+          metadata: requestedMetadata,
+          env: {
+            [LIVEKIT_API_KEY_VARIABLE]: API_KEY,
+            [LIVEKIT_API_SECRET_VARIABLE]: API_SECRET,
+          },
+        },
+        changedMetadata,
+      );
+
+      expect(result.code).toBe(CONNECT_EXIT.unreachable);
+      expect(result.out).not.toContain("receipt:");
+      expect(result.out).toContain("status: refused");
+      expect(platform.registrations).toHaveLength(1);
+      await expect(readConfig(folderPathsIn(workspace.dir).config)).resolves.toEqual({
+        format: 3,
+        platform: { origin: URL },
+        project: null,
+        agents: [],
+      });
+    },
+  );
+
+  it("requires every stable receipt id before recovery reads the platform", async () => {
+    let requests = 0;
+    const result = await run(
+      { action: "record", projectId: PROJECT_ID },
+      async () => {
+        requests += 1;
+        throw new Error("recovery must not read an incomplete receipt");
+      },
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(requests).toBe(0);
+    expect(result.out).toContain("status: incomplete-receipt");
+  });
+
+  it("rejects a name mixed with a partial receipt instead of ignoring the id", async () => {
+    let requests = 0;
+    const result = await run(
+      {
+        action: "record",
+        name: "front-desk",
+        receiptAgentId: AGENT_ID,
+      },
+      async () => {
+        requests += 1;
+        throw new Error("an invalid selector must not read the platform");
+      },
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(requests).toBe(0);
+    expect(result.out).toContain("status: incomplete-receipt");
   });
 
   it("lists the server-owned voice choices and refuses to guess", async () => {

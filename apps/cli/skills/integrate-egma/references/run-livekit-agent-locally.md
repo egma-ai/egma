@@ -7,9 +7,26 @@ does not create, update, or deploy a LiveKit Cloud agent.
 ## Give worker custody to `egma run`
 
 Use the entrypoint, dependency manifest, and registered worker name reported by
-the coding agent after integration. Keep `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
-`LIVEKIT_API_SECRET` in the `egma run` process environment. Confirm that each
-variable is present without printing its value, then run:
+the coding agent after integration.
+
+Before run approval, disclose the setup that this helper may perform. It may:
+
+- install or upgrade LiveKit CLI to 2.18.2 or newer with Homebrew on macOS,
+  `winget` on Windows, or LiveKit's downloaded installer on Linux;
+- create `.venv` in the worker project when it finds no usable environment;
+  and
+- run `uv pip install` or Python `pip install` against the declared
+  `pyproject.toml` or `requirements.txt` when that environment lacks Egma SDK
+  0.2.0 or newer.
+
+These are machine, repository, and dependency-environment writes. Name the
+ones this repository may need and include them in the explicit run approval.
+If the developer does not approve them, stop and let the developer prepare the
+tools and environment before retrying.
+
+Keep `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in the
+`egma run` process environment. Confirm that each variable is present without
+printing its value, then run:
 
 ```text
 <egma> run <suite-directory> \

@@ -11,7 +11,7 @@ Production monitoring is a separate agent-level setup.
 | Purpose | Path | Connection | Default mock-tool state |
 |---|---|---|---|
 | Simulation | Text | `retell_text_mode` | On; answers ride with each text request |
-| Simulation | Web call | `retell_web_call` | Off when the connection is created |
+| Simulation | Web call | `retell_web_call` | Raw setup creates the connection with mock tools off |
 | Simulation | Phone | `phone_number` | Never mockable; the call reaches real tools |
 | Production monitoring | Retell call-history polling | No simulation connection | Not applicable |
 
@@ -24,8 +24,8 @@ to create anything.
 
 The developer chooses testing, monitoring, or both. The coding agent then shows
 the exact Retell agent, simulation lanes, phone number when applicable, suite
-proposal, and monitoring target. Remote setup starts only after that plan is
-approved.
+proposal, and monitoring target. Remote setup starts only after the developer
+approves that plan.
 
 The coding agent starts browser-approved Egma login when needed:
 
@@ -93,7 +93,7 @@ repository-authored and provider-managed sources separate when they differ.
 
 ### Retell text mode
 
-Egma exchanges messages with the Retell voice agent in text. No call is placed,
+Egma exchanges messages with the Retell voice agent in text. Egma places no call,
 so a suite can finish quickly. The connection stores the Retell agent ID and a
 sealed API key.
 
@@ -105,9 +105,8 @@ product_label: Retell text mode
 connection_modality: chat
 ```
 
-Text mode is not available when the selected voice agent uses a custom LLM that
-keeps its words and tools outside Retell. The command reports the compatible
-lane and creates nothing.
+A custom LLM that keeps its words and tools outside Retell prevents text mode.
+The command reports the compatible lane and creates nothing.
 
 ### Retell web call
 
@@ -122,8 +121,8 @@ product_label: Retell web call
 connection_modality: voice
 ```
 
-Web-call mock tools are off when raw connection setup creates the connection.
-Turning them on is a separate explicit platform change because a mocked run
+Raw connection setup creates a web-call connection with mock tools off.
+Turning them on requires a separate explicit platform change because a mocked run
 temporarily writes and later restores a Retell version.
 
 ### Retell phone
@@ -145,8 +144,8 @@ phone run, the coding agent must state the suite, target, and expected
 simulation count, warn that real calls can cost money, and obtain fresh run
 approval.
 
-The Egma deployment needs a complete telephony route before a phone simulation
-can start.
+The Egma deployment needs a complete telephony route before Egma can start a
+phone simulation.
 
 ## Connection identity and custody
 
@@ -159,9 +158,38 @@ whether Egma created an agent, reused it, or added a connection:
 | `reused` | Compatible agent and connection already existed |
 | `connection_added` | Egma matched the agent and added this connection |
 
-Text and web-call connections store the Retell key sealed because the simulator
-needs it. A phone connection stores no Retell key. Nothing in connection setup
-writes to the Retell account; provider requests are reads.
+The CLI prints `registration_name` before each registration request and a
+`retell-registration` receipt after each confirmed connection. If local
+recording fails after that receipt, the printed `recovery_command` supplies the
+exact project, agent, and connection IDs for receipt recovery. If a reply
+becomes unclear before a receipt, the coding agent recovers with the approved
+provider-public target:
+
+```bash
+egma connect record \
+  --platform retell \
+  --retell-agent <provider-id> \
+  --lanes <text|web-call|phone> \
+  [--phone-number <e164>] \
+  [--name <registration_name>]
+```
+
+Use exactly one lane and add `--phone-number` for phone. `--name` is an optional
+preference, not identity. The command makes no remote write or Retell request.
+It needs no Retell credential and writes the equivalent target to local
+`egma/config.yaml`. If several connections match, choose a `connection_option`
+from command output with `--connection-id`; do not inspect the Egma UI for IDs.
+
+`registration-not-found` means Egma has no equivalent public target. It does
+not mean that an exact agent name is absent. If a same-name row has no provable
+Retell identity, including an ambiguous phone-only row, the connect command
+stops instead of creating a suffixed duplicate.
+
+Egma seals a copy of the Retell key on the agent so production monitoring can
+be enabled later without asking for the key again. Text and web-call
+connections also keep a sealed copy because the simulator needs it. A phone
+connection keeps no key. The key never lands in the repository. Nothing in
+connection setup writes to the Retell account; provider requests are reads.
 
 ## Author, validate, and run tests
 
@@ -223,18 +251,18 @@ For each watched agent, Egma:
 
 - imports the previous 30 days when monitoring starts;
 - checks for new terminal calls about every 30 seconds;
-- rereads a five-minute overlap on every check so late arrivals are still found;
+- rereads a five-minute overlap on every check so it catches late arrivals;
   and
 - stores one production conversation per Retell call even when an import page
-  or historical window is retried.
+  or historical window needs another attempt.
 
 There is no daily full-history rescan. Resuming monitoring starts observation
-from that time; calls made while monitoring was off are not backfilled.
+from that time; Egma does not backfill calls made while monitoring was off.
 
 If Retell cannot supply one complete call, Egma retries a few times, records the
-loss in operational logs and counters, and continues with later calls. A call
-with no transcript is still recorded, but transcript-based metrics and graders
-have no input.
+loss in operational logs and counters, and continues with later calls. Egma
+still records a call with no transcript, but transcript-based metrics and
+graders have no input.
 
 The provider endpoints have independent versions:
 
@@ -252,7 +280,7 @@ normalization.
 ## What appears in Monitoring
 
 Each imported call keeps its Retell conversation ID and the Retell agent ID,
-name, and version when supplied. Safe provider facts, such as call status and
+name, and version when Retell supplies them. Safe provider facts, such as call status and
 `phone_call` or `web_call`, remain in the provider payload. Egma omits Retell
 access tokens and named authentication-header values before storage.
 

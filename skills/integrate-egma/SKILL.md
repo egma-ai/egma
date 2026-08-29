@@ -57,7 +57,8 @@ Keep discovery read-only. Use committed source for repository facts. Keep
 credentials in standard input or the process environment. Do not read or edit
 an `.env` file yourself. The only exception is the CLI's documented safe write
 during LiveKit monitoring setup; let the CLI own that write and do not inspect
-its values. Never repeat a credential in a command, transcript, diff, or report.
+its values. The CLI reports only the protected file path, key ID, and masked
+hint. Never repeat a credential in a command, transcript, diff, or report.
 
 Before a remote write, name the platform, agent, connection or monitoring
 target, modality, and resources the command will create or update. Continue

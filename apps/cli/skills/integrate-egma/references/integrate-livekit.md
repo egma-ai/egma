@@ -115,8 +115,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 The monitoring entry is synchronous and is the first statement of the
 entrypoint. Its process receives `EGMA_URL` and `EGMA_API_KEY`. Name those
 variables when needed. `egma monitoring enable --platform livekit` owns the
-credential and reports the deployment handoff; the developer's runtime owns
-environment injection.
+credential, writes it only to a safe ignored environment file, and reports the
+non-secret file path and key receipt. The developer's runtime owns environment
+injection. The coding agent does not open that file.
 
 ### Both entries
 

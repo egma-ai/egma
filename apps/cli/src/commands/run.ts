@@ -1,5 +1,7 @@
 /** `egma run <suite-directory>`: run one exact current-set precondition. */
 
+import { randomUUID } from "node:crypto";
+
 import {
   RepositoryValidationError,
   folderPathsIn,
@@ -40,6 +42,9 @@ export const RUN_EXIT = {
   interrupted: 130,
 } as const;
 
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+const UNSAFE_IDEMPOTENCY_KEY_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
 export type RunCommandOptions = FolderCommandOptions & {
   readonly suiteDirectory: string;
   /** Exact committed agent name or stable id. Omit only when one can run. */
@@ -47,6 +52,8 @@ export type RunCommandOptions = FolderCommandOptions & {
   /** Exact committed connection name or stable id under the selected agent. */
   readonly connection?: string;
   readonly name?: string;
+  /** Reuse this exact key only when retrying the same start action. */
+  readonly idempotencyKey?: string;
   readonly noFollow?: boolean;
   readonly signal?: AbortSignal;
   readonly everyMs?: number;
@@ -73,6 +80,23 @@ function reportSelection(options: RunCommandOptions, selection: Selection): void
 
 export async function runRunCommand(options: RunCommandOptions): Promise<number> {
   options.out(`url: ${options.access.url}`);
+  const suppliedIdempotencyKey = options.idempotencyKey?.trim();
+  if (suppliedIdempotencyKey === "") {
+    options.out("status: invalid-idempotency-key");
+    options.fail("Give --idempotency-key one non-empty value. Nothing was started.");
+    return RUN_EXIT.nothing;
+  }
+  if (
+    suppliedIdempotencyKey !== undefined &&
+    (suppliedIdempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH ||
+      UNSAFE_IDEMPOTENCY_KEY_TEXT.test(suppliedIdempotencyKey))
+  ) {
+    options.out("status: invalid-idempotency-key");
+    options.fail(
+      `Give --idempotency-key one line of at most ${String(MAX_IDEMPOTENCY_KEY_LENGTH)} characters, without control characters. Nothing was started.`,
+    );
+    return RUN_EXIT.nothing;
+  }
   const paths = folderPathsIn(options.cwd);
   let config: FolderConfig;
   try {
@@ -121,6 +145,8 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   }
   reportSelection(options, selection);
 
+  const idempotencyKey = suppliedIdempotencyKey ?? `run_${randomUUID()}`;
+  options.out(`idempotency-key: ${idempotencyKey}`);
   let answer;
   try {
     answer = await startRun(
@@ -133,6 +159,7 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
           testId: one.testId,
           versionId: one.versionId,
         })),
+        idempotencyKey,
         ...(options.name === undefined ? {} : { name: options.name }),
       },
       options.fetchImpl,

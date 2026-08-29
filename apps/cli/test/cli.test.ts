@@ -124,6 +124,7 @@ describe("the egma command", () => {
       "--worker-entrypoint",
       "--worker-dependency-manifest",
       "--worker-dispatch-name",
+      "--idempotency-key",
     ]) {
       expect(help.stdout, option).toContain(option);
     }
@@ -148,5 +149,19 @@ describe("the egma command", () => {
     expect(secret.code).toBe(1);
     expect(secret.stderr).toContain("--livekit-api-secret");
     expect(secret.stderr).not.toContain("must-not-be-repeated");
+  });
+
+  it("refuses a missing or blank run idempotency key before platform access", async () => {
+    for (const args of [
+      ["run", "release", "--idempotency-key"],
+      ["run", "release", "--idempotency-key", ""],
+      ["run", "release", "--idempotency-key", "--no-follow"],
+    ]) {
+      const result = await egma(args, workspace);
+      expect(result.code, args.join(" ")).toBe(1);
+      expect(result.stderr, args.join(" ")).toContain(
+        "Give --idempotency-key one non-empty value.",
+      );
+    }
   });
 });

@@ -9,7 +9,8 @@ Agent Skills explain how to discover a voice agent, author grounded tests, and
 stop for developer approval. Named commands perform each local or remote action.
 
 Every named command asks no terminal questions. It prints one fact per line and
-uses its exit code as the next branch. No private agent driver is required.
+uses its exit code as the next branch. This workflow needs no private agent
+driver.
 
 ## Requirements
 
@@ -17,7 +18,7 @@ uses its exit code as the next branch. No private agent driver is required.
 - a coding agent that can use Agent Skills and run shell commands
 - a browser where the developer can approve sign-in
 
-A global install is optional. Use `egma` when installed, or
+A global install is optional. Use `egma` after you install it, or
 `npx --yes @egma/cli` as the command prefix on a clean machine.
 
 ## Bootstrap a repository
@@ -99,15 +100,32 @@ access method needs a new setup approval.
     that apply. The developer approves before the first write.
   </Step>
   <Step title="Connect for testing">
-    Retell uses `egma connect --platform retell --show-context` so the test
-    author receives the provider-managed prompt and tools. LiveKit first uses
-    an incomplete `egma connect --platform livekit` as a read-only catalog query,
-    then runs the selected complete command with secrets in the environment.
+    The coding agent runs `egma connect --platform retell --show-context` so the
+    test author receives the provider-managed prompt and tools. For LiveKit, it
+    reads modalities first, repeats the command with `--modality` to read access
+    variants, and repeats it with `--modality` plus `--access-variant` to read
+    required fields and secrets. These incomplete calls write nothing. It runs
+    the complete command only after the developer approves every value. The
+    complete command prints `registration_name` before its remote request and
+    a registration receipt after Egma confirms the write. If the response is
+    unclear or the local record fails, the coding agent runs
+    `egma connect record`. It either proves exact receipt IDs or matches the
+    approved provider-public identity. Retell recovery uses the provider agent,
+    exactly one lane, and a phone number for phone. LiveKit recovery uses the
+    server URL and exactly one dispatch name or token endpoint. It also matches
+    the approved metadata exactly; omission means the setup had none. The
+    attempted `registration_name` is only an optional preference. The command makes no
+    remote write and writes the proven or equivalent target to local
+    `egma/config.yaml`. `registration-not-found` means no equivalent public
+    target exists, not that an exact name is absent. The coding agent uses
+    `connection_option` output for ambiguous matches instead of inspecting the
+    Egma UI for IDs.
   </Step>
   <Step title="Create the first suite">
     `egma personas` supplies the only valid persona names and IDs. If remote
     suites already exist, the coding agent pulls first. It then creates one
-    suite and writes three or four grounded tests.
+    suite and writes three or four grounded tests. After an unreachable create
+    response or a local manifest failure, it pulls before any new create.
   </Step>
   <Step title="Integrate the LiveKit test path">
     For LiveKit testing, the coding agent adds the Egma SDK testing entry to the
@@ -123,12 +141,15 @@ access method needs a new setup approval.
     The coding agent names the suite, agent, connection, modality, and expected
     simulation count. The developer approves. A phone run includes a cost
     warning. `egma run` follows the complete run; its worker flags can own a
-    repository-local LiveKit worker for the same command.
+    repository-local LiveKit worker for the same command. The command prints an
+    idempotency key before the start request. A replay of the exact same unclear
+    start uses that key only after fresh run approval.
   </Step>
-  <Step title="Enable monitoring when requested">
+  <Step title="Enable monitoring after approval">
     After separate approval, `egma monitoring enable` configures the selected
-    Retell or LiveKit production path. `egma monitoring status` reads the final
-    state.
+    Retell or LiveKit production path. LiveKit enable writes its new secret only
+    to a regular `.env` that Git ignores; it never prints that secret. The
+    coding agent runs `egma monitoring status` to read the final state.
   </Step>
 </Steps>
 
@@ -139,6 +160,7 @@ access method needs a new setup approval.
 | `egma` | Prints the public skill install command and coding-agent handoff |
 | `egma login` | Starts browser-approved device login for this machine |
 | `egma connect` | Registers a Retell or LiveKit agent and simulation connection |
+| `egma connect record` | Proves receipt IDs or matches provider-public identity, then writes the target to local `egma/config.yaml` without a remote write |
 | `egma init` | Creates an empty committable `egma/` folder; `--url` can bind it without contacting the platform |
 | `egma personas` | Lists machine-readable valid persona IDs and names for the bound project |
 | `egma suite create <directory> --name <name>` | Creates a suite and writes its local manifest |
@@ -176,15 +198,32 @@ so the team can review and version them with the voice-agent source. See
 
 ## LiveKit catalog and local worker runs
 
-LiveKit setup is driven by the platform's current connection catalog. A
-read-only incomplete call lists the available values:
+The platform's current connection catalog drives LiveKit setup. Read it through
+three iterative, read-only calls. Start with the modality list:
 
 ```bash
 egma connect --platform livekit
 ```
 
-The complete call uses these public flags as requested by the chosen catalog
-entry:
+Then list the access variants for one modality:
+
+```bash
+egma connect --platform livekit --modality voice
+```
+
+Then list the required public fields and environment secrets for one access
+variant:
+
+```bash
+egma connect --platform livekit \
+  --modality voice \
+  --access-variant livekit_room.project_credentials
+```
+
+The three calls print `modality_option`, `access_variant_option`, then
+`required_field` and `required_secret` facts in that order. They exit on the
+missing input and write nothing. After approval, the complete call uses the
+public flags that the chosen catalog entry requests:
 
 - `--name <name>`
 - `--modality <chat|voice>`
@@ -210,7 +249,17 @@ egma run receptionist-core \
 ```
 
 The CLI starts the worker, waits for registration, starts the remote run, and
-always stops the worker. `--no-follow` is refused with worker ownership.
+always stops the worker. It refuses `--no-follow` when it owns the worker.
+
+Before run approval, the coding agent discloses any setup writes. The CLI may
+install or upgrade LiveKit CLI through Homebrew, `winget`, or LiveKit's Linux
+installer. It may also create the worker project's `.venv` and install the
+declared dependencies with `uv` or Python `pip`. The developer approves those
+writes or prepares the environment first.
+
+Every run prints `idempotency-key:` before the start `POST`. Use that key only
+to replay the exact same start after an unclear response, and ask for fresh run
+approval first. Never reuse it after changing inputs or for a new run.
 
 ## Point at a self-hosted instance
 

@@ -6,9 +6,9 @@ description: "Reference for Egma CLI verbs, flags, environment variables, stable
 
 Every named Egma command asks no terminal questions. It prints one fact per
 line, writes a final `status:` fact, and uses its numeric exit code as the next
-branch. This contract is designed for coding agents, shell scripts, and CI.
+branch. Egma designed this contract for coding agents, shell scripts, and CI.
 
-Use `egma` when installed. On a clean machine, replace it with
+Use `egma` after you install it. On a clean machine, replace it with
 `npx --yes @egma/cli`.
 
 ## Common options
@@ -29,7 +29,7 @@ contacting a provider.
 | Variable | Used by | Meaning |
 |---|---|---|
 | `EGMA_HOME` | All authenticated commands | Credentials folder. Default: `~/.egma` |
-| `EGMA_RETELL_API_KEY` | `connect` | Retell API key. `RETELL_API_KEY` is also accepted |
+| `EGMA_RETELL_API_KEY` | `connect` | Retell API key. The CLI also accepts `RETELL_API_KEY` |
 | `EGMA_RETELL_AGENT_ID` | Retell `connect` | Same as `--retell-agent` |
 | `EGMA_LANES` | Retell `connect` | Same as `--lanes` |
 | `EGMA_PHONE_NUMBER` | Retell `connect` | Same as `--phone-number` |
@@ -37,7 +37,7 @@ contacting a provider.
 | `EGMA_LIVEKIT_API_KEY` | LiveKit `connect` | LiveKit project API key |
 | `EGMA_LIVEKIT_API_SECRET` | LiveKit `connect` | LiveKit project API secret |
 | `EGMA_LIVEKIT_TOKEN_HEADERS` | LiveKit `connect` | Customer token endpoint headers as one JSON object |
-| `LIVEKIT_URL` | Local-worker `run` | LiveKit server used by the local worker |
+| `LIVEKIT_URL` | Local-worker `run` | LiveKit server that the local worker uses |
 | `LIVEKIT_API_KEY` | Local-worker `run` | Local worker API key |
 | `LIVEKIT_API_SECRET` | Local-worker `run` | Local worker API secret |
 
@@ -63,8 +63,8 @@ next: Use the integrate-egma skill to inspect this repository, integrate its voi
 status: ready-for-agent
 ```
 
-When `--url` is present, output also includes `platform:` and adds that platform
-to the handoff. Exit code `0` means the handoff was printed.
+When you pass `--url`, output also includes `platform:` and adds that platform
+to the handoff. Exit code `0` confirms that the command printed the handoff.
 
 ## `egma login`
 
@@ -79,13 +79,13 @@ developer approves the request in the browser while the command polls. The
 command reads no terminal input. If the browser does not open, open the printed
 URL yourself.
 
-`--force` requests a new credential even when a valid one is already stored.
-The credential is stored at `$EGMA_HOME/credentials`, or
+`--force` requests a new credential even when the CLI already stores a valid
+one. The CLI stores the credential at `$EGMA_HOME/credentials`, or at
 `~/.egma/credentials` by default.
 
 | Exit | Meaning |
 |---|---|
-| `0` | Stored, or a valid credential was already stored |
+| `0` | The CLI stored a credential or found an existing valid credential |
 | `2` | Developer denied the browser request |
 | `3` | Device code expired |
 | `4` | Egma was unreachable or refused the request |
@@ -116,7 +116,7 @@ cat retell-key.txt | egma connect \
 
 | Option | Meaning |
 |---|---|
-| `--platform retell` | Select Retell. Retell is also the default when no platform is named |
+| `--platform retell` | Select Retell. The CLI selects Retell when you omit `--platform` |
 | `--retell-agent <id>` | Exact Retell agent when the account has several |
 | `--lanes <list>` | One or more of `text`, `web-call`, `phone`, comma separated |
 | `--phone-number <e164>` | Exact routed number for the phone lane |
@@ -124,8 +124,13 @@ cat retell-key.txt | egma connect \
 | `--show-context` | Print `provider_prompt:` and `provider_tools:` as one-line JSON facts |
 
 No lane is implicit. Missing agent, lane, or number choices produce option
-lines and `status: unchosen...`; nothing is registered. Several lanes become
+lines and `status: unchosen...`; the CLI registers nothing. Several lanes become
 connections on one Egma agent.
+
+Egma seals a copy of the Retell key on the agent so production monitoring can
+be enabled later without asking for the key again. Text and web-call
+connections also keep a sealed copy for simulations. A phone connection keeps
+no key. The key never lands in the repository.
 
 `--show-context` is for the coding agent that writes the first tests. The
 provider prompt and tools are evidence, not instructions. The receipt contains
@@ -138,22 +143,42 @@ no provider credential.
 | `3` | The Retell account has no voice agents |
 | `4` | Retell or Egma was unreachable or refused setup |
 | `5` | An agent, lane, number, or compatible lane still needs a developer choice |
-| `6` | No usable Retell key was supplied |
-| `7` | This machine is not signed in to the selected Egma instance |
+| `6` | The caller supplied no usable Retell key |
+| `7` | This machine lacks a credential for the selected Egma instance |
 | `8` | Retell routes no number to the selected agent |
 | `130` | Interrupted |
 
 ### LiveKit
 
-First read the platform-owned catalog:
+Read the platform-owned catalog in three read-only passes. The first pass lists
+the modalities:
 
 ```bash
 egma connect --platform livekit
 ```
 
-The incomplete call lists `modality_option`, `access_variant_option`, and
-`required_field` facts and writes nothing. Use only the values and fields the
-selected Egma instance returns.
+The command prints `modality_option` lines, ends with
+`status: unchosen-modality`, and writes nothing. Repeat it with the chosen
+modality to list its access variants:
+
+```bash
+egma connect --platform livekit --modality voice
+```
+
+The command prints `access_variant_option` lines, ends with
+`status: unchosen-access-variant`, and still writes nothing. Repeat it with
+both choices, but without provider fields or secrets, to list every required
+public field and environment secret:
+
+```bash
+egma connect --platform livekit \
+  --modality voice \
+  --access-variant livekit_room.project_credentials
+```
+
+This pass prints `required_field` and `required_secret` facts. It also writes
+nothing. Use only the values and fields that the selected Egma instance returns,
+then run the complete command after the developer approves them.
 
 Project credentials:
 
@@ -191,14 +216,95 @@ egma connect \
 | `--access-variant <id>` | Exact offered connection method |
 | `--livekit-url <wss-url>` | LiveKit project WebSocket URL |
 | `--dispatch-name <name>` | Exact registered worker name for project credentials |
-| `--token-endpoint <https-url>` | Customer-owned token endpoint when that variant is selected |
+| `--token-endpoint <https-url>` | Customer-owned token endpoint for the token-endpoint variant |
 | `--metadata <json>` | Optional JSON object for variants that offer metadata |
 
 The current built-in access variants are
 `livekit_room.project_credentials` and
 `livekit_room.customer_token_endpoint`, but the platform catalog is the current
-authority. Credentials are read only from the `EGMA_LIVEKIT_*` environment
-variables listed above.
+authority. The CLI reads credentials only from the `EGMA_LIVEKIT_*`
+environment variables listed above.
+
+After remote registration succeeds, the command prints a non-secret receipt
+before it tries to record the remote agent and connection in
+`egma/config.yaml`. The receipt includes these identity facts:
+
+```text
+receipt: livekit-registration
+project_id: prj_...
+agent_id: agt_...
+agent_name: front-desk
+connection_id: con_...
+connection_name: livekit_voice-1
+agent_platform: livekit
+connection_type: livekit_room
+access_variant: livekit_room.project_credentials
+connection_modality: voice
+registration: created
+```
+
+If the local record fails, the command exits `9` and prints
+`status: repository-record-failed` plus a `recovery_command`. The remote agent
+and connection remain active. Fix the repository or Egma connection, then run
+the printed command. Its essential form is:
+
+```bash
+egma connect record \
+  --platform livekit \
+  --project-id <id> \
+  --agent-id <id> \
+  --connection-id <id>
+```
+
+The recovery command authenticates with Egma, reads the project and agent, and
+proves that the named connection belongs to that agent and represents a LiveKit
+room. It then writes that proven target to local `egma/config.yaml`. It makes no
+remote write, needs no provider secret, and never contacts LiveKit. Use the
+exact IDs and any `--url` from the printed `recovery_command`.
+
+Both provider paths print `registration_name` immediately before a remote
+registration request. If the reply becomes unclear before a receipt, recover
+with provider-public identity instead of repeating the write. Retell requires
+the provider agent ID and exactly one lane:
+
+```bash
+egma connect record \
+  --platform retell \
+  --retell-agent <provider-id> \
+  --lanes <text|web-call|phone> \
+  [--phone-number <e164>] \
+  [--name <registration_name>]
+```
+
+Add `--phone-number` for the phone lane. LiveKit requires its server URL and
+exactly one public access door:
+
+```bash
+egma connect record \
+  --platform livekit \
+  --livekit-url <wss-url> \
+  --dispatch-name <registered-worker-name> \
+  [--modality <chat|voice>] \
+  [--access-variant <id>] \
+  [--metadata <approved-json>] \
+  [--name <registration_name>]
+```
+
+For a token-endpoint target, replace `--dispatch-name` with
+`--token-endpoint <https-url>`; provide exactly one of those flags. Pass
+`--metadata` when the approved setup included it; omission requires a target
+with no metadata. `--modality`, `--access-variant`, and `--name` narrow or
+prefer a match but do not replace the required provider-public identity. If several equivalent
+connections remain, the command prints `connection_option` lines and exits
+`5`; repeat it with the selected `--connection-id` from command output. Do not
+inspect the Egma UI for IDs.
+
+Exact receipt IDs and provider-public identity are separate recovery modes.
+Both make no remote write, need no provider credential, and write the proven or
+equivalent target to local `egma/config.yaml`. `registration-not-found` means
+Egma has no equivalent public target. It does not mean that an exact agent name
+is absent. Retell refuses a same-name row with no provable provider identity,
+including an ambiguous phone-only row, instead of advancing to a suffixed name.
 
 | Exit | Meaning |
 |---|---|
@@ -206,7 +312,8 @@ variables listed above.
 | `4` | Egma was unreachable, refused setup, or described an unsupported required field |
 | `5` | Modality, variant, name, or public field is missing or invalid |
 | `6` | A required environment credential is missing or invalid |
-| `7` | This machine is not signed in |
+| `7` | This machine lacks an Egma credential |
+| `9` | Remote registration succeeded, but the CLI could not record it in the repository |
 | `130` | Interrupted |
 
 ## `egma init`
@@ -218,9 +325,9 @@ egma init [--url <address>]
 ```
 
 `--url` writes the normalized platform origin into `egma/config.yaml`. Running
-the command again is safe: existing files are left unchanged, except that an
-unbound existing folder can gain the supplied platform binding. Provider
-secrets are never written.
+the command again is safe: it leaves existing files unchanged, except that it
+can add the supplied platform binding to an unbound folder. The command never
+writes provider secrets.
 
 The command exits `0` with `status: created` or `status: already-there`.
 
@@ -259,9 +366,13 @@ egma suite create <directory> --name <display-name>
 ```
 
 The directory must be one portable lower-case name using letters, numbers, and
-hyphens. The complete existing repository must be valid before the remote
-write. If the local manifest write fails after remote creation, use
-`egma pull`; do not create a second suite.
+hyphens. Validate the complete existing repository before the remote write.
+
+If the command reports `status: unreachable`, the remote request may still
+have created the suite. If it reports `status: local-write-failed`, the receipt
+names the remote suite that definitely exists. In either case, run `egma pull`
+before another `egma suite create`. Use the pulled suite when it exists; do not
+create a duplicate.
 
 | Exit | Meaning |
 |---|---|
@@ -270,7 +381,7 @@ write. If the local manifest write fails after remote creation, use
 | `2` | Not signed in |
 | `4` | Egma was unreachable |
 | `6` | Egma refused creation |
-| `8` | Remote suite exists, but its local manifest could not be written |
+| `8` | The remote suite exists, but the CLI could not write its local manifest |
 
 ## `egma validate`
 
@@ -281,8 +392,8 @@ reference against the bound project's current personas.
 egma validate
 ```
 
-Local parsing happens before authentication or network work, so local syntax
-errors are reported first. The command detects missing, unknown, ambiguous, and
+Local parsing happens before authentication or network work, so the command
+reports local syntax errors first. It detects missing, unknown, ambiguous, and
 duplicate persona references. It never writes local or remote state.
 
 Successful output ends with counts and `status: valid`. Invalid content ends
@@ -292,7 +403,7 @@ with `status: invalid-repository` or `status: invalid-personas` and one
 | Exit | Meaning |
 |---|---|
 | `0` | Complete repository is valid |
-| `1` | Local repository or persona references are invalid, or no project is bound |
+| `1` | Local repository or persona references are invalid, or the config names no project |
 | `2` | Not signed in after local parsing succeeds |
 | `4` | Egma was unreachable or refused persona lookup |
 
@@ -306,7 +417,7 @@ egma pull
 
 The command plans and validates the complete update before writing. A failed
 later write restores earlier files and removes paths created by that pull.
-Unsynced local draft tests are kept and named in the receipt.
+The command keeps unsynced local draft tests and names them in the receipt.
 
 | Exit | Meaning |
 |---|---|
@@ -325,7 +436,7 @@ project change.
 egma push
 ```
 
-If any item conflicts with a newer remote version, nothing is uploaded. Pull,
+If any item conflicts with a newer remote version, the CLI uploads nothing. Pull,
 reconcile, validate, review, and get new publish approval before retrying.
 
 | Exit | Meaning |
@@ -334,8 +445,8 @@ reconcile, validate, review, and get new publish approval before retrying.
 | `1` | No valid folder or local repository is invalid |
 | `2` | Not signed in |
 | `4` | Egma was unreachable |
-| `5` | Remote versions moved; pull is required |
-| `6` | Egma turned away one or more files; nothing was uploaded |
+| `5` | Remote versions moved; run `egma pull` |
+| `6` | Egma turned away one or more files; the CLI uploaded nothing |
 | `130` | Interrupted |
 
 ## `egma run`
@@ -347,6 +458,7 @@ egma run <suite-directory> \
   [--agent <name-or-id>] \
   [--connection <name-or-id>] \
   [--name <run-name>] \
+  [--idempotency-key <value>] \
   [--no-follow]
 ```
 
@@ -360,15 +472,33 @@ execution and all requested grading on completed traces is terminal.
 `--no-follow` returns after the remote run starts. A low grade score does not
 change the exit code; execution and grading-system errors do.
 
+After local and remote preflight succeeds, the command prints
+`idempotency-key:` before it sends the start `POST`. Keep that key when the
+start response becomes unclear. Ask the developer for fresh run approval, then
+repeat the exact same start with the printed value:
+
+```bash
+egma run receptionist-core \
+  --agent "Front desk" \
+  --connection livekit_voice-1 \
+  --idempotency-key run_...
+```
+
+Use this replay only when the earlier response did not establish whether the
+same start succeeded. Keep the suite, agent, connection, run name, and current
+test versions unchanged. Never reuse the key for changed inputs or for a new
+run. When output already contains `run:`, that run exists; use its receipt
+instead of starting it again.
+
 | Exit | Meaning |
 |---|---|
 | `0` | Run started, or followed work reached terminal state without a system error |
-| `1` | Target or suite cannot be selected, local/remote content does not match, or local-worker preflight failed |
+| `1` | The CLI cannot select the target or suite, local/remote content does not match, or local-worker preflight failed |
 | `2` | Not signed in |
 | `4` | Egma was unreachable |
 | `5` | Egma refused to start the run |
 | `6` | Worker, simulation execution, or grading system errored |
-| `130` | Follow was interrupted; a printed `run:` ID means the remote run exists |
+| `130` | An interruption ended follow; a printed `run:` ID means the remote run exists |
 
 ### CLI-owned local LiveKit worker
 
@@ -396,8 +526,21 @@ The CLI reads worker credentials only from `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
 and `LIVEKIT_API_SECRET`. It checks the worker files and environment, starts the
 worker, waits for the exact dispatch name, starts the run, and always stops the
 worker on completion, failure, or interruption. The three flags are
-all-or-nothing. `--no-follow` is refused because the command must retain worker
+all-or-nothing. The CLI refuses `--no-follow` because it must retain worker
 custody until the run finishes.
+
+Worker preparation can change the machine and the worker project. Before run
+approval, disclose which of these actions the repository may need:
+
+- install or upgrade LiveKit CLI to 2.18.2 or newer through Homebrew on macOS,
+  `winget` on Windows, or LiveKit's downloaded Linux installer;
+- create `.venv` in the worker project when no usable environment exists; and
+- run `uv pip install` or Python `pip install` against the declared
+  `pyproject.toml` or `requirements.txt` when the environment lacks Egma Python
+  SDK 0.2.0 or newer.
+
+Obtain approval for those writes before `egma run`. If the developer declines,
+let them prepare the CLI and Python environment, then run the command again.
 
 ## `egma monitoring`
 
@@ -423,24 +566,27 @@ cat retell-key.txt | egma monitoring enable \
   --platform-agent agent_...
 ```
 
-LiveKit enable mints an Egma project key and prints the two SDK environment
-lines:
+LiveKit enable mints an Egma project key:
 
 ```bash
 egma monitoring enable --platform livekit
 ```
 
-It writes those lines to `.env` only when Git already ignores that regular
-file. Otherwise it prints the deployment handoff without writing. Run status
-after enable:
+The command never prints the minted secret. It writes the two SDK environment
+values only to a regular repository `.env` file that Git already ignores.
+Successful output names the non-secret `env_file` and
+`monitoring_key_id`, and `api_key` contains only a masked hint. If the command
+cannot make that safe write, it tries to revoke the fresh key and fails setup.
+When it cannot confirm revocation, the failure names the key ID that the
+developer must revoke before retrying. Run status after enable:
 
 ```bash
 egma monitoring status [--agent <name-or-id>]
 ```
 
 `disable` turns Retell polling off and keeps stored conversations, binding, and
-sealed key. `record` is only for a receipt where remote setup succeeded but
-`egma/config.yaml` could not be updated. It does not create another agent,
+sealed key. `record` is only for a receipt where remote setup succeeded but the
+CLI could not update `egma/config.yaml`. It does not create another agent,
 restart monitoring, or mint another key.
 
 | Exit | Meaning |
@@ -453,7 +599,7 @@ restart monitoring, or mint another key.
 | `5` | Platform or provider agent still needs a developer choice |
 | `6` | No Retell key arrived on standard input |
 | `7` | Not signed in |
-| `8` | Monitoring setup was refused by a platform rule |
+| `8` | A platform rule blocked monitoring setup |
 | `9` | Remote setup succeeded, but the local repository record failed |
 | `130` | Interrupted |
 

@@ -12,7 +12,6 @@ import {
   listAgents as listAgentsRequest,
   registerAgent as registerAgentRequest,
   type AddConnectionData,
-  type AddConnectionResponse,
   type GetAgentResponse,
 } from "@egma/platform-api/client";
 
@@ -26,7 +25,6 @@ import type { ConnectionCredentials } from "./connection-credentials.ts";
 import type { Fetch } from "./device-flow.ts";
 
 type ConnectionInput = AddConnectionData["body"];
-type AnsweredConnection = AddConnectionResponse["connection"];
 
 export type NewConnection = {
   /** Omit and the platform chooses a numbered product-label name. */
@@ -67,6 +65,9 @@ export type RegisteredAgent = {
   readonly id: string;
   readonly name: string;
   readonly projectId: string;
+  readonly agentPlatform: "retell" | "livekit";
+  /** The provider's public agent id, when this agent is bound to one. */
+  readonly platformAgentId: string | null;
 };
 
 export type RegisteredConnection = {
@@ -130,16 +131,33 @@ function errorCode(error: unknown): string {
     : "";
 }
 
-function cleanAgent(agent: {
-  readonly id: string;
-  readonly name: string;
-  readonly projectId: string;
-}): RegisteredAgent {
-  return {
-    id: platformText(agent.id),
-    name: platformText(agent.name),
-    projectId: platformText(agent.projectId),
-  };
+const OPAQUE_ID_ATOM = /^[A-Za-z0-9_-]+$/u;
+
+/** A platform resource ID that can be printed as one shell argument as-is. */
+function opaqueIdAtom(value: unknown): string {
+  return typeof value === "string" && OPAQUE_ID_ATOM.test(value) ? value : "";
+}
+
+function cleanAgent(value: unknown): RegisteredAgent | null {
+  if (typeof value !== "object" || value === null) return null;
+  const agent = value as Readonly<Record<string, unknown>>;
+  const id = opaqueIdAtom(agent["id"]);
+  const name = platformText(agent["name"]);
+  const projectId = opaqueIdAtom(agent["projectId"]);
+  const agentPlatform = agent["agentPlatform"];
+  const rawPlatformAgentId = agent["platformAgentId"];
+  const platformAgentId =
+    rawPlatformAgentId === null ? null : platformText(rawPlatformAgentId);
+  if (
+    id === "" ||
+    name === "" ||
+    projectId === "" ||
+    (agentPlatform !== "retell" && agentPlatform !== "livekit") ||
+    (rawPlatformAgentId !== null && platformAgentId === "")
+  ) {
+    return null;
+  }
+  return { id, name, projectId, agentPlatform, platformAgentId };
 }
 
 /** A successful registration is useful only with its complete stable receipt. */
@@ -159,32 +177,57 @@ function registrationReceipt(
   ) {
     return null;
   }
-  const agentRecord = rawAgent as Readonly<Record<string, unknown>>;
-  const agent = {
-    id: platformText(agentRecord["id"]),
-    name: platformText(agentRecord["name"]),
-    projectId: platformText(agentRecord["projectId"]),
-  };
-  return agent.id === "" || agent.name === "" || agent.projectId === ""
-    ? null
-    : { result, agent };
+  const agent = cleanAgent(rawAgent);
+  return agent === null ? null : { result, agent };
 }
 
-function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
+/** Turn one untrusted response value into a complete, safe connection receipt. */
+function connectionReceipt(value: unknown): RegisteredConnection | null {
+  if (typeof value !== "object" || value === null) return null;
+  const connection = value as Readonly<Record<string, unknown>>;
+  const id = opaqueIdAtom(connection["id"]);
+  const name = platformText(connection["name"]);
+  const connectionType = platformText(connection["connectionType"]);
+  const accessVariant = platformText(connection["accessVariant"]);
+  const productLabel = platformText(connection["productLabel"]);
+  const modality = connection["modality"];
+  const rawPlatform = connection["agentPlatform"];
+  const rawHint = connection["credentialsHint"];
+  const rawConfig = connection["config"];
+  if (
+    id === "" ||
+    name === "" ||
+    connectionType === "" ||
+    accessVariant === "" ||
+    productLabel === "" ||
+    (modality !== "chat" && modality !== "voice") ||
+    (rawPlatform !== null && typeof rawPlatform !== "string") ||
+    (rawHint !== null && typeof rawHint !== "string") ||
+    typeof rawConfig !== "object" ||
+    rawConfig === null ||
+    Array.isArray(rawConfig)
+  ) {
+    return null;
+  }
+  const config: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(rawConfig)) {
+    if (typeof raw !== "string") return null;
+    config[key] = raw;
+  }
+  const agentPlatform = rawPlatform === null ? null : platformText(rawPlatform);
+  const credentialsHint = rawHint === null ? null : platformText(rawHint);
+  if (rawPlatform !== null && agentPlatform === "") return null;
+
   return {
-    id: platformText(connection.id),
-    name: platformText(connection.name),
-    agentPlatform:
-      connection.agentPlatform === null ? null : platformText(connection.agentPlatform),
-    connectionType: platformText(connection.connectionType),
-    accessVariant: platformText(connection.accessVariant),
-    modality: connection.modality,
-    productLabel: platformText(connection.productLabel),
-    credentialsHint:
-      connection.credentialsHint === null
-        ? null
-        : platformText(connection.credentialsHint),
-    config: { ...connection.config },
+    id,
+    name,
+    agentPlatform,
+    connectionType,
+    accessVariant,
+    modality,
+    productLabel,
+    credentialsHint,
+    config,
   };
 }
 
@@ -246,6 +289,15 @@ export type FoundAgent =
   | { readonly kind: "not-found" }
   | CommonFailure;
 
+export type MatchedConnection = {
+  readonly agent: PlatformAgent;
+  readonly connection: RegisteredConnection;
+};
+
+export type MatchedConnections =
+  | { readonly kind: "matches"; readonly matches: readonly MatchedConnection[] }
+  | CommonFailure;
+
 /** How many pages of agents are walked before giving up on finding a name. */
 const MOST_PAGES = 20;
 
@@ -264,19 +316,110 @@ export async function agentNamed(
     );
     const failed = commonFailure(answer, options);
     if (failed !== null) return failed;
+    if (answer.data === undefined || !Array.isArray(answer.data.agents)) {
+      return {
+        kind: "refused",
+        reason:
+          "Egma answered without an agent list. Check that this Egma platform is up to date.",
+      };
+    }
 
-    for (const agent of answer.data?.agents ?? []) {
+    for (const agent of answer.data.agents) {
       if (platformText(agent.name) === wanted) {
-        return { kind: "found", agent: cleanAgent(agent) };
+        const cleaned = cleanAgent(agent);
+        return cleaned === null
+          ? {
+              kind: "refused",
+              reason:
+                "Egma answered with an incomplete agent. Check that this Egma platform is up to date.",
+            }
+          : { kind: "found", agent: cleaned };
       }
     }
 
-    const next = answer.data?.nextPageToken ?? null;
-    if (next === null || next === "") break;
+    const next = answer.data.nextPageToken ?? null;
+    if (next === null || next === "") return { kind: "not-found" };
     pageToken = next;
   }
 
-  return { kind: "not-found" };
+  return {
+    kind: "refused",
+    reason:
+      "Egma has more agent pages than this CLI can inspect safely. Use the complete stable receipt IDs, or update the CLI. Nothing was recorded.",
+  };
+}
+
+/**
+ * Read every living connection this key can see and keep the ones that match.
+ *
+ * Registration recovery sometimes starts with a provider's public identity,
+ * not an Egma id or name. The list endpoint supplies the bounded roster and
+ * each agent read supplies its complete public connection config. This helper
+ * stops at the same page ceiling as public-identity recovery instead of claiming that a
+ * partial scan found nothing.
+ */
+export async function matchingConnections(
+  matches: (agent: PlatformAgent, connection: RegisteredConnection) => boolean,
+  options: RegisterOptions,
+): Promise<MatchedConnections> {
+  let pageToken: string | undefined;
+  const visited = new Set<string>();
+  const found: MatchedConnection[] = [];
+
+  for (let page = 0; page < MOST_PAGES; page += 1) {
+    const answer = await listAgentsRequest(
+      pageToken === undefined ? undefined : { pageToken },
+      requestOptions(options),
+    );
+    const failed = commonFailure(answer, options);
+    if (failed !== null) return failed;
+    if (answer.data === undefined || !Array.isArray(answer.data.agents)) {
+      return {
+        kind: "refused",
+        reason:
+          "Egma answered without an agent list. Check that this Egma platform is up to date.",
+      };
+    }
+
+    for (const listed of answer.data.agents) {
+      const agent = cleanAgent(listed);
+      if (agent === null) {
+        return {
+          kind: "refused",
+          reason:
+            "Egma answered with an incomplete agent. Check that this Egma platform is up to date.",
+        };
+      }
+      if (visited.has(agent.id)) continue;
+      visited.add(agent.id);
+
+      const read = await readAgent(agent.id, options);
+      if (read.kind !== "agent") {
+        if (read.kind === "not-found") {
+          return {
+            kind: "refused",
+            reason: `Egma listed agent ${agent.id}, then could not read it. Try recovery again.`,
+          };
+        }
+        return read;
+      }
+      for (const connection of read.connections) {
+        if (matches(read.agent, connection)) {
+          found.push({ agent: read.agent, connection });
+        }
+      }
+    }
+
+    const next = answer.data.nextPageToken ?? null;
+    if (next === null || next === "") return { kind: "matches", matches: found };
+    pageToken = next;
+  }
+
+  return {
+    kind: "refused",
+    reason:
+      "Egma has more agent pages than this CLI can inspect safely. Use the complete stable receipt IDs, or update the CLI. Nothing was recorded.",
+  };
 }
 
 export type ReadAgent =
@@ -305,10 +448,44 @@ export async function readAgent(
       reason: "Egma answered without saying what it holds. Check that this Egma platform is up to date.",
     };
   }
+  const agent = cleanAgent(body.agent);
+  if (agent === null) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without a complete agent receipt. Check that this Egma platform is up to date.",
+    };
+  }
+  if (agent.id !== agentId) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered with a receipt for a different agent ID. Check that this Egma platform is up to date.",
+    };
+  }
+  if (!Array.isArray(body.connections)) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without a complete connection list. Check that this Egma platform is up to date.",
+    };
+  }
+  const connections: RegisteredConnection[] = [];
+  for (const raw of body.connections) {
+    const connection = connectionReceipt(raw);
+    if (connection === null) {
+      return {
+        kind: "refused",
+        reason:
+          "Egma answered without a complete connection receipt. Check that this Egma platform is up to date.",
+      };
+    }
+    connections.push(connection);
+  }
   return {
     kind: "agent",
-    agent: cleanAgent(body.agent),
-    connections: body.connections.map(cleanConnection),
+    agent,
+    connections,
   };
 }
 
@@ -335,13 +512,14 @@ export async function addConnection(
   }
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;
-  if (answer.data === undefined) {
+  const receipt = connectionReceipt(answer.data?.connection);
+  if (receipt === null) {
     return {
       kind: "refused",
       reason: "Egma answered without saying what it wrote. Check that this Egma platform is up to date.",
     };
   }
-  return { kind: "added", connection: cleanConnection(answer.data.connection) };
+  return { kind: "added", connection: receipt };
 }
 
 /**
@@ -436,7 +614,9 @@ export async function registerAgent(
   if (failed !== null) return failed;
 
   const body = answer.data;
-  if (body === undefined || body.connection === undefined) {
+  const receipt = registrationReceipt(body);
+  const answeredConnection = connectionReceipt(body?.connection);
+  if (receipt === null || answeredConnection === null) {
     return {
       kind: "refused",
       reason: "Egma answered without saying what it wrote. Check that this Egma platform is up to date.",
@@ -445,9 +625,9 @@ export async function registerAgent(
   return {
     kind: "registered",
     registered: {
-      result: body.result,
-      agent: cleanAgent(body.agent),
-      connection: cleanConnection(body.connection),
+      result: receipt.result,
+      agent: receipt.agent,
+      connection: answeredConnection,
     },
   };
 }
