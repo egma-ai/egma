@@ -103,12 +103,24 @@ describe("the public skill source", () => {
   it("keeps integration phases in short, selected references", async () => {
     const root = path.join(SOURCE_ROOT, "integrate-egma");
     const skill = await readFile(path.join(root, "SKILL.md"), "utf8");
+    const onboarding = await readFile(
+      path.join(root, "references", "onboard.md"),
+      "utf8",
+    );
     const finding = await readFile(
       path.join(root, "references", "find-voice-agent.md"),
       "utf8",
     );
     const retell = await readFile(
       path.join(root, "references", "connect-retell.md"),
+      "utf8",
+    );
+    const connectLiveKit = await readFile(
+      path.join(root, "references", "connect-livekit.md"),
+      "utf8",
+    );
+    const authorLiveKitMocks = await readFile(
+      path.join(root, "references", "author-livekit-mocks.md"),
       "utf8",
     );
     const integrating = await readFile(
@@ -125,6 +137,7 @@ describe("the public skill source", () => {
     );
 
     expect(skill).toContain("Complete only the phase the task requests");
+    expect(skill).toContain("[references/onboard.md](references/onboard.md)");
     expect(skill).toContain("[references/find-voice-agent.md](references/find-voice-agent.md)");
     expect(skill).toContain("[references/connect-retell.md](references/connect-retell.md)");
     expect(skill).toContain(
@@ -142,6 +155,13 @@ describe("the public skill source", () => {
     expect(finding).toContain("Dispatch name");
     expect(finding).toContain("Entrypoint");
     expect(retell).toContain("retell-sdk");
+    expect(onboarding).toContain("The coding agent runs `<egma> login`");
+    expect(onboarding).toMatch(/Browser approval is the developer's\s+action/u);
+    expect(onboarding).toContain("<egma> personas");
+    expect(onboarding).toContain("<egma> validate");
+    expect(onboarding).toMatch(/Ask for\s+explicit publish approval/u);
+    expect(connectLiveKit).toContain("EGMA_LIVEKIT_API_KEY");
+    expect(authorLiveKitMocks).toContain("AgentTask.complete");
     expect(livekit).toContain("LiveKit CLI 2.18.2 or newer");
     expect(livekit).toContain("egma:livekit-worker ready");
     expect(helper).toContain("const MINIMUM_VERSION = [2, 18, 2]");
@@ -236,9 +256,12 @@ describe("npx skills compatibility", () => {
     );
 
     for (const file of [
+      path.join("references", "onboard.md"),
       path.join("references", "find-voice-agent.md"),
       path.join("references", "connect-retell.md"),
+      path.join("references", "connect-livekit.md"),
       path.join("references", "integrate-livekit.md"),
+      path.join("references", "author-livekit-mocks.md"),
       path.join("references", "run-livekit-agent-locally.md"),
       path.join("scripts", "livekit-local.mjs"),
     ]) {
