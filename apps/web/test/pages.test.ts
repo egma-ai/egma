@@ -637,7 +637,7 @@ describe("the pages", () => {
     // grading progress and score as separate facts in the results summary.
     expect(runWorkbench).toContain("EXECUTION_LABEL");
     expect(runWorkbench).toContain("evidence.gradingState");
-    expect(runWorkbench).toContain("selectedEvidence.combinedScore");
+    expect(runWorkbench).toContain("evidenceForDisplay.combinedScore");
     expect(simulation).toContain('evidence.gradingState === "pending"');
     expect(grades).toContain("evidence.grades");
     expect(grades).toContain("evidence.gradeHistory");
