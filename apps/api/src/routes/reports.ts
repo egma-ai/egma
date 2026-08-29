@@ -83,6 +83,7 @@ export function reportPathFor(simulationId: string): string {
 /** One status event, after the contract check has vouched for its shape. */
 type StatusEvent = {
   readonly status: "running" | "completed" | "failed" | "canceled";
+  readonly reason: string | null;
   readonly facts?: {
     readonly ending: string;
     readonly started_at: string;
@@ -207,7 +208,12 @@ function matchesTerminalRow(
     event.status === "failed"
       ? FAILED_ENDING_OF[ending]
       : (ending as CompletedEndingReason);
-  return standing.endingReason === reported;
+  if (standing.endingReason !== reported) return false;
+  // A retained failure sentence is part of the terminal fact. Older rows have
+  // none and keep the earlier idempotency rule: same status and ending.
+  return event.status !== "failed" ||
+    standing.executionFailure === null ||
+    standing.executionFailure === event.reason?.trim();
 }
 
 /** Where the row stands, said plainly for a refusal that has to name it. */
@@ -517,8 +523,14 @@ async function applyLanding(
       // a schema drift fails a request, never the process.
       throw new Error(`"${ending}" is not a failed ending the wire carries`);
     }
+    if (event.reason === null) {
+      // Unreachable after the closed report schema, but kept at the trust
+      // boundary so a schema drift never writes a failure nobody can act on.
+      throw new Error("a failed simulation report has no execution failure message");
+    }
     return failSimulation(standing.auth, standing.id, conductor, {
       reason,
+      message: event.reason,
       ...facts,
     });
   }

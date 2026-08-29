@@ -233,6 +233,7 @@ export async function simulationRoutes(
         status: simulation.status,
         ...describedTraceGrading(grading),
         reason: simulation.endingReason,
+        executionFailure: simulation.executionFailure,
         modality: simulation.modality,
         createdAt: simulation.createdAt.toISOString(),
         startedAt: simulation.startedAt?.toISOString() ?? null,

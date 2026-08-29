@@ -653,16 +653,19 @@ describe("unlimited execution with bounded reads", () => {
       after: 0,
     });
     expect(firstEvents?.events).toHaveLength(200);
+    expect(firstEvents?.caughtUp).toBe(false);
     expect(firstEvents?.done).toBe(false);
     const middleEvents = await listRunEvents(actingAsAcme(), started.id, {
       after: firstEvents?.next,
     });
     expect(middleEvents?.events).toHaveLength(200);
+    expect(middleEvents?.caughtUp).toBe(false);
     expect(middleEvents?.done).toBe(false);
     const lastEvents = await listRunEvents(actingAsAcme(), started.id, {
       after: middleEvents?.next,
     });
     expect(lastEvents?.events).toHaveLength(106);
+    expect(lastEvents?.caughtUp).toBe(true);
     expect(lastEvents?.done).toBe(true);
     expect(lastEvents?.next).toBe(506);
   });

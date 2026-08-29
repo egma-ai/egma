@@ -327,6 +327,7 @@ function describedSimulation(
     gradingState,
     combinedScore,
     reason: simulation.endingReason,
+    executionFailure: simulation.executionFailure,
     startedAt: simulation.startedAt?.toISOString() ?? null,
     endedAt: simulation.endedAt?.toISOString() ?? null,
     modality: simulation.modality,
@@ -355,6 +356,7 @@ function describedEvent(event: RunEvent): Record<string, unknown> {
         personaName: event.personaName,
         status: event.status,
         reason: event.reason,
+        executionFailure: event.executionFailure,
       };
 }
 
@@ -787,6 +789,7 @@ export async function runRoutes(
       return reply.send({
         events: found.events.map(describedEvent),
         next: found.next,
+        caughtUp: found.caughtUp,
         done: found.done && gradingDone,
       });
     },

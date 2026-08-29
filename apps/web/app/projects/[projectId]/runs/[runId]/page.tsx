@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   cancelRun,
   getRun,
@@ -24,6 +25,7 @@ import {
   type RunSimulation,
   type RunSimulationPage,
   type SimulationStatusWord,
+  executionFailureMessage,
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -93,6 +95,7 @@ const SUMMARY_LINK = cn(
 type Moved = {
   readonly status: SimulationStatusWord;
   readonly reason: RunSimulation["reason"];
+  readonly executionFailure: RunSimulation["executionFailure"];
 };
 
 type LoadedSimulationPage = {
@@ -164,7 +167,16 @@ function RunDetailView({
   const [runStatus, setRunStatus] = useState<string | null>(null);
   /** The last sequence number applied. The whole of the cursor. */
   const applied = useRef(0);
+  /** Failure toasts begin only after the initial historical event tail is read. */
+  const failureToastsArmed = useRef(false);
+  const [selectedSimulationId, setSelectedSimulationId] = useState<string | null>(null);
+  const selectedSimulationIdRef = useRef<string | null>(null);
   const [finishedByFeed, setFinishedByFeed] = useState(false);
+
+  const selectSimulation = useCallback((simulationId: string | null) => {
+    selectedSimulationIdRef.current = simulationId;
+    setSelectedSimulationId(simulationId);
+  }, []);
 
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -182,6 +194,9 @@ function RunDetailView({
    */
   useEffect(() => {
     applied.current = 0;
+    failureToastsArmed.current = false;
+    selectedSimulationIdRef.current = null;
+    setSelectedSimulationId(null);
     setMoved(new Map());
     setRunStatus(null);
     setFinishedByFeed(false);
@@ -208,6 +223,16 @@ function RunDetailView({
       window.location.replace("/sign-in");
     }
   }, [answer, simulationPage]);
+
+  useEffect(() => {
+    if (
+      simulationPage?.status !== "ready" ||
+      selectedSimulationIdRef.current !== null
+    ) {
+      return;
+    }
+    selectSimulation(simulationPage.value.simulations[0]?.id ?? null);
+  }, [selectSimulation, simulationPage]);
 
   const stillMoving =
     run !== null &&
@@ -266,13 +291,14 @@ function RunDetailView({
    * more, and it is read *after* the events on that side so it can only ever be
    * one poll stale rather than one poll early.
    */
-  const follow = useCallback(async () => {
+  const follow = useCallback(async (isCurrent: () => boolean) => {
     const asked = await platformAnswer(
       listRunEvents(
         { runId, projectId, after: applied.current },
         { client: platformClient },
       ),
     );
+    if (!isCurrent()) return true;
     if (asked.status === "signed-out") {
       window.location.replace("/sign-in");
       return true;
@@ -281,7 +307,8 @@ function RunDetailView({
     // it has and asks again; the numbers it already applied are still right.
     if (asked.status !== "ready") return false;
 
-    const { events, next, done } = asked.value;
+    const { events, next, caughtUp, done } = asked.value;
+    const mayToastFailures = failureToastsArmed.current;
 
     /*
      * **Which events are new is decided here, once, and never inside a state
@@ -306,12 +333,31 @@ function RunDetailView({
           now.set(event.simulationId, {
             status: event.status as SimulationStatusWord,
             reason: event.reason ?? null,
+            executionFailure: event.executionFailure ?? null,
           });
         }
         return now;
       });
       for (const event of fresh) {
         if (event.kind === "run") setRunStatus(event.status);
+        if (
+          mayToastFailures &&
+          event.kind === "simulation" &&
+          event.status === "failed" &&
+          event.simulationId !== selectedSimulationIdRef.current
+        ) {
+          const simulationName = [event.testName, event.personaName]
+            .filter((name): name is string => name !== null)
+            .join(" · ") || "Simulation";
+          toast.error("Simulation execution failed", {
+            id: `${runId}:${String(event.seq)}`,
+            description:
+              `${simulationName}: ${executionFailureMessage(
+                event.reason,
+                event.executionFailure,
+              )}`,
+          });
+        }
       }
       const terminalSimulationLanded = fresh.some(
         (event) =>
@@ -325,9 +371,11 @@ function RunDetailView({
          * again so a person stays on the same selected simulation.
          */
         await refreshLoadedSimulationPages();
+        if (!isCurrent()) return true;
       }
     }
 
+    if (caughtUp) failureToastsArmed.current = true;
     if (done) setFinishedByFeed(true);
     return done;
   }, [projectId, runId, refreshLoadedSimulationPages]);
@@ -346,7 +394,7 @@ function RunDetailView({
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const again = async (): Promise<void> => {
-      const done = await follow();
+      const done = await follow(() => !stopped);
       if (stopped) return;
       if (done) {
         refreshRun();
@@ -510,6 +558,8 @@ function RunDetailView({
           ...one,
           status: change.status,
           reason: change.reason ?? one.reason,
+          executionFailure:
+            change.executionFailure ?? one.executionFailure,
         };
   });
 
@@ -655,6 +705,8 @@ function RunDetailView({
               runId={runId}
               rows={simulations}
               total={read.expectedSimulationCount}
+              selectedId={selectedSimulationId}
+              onSelect={selectSimulation}
               {...(nextSimulationCursor === null
                 ? {}
                 : {

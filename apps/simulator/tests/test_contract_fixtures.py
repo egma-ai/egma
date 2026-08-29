@@ -128,6 +128,7 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     ),
     "report/completed-without-facts.json": ("/events/0", "required", "facts"),
     "report/credentials-echoed.json": ("", "additionalProperties", "connection"),
+    "report/failed-with-blank-reason.json": ("/events/0/reason", "pattern", None),
     "report/failed-without-reason.json": ("/events/0/reason", "type", None),
     "report/running-with-facts.json": ("/events/0", "additionalProperties", "facts"),
     # The three kinds this direction used to carry. A conversation's record

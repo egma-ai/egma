@@ -685,10 +685,12 @@ export async function claimRoutes(
             responseDeadline,
           ).catch(
             (
-              fault: unknown,
+              _fault: unknown,
             ): { readonly unbuildable: string } => ({
-              unbuildable:
-                fault instanceof Error ? fault.message : String(fault),
+              // This broad catch can hold dependency or credential errors.
+              // Unlike a simulator report, it has no secret-redaction seam,
+              // so the retained customer-facing sentence stays generic.
+              unbuildable: "an internal error prevented Egma from building its simulation spec",
             }),
           ),
         ),
@@ -777,6 +779,7 @@ export async function claimRoutes(
             claim.auth,
             claim.id,
             claim.claimedBy,
+            `Egma could not dispatch this simulation: ${spec.unbuildable}`,
           ).catch((fault: unknown) => {
             // The one place left where the sweep is the backstop: a row so
             // broken even its landing throws stays claimed until swept, and

@@ -208,6 +208,7 @@ export type Simulation = {
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
+  readonly executionFailure: string | null;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
@@ -244,6 +245,8 @@ export type SimulationReport = SimulationSummaryFacts & {
 
 export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
+  /** The credential-redacted sentence the simulator reported. */
+  readonly message: string;
 };
 
 const RUN_COLUMNS = {
@@ -284,6 +287,7 @@ const SIMULATION_COLUMNS = {
   modality: simulation.modality,
   status: simulation.status,
   endingReason: simulation.endingReason,
+  executionFailure: simulation.executionFailure,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
   heartbeatAt: simulation.heartbeatAt,
@@ -357,6 +361,15 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
   return write;
+}
+
+/** One non-empty sentence safe to retain as a simulation execution failure. */
+function executionFailureWrite(message: string): string {
+  const written = message.trim();
+  if (written === "") {
+    throw new Error("a failed simulation needs an execution failure message");
+  }
+  return written;
 }
 
 function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSnapshot {
@@ -2222,6 +2235,7 @@ export async function resolveSimulationStanding(
       modality: simulation.modality,
       status: simulation.status,
       endingReason: simulation.endingReason,
+      executionFailure: simulation.executionFailure,
       claimedBy: simulation.claimedBy,
       cancelRequestedAt: simulation.cancelRequestedAt,
     })
@@ -2240,6 +2254,7 @@ export async function resolveSimulationStanding(
     modality: row.modality as Modality,
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
+    executionFailure: row.executionFailure,
     claimedBy: row.claimedBy,
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
@@ -2422,6 +2437,7 @@ export type SimulationStanding = {
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
+  readonly executionFailure: string | null;
   /** The row's conductor — the claimant whose word the row takes. */
   readonly claimedBy: string | null;
   readonly cancelRequestedAt: Date | null;
@@ -2802,6 +2818,7 @@ export async function failSimulation(
     write: {
       status: "failed",
       endingReason: failure.reason,
+      executionFailure: executionFailureWrite(failure.message),
       ...summaryFactsWrite(failure),
     },
   });
@@ -2834,6 +2851,7 @@ export async function failSimulationDispatch(
   auth: AuthContext,
   id: string,
   claimant: string,
+  message = "Egma could not dispatch this simulation to a simulator.",
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
@@ -2845,7 +2863,11 @@ export async function failSimulationDispatch(
 
   return landSimulation(auth, id, claimant, {
     from: ["claimed"],
-    write: { status: "failed", endingReason: "dispatch_failed" },
+    write: {
+      status: "failed",
+      endingReason: "dispatch_failed",
+      executionFailure: executionFailureWrite(message),
+    },
   });
 }
 
@@ -2983,7 +3005,13 @@ export async function sweepOrphanedSimulations(
   const swept = await db().transaction(async (tx) => {
     const rows = await tx
       .update(simulation)
-      .set({ status: "failed", endingReason: "orphaned", endedAt: now })
+      .set({
+        status: "failed",
+        endingReason: "orphaned",
+        executionFailure:
+          "The simulator stopped reporting before this simulation finished.",
+        endedAt: now,
+      })
       .where(
         and(
           inArray(simulation.status, ["claimed", "running"]),
@@ -3048,6 +3076,8 @@ export type RunEvent = {
   /** A run status on a run event; a simulation status on a simulation one. */
   readonly status: RunStatus | SimulationStatus;
   readonly reason: SimulationEndingReason | null;
+  /** Present on a failed simulation event when its row retained the message. */
+  readonly executionFailure: string | null;
 };
 
 /** A bounded page of changes, where to ask from next, and whether there will be more. */
@@ -3055,6 +3085,8 @@ export type RunEventPage = {
   readonly events: readonly RunEvent[];
   /** Hand back as `after` to continue; the same number again on an empty page. */
   readonly next: number;
+  /** True when this page reached the end of the event tail that existed when it was read. */
+  readonly caughtUp: boolean;
   /** True once the run has finished, and only then. */
   readonly done: boolean;
 };
@@ -3109,6 +3141,7 @@ export async function listRunEvents(
       personaName: persona.name,
       status: runEvent.status,
       reason: runEvent.reason,
+      executionFailure: simulation.executionFailure,
     })
     .from(runEvent)
     .leftJoin(simulation, eq(runEvent.simulationId, simulation.id))
@@ -3134,11 +3167,19 @@ export async function listRunEvents(
     kind: row.kind as RunEventKind,
     status: row.status as RunStatus | SimulationStatus,
     reason: row.reason as SimulationEndingReason | null,
+    // The joined simulation now holds its terminal failure for good. Earlier
+    // queued, claimed, or running events did not know it yet, so the feed must
+    // not rewrite their history with a fact that arrived later.
+    executionFailure:
+      row.kind === "simulation" && row.status === "failed"
+        ? row.executionFailure
+        : null,
   }));
 
   return {
     events,
     next: events.at(-1)?.seq ?? after,
+    caughtUp: !hasLater,
     done: header.finishedAt !== null && !hasLater,
   };
 }

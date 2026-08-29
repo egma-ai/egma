@@ -29,9 +29,10 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import type {
-  RunSimulation,
-  SimulationStatusWord,
+import {
+  executionFailureMessage,
+  type RunSimulation,
+  type SimulationStatusWord,
 } from "../../../../../lib/runs.ts";
 import {
   priorGrades,
@@ -280,7 +281,7 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
   if (evidence.status !== "completed") {
     const failed = evidence.status === "failed";
     const message = failed
-      ? "Egma could not conduct this simulation. This is an execution problem, not a failed grade."
+      ? `${executionFailureMessage(evidence.reason, evidence.executionFailure)} This is an execution problem, not a failed grade.`
       : evidence.status === "canceled"
         ? "This simulation stopped before it finished. Any evidence recorded before it stopped remains below."
         : "This simulation is still in progress. Results update here as evidence arrives.";
@@ -748,16 +749,19 @@ export function RunScenarioWorkbench({
   runId,
   rows,
   total,
+  selectedId,
+  onSelect,
   more,
 }: {
   readonly projectId: string;
   readonly runId: string;
   readonly rows: readonly RunSimulation[];
   readonly total: number;
+  readonly selectedId: string | null;
+  readonly onSelect: (simulationId: string | null) => void;
   readonly more?: MoreSimulations;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(rows[0]?.id ?? null);
 
   const visibleRows = useMemo(() => {
     const asked = query.trim().toLocaleLowerCase();
@@ -772,17 +776,14 @@ export function RunScenarioWorkbench({
 
   useEffect(() => {
     setQuery("");
-    setSelectedId(rows[0]?.id ?? null);
   }, [projectId, runId]);
 
   useEffect(() => {
-    setSelectedId((current) => {
-      if (current !== null && visibleRows.some((row) => row.id === current)) {
-        return current;
-      }
-      return visibleRows[0]?.id ?? current ?? rows[0]?.id ?? null;
-    });
-  }, [rows, visibleRows]);
+    if (selectedId !== null && visibleRows.some((row) => row.id === selectedId)) {
+      return;
+    }
+    onSelect(visibleRows[0]?.id ?? selectedId ?? rows[0]?.id ?? null);
+  }, [onSelect, rows, selectedId, visibleRows]);
 
   const selected = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null;
   const evidenceProject = selected === null ? null : projectId;
@@ -868,7 +869,7 @@ export function RunScenarioWorkbench({
                 key={row.id}
                 row={row.id === displayedSelected?.id ? displayedSelected : row}
                 selected={row.id === selected?.id}
-                onSelect={() => setSelectedId(row.id)}
+                onSelect={() => onSelect(row.id)}
               />
             ))}
           </ol>
