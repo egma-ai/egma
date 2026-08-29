@@ -936,7 +936,7 @@ describe("choosing both", () => {
       goal: "both",
       steps: retellDiscovery(),
       stepsByTask: [{ contains: GENERATE_TASK, steps: writesOneTest("late-repair") }],
-      answers: { "retell-key": KEY, reach: "text" },
+      answers: { "retell-key": KEY, lanes: "text" },
       retell,
     });
 
