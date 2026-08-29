@@ -15,6 +15,7 @@
 --
 -- Frozen grading work is untouched. A `grading_job` row copies the whole
 -- definition into its own `entries` JSON, so a job frozen before this change
--- still carries the key inside that snapshot. The snapshot reader names the
--- fields it wants and ignores the rest, so in-flight work keeps executing.
+-- still carries the key inside that snapshot. Nothing re-validates a frozen
+-- entry: `claimGradingJobs` casts the stored JSON as it stands, and the
+-- worker reads only the fields it names, so in-flight work keeps executing.
 ALTER TABLE "grader_definition_version" DROP COLUMN "output_contract";

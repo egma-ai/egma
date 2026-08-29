@@ -53,7 +53,9 @@ import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
 import { ScopeFields } from "./scope-fields.tsx";
 
 /**
- * The words this surface repeats, written once.
+ * The words this surface says, written once — the ones it repeats across its
+ * three sheets, and the ones it says exactly once and keeps here beside the
+ * reason it says them.
  *
  * The pass threshold is asked for in three places — using a library grader,
  * editing an active one, creating a custom one — and a sentence that drifted

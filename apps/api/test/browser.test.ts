@@ -2536,6 +2536,9 @@ describe("the project grader library", () => {
        * the one immutable prompt, so the sheet sends the parts and nothing
        * else, and Create stays disabled while any of them is empty.
        */
+      expect(
+        await custom.getByRole("button", { name: "Create grader" }).isDisabled(),
+      ).toBe(true);
       await custom
         .getByLabel("Grading instructions")
         .fill("the agent stayed polite and resolved the request");

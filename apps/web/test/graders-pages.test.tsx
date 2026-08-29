@@ -844,6 +844,51 @@ describe("the project Graders surface", () => {
       ),
     ).toBeTruthy();
 
+    /*
+     * And the order, which is the sheet's argument rather than a layout
+     * detail: the framing line before anything is asked for, the evidence
+     * sentence above the three boxes it governs, and the boundary drawn
+     * before the threshold and the scope that apply it. Presence alone would
+     * let a later edit shuffle these and stay green.
+     */
+    const pinned = [
+      [
+        "framing line",
+        within(sheet).getByText(
+          "This grader judges every conversation in its scope. For something " +
+            "one test must do, write an expected behavior on that test instead.",
+        ),
+      ],
+      ["Name*", within(sheet).getByLabelText("Name*")],
+      [
+        "Description [optional]",
+        within(sheet).getByLabelText("Description [optional]"),
+      ],
+      [
+        "evidence sentence",
+        within(sheet).getByText(
+          "The judge reads the transcript, the outcome, the tool calls, and " +
+            "the metrics of one conversation.",
+        ),
+      ],
+      [
+        "Grading instructions*",
+        within(sheet).getByLabelText("Grading instructions*"),
+      ],
+      ["Passes when*", within(sheet).getByLabelText("Passes when*")],
+      ["Fails when*", within(sheet).getByLabelText("Fails when*")],
+      ["Pass threshold*", within(sheet).getByLabelText("Pass threshold*")],
+      ["Scope", within(sheet).getByText("Scope")],
+    ] as const;
+    const rendered = [...pinned].sort(([, one], [, next]) => {
+      const follows =
+        one.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING;
+      return follows === 0 ? 1 : -1;
+    });
+    expect(rendered.map(([step]) => step)).toEqual(
+      pinned.map(([step]) => step),
+    );
+
     fireEvent.change(within(sheet).getByLabelText("Name*"), {
       target: { value: "Polite resolution" },
     });
