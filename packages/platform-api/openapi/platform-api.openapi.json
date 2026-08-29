@@ -15695,6 +15695,9 @@
                         }
                       ]
                     },
+                    "eventThrough": {
+                      "type": "integer"
+                    },
                     "tempMockAgentVersion": {
                       "anyOf": [
                         {
@@ -15935,6 +15938,7 @@
                     "createdAt",
                     "startedAt",
                     "finishedAt",
+                    "eventThrough",
                     "tempMockAgentVersion",
                     "tempMockAgentVersionCleanup",
                     "mockMetadata",
@@ -16176,6 +16180,16 @@
                               }
                             ]
                           },
+                          "executionFailure": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "startedAt": {
                             "anyOf": [
                               {
@@ -16258,6 +16272,7 @@
                           "gradingState",
                           "combinedScore",
                           "reason",
+                          "executionFailure",
                           "startedAt",
                           "endedAt",
                           "modality",
@@ -16520,6 +16535,16 @@
                                     "type": "null"
                                   }
                                 ]
+                              },
+                              "executionFailure": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "required": [
@@ -16530,7 +16555,8 @@
                               "testName",
                               "personaName",
                               "status",
-                              "reason"
+                              "reason",
+                              "executionFailure"
                             ],
                             "additionalProperties": false
                           }
@@ -16540,6 +16566,9 @@
                     "next": {
                       "type": "integer"
                     },
+                    "caughtUp": {
+                      "type": "boolean"
+                    },
                     "done": {
                       "type": "boolean"
                     }
@@ -16547,6 +16576,7 @@
                   "required": [
                     "events",
                     "next",
+                    "caughtUp",
                     "done"
                   ],
                   "additionalProperties": false
@@ -17319,6 +17349,16 @@
                         }
                       ]
                     },
+                    "executionFailure": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "modality": {
                       "type": "string",
                       "enum": [
@@ -17965,6 +18005,7 @@
                     "gradeHistory",
                     "combinedScore",
                     "reason",
+                    "executionFailure",
                     "modality",
                     "createdAt",
                     "startedAt",

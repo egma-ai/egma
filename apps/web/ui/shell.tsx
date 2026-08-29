@@ -26,6 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { SheetHost } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import {
   SidebarBrand,
@@ -879,6 +880,7 @@ function ShellFrame({
         {children}
       </div>
     </div>
+    <Toaster position="top-right" closeButton />
     </DraftNavigationProvider>
     </SessionContext.Provider>
   );

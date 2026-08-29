@@ -387,6 +387,21 @@ describe("what the door refuses before believing a word", () => {
     }
   });
 
+  it("refuses a failed report whose reason is only whitespace", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_blank_failure_reason",
+    );
+    const { simulationId } = await aRunningSimulation(key, connectionId, versionId);
+    const failed = terminalEvent("failed", "error");
+    failed.reason = "   ";
+
+    const refused = await report(simulationId, [failed]);
+
+    expect(refused.statusCode).toBe(400);
+    expect(refused.body.error).toBe("invalid_request");
+    expect(String(refused.body.message)).toContain("/events/0/reason");
+  });
+
   it("refuses a document about another simulation, naming both ids", async () => {
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "reports_mismatch",
@@ -692,6 +707,7 @@ describe("the lifecycle lands", () => {
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("simulator_error");
+    expect(row?.executionFailure).toBe("the platform refused the exchange");
     expect(row?.turnCount).toBe(3);
 
     // No completed trace exists, so the execution failure creates no grade job.
@@ -699,6 +715,41 @@ describe("the lifecycle lands", () => {
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
     expect(header.body.failedCount).toBe(1);
+
+    const simulations = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}/simulations?pageSize=1`,
+      key,
+    );
+    expect(simulations.body.simulations).toEqual([
+      expect.objectContaining({
+        id: simulationId,
+        executionFailure: "the platform refused the exchange",
+      }),
+    ]);
+    const detail = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(detail.body.executionFailure).toBe("the platform refused the exchange");
+    const events = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}/events?after=0`,
+      key,
+    );
+    expect(events.body.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          simulationId,
+          status: "failed",
+          executionFailure: "the platform refused the exchange",
+        }),
+      ]),
+    );
   });
 
   it("lands agent_never_joined from the claimed state, where nothing ever ran", async () => {
@@ -871,6 +922,62 @@ describe("idempotency without a ledger", () => {
     expect(resent.body).toEqual({
       simulation_id: simulationId,
       status: "completed",
+    });
+  });
+
+  it("refuses a failed resend that changes the retained execution failure", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_failed_message_conflict",
+    );
+    const { simulationId } = await aRunningSimulation(key, connectionId, versionId);
+    const landed = terminalEvent("failed", "error");
+    expect((await report(simulationId, [landed])).statusCode).toBe(200);
+
+    const changed = await report(simulationId, [
+      {
+        ...terminalEvent("failed", "error"),
+        reason: "a different failure sentence",
+      },
+    ]);
+    expect(changed.statusCode).toBe(409);
+    expect(changed.body.error).toBe("conflict");
+  });
+
+  it("absorbs an exact failed resend and keeps legacy failed rows idempotent", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_failed_message_resend",
+    );
+    const { simulationId } = await aRunningSimulation(key, connectionId, versionId);
+    const landed = terminalEvent("failed", "error");
+    expect((await report(simulationId, [landed])).statusCode).toBe(200);
+
+    const exact = await report(simulationId, [landed]);
+    expect(exact.statusCode).toBe(200);
+    expect(exact.body).toEqual({
+      simulation_id: simulationId,
+      status: "failed",
+    });
+
+    // A row written before execution failures were retained has no sentence
+    // to compare. Reproduce that old terminal shape in one legal running-to-
+    // failed transition; terminal rows themselves remain immutable.
+    const legacyRun = await aRunningSimulation(key, connectionId, versionId);
+    await api.database.sql(
+      `update simulation
+       set status = 'failed', ending_reason = 'simulator_error', ended_at = now()
+       where id = $1`,
+      [legacyRun.simulationId],
+    );
+    const legacy = await report(legacyRun.simulationId, [
+      {
+        ...terminalEvent("failed", "error"),
+        reason: "the retry cannot recover a sentence the old row never stored",
+      },
+    ]);
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.body).toEqual({
+      simulation_id: legacyRun.simulationId,
+      status: "failed",
     });
   });
 

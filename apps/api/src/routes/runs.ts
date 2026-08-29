@@ -7,6 +7,7 @@ import {
   getConnection,
   getRun,
   IdempotencyConflictError,
+  latestRunEventSequence,
   listRunEvents,
   listRuns,
   listSimulations,
@@ -327,6 +328,7 @@ function describedSimulation(
     gradingState,
     combinedScore,
     reason: simulation.endingReason,
+    executionFailure: simulation.executionFailure,
     startedAt: simulation.startedAt?.toISOString() ?? null,
     endedAt: simulation.endedAt?.toISOString() ?? null,
     modality: simulation.modality,
@@ -355,6 +357,7 @@ function describedEvent(event: RunEvent): Record<string, unknown> {
         personaName: event.personaName,
         status: event.status,
         reason: event.reason,
+        executionFailure: event.executionFailure,
       };
 }
 
@@ -657,7 +660,7 @@ export async function runRoutes(
       if ("refusal" in acting) return refuseActing(reply, acting);
       const run = await getRun(acting.auth, runId);
       if (run === undefined) return noSuchRun(reply, runId);
-      const [header, agent, connection] = await Promise.all([
+      const [header, agent, connection, eventThrough] = await Promise.all([
         // The one read that asked for this run in particular, and the only one
         // answered with the temporary platform world.
         headersOf(acting.auth, [run], options.baseUrl, true).then(
@@ -665,9 +668,13 @@ export async function runRoutes(
         ),
         getAgent(acting.auth, run.agentId),
         getConnection(acting.auth, run.agentId, run.connectionId),
+        latestRunEventSequence(acting.auth, runId),
       ]);
       return reply.send({
         ...header,
+        // Captured before this response makes the page visible. A browser
+        // keeps it as the boundary between history and live notifications.
+        eventThrough: eventThrough ?? 0,
         connectionSnapshot: {
           agentPlatform: run.connectionSnapshot.agentPlatform,
           connectionType: run.connectionSnapshot.connectionType,
@@ -787,6 +794,7 @@ export async function runRoutes(
       return reply.send({
         events: found.events.map(describedEvent),
         next: found.next,
+        caughtUp: found.caughtUp,
         done: found.done && gradingDone,
       });
     },

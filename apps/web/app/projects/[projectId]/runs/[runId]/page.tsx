@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   cancelRun,
   getRun,
@@ -24,6 +25,7 @@ import {
   type RunSimulation,
   type RunSimulationPage,
   type SimulationStatusWord,
+  executionFailureMessage,
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -93,7 +95,35 @@ const SUMMARY_LINK = cn(
 type Moved = {
   readonly status: SimulationStatusWord;
   readonly reason: RunSimulation["reason"];
+  readonly executionFailure: RunSimulation["executionFailure"];
 };
+
+type FailureToastCandidate = {
+  readonly seq: number;
+  readonly simulationId: string;
+  readonly testName: string | null;
+  readonly personaName: string | null;
+  readonly reason: RunSimulation["reason"];
+  readonly executionFailure: RunSimulation["executionFailure"];
+};
+
+function failureToastId(runId: string, seq: number): string {
+  return `${runId}:${String(seq)}`;
+}
+
+function showFailureToast(runId: string, failure: FailureToastCandidate): void {
+  const simulationName = [failure.testName, failure.personaName]
+    .filter((name): name is string => name !== null)
+    .join(" · ") || "Simulation";
+  toast.error("Simulation execution failed", {
+    id: failureToastId(runId, failure.seq),
+    description:
+      `${simulationName}: ${executionFailureMessage(
+        failure.reason,
+        failure.executionFailure,
+      )}`,
+  });
+}
 
 type LoadedSimulationPage = {
   readonly cursor: string;
@@ -164,7 +194,36 @@ function RunDetailView({
   const [runStatus, setRunStatus] = useState<string | null>(null);
   /** The last sequence number applied. The whole of the cursor. */
   const applied = useRef(0);
+  /** Last event already present when this page first observed the run. */
+  const failureToastHistoryThrough = useRef<number | null>(null);
+  /** Visible failure toasts that a later persistent selected message can replace. */
+  const activeFailureToasts = useRef<FailureToastCandidate[]>([]);
+  const initialSelectionReady = useRef(false);
+  const [selectedSimulationId, setSelectedSimulationId] = useState<string | null>(null);
+  const selectedSimulationIdRef = useRef<string | null>(null);
   const [finishedByFeed, setFinishedByFeed] = useState(false);
+
+  const selectSimulation = useCallback((simulationId: string | null) => {
+    selectedSimulationIdRef.current = simulationId;
+    setSelectedSimulationId(simulationId);
+  }, []);
+
+  const showTrackedFailureToast = useCallback((failure: FailureToastCandidate) => {
+    activeFailureToasts.current.push(failure);
+    showFailureToast(runId, failure);
+  }, [runId]);
+
+  const dismissFailureToastsForSimulation = useCallback((simulationId: string) => {
+    const kept: FailureToastCandidate[] = [];
+    for (const failure of activeFailureToasts.current) {
+      if (failure.simulationId === simulationId) {
+        toast.dismiss(failureToastId(runId, failure.seq));
+      } else {
+        kept.push(failure);
+      }
+    }
+    activeFailureToasts.current = kept;
+  }, [runId]);
 
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -182,12 +241,38 @@ function RunDetailView({
    */
   useEffect(() => {
     applied.current = 0;
+    failureToastHistoryThrough.current = null;
+    activeFailureToasts.current = [];
+    initialSelectionReady.current = false;
+    selectedSimulationIdRef.current = null;
+    setSelectedSimulationId(null);
     setMoved(new Map());
     setRunStatus(null);
     setFinishedByFeed(false);
     setLaterSimulationPages([]);
     setMoreSimulationsRefused(null);
+    return () => {
+      for (const failure of activeFailureToasts.current) {
+        toast.dismiss(failureToastId(runId, failure.seq));
+      }
+      activeFailureToasts.current = [];
+    };
   }, [runId, projectId]);
+
+  /*
+   * Lock history to the first run detail that makes this page visible. A quiet
+   * detail refresh can finish while the first feed request is still waiting;
+   * it must not move the boundary forward and hide a failure that happened
+   * after the person opened the page.
+   *
+   * This effect is declared before the follower effect. React therefore locks
+   * the boundary before this ready run can start its first feed request.
+   */
+  useEffect(() => {
+    if (run !== null && failureToastHistoryThrough.current === null) {
+      failureToastHistoryThrough.current = run.eventThrough;
+    }
+  }, [run]);
 
   /**
    * And the pending failure and the open control, which are a **separate**
@@ -208,6 +293,14 @@ function RunDetailView({
       window.location.replace("/sign-in");
     }
   }, [answer, simulationPage]);
+
+  useEffect(() => {
+    if (simulationPage?.status !== "ready" || initialSelectionReady.current) return;
+    if (selectedSimulationIdRef.current === null) {
+      selectSimulation(simulationPage.value.simulations[0]?.id ?? null);
+    }
+    initialSelectionReady.current = true;
+  }, [runId, selectSimulation, simulationPage]);
 
   const stillMoving =
     run !== null &&
@@ -266,13 +359,14 @@ function RunDetailView({
    * more, and it is read *after* the events on that side so it can only ever be
    * one poll stale rather than one poll early.
    */
-  const follow = useCallback(async () => {
+  const follow = useCallback(async (isCurrent: () => boolean) => {
     const asked = await platformAnswer(
       listRunEvents(
         { runId, projectId, after: applied.current },
         { client: platformClient },
       ),
     );
+    if (!isCurrent()) return true;
     if (asked.status === "signed-out") {
       window.location.replace("/sign-in");
       return true;
@@ -282,6 +376,11 @@ function RunDetailView({
     if (asked.status !== "ready") return false;
 
     const { events, next, done } = asked.value;
+    const historyThrough = failureToastHistoryThrough.current;
+    // The ready run-detail effect above normally makes this impossible. If a
+    // future refactor changes effect order, keep the page quiet and re-read the
+    // same feed page instead of guessing which failures are historical.
+    if (historyThrough === null) return false;
 
     /*
      * **Which events are new is decided here, once, and never inside a state
@@ -306,12 +405,35 @@ function RunDetailView({
           now.set(event.simulationId, {
             status: event.status as SimulationStatusWord,
             reason: event.reason ?? null,
+            executionFailure: event.executionFailure ?? null,
           });
         }
         return now;
       });
       for (const event of fresh) {
         if (event.kind === "run") setRunStatus(event.status);
+        if (
+          event.seq > historyThrough &&
+          event.kind === "simulation" &&
+          event.status === "failed"
+        ) {
+          const failure: FailureToastCandidate = {
+            seq: event.seq,
+            simulationId: event.simulationId,
+            testName: event.testName,
+            personaName: event.personaName,
+            reason: event.reason,
+            executionFailure: event.executionFailure,
+          };
+          if (!initialSelectionReady.current) {
+            // Selection can be delayed, refused, or never answer. The failure
+            // must still be visible now. Track it so the exact persistent
+            // selected message can replace the toast after it is on screen.
+            showTrackedFailureToast(failure);
+          } else if (event.simulationId !== selectedSimulationIdRef.current) {
+            showTrackedFailureToast(failure);
+          }
+        }
       }
       const terminalSimulationLanded = fresh.some(
         (event) =>
@@ -325,12 +447,13 @@ function RunDetailView({
          * again so a person stays on the same selected simulation.
          */
         await refreshLoadedSimulationPages();
+        if (!isCurrent()) return true;
       }
     }
 
     if (done) setFinishedByFeed(true);
     return done;
-  }, [projectId, runId, refreshLoadedSimulationPages]);
+  }, [projectId, runId, refreshLoadedSimulationPages, showTrackedFailureToast]);
 
   /**
    * The follower itself: one page, then another, while anything is moving.
@@ -346,7 +469,7 @@ function RunDetailView({
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const again = async (): Promise<void> => {
-      const done = await follow();
+      const done = await follow(() => !stopped);
       if (stopped) return;
       if (done) {
         refreshRun();
@@ -510,6 +633,8 @@ function RunDetailView({
           ...one,
           status: change.status,
           reason: change.reason ?? one.reason,
+          executionFailure:
+            change.executionFailure ?? one.executionFailure,
         };
   });
 
@@ -655,6 +780,9 @@ function RunDetailView({
               runId={runId}
               rows={simulations}
               total={read.expectedSimulationCount}
+              selectedId={selectedSimulationId}
+              onSelect={selectSimulation}
+              onExecutionFailureVisible={dismissFailureToastsForSimulation}
               {...(nextSimulationCursor === null
                 ? {}
                 : {

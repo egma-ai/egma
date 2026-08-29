@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
@@ -38,7 +39,10 @@ const ME: Me = {
   projects: [{ id: "prj_1", name: "Receptionists", slug: "receptionists" }],
 };
 
-type Stub = { readonly status: number; readonly body: unknown } | "never";
+type Stub =
+  | { readonly status: number; readonly body: unknown }
+  | { readonly deferred: Promise<Response> }
+  | "never";
 type Sent = {
   readonly path: string;
   readonly url: string;
@@ -69,6 +73,7 @@ function answers(stubs: Record<string, Stub | readonly Stub[]>): void {
         ? (held[Math.min(turn, held.length - 1)] ?? "never")
         : held;
       if (answer === "never") return new Promise<Response>(() => undefined);
+      if ("deferred" in answer) return answer.deferred;
       return new Response(answer.status === 204 ? null : JSON.stringify(answer.body), {
         status: answer.status,
         headers: { "content-type": "application/json" },
@@ -122,6 +127,7 @@ function runHeader(overrides: Record<string, unknown> = {}) {
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
     ...runHeader(),
+    eventThrough: 0,
     connectionSnapshot: {
       agentPlatform: "retell",
       connectionType: "retell_chat_api",
@@ -156,6 +162,7 @@ function simulation(overrides: Record<string, unknown> = {}) {
     gradingState: "complete",
     combinedScore: 1,
     reason: null,
+    executionFailure: null,
     startedAt: "2026-08-21T10:00:01.000Z",
     endedAt: "2026-08-21T10:01:00.000Z",
     modality: "chat",
@@ -245,6 +252,7 @@ function simulationEvidence(overrides: Record<string, unknown> = {}) {
     gradeHistory: [],
     combinedScore: 1,
     reason: null,
+    executionFailure: null,
     modality: "chat",
     createdAt: "2026-08-21T10:00:00.000Z",
     startedAt: "2026-08-21T10:00:01.000Z",
@@ -328,7 +336,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  toast.dismiss();
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -785,6 +795,7 @@ describe("one run after suites", () => {
                 gradingState: "not_requested",
                 combinedScore: null,
                 reason: "not_answered",
+                executionFailure: "Retell did not answer the test call.",
               }),
             ],
             nextPageToken: null,
@@ -798,6 +809,7 @@ describe("one run after suites", () => {
             grades: [],
             combinedScore: null,
             reason: "not_answered",
+            executionFailure: "Retell did not answer the test call.",
             gradingPlan: null,
             transcript: null,
           }),
@@ -808,7 +820,7 @@ describe("one run after suites", () => {
 
     expect(await screen.findByRole("button", { name: /Execution failed/u })).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Egma could not conduct this simulation. This is an execution problem, not a failed grade.",
+      "Retell did not answer the test call. This is an execution problem, not a failed grade.",
     );
     expect(
       document.querySelector('[data-slot="selected-simulation-header"]')?.textContent,
@@ -875,8 +887,909 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Egma could not conduct this simulation.");
+    expect(alert.textContent).toContain(
+      "The simulator encountered an error and could not continue.",
+    );
     expect(alert.textContent).not.toContain("simulator_error");
+  });
+
+  it("toasts the exact execution failure when a non-selected simulation fails", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const dismiss = vi.spyOn(toast, "dismiss");
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [first, second], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: {
+              simulations: [
+                first,
+                {
+                  ...second,
+                  status: "failed",
+                  reason: "simulator_error",
+                  executionFailure:
+                    "LiveKit refused the room because the token had expired.",
+                  endedAt: "2026-08-21T10:01:00.000Z",
+                },
+              ],
+              nextPageToken: null,
+            },
+          },
+        ],
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [],
+            next: 0,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure:
+                  "LiveKit refused the room because the token had expired.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+      "/v1/simulations/sim_2": {
+        status: 200,
+        body: simulationEvidence({
+          id: "sim_2",
+          status: "failed",
+          gradingState: "not_requested",
+          combinedScore: null,
+          reason: "simulator_error",
+          executionFailure:
+            "LiveKit refused the room because the token had expired.",
+          endedAt: "2026-08-21T10:01:00.000Z",
+          grades: [],
+          gradeHistory: [],
+          gradingPlan: null,
+          transcript: null,
+        }),
+      },
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(notify).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:1",
+      description:
+        "Reschedules service · Patient caller: LiveKit refused the room because the token had expired.",
+    });
+    expect(await screen.findByText("Simulation execution failed")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Reschedules service · Patient caller: LiveKit refused the room because the token had expired.",
+      ),
+    ).toBeTruthy();
+    const firstChoice = await screen.findByRole("button", { name: /Books service,/u });
+    expect(firstChoice.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reschedules service, Patient caller, Execution failed",
+      }),
+    );
+    expect(
+      await screen.findByText(/This is an execution problem, not a failed grade\./u),
+    ).toBeTruthy();
+    expect(dismiss).toHaveBeenCalledWith("run_1:1");
+  });
+
+  it("does not replay a historical failure toast while the feed catches up", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const activeRun = runDetail({
+      status: "running",
+      eventThrough: 1,
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        {
+          status: 200,
+          body: { simulations: [first, second], nextPageToken: null },
+        },
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure:
+                  "LiveKit refused the room because the token had expired.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await screen.findByRole("button", {
+      name: "Reschedules service, Patient caller, Execution failed",
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(screen.queryByText("Simulation execution failed")).toBeNull();
+  });
+
+  it("toasts a new failure that arrives while a long history is still paging", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const activeRun = runDetail({
+      status: "running",
+      // The page became visible with 200 historical events. Failure 201 then
+      // landed before the first bounded feed request could reach it.
+      eventThrough: 200,
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const history = Array.from({ length: 200 }, (_, index) => ({
+      seq: index + 1,
+      at: "2026-08-21T10:00:00.000Z",
+      kind: "run",
+      status: "running",
+    }));
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [first, second], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: {
+              simulations: [
+                first,
+                {
+                  ...second,
+                  status: "failed",
+                  reason: "simulator_error",
+                  executionFailure: "The media connection closed unexpectedly.",
+                  endedAt: "2026-08-21T10:01:00.000Z",
+                },
+              ],
+              nextPageToken: null,
+            },
+          },
+        ],
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: history,
+            next: 200,
+            caughtUp: false,
+            done: false,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 201,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 201,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(notify).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:201",
+      description:
+        "Reschedules service · Patient caller: The media connection closed unexpectedly.",
+    });
+  });
+
+  it("keeps the first detail boundary while a feed request is delayed", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const firstDetail = runDetail({
+      status: "running",
+      eventThrough: 0,
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 1,
+      gradedCount: 0,
+    });
+    const refreshedDetail = { ...firstDetail, eventThrough: 1 };
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    answers({
+      ...detailStubs(
+        firstDetail,
+        {
+          status: 200,
+          body: { simulations: [first, second], nextPageToken: null },
+        },
+        "never",
+      ),
+      "/v1/runs/run_1": [
+        { status: 200, body: firstDetail },
+        { status: 200, body: refreshedDetail },
+      ],
+      "/v1/runs/run_1/events": [
+        // The first feed request stays open. Grading polling refreshes the run
+        // detail to eventThrough 1 and restarts the follower.
+        "never",
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(notify).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:1",
+      description:
+        "Reschedules service · Patient caller: The media connection closed unexpectedly.",
+    });
+  });
+
+  it("temporarily toasts until the initial selection can show the persistent message", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const dismiss = vi.spyOn(toast, "dismiss");
+    let answerSimulationList!: (response: Response) => void;
+    const refreshedSimulationList = new Promise<Response>((resolve) => {
+      answerSimulationList = resolve;
+    });
+    let answerEvidence!: (response: Response) => void;
+    const evidenceRead = new Promise<Response>((resolve) => {
+      answerEvidence = resolve;
+    });
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 1,
+      completedCount: 0,
+      simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const failed = simulation({
+      status: "failed",
+      gradingState: "not_requested",
+      combinedScore: null,
+      reason: "simulator_error",
+      executionFailure: "The media connection closed unexpectedly.",
+      endedAt: "2026-08-21T10:01:00.000Z",
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        ["never", { deferred: refreshedSimulationList }],
+        { deferred: evidenceRead },
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_1",
+                testName: "Books service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 1,
+            // The failure landed after the run detail captured its history
+            // boundary, while the simulation list was still loading.
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(
+          sent.filter(
+            (request) => request.path === "/v1/runs/run_1/simulations",
+          ),
+        ).toHaveLength(2);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:1",
+      description:
+        "Books service · Patient caller: The media connection closed unexpectedly.",
+    });
+
+    answerSimulationList(
+      new Response(
+        JSON.stringify({ simulations: [failed], nextPageToken: null }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Loading this simulation's results…",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The media connection closed unexpectedly. This is an execution problem, not a failed grade.",
+      ).closest('[role="alert"]'),
+    ).not.toBeNull();
+    expect(dismiss).toHaveBeenCalledWith("run_1:1");
+    await waitFor(() => {
+      expect(screen.queryByText("Simulation execution failed")).toBeNull();
+    });
+
+    answerEvidence(
+      new Response(
+        JSON.stringify(
+          simulationEvidence({
+            status: "failed",
+            gradingState: "not_requested",
+            combinedScore: null,
+            reason: "simulator_error",
+            executionFailure: "The media connection closed unexpectedly.",
+            endedAt: "2026-08-21T10:01:00.000Z",
+            grades: [],
+            gradeHistory: [],
+            gradingPlan: null,
+            transcript: null,
+          }),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", {
+          name: "Loading this simulation's results…",
+        }),
+      ).toBeNull();
+    });
+    const persistentMessage = screen.getByText(
+      "The media connection closed unexpectedly. This is an execution problem, not a failed grade.",
+    );
+    expect(persistentMessage.closest('[role="alert"]')).not.toBeNull();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(dismiss).toHaveBeenCalledWith("run_1:1");
+  });
+
+  it("toasts while the simulation list is unavailable and selects normally on retry", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const dismiss = vi.spyOn(toast, "dismiss");
+    let answerEvent!: (response: Response) => void;
+    const eventRead = new Promise<Response>((resolve) => {
+      answerEvent = resolve;
+    });
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "failed",
+      gradingState: "not_requested",
+      combinedScore: null,
+      reason: "simulator_error",
+      executionFailure:
+        "LiveKit refused the room because the token had expired.",
+      endedAt: "2026-08-21T10:01:00.000Z",
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 500,
+            body: {
+              error: "read_failed",
+              message: "The simulation list could not be read.",
+            },
+          },
+          // The terminal event starts a quiet refresh. Keep that read open so
+          // only the person's explicit retry returns the list.
+          "never",
+          {
+            status: 200,
+            body: { simulations: [first, second], nextPageToken: null },
+          },
+        ],
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        { deferred: eventRead },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    expect(await screen.findByText("The simulation list could not be read.")).toBeTruthy();
+    answerEvent(
+      new Response(
+        JSON.stringify({
+          events: [
+            {
+              seq: 1,
+              at: "2026-08-21T10:01:00.000Z",
+              kind: "simulation",
+              simulationId: "sim_2",
+              testName: "Reschedules service",
+              personaName: "Patient caller",
+              status: "failed",
+              reason: "simulator_error",
+              executionFailure:
+                "LiveKit refused the room because the token had expired.",
+            },
+          ],
+          next: 1,
+          caughtUp: true,
+          done: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:1",
+      description:
+        "Reschedules service · Patient caller: LiveKit refused the room because the token had expired.",
+    });
+
+    await waitFor(() => {
+      expect(
+        sent.filter(
+          (request) => request.path === "/v1/runs/run_1/simulations",
+        ),
+      ).toHaveLength(2);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    const selected = await screen.findByRole("button", { name: /Books service,/u });
+    expect(selected.getAttribute("aria-pressed")).toBe("true");
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(dismiss).not.toHaveBeenCalledWith("run_1:1");
+  });
+
+  it("uses the selected simulation's persistent alert instead of a duplicate toast", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    let answerFailedEvidence!: (response: Response) => void;
+    const failedEvidenceRead = new Promise<Response>((resolve) => {
+      answerFailedEvidence = resolve;
+    });
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 1,
+      completedCount: 0,
+      simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const running = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const failed = {
+      ...running,
+      status: "failed",
+      reason: "simulator_error",
+      executionFailure: "LiveKit refused the room because the token had expired.",
+      endedAt: "2026-08-21T10:01:00.000Z",
+    };
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [running], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: { simulations: [failed], nextPageToken: null },
+          },
+        ],
+        [
+          {
+            status: 200,
+            body: simulationEvidence({
+              status: "running",
+              gradingState: null,
+              combinedScore: null,
+              endedAt: null,
+            }),
+          },
+          { deferred: failedEvidenceRead },
+        ],
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [],
+            next: 0,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_1",
+                testName: "Books service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure:
+                  "LiveKit refused the room because the token had expired.",
+              },
+            ],
+            next: 1,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    const feedBackedMessage = await screen.findByText(
+      "LiveKit refused the room because the token had expired. This is an execution problem, not a failed grade.",
+      undefined,
+      { timeout: 5000 },
+    );
+    expect(feedBackedMessage.closest('[role="alert"]')).not.toBeNull();
+    expect(notify).not.toHaveBeenCalled();
+    expect(screen.queryByText("Simulation execution failed")).toBeNull();
+
+    answerFailedEvidence(
+      new Response(
+        JSON.stringify(
+          simulationEvidence({
+            status: "failed",
+            gradingState: "not_requested",
+            combinedScore: null,
+            reason: "simulator_error",
+            executionFailure:
+              "LiveKit refused the room because the token had expired.",
+            endedAt: "2026-08-21T10:01:00.000Z",
+            grades: [],
+            gradeHistory: [],
+            gradingPlan: null,
+            transcript: null,
+          }),
+        ),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", {
+          name: "Loading this simulation's results…",
+        }),
+      ).toBeNull();
+    });
+    const evidenceBackedMessage = screen.getByText(
+      "LiveKit refused the room because the token had expired. This is an execution problem, not a failed grade.",
+    );
+    expect(evidenceBackedMessage.closest('[role="alert"]')).not.toBeNull();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("does not toast a failed feed response after leaving the run", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    let answerLate!: (response: Response) => void;
+    const late = new Promise<Response>((resolve) => {
+      answerLate = resolve;
+    });
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        {
+          status: 200,
+          body: {
+            simulations: [
+              simulation({
+                status: "running",
+                gradingState: null,
+                combinedScore: null,
+                endedAt: null,
+              }),
+              simulation({
+                id: "sim_2",
+                position: 2,
+                testId: "tst_2",
+                testName: "Reschedules service",
+                status: "running",
+                gradingState: null,
+                combinedScore: null,
+                endedAt: null,
+              }),
+            ],
+            nextPageToken: null,
+          },
+        },
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [],
+            next: 0,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        { deferred: late },
+      ],
+    });
+    const view = render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(
+          sent.filter((request) => request.path === "/v1/runs/run_1/events"),
+        ).toHaveLength(2);
+      },
+      { timeout: 4000 },
+    );
+    view.unmount();
+    answerLate(
+      new Response(
+        JSON.stringify({
+          events: [
+            {
+              seq: 1,
+              at: "2026-08-21T10:01:00.000Z",
+              kind: "simulation",
+              simulationId: "sim_2",
+              testName: "Reschedules service",
+              personaName: "Patient caller",
+              status: "failed",
+              reason: "simulator_error",
+              executionFailure:
+                "LiveKit refused the room because the token had expired.",
+            },
+          ],
+          next: 1,
+          caughtUp: true,
+          done: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("switches simulations in place and ignores a slower first detail read", async () => {
@@ -1091,6 +2004,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            caughtUp: true,
             done: false,
           },
         },
@@ -1301,7 +2215,15 @@ describe("one run after suites", () => {
       ),
       "/v1/simulations/sim_2": "never",
       "/v1/runs/run_1/events": [
-        { status: 200, body: { events: [], next: 0, done: false } },
+        {
+          status: 200,
+          body: {
+            events: [],
+            next: 0,
+            caughtUp: true,
+            done: false,
+          },
+        },
         {
           status: 200,
           body: {
@@ -1318,6 +2240,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            caughtUp: true,
             done: false,
           },
         },

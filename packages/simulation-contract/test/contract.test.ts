@@ -213,6 +213,10 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "connection",
   },
+  "report/failed-with-blank-reason.json": {
+    at: "/events/0/reason",
+    keyword: "pattern",
+  },
   "report/failed-without-reason.json": {
     at: "/events/0/reason",
     keyword: "type",

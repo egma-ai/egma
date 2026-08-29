@@ -257,6 +257,7 @@ describe("every lifecycle change", () => {
     });
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "agent_never_joined",
+      message: "The agent never joined before the deadline.",
     });
 
     const feed = await feedOf(started.id);
@@ -425,6 +426,7 @@ describe("a follower that crashes and comes back", () => {
       after: applied.at(-1) ?? 0,
     });
     expect(replayed?.events).toEqual([]);
+    expect(replayed?.caughtUp).toBe(true);
     expect(applied).toEqual(beforeReplay);
 
     await startSimulation(actingAsAcme(), first.id, CLAIMANT);
@@ -447,6 +449,7 @@ describe("a follower that crashes and comes back", () => {
 
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "simulator_error",
+      message: "The simulator lost its media connection.",
     });
     const last = await follow();
 
@@ -458,6 +461,7 @@ describe("a follower that crashes and comes back", () => {
       Array.from({ length: applied.length }, (_, index) => index + 1),
     );
     expect(last.done).toBe(true);
+    expect(last.caughtUp).toBe(true);
     expect(applied.length).toBe(await eventCount(started.id));
   });
 });
@@ -562,6 +566,7 @@ describe("asking from a number nobody could have issued", () => {
     const page = await feedOf(started.id, 999);
     expect(page.events).toEqual([]);
     expect(page.next).toBe(999);
+    expect(page.caughtUp).toBe(true);
   });
 });
 

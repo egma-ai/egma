@@ -165,6 +165,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
     ],
     combinedScore: 0.5,
     reason: null,
+    executionFailure: null,
     modality: "voice",
     createdAt: "2026-08-15T09:59:00.000Z",
     startedAt: "2026-08-15T10:00:00.000Z",
@@ -282,7 +283,7 @@ afterEach(() => {
 });
 
 describe("one simulation's grades", () => {
-  it("shows a generic execution failure without exposing its raw reason", async () => {
+  it("shows the simulator's exact execution failure without exposing its raw category", async () => {
     page({
       read: evidence({
         status: "failed",
@@ -291,6 +292,8 @@ describe("one simulation's grades", () => {
         gradeHistory: [],
         combinedScore: null,
         reason: "simulator_error",
+        executionFailure:
+          "OpenAI Realtime STT refused the request because the account has no credits remaining.",
         gradingPlan: null,
         transcript: null,
       }),
@@ -298,7 +301,9 @@ describe("one simulation's grades", () => {
     render(<SimulationEvidencePage />);
 
     expect(
-      await screen.findByText("Egma could not conduct this simulation."),
+      await screen.findByText(
+        "OpenAI Realtime STT refused the request because the account has no credits remaining.",
+      ),
     ).toBeTruthy();
     expect(screen.getByText(/execution problem, not a failed grade/iu)).toBeTruthy();
     expect(screen.queryByText("simulator_error")).toBeNull();

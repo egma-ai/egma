@@ -467,6 +467,31 @@ describe("a simulation's shape", () => {
     );
   });
 
+  it("keeps an execution failure non-empty and on a failed row", async () => {
+    await expect(
+      insertSimulation("failed", {
+        ending_reason: "simulator_error",
+        execution_failure: "The simulator lost its media connection.",
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      insertSimulation("failed", {
+        ending_reason: "simulator_error",
+        execution_failure: "   ",
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(
+      insertSimulation("completed", {
+        ending_reason: "agent_ended",
+        execution_failure: "This row did not fail.",
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
   it("refuses a recording on a row that has not ended", async () => {
     // A chat row cannot hold a recording at all, so this case is voice.
     await expect(

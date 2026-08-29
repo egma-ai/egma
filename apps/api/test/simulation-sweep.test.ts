@@ -152,6 +152,9 @@ describe("the standing sweep", () => {
         const row = await getSimulation(contextFor(ada, "member"), simulationId);
         expect(row?.status).toBe("failed");
         expect(row?.endingReason).toBe("orphaned");
+        expect(row?.executionFailure).toBe(
+          "The simulator stopped reporting before this simulation finished.",
+        );
       },
       { timeout: 5_000, interval: 100 },
     );

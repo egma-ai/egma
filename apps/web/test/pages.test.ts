@@ -631,13 +631,13 @@ describe("the pages", () => {
     // The run list names the execution state. The simulation page explains it.
     // Neither turns that failure into a zero score or an errored grader.
     expect(runWorkbench).toContain("Execution failed");
-    expect(simulation).toContain("Egma could not conduct this simulation.");
+    expect(simulation).toContain("executionFailureMessage");
     expect(simulation).toContain("This is an execution problem, not a failed grade");
     // The simulation choice names execution only. The selected evidence keeps
     // grading progress and score as separate facts in the results summary.
     expect(runWorkbench).toContain("EXECUTION_LABEL");
     expect(runWorkbench).toContain("evidence.gradingState");
-    expect(runWorkbench).toContain("selectedEvidence.combinedScore");
+    expect(runWorkbench).toContain("evidenceForDisplay.combinedScore");
     expect(simulation).toContain('evidence.gradingState === "pending"');
     expect(grades).toContain("evidence.grades");
     expect(grades).toContain("evidence.gradeHistory");
