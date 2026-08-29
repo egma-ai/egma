@@ -10,7 +10,6 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
-  mockMetadataRow,
   mockToolCoverageRow,
   NotPermittedError,
   productLabelOf,
@@ -241,8 +240,10 @@ function describedHeader(
       ? {
           tempMockAgentVersion: run.tempMockAgentVersion,
           tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
-          mockMetadata:
-            run.mockMetadata === null ? null : mockMetadataRow(run.mockMetadata),
+          // The note in the wire's own spelling. The stored row keeps the
+          // record's, which is the one the decisions record settled; a reader
+          // of the API sees the same three facts either way.
+          mockMetadata: run.mockMetadata,
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,

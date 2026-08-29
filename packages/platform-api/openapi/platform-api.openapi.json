@@ -15732,7 +15732,7 @@
                                 "type": {
                                   "type": "string"
                                 },
-                                "engine_id": {
+                                "engineId": {
                                   "type": "string"
                                 },
                                 "version": {
@@ -15748,7 +15748,7 @@
                               },
                               "required": [
                                 "type",
-                                "engine_id",
+                                "engineId",
                                 "version"
                               ],
                               "additionalProperties": false
@@ -15774,14 +15774,14 @@
                                       }
                                     ]
                                   },
-                                  "pinned_to": {
+                                  "pinnedTo": {
                                     "type": "integer"
                                   }
                                 },
                                 "required": [
                                   "number",
                                   "was",
-                                  "pinned_to"
+                                  "pinnedTo"
                                 ],
                                 "additionalProperties": false
                               }

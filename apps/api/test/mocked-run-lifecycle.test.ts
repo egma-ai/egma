@@ -126,6 +126,18 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
         has_more: false,
       });
     }
+    if (method === "GET" && path.startsWith("/get-phone-number/")) {
+      // The restore reads the number before it writes, so this account has to
+      // answer for one number as well as for the listing.
+      const number = decodeURIComponent(path.slice("/get-phone-number/".length));
+      const inbound = state.bindings.get(number);
+      if (inbound === undefined) return json({ error: "gone" }, 404);
+      return json({
+        phone_number: number,
+        nickname: "After hours",
+        inbound_agents: inbound,
+      });
+    }
     if (method === "PATCH" && path.startsWith("/update-phone-number/")) {
       const number = decodeURIComponent(path.slice("/update-phone-number/".length));
       state.bindings.set(
@@ -241,12 +253,29 @@ async function aTickedAgent(
   const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
-  // The tick, with consent to pin the number that rides `latest`.
-  const ticked = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-    mockToolsDuringSimulations: true,
-    pinNumbersDuringRuns: true,
-  });
+  // The switch, on the connection a mocked run is conducted over. Consent to
+  // pin a `latest`-riding number is one of the four promises the single
+  // consent screen makes, so there is no second checkbox here.
+  const ticked = await ask(
+    api.app,
+    "PATCH",
+    `/v1/agents/${agentId}/connections/${connectionId}`,
+    key,
+    { mockToolsEnabled: true },
+  );
   expect(ticked.statusCode, JSON.stringify(ticked.body)).toBe(200);
+
+  // The answers a mocked run serves. Seeding is the discovery read's own job
+  // now that the agent tick is gone: it adds a deterministic answer for every
+  // tool Egma can stand in front of and this project does not answer for yet.
+  const seeded = await ask(
+    api.app,
+    "POST",
+    `/v1/agents/${agentId}/mock-tools:discover`,
+    key,
+    { seed: true },
+  );
+  expect(seeded.statusCode, JSON.stringify(seeded.body)).toBe(200);
 
   const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
     name: "Appointment changes",
@@ -345,29 +374,19 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
 
-    // The world, as the run recorded it.
+    // The four fields, as the run recorded them.
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, ready.key);
-    const world = header.body.mockedWorld as {
-      servingVersion: number;
-      draftVersion: number;
-      coverage: Record<string, string[]>;
-      numbers: { number: string; pinned: boolean }[];
+    expect(header.body.agentVersion).toBe(105);
+    expect(header.body.tempMockAgentVersion).toBe(106);
+    expect(header.body.tempMockAgentVersionCleanup).toBe(false);
+    const world = header.body.mockMetadata as {
+      numbers: { number: string; was: string | number | null; pinnedTo: number }[];
     };
-    expect(world.servingVersion).toBe(105);
-    expect(world.draftVersion).toBe(106);
-    expect(world.coverage).toEqual({
-      mocked: ["get_availability"],
-      notInterceptable: ["transfer_to_front_desk"],
-      notInThisVersion: [],
-    });
+    // The put-it-back note: where the binding pointed, and what Egma pinned it
+    // to. A restore reads the number again and writes only where it still
+    // points at `pinnedTo`.
     expect(world.numbers).toEqual([
-      {
-        number: "+12567332874",
-        pinned: true,
-        bindings: [
-          { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
-        ],
-      },
+      { number: "+12567332874", was: "latest", pinnedTo: 105 },
     ]);
 
     // The account, as it stands mid-run: the temporary version points at Egma,
@@ -379,6 +398,7 @@ describe("one mocked run, from the tick to the teardown", () => {
       `${MOCK_TOOL_PREFIX}/${runId}/{{${SIMULATION_VARIABLE}}}/get_availability`,
     );
     expect(draftTools[0]?.["headers"]).toEqual({});
+    expect(draftTools[0]?.["query_params"]).toEqual({});
     const servingTools = (ready.state.engines.get(105)?.["tools"] ??
       []) as Record<string, unknown>[];
     expect(servingTools[0]?.["url"]).toBe(LIVE_TOOL_URL);
@@ -441,7 +461,10 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(payload["egma.tool.provenance"]).toBe("mocked");
     expect(payload["egma.tool.mock_tool"]).toMatch(/^mck_/u);
 
-    // The stamp, in all three classes, on the simulation's own row.
+    // **No coverage stamp, and that is the settled answer.** The stamp is the
+    // LiveKit in-room seam's, where the agent declares its tools per
+    // conversation; this lane decides what it answers for once per run and
+    // marks each answered call on the transcript, which the span above is.
     const page = await ask(
       api.app,
       "GET",
@@ -449,13 +472,7 @@ describe("one mocked run, from the tick to the teardown", () => {
       ready.key,
     );
     const simulation = (page.body.simulations as Record<string, unknown>[])[0];
-    expect(simulation?.["mockToolCoverage"]).toEqual({
-      discovered: ["get_availability", "transfer_to_front_desk"],
-      covered: ["get_availability"],
-      uncovered: ["transfer_to_front_desk"],
-      notInterceptable: ["transfer_to_front_desk"],
-      notInThisVersion: [],
-    });
+    expect(simulation?.["mockToolCoverage"]).toBeNull();
 
     // And the account, given back: the temporary version deleted first, then
     // the number's routing restored exactly as it was read.
@@ -464,13 +481,10 @@ describe("one mocked run, from the tick to the teardown", () => {
       { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
     const settled = await ask(api.app, "GET", `/v1/runs/${runId}`, ready.key);
-    expect(
-      (settled.body.mockedWorld as { draftVersion: number | null }).draftVersion,
-    ).toBeNull();
-    expect(
-      (settled.body.mockedWorld as { numbers: { pinned: boolean }[] }).numbers[0]
-        ?.pinned,
-    ).toBe(false);
+    // The flag says the account is back. The version number and the note stay:
+    // they are the record of what this run branched and what it put back.
+    expect(settled.body.tempMockAgentVersionCleanup).toBe(true);
+    expect(settled.body.tempMockAgentVersion).toBe(106);
   });
 });
 
@@ -556,11 +570,10 @@ describe("a second mocked run on an agent already holding its world", () => {
     expect([...ready.state.versions].sort()).toEqual([...before.versions].sort());
     expect(JSON.stringify([...ready.state.bindings])).toBe(before.bindings);
 
-    // And the first run's own world is untouched, still holding its draft.
+    // And the first run's own record is untouched, still holding its copy.
     const header = await ask(api.app, "GET", `/v1/runs/${firstRunId}`, ready.key);
-    expect(
-      (header.body.mockedWorld as { draftVersion: number }).draftVersion,
-    ).toBe(106);
+    expect(header.body.tempMockAgentVersion).toBe(106);
+    expect(header.body.tempMockAgentVersionCleanup).toBe(false);
 
     // The refused run conducts nothing: only the first run's simulation is
     // ever claimable.
@@ -604,14 +617,11 @@ describe("a second mocked run on an agent already holding its world", () => {
       `/v1/runs/${String(second.body.id)}`,
       ready.key,
     );
-    // A fresh draft of its own, branched from the same serving version.
-    const world = header.body.mockedWorld as {
-      servingVersion: number;
-      draftVersion: number;
-    };
-    expect(world.servingVersion).toBe(105);
-    expect(world.draftVersion).toBeGreaterThan(105);
-    expect(ready.state.versions.has(world.draftVersion)).toBe(true);
+    // A fresh copy of its own, branched from the same serving version.
+    expect(header.body.agentVersion).toBe(105);
+    const branched = header.body.tempMockAgentVersion as number;
+    expect(branched).toBeGreaterThan(105);
+    expect(ready.state.versions.has(branched)).toBe(true);
   });
 });
 

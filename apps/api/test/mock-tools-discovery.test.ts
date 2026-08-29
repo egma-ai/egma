@@ -308,135 +308,82 @@ describe("what the tick discovers", () => {
     ).toBe(2);
   });
 
-  it("turns the tick on, seeding as it goes", async () => {
-    const { key, agentId } = await anAgent("tick_on_seeds", {
+  it("refuses the agent an edit that tries to carry a mock switch", async () => {
+    // **Mocking is not an agent setting.** It is a switch on each connection,
+    // because the lane is what decides whether a mocked run is a thing Egma
+    // can conduct — so the agent door says it has no such key rather than
+    // silently dropping half a payload.
+    const { key, agentId } = await anAgent("tick_not_an_agent_setting", {
       numbers: numbered(RIDES_TAG),
     });
 
-    const ticked = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
+    const refused = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
       mockToolsDuringSimulations: true,
     });
-    expect(ticked.statusCode, JSON.stringify(ticked.body)).toBe(200);
-    expect(
-      (ticked.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(true);
-
-    const listed = await ask(api.app, "GET", "/v1/mock-tools", key);
-    expect(
-      (listed.body.mockTools as { tool: string }[]).map((row) => row.tool).sort(),
-    ).toEqual(["book_appointment", "get_availability"]);
+    expect(refused.statusCode).toBe(400);
+    expect(String(refused.body.message)).toContain(
+      'an agent edit has no key "mockToolsDuringSimulations"',
+    );
   });
 });
 
-describe("the four refusals, each with its reason", () => {
-  it("refuses a custom-LLM engine, and says where those tools live", async () => {
-    const { key, agentId } = await anAgent("tick_custom_llm", {
+describe("the refusals the enable-time read carries", () => {
+  /** What the consent screen reads, which is where a refusal is shown. */
+  async function discovered(key: string, agentId: string) {
+    const found = await ask(
+      api.app,
+      "POST",
+      `/v1/agents/${agentId}/mock-tools:discover`,
+      key,
+      {},
+    );
+    expect(found.statusCode, JSON.stringify(found.body)).toBe(200);
+    return found.body as {
+      mockable: boolean;
+      refusal: { reason: string; message: string } | null;
+      numbers: { number: string; pin: boolean }[];
+    };
+  }
+
+  it("names a custom-LLM engine, and says where those tools live", async () => {
+    const { key, agentId } = await anAgent("mock_tools_custom_llm", {
       engine: "custom-llm",
     });
-
-    const refused = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-    });
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain("custom LLM");
-    expect(String(refused.body.message)).toContain("your own service");
-    // Not a permanent no: the sentence names where the agent does belong.
-    expect(String(refused.body.message)).toContain("Egma SDK");
-
-    // And the read says the same, with its own reason word.
-    const found = await ask(
-      api.app,
-      "POST",
-      `/v1/agents/${agentId}/mock-tools:discover`,
-      key,
-      {},
-    );
-    expect(found.body.mockable).toBe(false);
-    expect((found.body.refusal as { reason: string }).reason).toBe(
-      "custom_llm_engine",
-    );
-
-    // The box stayed off.
-    const read = await ask(api.app, "GET", `/v1/agents/${agentId}`, key);
-    expect(
-      (read.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(false);
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(false);
+    expect(found.refusal?.reason).toBe("custom_llm_engine");
+    expect(found.refusal?.message).toContain("custom LLM");
   });
 
-  it("refuses without pin consent, and turns on with it", async () => {
-    const { key, agentId } = await anAgent("tick_pin_consent", {
+  it("shows the `latest`-riding number rather than refusing for it", async () => {
+    // The per-number checkbox is gone: pinning and restoring is one of the
+    // four promises the single consent screen makes, so the read shows the
+    // number the promise is about and refuses nothing for it.
+    const { key, agentId } = await anAgent("mock_tools_pin_shown", {
       numbers: numbered(RIDES_LATEST),
     });
-
-    const declined = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-      pinNumbersDuringRuns: false,
-    });
-    expect(declined.statusCode, JSON.stringify(declined.body)).toBe(422);
-    expect(String(declined.body.message)).toContain("`latest` pointer");
-    expect(String(declined.body.message)).toContain("the tick stays off");
-
-    // Saying nothing is not consent either.
-    const silent = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-    });
-    expect(silent.statusCode).toBe(422);
-
-    const off = await ask(api.app, "GET", `/v1/agents/${agentId}`, key);
-    expect(
-      (off.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(false);
-
-    // The read shows the number the question is about, so a screen can ask it.
-    const found = await ask(
-      api.app,
-      "POST",
-      `/v1/agents/${agentId}/mock-tools:discover`,
-      key,
-      {},
-    );
-    expect(found.body.numbers).toEqual([
-      {
-        number: "+12567332874",
-        label: "After hours",
-        verdicts: ["hijackable"],
-        pin: true,
-      },
-    ]);
-
-    const consented = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-      pinNumbersDuringRuns: true,
-    });
-    expect(consented.statusCode, JSON.stringify(consented.body)).toBe(200);
-    expect(
-      (consented.body.agent as { mockToolsDuringSimulations: boolean })
-        .mockToolsDuringSimulations,
-    ).toBe(true);
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(true);
+    expect(found.refusal).toBeNull();
+    expect(found.numbers.some((one) => one.pin)).toBe(true);
   });
 
-  it("refuses an agent whose only connection is a phone number", async () => {
+  it("names an agent whose only connection is a phone number", async () => {
     const { key, agentId } = await anAgent(
-      "tick_phone_only",
+      "mock_tools_phone_only",
       { numbers: numbered(RIDES_TAG) },
       { ...PHONE },
     );
-
-    const refused = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-    });
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain("never dialled");
-    // It says why the phone lane stays real, and what to add.
-    expect(String(refused.body.message)).toContain("real carrier leg");
-    expect(String(refused.body.message)).toContain("web-call connection");
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(false);
+    expect(found.refusal?.reason).toBe("phone_only_agent");
+    expect(found.refusal?.message).toContain("never dialled");
+    expect(found.refusal?.message).toContain("real carrier leg");
+    expect(found.refusal?.message).toContain("web-call connection");
   });
 
-  it("refuses when the agent's key and a connection's key name different agents", async () => {
-    const { key, agentId } = await anAgent("tick_keys_disagree", {
+  it("names two keys that see two different Retell agents", async () => {
+    const { key, agentId } = await anAgent("mock_tools_keys_disagree", {
       numbers: numbered(RIDES_TAG),
     });
 
@@ -448,24 +395,21 @@ describe("the four refusals, each with its reason", () => {
       `/v1/agents/${agentId}/connections`,
       key,
       {
-        name: "Somebody else's chat",
+        name: "Somebody else's web call",
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
+        connectionType: "retell_web_call",
+        accessVariant: "retell_web_call.api_key",
+        modality: "voice",
         config: { retellAgentId: "agent_somebody_elses_0001" },
         credentials: { apiKey: "retell-secret-ZZZZ9999WXYZ" },
       },
     );
     expect(added.statusCode, JSON.stringify(added.body)).toBe(201);
 
-    const refused = await ask(api.app, "PATCH", `/v1/agents/${agentId}`, key, {
-      mockToolsDuringSimulations: true,
-    });
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain(
-      "agent_somebody_elses_0001",
-    );
-    expect(String(refused.body.message)).toContain("was never mocked");
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(false);
+    expect(found.refusal?.reason).toBe("keys_disagree");
+    expect(found.refusal?.message).toContain("agent_somebody_elses_0001");
+    expect(found.refusal?.message).toContain("was never mocked");
   });
 });

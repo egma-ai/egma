@@ -4352,13 +4352,13 @@ export type GetRunResponses = {
         mockMetadata: {
             engine: {
                 type: string;
-                engine_id: string;
+                engineId: string;
                 version: number | null;
             };
             numbers: Array<{
                 number: string;
                 was: string | number | null;
-                pinned_to: number;
+                pinnedTo: number;
             }>;
         } | null;
         connectionSnapshot: {

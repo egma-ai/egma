@@ -1103,6 +1103,17 @@ export type MockRunState = {
   /** Null = no copy was made; false = cleanup owed; true = account put back. */
   readonly tempMockAgentVersionCleanup: boolean | null;
   readonly mockMetadata: MockMetadata | null;
+  /**
+   * The serving version this run conducts against, where the build is what
+   * resolved it.
+   *
+   * Absent leaves it as it is. A text-mode run has it written by `startRun`
+   * from the run-start read; a mocked web-call run resolves it while building
+   * its world, and that is where it is written down — before the run's counts
+   * land, so it is inside the header's freeze exactly as it is on the other
+   * lane.
+   */
+  readonly agentVersion?: number | undefined;
 };
 
 export async function recordMockState(
@@ -1118,6 +1129,9 @@ export async function recordMockState(
       tempMockAgentVersionCleanup: state.tempMockAgentVersionCleanup,
       mockMetadata:
         state.mockMetadata === null ? null : mockMetadataRow(state.mockMetadata),
+      ...(state.agentVersion === undefined
+        ? {}
+        : { agentVersion: state.agentVersion }),
     })
     .where(theRun(auth, runId))
     .returning({ id: run.id });

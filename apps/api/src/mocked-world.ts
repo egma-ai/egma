@@ -242,7 +242,17 @@ export async function buildRunMockedWorld(
     state: null,
   }));
 
-  if (built.kind === "built") return { kind: "built" };
+  if (built.kind === "built") {
+    // The serving version this run conducts against, written down once the
+    // build has resolved it. Every request of the run names the temporary copy
+    // beside it, and this is what the copy was branched from — so a reader
+    // asking what real traffic reaches gets an answer on the same row.
+    await recordMockState(auth, run.id, {
+      ...built.state,
+      agentVersion: built.agentVersion,
+    });
+    return { kind: "built" };
+  }
 
   // Whatever was made before the refusal is given back at once, in the one
   // order that is safe, and then the run is failed.

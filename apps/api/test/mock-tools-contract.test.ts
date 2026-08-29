@@ -225,10 +225,10 @@ describe("what one run records, through the API", () => {
     expect(after.body.mockMetadata).toEqual({
       engine: {
         type: "conversation-flow",
-        engine_id: "conversation_flow_2346a0e8367c",
+        engineId: "conversation_flow_2346a0e8367c",
         version: 105,
       },
-      numbers: [{ number: "+14155550199", was: "latest", pinned_to: 8 }],
+      numbers: [{ number: "+14155550199", was: "latest", pinnedTo: 8 }],
     });
   });
 });

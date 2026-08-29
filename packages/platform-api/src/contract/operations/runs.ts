@@ -102,10 +102,10 @@ export const mockMetadataSchema = {
       type: "object",
       properties: {
         type: stringSchema,
-        engine_id: stringSchema,
+        engineId: stringSchema,
         version: nullable(integerSchema),
       },
-      required: ["type", "engine_id", "version"],
+      required: ["type", "engineId", "version"],
       additionalProperties: false,
     },
     numbers: arrayOf({
@@ -115,9 +115,9 @@ export const mockMetadataSchema = {
         was: {
           oneOf: [stringSchema, integerSchema, { type: "null" }],
         },
-        pinned_to: integerSchema,
+        pinnedTo: integerSchema,
       },
-      required: ["number", "was", "pinned_to"],
+      required: ["number", "was", "pinnedTo"],
       additionalProperties: false,
     }),
   },
