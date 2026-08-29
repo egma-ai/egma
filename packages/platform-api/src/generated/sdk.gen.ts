@@ -669,14 +669,15 @@ export const useGraderInProject = <ThrowOnError extends boolean = false>(paramet
 /**
  * Create and use a custom LLM grader
  *
- * Creates one organization-owned LLM judge and its current-project policy. The server fixes its type, model, output contract, and empty settings contract.
+ * Creates one organization-owned LLM judge and its current-project policy. The judge is binary, so the body draws its boundary in three parts: what to decide, what answers met, and what answers not_met. The server compiles them into the definition version's one immutable prompt and fixes its type, model, compatible modalities, and empty settings contract.
  */
 export const createCustomGrader = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
     description?: string | null;
     gradingInstructions: string;
-    modalities: Array<'chat' | 'voice'>;
+    passesWhen: string;
+    failsWhen: string;
     scope: {
         simulations: Array<{
             kind: 'all';
@@ -698,7 +699,8 @@ export const createCustomGrader = <ThrowOnError extends boolean = false>(paramet
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'description' },
                 { in: 'body', key: 'gradingInstructions' },
-                { in: 'body', key: 'modalities' },
+                { in: 'body', key: 'passesWhen' },
+                { in: 'body', key: 'failsWhen' },
                 { in: 'body', key: 'scope' },
                 { in: 'body', key: 'passThreshold' }
             ] }]);

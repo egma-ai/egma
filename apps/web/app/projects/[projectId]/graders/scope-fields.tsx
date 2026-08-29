@@ -432,12 +432,20 @@ export function ScopeFields({
   projectId,
   scope,
   disabled = false,
+  productionNote,
   onChange,
   onValidityChange,
 }: {
   readonly projectId: string;
   readonly scope: ProjectGraderScope;
   readonly disabled?: boolean;
+  /**
+   * One line beside the sample percent, shown only while production grading is
+   * on. It is what this grader costs per sampled transcript, and the caller
+   * says it rather than this component, because the price depends on the
+   * mechanism: an LLM judge spends a judge call and trusted code spends none.
+   */
+  readonly productionNote?: string;
   readonly onChange: (scope: ProjectGraderScope) => void;
   readonly onValidityChange?: (valid: boolean) => void;
 }) {
@@ -550,7 +558,7 @@ export function ScopeFields({
           Grades production
         </label>
         {scope.production === null ? null : (
-          <div className="ml-[30px]">
+          <div className="ml-[30px] flex flex-col gap-3">
             <NumberField
               id="grader-production-sample"
               label="Production sample"
@@ -573,6 +581,11 @@ export function ScopeFields({
               invalid={!productionValid}
               hint="Enter a whole percentage from 1 through 100."
             />
+            {productionNote === undefined ? null : (
+              <p className="m-0 text-sm leading-(--line-normal) text-faint">
+                {productionNote}
+              </p>
+            )}
           </div>
         )}
       </div>

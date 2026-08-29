@@ -168,8 +168,9 @@ describe("the grader library", () => {
       viewer.secret,
       {
         name: "Viewer grader",
-        gradingInstructions: "Give 1 when the criterion is met.",
-        modalities: ["chat"],
+        gradingInstructions: "the agent offered a refund",
+        passesWhen: "the agent offers a refund",
+        failsWhen: "the agent never offers a refund",
         scope: { simulations: [{ kind: "all" }], production: null },
         passThreshold: 1,
       },
@@ -260,32 +261,45 @@ describe("the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
+    const boundary = {
+      name: "Polite close",
+      description: "Checks that the agent closes politely.",
+      gradingInstructions: "the agent closed the conversation politely",
+      passesWhen: "the last agent turn thanks the caller",
+      failsWhen: "the last agent turn ends with no closing courtesy",
+      scope: { simulations: [{ kind: "all" }], production: null },
+      passThreshold: 0.8,
+    };
     const created = await request(
       "POST",
       "/v1/grader-library/custom",
       key,
-      {
-        name: "Polite close",
-        description: "Checks that the agent closes politely.",
-        gradingInstructions: "Give 1 only when the final reply is polite.",
-        modalities: ["chat", "voice"],
-        scope: { simulations: [{ kind: "all" }], production: null },
-        passThreshold: 0.8,
-      },
+      boundary,
     );
 
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+    /*
+     * The three authored parts arrive as three fields and leave as one
+     * compiled prompt, so every client produces the same judged behavior.
+     */
     expect(created.body.definition).toMatchObject({
       name: "Polite close",
       owner: "organization",
       type: "llm_as_judge",
-      gradingInstructions: "Give 1 only when the final reply is polite.",
+      modalities: ["chat", "voice"],
+      gradingInstructions:
+        "Decide whether: the agent closed the conversation politely. " +
+        "Answer met when: the last agent turn thanks the caller. " +
+        "Answer not_met when: the last agent turn ends with no closing courtesy.",
       settingDefinitions: [],
     });
+    expect(JSON.stringify(created.body)).not.toContain("outputContract");
     expect(created.body.grader).toMatchObject({
       owner: "organization",
       type: "llm_as_judge",
+      modalities: ["chat", "voice"],
       settings: {},
+      scope: { simulations: [{ kind: "all" }], production: null },
       passThreshold: 0.8,
       removable: true,
     });
@@ -297,19 +311,56 @@ describe("the grader library", () => {
       "POST",
       "/v1/grader-library/custom",
       key,
-      {
-        name: "Customer code",
-        gradingInstructions: "return 1",
-        modalities: ["chat"],
-        scope: { simulations: [{ kind: "all" }], production: null },
-        passThreshold: 1,
-        type: "code",
-      },
+      { ...boundary, name: "Customer code", type: "code" },
     );
     expect(typeChoice.statusCode).toBe(400);
+    /* A stale client that still sends modalities is told, not ignored. */
+    const staleClient = await request(
+      "POST",
+      "/v1/grader-library/custom",
+      key,
+      { ...boundary, name: "Stale client", modalities: ["voice"] },
+    );
+    expect(staleClient.statusCode).toBe(400);
+    expect(JSON.stringify(staleClient.body)).toContain("modalities");
     expect(
       (await request("POST", "/v1/grader-library", key, {})).statusCode,
     ).toBe(404);
+  });
+
+  it("refuses a boundary that leaves any of its three parts blank", async () => {
+    api = await createApi("grader_library_boundary");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const boundary = {
+      name: "Blank part",
+      gradingInstructions: "the agent confirmed the address",
+      passesWhen: "the agent reads the address back",
+      failsWhen: "the agent never reads the address back",
+      scope: { simulations: [{ kind: "all" }], production: null },
+      passThreshold: 1,
+    };
+
+    for (const blank of [
+      "gradingInstructions",
+      "passesWhen",
+      "failsWhen",
+    ] as const) {
+      const refused = await request("POST", "/v1/grader-library/custom", key, {
+        ...boundary,
+        [blank]: "   ",
+      });
+      expect(refused.statusCode, blank).toBe(400);
+      expect(JSON.stringify(refused.body), blank).toContain(blank);
+
+      const missing = { ...boundary } as Record<string, unknown>;
+      delete missing[blank];
+      expect(
+        (await request("POST", "/v1/grader-library/custom", key, missing))
+          .statusCode,
+        blank,
+      ).toBe(400);
+    }
   });
 
   it("keeps custom definitions inside their organization and activation inside one project", async () => {
@@ -323,8 +374,9 @@ describe("the grader library", () => {
       acmeKey,
       {
         name: "Acme policy",
-        gradingInstructions: "Give 1 when Acme policy was followed.",
-        modalities: ["voice"],
+        gradingInstructions: "the agent followed Acme policy",
+        passesWhen: "the agent states the policy before closing",
+        failsWhen: "the agent closes without stating the policy",
         scope: { simulations: [{ kind: "all" }], production: null },
         passThreshold: 1,
       },

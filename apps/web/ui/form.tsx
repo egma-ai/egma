@@ -61,23 +61,47 @@ export function LabelText({ label }: { readonly label: string }) {
 export function Field({
   label,
   htmlFor,
+  annotation,
   hint,
   children,
 }: {
   readonly label: string;
   readonly htmlFor: string;
+  /**
+   * A quiet fact about the value, beside the label rather than inside it.
+   *
+   * `scores · 1` is what the answer means, not what to write, so it is neither
+   * a second help line nor part of the label's own words: the form still reads
+   * in plain language and the mapping is still there to find. It stays outside
+   * the `<label>` element, so the name a screen reader announces does not
+   * change — the control describes itself with it instead. Square brackets are
+   * reserved for `[optional]`, so an annotation never wears them.
+   */
+  readonly annotation?: string;
   /** One line saying what belongs here, for a field whose name is not enough. */
   readonly hint?: ReactNode;
   readonly children: ReactNode;
 }) {
   const said = useId();
+  const noted = useId();
+  const describes = [
+    annotation === undefined ? undefined : noted,
+    hint === undefined ? undefined : said,
+  ].filter((one) => one !== undefined).join(" ");
 
   return (
     <div className="flex flex-col gap-2" data-slot="field">
-      <Label htmlFor={htmlFor}>
-        <LabelText label={label} />
-      </Label>
-      <FieldHintContext.Provider value={hint === undefined ? undefined : said}>
+      <div className="flex flex-wrap items-baseline gap-2">
+        <Label htmlFor={htmlFor}>
+          <LabelText label={label} />
+        </Label>
+        {annotation === undefined ? null : (
+          <span className="text-sm text-faint" id={noted}>
+            {annotation}
+          </span>
+        )}
+      </div>
+      <FieldHintContext.Provider value={describes === "" ? undefined : describes}>
         {children}
       </FieldHintContext.Provider>
       {hint === undefined ? null : (

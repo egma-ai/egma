@@ -6556,7 +6556,7 @@
       "post": {
         "operationId": "createCustomGrader",
         "summary": "Create and use a custom LLM grader",
-        "description": "Creates one organization-owned LLM judge and its current-project policy. The server fixes its type, model, output contract, and empty settings contract.",
+        "description": "Creates one organization-owned LLM judge and its current-project policy. The judge is binary, so the body draws its boundary in three parts: what to decide, what answers met, and what answers not_met. The server compiles them into the definition version's one immutable prompt and fixes its type, model, compatible modalities, and empty settings contract.",
         "tags": [
           "Graders"
         ],
@@ -6602,17 +6602,11 @@
                   "gradingInstructions": {
                     "type": "string"
                   },
-                  "modalities": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "chat",
-                        "voice"
-                      ]
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
+                  "passesWhen": {
+                    "type": "string"
+                  },
+                  "failsWhen": {
+                    "type": "string"
                   },
                   "scope": {
                     "type": "object",
@@ -6716,7 +6710,8 @@
                 "required": [
                   "name",
                   "gradingInstructions",
-                  "modalities",
+                  "passesWhen",
+                  "failsWhen",
                   "scope",
                   "passThreshold"
                 ],

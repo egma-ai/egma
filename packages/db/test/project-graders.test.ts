@@ -187,21 +187,34 @@ describe("shared definitions and project grader policy", () => {
     const created = await createCustomLlmGrader(auth, {
       name: "Policy compliance",
       description: "Grades one policy instruction.",
-      gradingInstructions: "The agent must state the cancellation policy.",
-      modalities: ["chat", "voice"],
+      gradingInstructions: "the agent stated the cancellation policy",
+      passesWhen: "the agent names the 30-day window",
+      failsWhen: "the agent ends the call without naming a window",
       scope: { simulations: [{ kind: "all" }], production: null },
       passThreshold: 1,
     });
+    /*
+     * The three authored parts are one compiled prompt on the immutable
+     * version. The parts are not stored beside it, so the prompt is the
+     * record, and the fixed template is what every client compiles to.
+     */
     expect(created.definition).toMatchObject({
       owner: "organization",
       type: "llm_as_judge",
-      gradingInstructions: "The agent must state the cancellation policy.",
+      gradingInstructions:
+        "Decide whether: the agent stated the cancellation policy. " +
+        "Answer met when: the agent names the 30-day window. " +
+        "Answer not_met when: the agent ends the call without naming a window.",
+      modalities: ["chat", "voice"],
       parameterContract: [],
       activeProjectGraderId: created.projectGrader.id,
     });
     expect(created.projectGrader).toMatchObject({
       owner: "organization",
       type: "llm_as_judge",
+      modalities: ["chat", "voice"],
+      passThreshold: 1,
+      scope: { simulations: [{ kind: "all" }], production: null },
       parameterValues: {},
     });
 
@@ -251,6 +264,27 @@ describe("shared definitions and project grader policy", () => {
       parameterValues: {},
       passThreshold: 1,
     })).resolves.toBeUndefined();
+  });
+
+  it("refuses a boundary with a blank part", async () => {
+    const boundary = {
+      name: "Blank part",
+      gradingInstructions: "the agent apologized for the wait",
+      passesWhen: "the agent says sorry",
+      failsWhen: "the agent never apologizes",
+      scope: { simulations: [], production: null },
+      passThreshold: 1,
+    } as const;
+
+    await expect(createCustomLlmGrader(auth, { ...boundary, name: "  " }))
+      .rejects.toThrow("a custom grader needs a name");
+    await expect(
+      createCustomLlmGrader(auth, { ...boundary, gradingInstructions: " " }),
+    ).rejects.toThrow("a custom grader needs grading instructions");
+    await expect(createCustomLlmGrader(auth, { ...boundary, passesWhen: "" }))
+      .rejects.toThrow("a custom grader needs the text for Passes when");
+    await expect(createCustomLlmGrader(auth, { ...boundary, failsWhen: "\n" }))
+      .rejects.toThrow("a custom grader needs the text for Fails when");
   });
 
   it("allows reads but refuses viewer project-grader writes", async () => {

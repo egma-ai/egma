@@ -17,7 +17,6 @@ import {
 } from "../grader-library/snapshot.ts";
 import { RECOMMENDED_GRADER_MODEL } from "../models/selections.ts";
 import {
-  GRADER_MODALITIES,
   graderDefinition,
   graderDefinitionVersion,
   projectGrader,
@@ -72,8 +71,12 @@ export type UseGraderInProjectInput = {
 export type CreateCustomLlmGraderInput = {
   readonly name: string;
   readonly description?: string | null | undefined;
+  /** What the judge decides. */
   readonly gradingInstructions: string;
-  readonly modalities: unknown;
+  /** What scores 1. */
+  readonly passesWhen: string;
+  /** What scores 0. */
+  readonly failsWhen: string;
   readonly scope: unknown;
   readonly passThreshold: number;
 };
@@ -226,23 +229,35 @@ async function validateScopeReferences(
   }
 }
 
-function validateModalities(value: unknown): readonly GraderModality[] {
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    new Set(value).size !== value.length ||
-    value.some(
-      (modality) =>
-        typeof modality !== "string" ||
-        !(GRADER_MODALITIES as readonly string[]).includes(modality),
-    )
-  ) {
-    throw new UnprocessableInputError(
-      "compatible modalities must contain chat, voice, or both once",
-    );
-  }
-  return value as readonly GraderModality[];
+/**
+ * The one prompt an authored boundary compiles to.
+ *
+ * A binary judge answers met or not met against a criterion, so the sheet asks
+ * for the criterion and the two sides of the line, and the server writes the
+ * one immutable prompt. Every client that sends the three parts therefore
+ * produces the same judged behavior. The parts are not stored beside the
+ * prompt: a definition version is immutable, and an edit mints a new one.
+ */
+function compileGraderBoundary(boundary: {
+  readonly gradingInstructions: string;
+  readonly passesWhen: string;
+  readonly failsWhen: string;
+}): string {
+  return (
+    `Decide whether: ${boundary.gradingInstructions}. ` +
+    `Answer met when: ${boundary.passesWhen}. ` +
+    `Answer not_met when: ${boundary.failsWhen}.`
+  );
 }
+
+/**
+ * What a custom definition stamps for modalities, now that nobody is asked.
+ *
+ * Both, because the stamp is immutable per version and the judge's evidence is
+ * text: a voice-only stamp would silently leave every later chat simulation
+ * ungraded, with no grade row and no warning to say so.
+ */
+const CUSTOM_GRADER_MODALITIES: readonly GraderModality[] = ["chat", "voice"];
 
 export async function listProjectGraders(
   auth: AuthContext,
@@ -497,6 +512,8 @@ export async function createCustomLlmGrader(
   const projectId = projectIdOf(auth);
   const name = input.name.trim();
   const gradingInstructions = input.gradingInstructions.trim();
+  const passesWhen = input.passesWhen.trim();
+  const failsWhen = input.failsWhen.trim();
   if (name === "") {
     throw new UnprocessableInputError("a custom grader needs a name");
   }
@@ -505,8 +522,22 @@ export async function createCustomLlmGrader(
       "a custom grader needs grading instructions",
     );
   }
+  if (passesWhen === "") {
+    throw new UnprocessableInputError(
+      "a custom grader needs the text for Passes when",
+    );
+  }
+  if (failsWhen === "") {
+    throw new UnprocessableInputError(
+      "a custom grader needs the text for Fails when",
+    );
+  }
+  const prompt = compileGraderBoundary({
+    gradingInstructions,
+    passesWhen,
+    failsWhen,
+  });
   const description = input.description?.trim() || null;
-  const modalities = validateModalities(input.modalities);
   const scope = validateProjectGraderScope(input.scope);
   const passThreshold = validatePassThreshold(input.passThreshold);
 
@@ -526,9 +557,9 @@ export async function createCustomLlmGrader(
       definitionId,
       version: 1,
       type: "llm_as_judge",
-      prompt: gradingInstructions,
+      prompt,
       parameterContract: [],
-      modalities,
+      modalities: CUSTOM_GRADER_MODALITIES,
       judgeModel: RECOMMENDED_GRADER_MODEL,
     });
     await tx.insert(projectGrader).values({
