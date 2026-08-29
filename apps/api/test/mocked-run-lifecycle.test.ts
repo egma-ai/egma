@@ -78,6 +78,24 @@ type Account = {
     /** Flipped by a test to make every delete fail — a teardown that cannot
      * finish, which is what leaves a world owed. */
     refuseDeletes: boolean;
+    /**
+     * Held by a test to stop **one** teardown inside its delete, so that a
+     * second caller arrives while the first is halfway through putting the
+     * account back. Consumed the first time it is used, so whoever comes next
+     * is not stopped too.
+     */
+    holdOneDelete?: Promise<void>;
+    /** Called as that delete arrives, so a test knows the teardown is inside. */
+    onDelete?: () => void;
+    /**
+     * Every binding this account was asked to write, with the versions that
+     * stood at the moment it was asked.
+     *
+     * A restore that lands while a newer version stands is the hijack itself:
+     * `latest` written back onto somebody's temporary copy. What a test asserts
+     * is not the order of two requests but that this never happened.
+     */
+    writes: { wrote: unknown; versionsStanding: number[] }[];
   };
 };
 
@@ -92,6 +110,7 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       ["+12567332874", [{ agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 }]],
     ]),
     refuseDeletes: false,
+    writes: [],
   };
   const branching = options.branching ?? "fork";
 
@@ -140,10 +159,12 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
     }
     if (method === "PATCH" && path.startsWith("/update-phone-number/")) {
       const number = decodeURIComponent(path.slice("/update-phone-number/".length));
-      state.bindings.set(
-        number,
-        body?.["inbound_agents"] as readonly Record<string, unknown>[],
-      );
+      const inbound = body?.["inbound_agents"] as readonly Record<string, unknown>[];
+      state.writes.push({
+        wrote: inbound.map((one) => one["agent_version"]),
+        versionsStanding: [...state.versions],
+      });
+      state.bindings.set(number, inbound);
       return json({ phone_number: number });
     }
     if (path.startsWith("/get-agent/")) {
@@ -199,6 +220,12 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       return json(document);
     }
     if (method === "DELETE" && path.startsWith("/delete-agent-version/")) {
+      const holding = state.holdOneDelete;
+      if (holding !== undefined) {
+        state.holdOneDelete = undefined;
+        state.onDelete?.();
+        await holding;
+      }
       if (state.refuseDeletes) return json({ error: "not today" }, 500);
       const asked = Number(path.split("/").at(-1));
       if (!state.versions.has(asked)) return json({ error: "gone" }, 404);
@@ -622,6 +649,94 @@ describe("a second mocked run on an agent already holding its world", () => {
     const branched = header.body.tempMockAgentVersion as number;
     expect(branched).toBeGreaterThan(105);
     expect(ready.state.versions.has(branched)).toBe(true);
+  });
+});
+
+/**
+ * The teardown and the next run's claim, meeting.
+ *
+ * A finished run never blocks a claim — its litter is the next run's sweep to
+ * clear — so the two really do arrive at once every time a suite is started
+ * again as soon as the last one ends. Without one fence over both, the first
+ * run's restore is still in flight while the second branches its copy, and the
+ * restore then writes `latest` onto that copy: real callers reach a mocked
+ * agent. Nothing downstream catches it, because the number still points exactly
+ * where the first run's note says it pinned it — the second run pinned it to
+ * the same version.
+ */
+describe("a teardown that is in flight when the next run starts", () => {
+  it("never restores a binding while a temporary version stands", async () => {
+    const ready = await aTickedAgent("mocked_run_teardown_meets_claim");
+
+    const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
+    const specs = await claim();
+    const simulationId = String(specs[0]?.["simulation_id"]);
+    await report(simulationId, "running");
+
+    // Stop the first run's teardown inside its delete, so the second run
+    // arrives while the account still holds the copy and the pin.
+    let release = (): void => undefined;
+    ready.state.holdOneDelete = new Promise<void>((resume) => {
+      release = () => {
+        resume();
+      };
+    });
+    const insideTheTeardown = new Promise<void>((reached) => {
+      ready.state.onDelete = () => {
+        reached();
+      };
+    });
+
+    const landing = report(simulationId, "completed");
+    await insideTheTeardown;
+
+    // The next run, started now: its claim finds a finished run, which does
+    // not block it, and it must still wait for the teardown to finish.
+    const second = ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    // Long enough for an unfenced build to have swept, branched and pinned.
+    await new Promise((resume) => setTimeout(resume, 50));
+    release();
+    const [, answered] = await Promise.all([landing, second]);
+
+    console.log("WRITES", JSON.stringify(ready.state.writes), "STATUS", answered.statusCode);
+    // The whole point: every write of this number's binding happened over an
+    // account holding no temporary version but the serving one.
+    for (const write of ready.state.writes) {
+      expect(write.versionsStanding).toEqual([105]);
+    }
+    // Put back once, to exactly what it was.
+    expect(
+      ready.state.writes.filter((write) =>
+        JSON.stringify(write.wrote).includes("latest"),
+      ),
+    ).toHaveLength(1);
+    // And it stands pinned again now — the second run's own pin, to a real
+    // serving version, which is what keeps real callers off its copy.
+    expect(ready.state.bindings.get("+12567332874")).toEqual([
+      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+    ]);
+
+    // The second run got its turn: the agent was clean by the time it had the
+    // fence, so it built a world of its own.
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(201);
+    const header = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${String(answered.body.id)}`,
+      ready.key,
+    );
+    expect(header.body.tempMockAgentVersion).toBeGreaterThan(105);
   });
 });
 

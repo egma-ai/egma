@@ -1007,8 +1007,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             <fieldset className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
               <legend className="sr-only">{RETELL_LANE_QUESTION}</legend>
               {RETELL_LANES.map((lane) => (
-                <label
-                  className="flex min-w-0 cursor-pointer items-start gap-3 border border-border p-4"
+                <div
+                  className="flex min-w-0 items-start gap-3 border border-border p-4"
                   key={lane}
                 >
                   <Checkbox
@@ -1023,14 +1023,22 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                     }
                   />
                   <span className="flex min-w-0 flex-col gap-1">
-                    <span className="text-sm font-medium text-foreground">
+                    {/*
+                      The visible copy stays visible and points at the control
+                      with `htmlFor`, which makes the whole line a target as
+                      well as naming the box.
+                    */}
+                    <label
+                      className="cursor-pointer text-sm font-medium text-foreground"
+                      htmlFor={`retell-lane-${lane}`}
+                    >
                       {RETELL_LANE_LABELS[lane]}
-                    </span>
+                    </label>
                     <span className="text-sm text-faint">
                       {RETELL_LANE_HELP[lane]}
                     </span>
                   </span>
-                </label>
+                </div>
               ))}
             </fieldset>
             <InfoBox>
