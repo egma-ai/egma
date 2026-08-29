@@ -1249,12 +1249,10 @@ describe("LiveKit in the wizard", () => {
   });
 
   /**
-   * A Node LiveKit worker has no Egma SDK to put inside it.
+   * JavaScript monitoring does not make JavaScript simulation testing safe.
    *
-   * The SDK ships for Python today. Wiring a Python import into a TypeScript
-   * worker would be worse than doing nothing, and running tests without
-   * isolation could call real tools. The wizard says which of those it found
-   * and stops before it creates testing resources.
+   * Session-isolated mock tools are still absent, so a test could call real
+   * tools. The wizard names that boundary and stops before remote setup.
    */
   it("refuses an unisolated testing run for a Node worker", async () => {
     const { report, ui } = await liveKitLane({
@@ -1264,10 +1262,11 @@ describe("LiveKit in the wizard", () => {
 
     expect(report.kind).toBe("failed");
     if (report.kind !== "failed") throw new Error("expected Node refusal");
-    expect(report.reason).toContain("Node LiveKit worker cannot be integrated");
+    expect(report.reason).toContain("does not yet isolate simulation tools");
+    expect(report.reason).toContain("cannot be integrated for testing");
     expect(report.reason).toContain("did not create remote resources");
     expect(ui.record.statuses.join(" ")).toContain(
-      "Egma SDK is Python only today",
+      "monitors production calls but does not yet isolate simulation tools",
     );
     expect(ui.record.gate).toBeNull();
     expect(platform.registered.connections).toHaveLength(0);
@@ -1276,7 +1275,7 @@ describe("LiveKit in the wizard", () => {
     expect(platform.running.runs).toHaveLength(0);
     expect(localWorkerRuns).toHaveLength(0);
 
-    // Neither integration nor mock authoring was sent: the SDK is unavailable.
+    // Neither integration nor mock authoring was sent: the testing seam is unsafe.
     const driven = JSON.parse(
       await readFile(
         path.join(workspace.dir, "fake-agent-report.json"),

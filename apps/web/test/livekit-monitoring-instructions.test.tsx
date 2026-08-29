@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { LiveKitMonitoringInstructions } from "../app/projects/[projectId]/agents/livekit-monitoring-instructions.tsx";
@@ -23,6 +23,12 @@ describe("LiveKit monitoring instructions", () => {
     ).toBeTruthy();
     expect(screen.getByText("Set the environment values")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(3);
+    expect(
+      screen.getByRole("tab", { name: "Python" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.getByRole("tablist").getAttribute("data-variant")).toBe(
+      "default",
+    );
 
     const copy = container.textContent ?? "";
     expect(copy).toContain("pip install 'egma>=0.2.0'");
@@ -44,5 +50,32 @@ describe("LiveKit monitoring instructions", () => {
     expect(copy).not.toContain("ctx.connect()");
     expect(copy).not.toContain("mockable");
     expect(copy).not.toMatch(/monitoring (ready|configured|on)/i);
+  });
+
+  it("shows the JavaScript package and keeps the hook first", () => {
+    const { container } = render(
+      <LiveKitMonitoringInstructions projectId="prj_1" />,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
+
+    const copy = container.textContent ?? "";
+    expect(
+      screen
+        .getByRole("tab", { name: "JavaScript" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(screen.getAllByRole("button", { name: "Copy" })).toHaveLength(3);
+    expect(copy).toContain("npm install @egma/livekit");
+    expect(copy).toContain(
+      'import { monitorLiveKit } from "@egma/livekit"',
+    );
+    expect(copy.indexOf("monitorLiveKit(ctx)")).toBeLessThan(
+      copy.indexOf("await session.start(...)"),
+    );
+    expect(copy).toContain("EGMA_URL=<your-public-egma-url>");
+    expect(copy).toContain("EGMA_API_KEY=<your-project-api-key>");
+    expect(copy).not.toContain("pip install");
+    expect(copy).not.toContain("monitor_livekit");
   });
 });

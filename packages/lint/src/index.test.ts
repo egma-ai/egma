@@ -484,6 +484,19 @@ describe("a published package importing one that is never published", () => {
     ]);
   });
 
+  it("holds the published LiveKit SDK to the same install boundary", async () => {
+    await workspace();
+    await write(
+      "sdks/livekit-js/src/index.ts",
+      'import { newId } from "@egma/ids";\nexport { newId };\n',
+    );
+
+    const violations = await check(root);
+
+    expect(rules(violations)).toEqual(["no-private-package-in-a-published-one"]);
+    expect(violations[0]?.file).toBe("sdks/livekit-js/src/index.ts");
+  });
+
   it("finds a private package under a root the first version of this rule missed", async () => {
     await workspace();
     await write(

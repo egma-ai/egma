@@ -13,9 +13,12 @@ the platform Egma pulls from today.
 
 **Push** is your own agent process sending its spans to Egma. It needs no
 switch and no configuration on this page: set `EGMA_URL` and a project-scoped
-`EGMA_API_KEY` in the agent, call `monitor_livekit(ctx)` before
-`AgentSession.start`, and the conversations appear on the Monitoring page. See
-[Egma Python SDK](/integrations/python-sdk).
+`EGMA_API_KEY` in the agent, call `monitor_livekit(ctx)` in Python or
+`monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`, and the
+conversations appear on the Monitoring page. See the
+[Python SDK](/integrations/python-sdk) or
+[JavaScript SDK](/integrations/javascript-sdk). The JavaScript setup page
+starts with the required npm availability check.
 
 There is no monitoring configuration object. The switch on the agent is the
 only stored monitoring choice, and an agent's fields are documented with
@@ -175,5 +178,6 @@ curl -X POST \
 ## LiveKit
 
 A LiveKit agent pushes its own spans to the OTLP door with the project
-key. It has no switch, no key on the agent, and no route on this page. See
-[Egma Python SDK](/integrations/python-sdk) for the worker setup.
+key. It has no switch, no key on the agent, and no route on this page. See the
+[Python SDK](/integrations/python-sdk) or
+[JavaScript SDK](/integrations/javascript-sdk) for the worker setup.

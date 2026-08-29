@@ -327,8 +327,8 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * inside each one hanging beneath. So a transcript here is a projection rather
  * than a reconstruction: `turn:human` and `turn:agent` become the two labels the
  * transcript has always had, and the text is the span's own — LiveKit's
- * `lk.user_transcript` and `lk.response.text`, normalised into the `text` column
- * at the door.
+ * `lk.pii.user_transcript` and `lk.pii.response.text`, normalised into the
+ * `text` column at the door.
  *
  * The keys are the simulation contract's turn event, minus the two fields only a
  * report needs, plus the real span id that lets a grade cite its evidence. A

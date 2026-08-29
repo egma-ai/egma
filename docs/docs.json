@@ -43,7 +43,8 @@
             "group": "Integrations",
             "pages": [
               "integrations/retell",
-              "integrations/python-sdk"
+              "integrations/python-sdk",
+              "integrations/javascript-sdk"
             ]
           },
           {

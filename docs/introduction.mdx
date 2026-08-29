@@ -17,7 +17,7 @@ recording when the call connects; chat simulations never produce audio. The
 Expected behaviors grader checks each behavior statement, keeps its evidence
 in the details, and returns one normalized score for the completed simulation.
 
-**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, observed metrics, and grades when a project grader applies. Voice simulation recordings stay with the run that Egma conducted.
+**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit, an installed Egma Python or JavaScript SDK configures OpenTelemetry export inside the running agent. The JavaScript setup starts by checking that its separate npm release is available. Both paths produce production conversation records. Egma shows a transcript, observed metrics, and grades when a project grader applies. Voice simulation recordings stay with the run that Egma conducted.
 
 ## How it works
 
@@ -46,7 +46,7 @@ is separate: enter one
 Retell API key when you start monitoring an agent, and Egma polls that Retell
 agent's completed conversations for as long as the agent's switch is on.
 
-**LiveKit** can use a LiveKit room or a public phone number for simulations. A room connection can use project credentials or a customer token endpoint. Production monitoring is separate again: call `monitor_livekit(ctx)` in the Python agent before `AgentSession.start`, whether the agent is customer-hosted or hosted in LiveKit Cloud.
+**LiveKit** can use a LiveKit room or a public phone number for simulations. A room connection can use project credentials or a customer token endpoint. Production monitoring is separate again: call `monitor_livekit(ctx)` in a Python worker or, after the npm availability check, `monitorLiveKit(ctx)` in a JavaScript worker before `AgentSession.start`, whether the agent is customer-hosted or hosted in LiveKit Cloud.
 
 ## What to read next
 

@@ -56,24 +56,56 @@ used. The voice path is unchanged.
 
 ## Egma SDK entries
 
-The Egma Python SDK has two separate entries:
+The worker's language decides which entries are available:
 
-| Entry | Purpose | Position |
-| --- | --- | --- |
-| `await mockable(agent, ctx, session)` | Serve mock tools during an Egma simulation | After the agent and `AgentSession` exist; before `AgentSession.start` |
-| `monitor_livekit(ctx)` | Send production evidence to Egma | First statement of the job entrypoint; before `ctx.connect()` |
+| Worker | Entry | Purpose | Position |
+| --- | --- | --- | --- |
+| Python | `await mockable(agent, ctx, session)` | Serve mock tools during an Egma simulation | After the agent and `AgentSession` exist; before `AgentSession.start` |
+| Python | `monitor_livekit(ctx)` | Send production evidence to Egma | First statement of the job entrypoint; before `ctx.connect()` |
+| JavaScript | `monitorLiveKit(ctx)` | Send production evidence to Egma | First statement of the job entrypoint; before `ctx.connect()` |
 
 The task names the requested integration: testing, monitoring, or both. Ensure
-every requested entry is present and preserve every existing Egma entry. An
-integration task adds capabilities; it removes one only when the developer asks
-for that removal explicitly.
+every requested available entry is present and preserve every existing Egma
+entry. An integration task adds capabilities; it removes one only when the
+developer asks for that removal explicitly.
 
-The Python package is named `egma`. Require `egma>=0.2.0` and add it through the
-dependency file the repository already uses. `0.2.0` is the first release in
-which both entries read the job's room name, which is the only signal that
-reaches the worker on all three LiveKit dispatch paths. The Egma SDK does not yet support
-a worker built with `@livekit/agents`; report that boundary and leave a Node
-worker unchanged.
+The JavaScript SDK does not yet provide session-isolated mock tools. If a task
+asks for testing or both on a worker built with `@livekit/agents`, report that
+boundary and do not claim that the worker can run isolated Egma simulations.
+Monitoring is supported on that worker and is not blocked by this testing
+boundary.
+
+### JavaScript monitoring entry
+
+The npm package is `@egma/livekit`. Require `@egma/livekit@^0.1.0` and keep
+`@livekit/agents` within the package's supported `>=1.7.1 <1.8` range.
+
+```typescript
+import { monitorLiveKit } from "@egma/livekit";
+import { type JobContext, voice } from "@livekit/agents";
+
+export async function entrypoint(ctx: JobContext) {
+  monitorLiveKit(ctx);
+  const agent = voice.Agent.create({ instructions: "Help the caller." });
+  const session = new voice.AgentSession({
+    stt: "deepgram/nova-3:en",
+    llm: "openai/gpt-4.1-mini",
+    tts: "cartesia/sonic-3",
+  });
+  await session.start({ agent, room: ctx.room });
+}
+```
+
+The entry is synchronous and is the first statement of the entrypoint. Its
+process receives `EGMA_URL` and `EGMA_API_KEY`. Name those variables when
+needed. Egma owns their values and environment injection.
+
+### Python SDK entries
+
+The Python package is named `egma`. Require `egma>=0.2.0` and add it through
+the dependency file the repository already uses. `0.2.0` is the first release
+in which both entries read the job's room name, which is the only signal that
+reaches the worker on all three LiveKit dispatch paths.
 
 ### Testing entry
 
@@ -102,7 +134,7 @@ Keep this one `mockable` call on the initial agent. The SDK follows LiveKit
 handoffs and prepares each selected `Agent` or `AgentTask` before it starts, so
 the integration needs no extra calls inside task classes.
 
-### Monitoring entry
+### Python monitoring entry
 
 ```python
 from egma import monitor_livekit

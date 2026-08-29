@@ -331,13 +331,13 @@ describe("Egma's instruction content", () => {
     expect(chat).not.toContain("from egma import");
     expect(chat).not.toContain("egma>=");
 
-    // A Node worker is named here as one the setup reaches, and the SDK's
-    // Python-only boundary is written once, inside the part that has it.
+    // A Node worker is named here as one the setup reaches, and the testing
+    // boundary is written once, inside the SDK part that owns it.
     expect(chat).toContain("@livekit/agents");
-    expect(chat).not.toContain("does not yet support");
-    expect(reference.split("does not yet support")).toHaveLength(2);
+    expect(chat).not.toContain("session-isolated mock tools");
+    expect(reference.split("session-isolated mock tools")).toHaveLength(2);
     expect(referencePart(reference, "Egma SDK entries")).toContain(
-      "does not yet support",
+      "session-isolated mock tools",
     );
 
     // The customer's live rooms are untouched by taking it.
@@ -347,7 +347,7 @@ describe("Egma's instruction content", () => {
   });
 
   /** The router owns common safety; the selected reference adds SDK-specific bounds. */
-  it("teaches both SDK entries, named credential custody, and the printed fallback", () => {
+  it("teaches the available SDK entries, credential custody, and the fallback", () => {
     const integration = publicSkill("integrate-egma");
     const sdk = readFileSync(
       path.join(
@@ -376,8 +376,14 @@ describe("Egma's instruction content", () => {
     expect(
       bothExample?.indexOf("await mockable(agent, ctx, session)"),
     ).toBeLessThan(bothExample?.indexOf("await session.start") ?? -1);
-    // The monitoring entry, which ticket 02 reuses and this lane never adds.
+    // Both monitoring entries use the same environment contract.
     expect(sdk).toContain("monitor_livekit(ctx)");
+    expect(sdk).toContain("monitorLiveKit(ctx)");
+    expect(sdk).toContain("@egma/livekit@^0.1.0");
+    expect(sdk).toContain(
+      'const agent = voice.Agent.create({ instructions: "Help the caller." });',
+    );
+    expect(sdk).not.toContain("new voice.AgentSession({ ... })");
     expect(sdk).toContain("ctx.connect()");
     expect(sdk).toContain("EGMA_URL");
     expect(sdk).toContain("EGMA_API_KEY");
@@ -487,8 +493,18 @@ describe("Egma's instruction content", () => {
     expect(integration.split(sdk)).toHaveLength(2);
     expect(integration).toContain("final mode is **both**");
     expect(integration).toContain("egma:found worker-entry");
-    expect(integration).toContain("Change the worker, its Python dependency files");
+    expect(integration).toContain("Change the worker, its dependency manifest");
     expect(integration).toContain("dependency manifest");
+
+    const javascript = workerIntegrationInstructions(
+      "/repo",
+      new Map([["framework", "@livekit/agents"]]),
+      "monitoring",
+    );
+    const task = javascript.slice(javascript.lastIndexOf("# Your task"));
+    expect(task).toContain("the registry dependency @egma/livekit@^0.1.0");
+    expect(task).toContain("egma:found worker-entry src/agent.ts");
+    expect(task).toContain("egma:found dependency-manifest package.json");
   });
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {

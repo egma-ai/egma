@@ -1,0 +1,62 @@
+{
+  "name": "@egma/livekit",
+  "version": "0.1.0",
+  "description": "Send LiveKit Agents JS production traces to Egma.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/egma-ai/egma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/egma-ai/egma.git",
+    "directory": "sdks/livekit-js"
+  },
+  "bugs": {
+    "url": "https://github.com/egma-ai/egma/issues"
+  },
+  "keywords": [
+    "livekit",
+    "voice-agents",
+    "monitoring",
+    "opentelemetry"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "prepublishOnly": "pnpm -w build",
+    "test": "tsc -p tsconfig.test.json && vitest run --config vitest.config.ts"
+  },
+  "peerDependencies": {
+    "@livekit/agents": ">=1.7.1 <1.8"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
+    "@opentelemetry/resources": "^2.8.0",
+    "@opentelemetry/sdk-trace-node": "^2.8.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0"
+  },
+  "devDependencies": {
+    "@livekit/agents": "1.7.1",
+    "@livekit/rtc-node": "^0.13.34",
+    "zod": "^4.1.8"
+  }
+}

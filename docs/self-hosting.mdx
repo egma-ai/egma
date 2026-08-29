@@ -195,9 +195,11 @@ depend on the agent platform.
 
 - **Retell:** enter a Retell API key, select the matching Retell agent, and
   start monitoring.
-- **LiveKit:** install the Egma Python SDK in the agent process. Set `EGMA_URL`
-  to the API address and `EGMA_API_KEY` to a project key, then call
-  `monitor_livekit(ctx)` before `AgentSession.start`.
+- **LiveKit:** install the [Python SDK](/integrations/python-sdk) or
+  [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
+  `EGMA_URL` to the API address and `EGMA_API_KEY` to a project key, then call
+  the language's monitoring helper before `AgentSession.start`. For JavaScript,
+  complete the npm availability check on the linked setup page first.
 
 ```bash
 export EGMA_URL=http://localhost:3100

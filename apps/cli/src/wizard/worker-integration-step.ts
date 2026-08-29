@@ -30,8 +30,15 @@ const DISPATCH_NAME_FACT = "dispatch-name";
 
 const NODE_LIVEKIT = /@livekit\/agents/iu;
 
-export function supportsLiveKitSdk(facts: Facts): boolean {
-  return !NODE_LIVEKIT.test(facts.get("framework") ?? "");
+function isNodeLiveKitWorker(facts?: Facts): boolean {
+  return NODE_LIVEKIT.test(facts?.get("framework") ?? "");
+}
+
+export function supportsLiveKitIntegrationMode(
+  facts: Facts,
+  mode: WorkerIntegrationMode = "testing",
+): boolean {
+  return mode === "monitoring" || !isNodeLiveKitWorker(facts);
 }
 
 function contextBlock(facts: Facts): readonly string[] {
@@ -69,6 +76,12 @@ function workerIntegrationTask(
   facts: Facts,
   mode: WorkerIntegrationMode,
 ): string {
+  const nodeWorker = isNodeLiveKitWorker(facts);
+  const workerExample = nodeWorker ? "src/agent.ts" : "src/agent.py";
+  const manifestExample = nodeWorker ? "package.json" : "pyproject.toml";
+  const dependency = nodeWorker
+    ? "the registry dependency @egma/livekit@^0.1.0"
+    : "Egma Python SDK 0.2.0 or newer";
   return [
     "# Your task",
     "",
@@ -97,7 +110,7 @@ function workerIntegrationTask(
         ]),
     "## Where you may write",
     "",
-    `Work in ${cwd}. Change the worker, its Python dependency files, its lockfile,`,
+    `Work in ${cwd}. Change the worker, its dependency manifest, its lockfile,`,
     "and any directly related local test or configuration needed to complete the",
     "integration. Use the dependency system this repository already uses. Run",
     "relevant local validation and package-manager commands when needed. Do not",
@@ -122,7 +135,7 @@ function workerIntegrationTask(
     "When the integration is complete, report the worker on one line:",
     "",
     "```text",
-    `egma:found ${WORKER_ENTRY_FACT} src/agent.py`,
+    `egma:found ${WORKER_ENTRY_FACT} ${workerExample}`,
     "```",
     "",
     "If one job entrypoint cannot be identified, edit nothing and write",
@@ -130,15 +143,19 @@ function workerIntegrationTask(
     "",
     "## Report the dependency manifest",
     "",
-    "After you have confirmed that the worker environment installs Egma Python",
-    "SDK 0.2.0 or newer, report the dependency manifest on one line:",
+    `After you have confirmed that the worker environment installs ${dependency},`,
+    "report the dependency manifest on one line:",
     "",
     "```text",
-    `egma:found ${DEPENDENCY_MANIFEST_FACT} pyproject.toml`,
+    `egma:found ${DEPENDENCY_MANIFEST_FACT} ${manifestExample}`,
     "```",
     "",
-    "Report the Python manifest that the worker uses. For a local worker, Egma's",
-    "launcher currently supports `pyproject.toml` and `requirements.txt`.",
+    ...(nodeWorker
+      ? ["Report the `package.json` that owns this LiveKit worker."]
+      : [
+          "Report the Python manifest that the worker uses. For a local worker, Egma's",
+          "launcher currently supports `pyproject.toml` and `requirements.txt`.",
+        ]),
     "",
     "## Report the agent name",
     "",
@@ -195,7 +212,22 @@ export function workerIntegrationInstructions(
 
 export function workerEntryInstructions(
   mode: WorkerIntegrationMode,
+  facts?: Facts,
 ): readonly string[] {
+  const nodeWorker = isNodeLiveKitWorker(facts);
+  if (nodeWorker && mode === "monitoring") {
+    return [
+      "The coding agent did not report a completed LiveKit worker integration.",
+      "Add the following to the worker before starting Monitoring:",
+      "",
+      '  1. Add the registry dependency "@egma/livekit@^0.1.0".',
+      "  2. Make monitorLiveKit(ctx) the first statement of the job entrypoint.",
+      "",
+      '         import { monitorLiveKit } from "@egma/livekit";',
+      "",
+      "         monitorLiveKit(ctx);",
+    ];
+  }
   const monitoring = mode === "monitoring" || mode === "both";
   const testing = mode === "testing" || mode === "both";
   return [
@@ -266,15 +298,15 @@ export async function workerIntegrationStep(
 ): Promise<WorkerIntegration> {
   const { ui, drivenAgent, signal, log } = options;
 
-  if (!supportsLiveKitSdk(options.facts)) {
+  if (!supportsLiveKitIntegrationMode(options.facts, options.mode)) {
     ui.pushStatus(
-      "This is a Node LiveKit worker, and the Egma SDK is Python only today, so the worker was left unchanged.",
+      "The Egma JavaScript SDK monitors production calls but does not yet isolate simulation tools, so this Node worker was left unchanged.",
     );
     return {
       halted: null,
       files: null,
       reason:
-        "The Egma SDK is Python only today, so this Node LiveKit worker cannot be integrated.",
+        "The Egma JavaScript SDK does not yet isolate simulation tools, so this Node LiveKit worker cannot be integrated for testing.",
       agentName: options.facts.get("agent-name") ?? null,
       dispatchName: null,
       supportsSdk: false,
@@ -404,7 +436,7 @@ export async function workerIntegrationStep(
       ? await acceptRepositoryFileClaim(
           options.cwd,
           claimed.dependency ?? "",
-          "the Python dependency manifest",
+          "the dependency manifest",
         )
       : null;
   const named = claimed.name?.trim() ?? "";
@@ -427,7 +459,9 @@ export async function workerIntegrationStep(
   if (halted === null) {
     if (files === null) {
       if (reason !== null) ui.pushStatus(`${DETAIL_MARK} ${reason}`);
-      for (const line of workerEntryInstructions(options.mode)) ui.pushStatus(line);
+      for (const line of workerEntryInstructions(options.mode, options.facts)) {
+        ui.pushStatus(line);
+      }
     } else {
       ui.pushStatus(
         `${ACTION_MARK} ${drivenAgent.name} completed the LiveKit worker integration in ${files.worker}`,
