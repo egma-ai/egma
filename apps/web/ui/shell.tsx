@@ -74,23 +74,6 @@ import { useTheme } from "./theme.tsx";
  * tuning pass at the end of this effort is an edit to the theme rather than an
  * edit to every page.
  *
- * **Gray is the chrome, white is the work.** Three surfaces in this file are
- * the application's own furniture — the sidebar, the page title bar, and the
- * bar that stands in for both under the layout breakpoint — and all three are
- * `--chrome`. Everything between them is `--background`, which is paper now.
- * The product used to be drawn the other way round: a white bar beside a
- * near-white canvas, which made the frame and the work the same material and
- * left a hairline to say which was which. One rule replaces that, and it is
- * legible at a glance from across a desk. (Developer decision, 2026-08-28,
- * from the approved Paper variation.)
- *
- * **On chrome, a quiet state goes up to paper rather than down to grey.** The
- * bar's own fill and `--surface-soft` are one value in light theme, so the
- * neutral hover plate every control here used to wear would land on exactly
- * the colour it sits on and disappear. Hovering a control on the chrome lifts
- * it to `--surface` instead — towards the work surface, away from the frame —
- * which reads in both themes and is the same movement everywhere in the frame.
- *
  * **Where you are comes from the address.** The project is read out of the
  * path, the navigation item is read out of the path, and nothing here keeps a
  * chosen project of its own. Two tabs on two projects are therefore two
@@ -406,17 +389,12 @@ function OrganizationMenu({
           "flex min-h-(--control-lg) w-full min-w-0 items-center gap-1 px-2",
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
           "transition-transform duration-(--duration-press) ease-out",
-          /*
-           * Paper, not the quiet grey: this control stands on the chrome, and
-           * the chrome and `--surface-soft` are one value in light theme. The
-           * plate is the account control's, one lane down the same bar.
-           */
-          "pointer-hover:border-border pointer-hover:bg-surface",
+          "pointer-hover:border-border pointer-hover:bg-surface-soft",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
           "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
         )}
-        openClassName="border-border bg-surface"
+        openClassName="border-border bg-surface-soft"
         placement="below-start"
         panelRole="dialog"
         panelClassName="w-[280px] p-3"
@@ -561,14 +539,6 @@ function AccountMenu({
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
           "transition-transform duration-(--duration-press) ease-out",
           "pointer-coarse:min-h-(--tap-target)",
-          /*
-           * The plate rises to paper, avatar and all, and it is the whole
-           * plate that rises. On the white bar this used to be the border
-           * arriving and nothing else — the fill it asks for was the fill it
-           * already stood on. The bar is chrome now, so the same class is a
-           * visible lift, and the hover a person gets here is the hover the
-           * organization control and every navigation row get.
-           */
           "pointer-hover:border-border pointer-hover:bg-surface",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
@@ -582,14 +552,7 @@ function AccountMenu({
             <span
               className={cn(
                 "grid size-(--control-md) flex-none place-items-center",
-                /*
-                 * Paper inside a hairline, because the square stands on the
-                 * chrome and the quiet grey it used to wear is the chrome's
-                 * own value in light theme — a tile the colour of the bar it
-                 * is on. It reads as a tile at rest and keeps its hairline
-                 * once the plate under it has risen to the same paper.
-                 */
-                "rounded-none border border-border bg-surface text-sm",
+                "rounded-none border border-border bg-surface-soft text-sm",
                 compact && "size-(--tap-target)",
               )}
               data-slot="account-avatar"
@@ -816,14 +779,11 @@ function ShellFrame({
        * living beside the breakpoint that reads it. Everything inside it is on
        * the sidebar primitives — the switcher topmost in the header slot, the
        * groups in the content, the account control in the footer slot.
-       *
-       * It is the first of the three chrome surfaces, and it used to be the
-       * paper one. See the note at the top of this file for the rule.
        */}
       <aside
         className={cn(
           "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-4",
-          "border-r border-border bg-chrome",
+          "border-r border-border bg-surface",
           "max-[900px]:hidden",
         )}
       >
@@ -865,19 +825,11 @@ function ShellFrame({
             "sticky top-0 z-20 hidden h-(--topbar-height) items-center gap-3 px-4",
             "border-b border-border backdrop-blur-[12px]",
             /*
-             * Nearly the chrome, so what scrolls under the bar is felt rather
-             * than read. Written here because it is one derived value used in
-             * one place, and the theme holds no key for it.
-             *
-             * **The mix moved from `--surface` to `--chrome` and the effect is
-             * the one it always was**: this bar is the sidebar and the title
-             * bar at once under the layout breakpoint, so it takes their fill,
-             * and 6% of the page shows through it while the page moves. Left
-             * on `--surface` it would have been a paper bar over paper
-             * content — the blur with nothing to blur, and the one chrome
-             * surface a narrow screen has drawn as work.
+             * Nearly the raised surface, so what scrolls under the bar is felt
+             * rather than read. Written here because it is one derived value
+             * used in one place, and the theme holds no key for it.
              */
-            "bg-[color-mix(in_srgb,var(--chrome)_94%,transparent)]",
+            "bg-[color-mix(in_srgb,var(--surface)_94%,transparent)]",
             "max-[900px]:flex",
           )}
         >
@@ -888,16 +840,7 @@ function ShellFrame({
                 "rounded-button border border-border bg-surface text-sm text-foreground",
                 "transition-transform duration-(--duration-press) ease-out",
                 "pointer-coarse:size-(--tap-target)",
-                /*
-                 * **The edge answers the pointer; the fill stays where it is.**
-                 * This control already rests on paper, so the lift the rest of
-                 * the chrome uses is a step it has taken — and the grey it used
-                 * to hover to is the bar's own colour in light theme, which
-                 * would sink a white tile into the bar the moment somebody
-                 * pointed at it. The hairline going to ink says the same thing
-                 * and says it in both themes.
-                 */
-                "pointer-hover:border-border-strong",
+                "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
                 "[&:active:not(:focus-visible)]:scale-97",
                 "motion-reduce:transition-none",
                 "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
@@ -1134,28 +1077,15 @@ export function PageHeader({
         data-slot="page-topbar"
         className={cn(
           "sticky top-0 z-10 flex min-w-0 flex-none items-center",
-          /*
-           * Chrome, and the same fill as the sidebar across the divider from
-           * it. The two bars are the same 56px for the reason `SidebarBrand`
-           * gives, and they are now the same colour for the same kind of
-           * reason: they are one frame around the page, drawn in two elements
-           * because one of them scrolls with a column the other does not.
-           */
-          "h-(--topbar-height) border-b border-border bg-chrome",
+          "h-(--topbar-height) border-b border-border bg-background",
           "px-(--page-gutter)",
           /*
            * Under the one layout breakpoint the page has a top bar of its own
            * already — the drawer button, the switcher and the account control
            * — so this stops being a bar and becomes the page's first line.
-           *
-           * **And a line of the page is drawn on the page.** The chrome fill
-           * goes with the bar: kept, it would put a grey band across the top
-           * of the content with no edge under it and nothing above it, which
-           * is the frame's colour worn by something that is no longer frame.
            */
           "max-[900px]:static max-[900px]:h-auto max-[900px]:flex-wrap",
-          "max-[900px]:border-b-0 max-[900px]:bg-background",
-          "max-[900px]:px-4 max-[900px]:pt-4",
+          "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
         <PageContentFrame className="items-center gap-3" slot="page-topbar-content">

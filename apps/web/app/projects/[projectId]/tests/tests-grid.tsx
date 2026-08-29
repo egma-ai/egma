@@ -17,7 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { HEAD_TYPE, LANE_X } from "@/components/ui/table";
+import { LANE_X } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
   platformAnswer,
@@ -422,7 +422,7 @@ function PersonaPicker({
 
   return (
     <Arriving
-      className="absolute top-full left-0 z-20 mt-1 w-[300px] origin-top border border-border bg-raised shadow-popover"
+      className="absolute top-full left-0 z-20 mt-1 w-[300px] origin-top border border-border bg-surface shadow-popover"
       role="dialog"
       aria-label="Choose personas"
       data-persona-picker={owner}
@@ -1417,21 +1417,12 @@ export function TestsGrid(props: GridProps) {
           <col style={{ width: "var(--table-action-labelled-width)" }} />
         </colgroup>
         <thead>
-          {/*
-            The header row is unfilled, like every other header row in the
-            product. This grid used to tint it, which was the spreadsheet
-            habit rather than a rule: the approved header is ranked by weight
-            and space, and a tint under it would say the same thing a second
-            time on the one screen that draws it. The vertical rules stay —
-            they are what make this a grid to type in.
-          */}
-          <tr>
+          <tr className="bg-surface-soft">
             {COLUMNS.map((column) => (
               <th
                 className={cn(
                   PAD,
-                  "border-r border-b border-border text-left text-sm last:border-r-0",
-                  HEAD_TYPE,
+                  "border-r border-b border-border text-left text-sm font-normal text-faint last:border-r-0",
                 )}
                 key={column.field}
                 scope="col"
@@ -1448,8 +1439,7 @@ export function TestsGrid(props: GridProps) {
             <th
               className={cn(
                 PAD,
-                "w-(--table-action-labelled-width) border-b border-border text-center text-sm whitespace-nowrap",
-                HEAD_TYPE,
+                "w-(--table-action-labelled-width) border-b border-border text-center text-sm font-normal whitespace-nowrap text-faint",
               )}
               scope="col"
             >

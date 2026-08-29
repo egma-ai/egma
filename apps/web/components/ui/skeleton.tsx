@@ -15,13 +15,11 @@ import { cn } from "@/lib/utils";
  *
  * 1. **The bar reads `--border`.** shadcn draws it on the quiet accent
  *    surface, which this theme maps to `--surface-soft` — 6% Graphite on
- *    paper. The content area is Pure Paper, so a skeleton drawn there was six
- *    percent of one colour away from the page under it: present in the DOM,
- *    invisible to a person. `--border` is 18%, still "a neutral
- *    Graphite-and-Paper mix" and still quiet, and it is legible on the
- *    content, on the chrome and in dark theme alike. The gap is wider than it
- *    was, not narrower: the canvas used to be 3% Graphite and is now paper,
- *    so this rule is more load-bearing after 2026-08-28, not less.
+ *    paper. The application canvas is 3% Graphite on paper, so a skeleton on
+ *    the canvas was three percent of one colour away from the page it was
+ *    drawn on: present in the DOM, invisible to a person. `--border` is 18%,
+ *    still "a neutral Graphite-and-Paper mix" and still quiet, and it is
+ *    legible on the canvas, on Pure Paper and in dark theme alike.
  * 2. **The radius is named for a component.** shadcn's generic medium step and
  *    `rounded-input` are the same 8px today; only one of them says which of
  *    egma's four radii it means, and only one of them moves if that step ever

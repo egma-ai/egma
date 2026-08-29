@@ -67,17 +67,6 @@ const PANEL_SHAPE = {
     "top-0 left-0 h-full max-h-none",
     "w-[min(340px,calc(100vw-var(--space-7)))] translate-x-0 translate-y-0",
     "overflow-y-auto border-y-0 border-l-0",
-    /*
-     * **The drawer is the sidebar, so it is chrome and not paper.** It is the
-     * one kind that holds navigation rather than a question or a record, it
-     * draws the shell's own `Navigation`, and those rows read their hover
-     * against the bar they believe they are in — a paper panel would have
-     * given the same component two different grounds and made its hover
-     * invisible on one of them. What makes it a raised surface is what makes
-     * every raised surface one here: the scrim behind it, the hairline on its
-     * edge and the shared shadow. Not the fill.
-     */
-    "bg-chrome",
   ],
   /*
    * **One side sheet look, with reading widths chosen by content.** This is the
