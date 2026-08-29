@@ -38,6 +38,7 @@ The supported combinations are:
 | Retell | `retell_web_call` | `retell_web_call.api_key` | voice | Retell web call |
 | Retell | `phone_number` | `phone_number.public_e164` | voice | Retell phone |
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
+| LiveKit | `livekit_room` | `livekit_room.project_credentials` | chat | LiveKit chat |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
 | LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
@@ -92,8 +93,9 @@ deployment's telephony configuration.
 
 ### LiveKit room
 
-`livekit_room` joins a room in the customer's LiveKit project. It is
-voice-only and has two access variants:
+`livekit_room` joins a room in the customer's LiveKit project. Project
+credentials support chat and voice simulations. A customer token endpoint
+supports voice simulations. The connection type has two access variants:
 
 - `livekit_room.project_credentials`: Egma stores the project key pair sealed,
   mints a token, creates the room, and can dispatch a named worker.

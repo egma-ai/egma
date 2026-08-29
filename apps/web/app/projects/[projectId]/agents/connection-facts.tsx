@@ -33,24 +33,6 @@ import { connectionsOnRow, type ListedConnection } from "@/lib/agents.ts";
  */
 
 /**
- * What a person is shown for a channel.
- *
- * Two values, and the words are the product's rather than the API's: a
- * connection's modality is `voice` or `chat`, and a person reading a list is
- * shown Voice or Chat. The connection sheet draws them that way, and these
- * surfaces say the same words rather than inventing a third pair.
- *
- * **It said Text until #158**, which made Retell a Chat connection and renamed
- * the word on the connection page and in the new-connection form. The rename
- * arrives here because saying "the same words" is the whole reason this
- * function exists: leaving it behind would have produced exactly the third
- * pair the paragraph above refuses.
- */
-export function modalityLabel(modality: string): string {
-  return modality === "voice" ? "Voice" : "Chat";
-}
-
-/**
  * Every way into one agent, or the fact that there is none.
  *
  * **"No connections yet" is a state of the agent, not an empty cell.** An agent

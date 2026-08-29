@@ -472,6 +472,7 @@ describe("one run after suites", () => {
     for (const label of ["Status", "Started", "Test suite", "Agent", "Connection"]) {
       expect(within(summary).getByText(label)).toBeTruthy();
     }
+    expect(within(summary).getByText("Chat")).toBeTruthy();
     const completedStatus = within(summary)
       .getByText("Completed")
       .closest('[data-slot="run-status"]');
@@ -617,9 +618,11 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Transcript & audio" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Transcript" }));
     expect(
-      await screen.findByText(/later tool calls or speech may be absent/iu),
+      await screen.findByText(
+        /later tool calls or conversation turns may be absent/iu,
+      ),
     ).toBeTruthy();
   });
 
@@ -822,7 +825,7 @@ describe("one run after suites", () => {
       expect(meaning.className).toContain("sr-only");
     }
 
-    fireEvent.click(screen.getByRole("tab", { name: "Transcript & audio" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
     const conversationHeading = await screen.findByRole("heading", {
       name: "Conversation",
     });
@@ -1154,18 +1157,16 @@ describe("one run after suites", () => {
     expect(within(policy).getByText("The agent did not confirm consent.")).toBeTruthy();
   });
 
-  it("keeps transcript, speakers, audio, and tool calls in one ordered detail tab", async () => {
+  it("keeps a chat transcript and its tool calls in one ordered detail tab", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(detailStubs());
     render(<RunDetailPage />);
 
-    const transcriptTab = await screen.findByRole("tab", {
-      name: "Transcript & audio",
-    });
+    const transcriptTab = await screen.findByRole("tab", { name: "Transcript" });
     fireEvent.click(transcriptTab);
 
-    expect(await screen.findByRole("heading", { name: "Recording" })).toBeTruthy();
-    expect(screen.getByText("No audio was recorded.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Recording" })).toBeNull();
+    expect(screen.queryByText("No audio was recorded.")).toBeNull();
     expect(screen.getByRole("heading", { name: "Conversation" })).toBeTruthy();
     const conversation = screen.getByRole("list", { name: "Transcript messages" });
     const events = within(conversation).getAllByRole("listitem");
@@ -1189,6 +1190,56 @@ describe("one run after suites", () => {
       within(details!).getByRole("region", { name: "lookup_appointment response" })
         .textContent,
     ).toContain('{"appointment":"Tuesday at 10"}');
+  });
+
+  it("keeps recording evidence on the voice simulation path", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const voiceSnapshot = {
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      modality: "voice",
+      topology: "agent-dials-out",
+      environment: null,
+      config: {},
+    };
+    answers(
+      detailStubs(
+        runDetail({
+          modality: "voice",
+          connectionSnapshot: voiceSnapshot,
+          connection: {
+            id: "con_1",
+            name: "livekit_voice-1",
+            productLabel: "LiveKit project credentials",
+            archived: false,
+          },
+        }),
+        {
+          status: 200,
+          body: {
+            simulations: [simulation({ modality: "voice" })],
+            nextPageToken: null,
+          },
+        },
+        {
+          status: 200,
+          body: simulationEvidence({
+            modality: "voice",
+            connectionSnapshot: voiceSnapshot,
+          }),
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const evidence = await screen.findByRole("tab", {
+      name: "Transcript & audio",
+    });
+    fireEvent.click(evidence);
+
+    expect(await screen.findByRole("heading", { name: "Recording" })).toBeTruthy();
+    expect(screen.getByText("No audio was recorded.")).toBeTruthy();
   });
 
   it("keeps a selected later-page simulation open while its row refreshes", async () => {

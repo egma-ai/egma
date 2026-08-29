@@ -394,6 +394,7 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   const connection = {
     name: options.registered.connection.name,
     id: options.registered.connection.id,
+    modality: options.registered.connection.modality,
   };
   const project = await readProject(
     options.signedIn,

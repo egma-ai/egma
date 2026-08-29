@@ -2141,6 +2141,7 @@ function SimulationEvidencePanel({
   const simulationActive = ["queued", "claimed", "running"].includes(
     evidence.status,
   );
+  const voice = evidence.modality === "voice";
   const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
   const pendingTurn = useRef<number | null>(null);
 
@@ -2201,7 +2202,7 @@ function SimulationEvidencePanel({
             aria-expanded={evidenceOpen}
             onClick={() => onEvidenceChange(true)}
           >
-            Open transcript and audio
+            {voice ? "Open transcript and audio" : "Open transcript"}
           </Button>
         </header>
         {stillGrading ? (
@@ -2261,33 +2262,35 @@ function SimulationEvidencePanel({
         <Dialog
           kind="sheet"
           size="wide"
-          title="Transcript and audio"
+          title={voice ? "Transcript and audio" : "Transcript"}
           onClose={() => onEvidenceChange(false)}
         >
           <div
             className="flex min-h-0 flex-auto flex-col gap-6 overflow-y-auto bg-background p-5 max-[40rem]:p-4"
             id="transcript-audio-evidence"
           >
-            <section className={SHEET_BLOCK} aria-labelledby="evidence-recording">
-              <h3 className={SHEET_BLOCK_TITLE} id="evidence-recording">
-                Recording
-              </h3>
-              <RecordingEvidence
-                active={simulationActive}
-                recording={recording}
-                speakerTimeline={
-                  evidence.transcript === null
-                    ? null
-                    : {
-                        startedAt:
-                          recordingOriginOf(evidence.transcript) ??
-                          evidence.transcript.startedAt,
-                        endedAt: evidence.transcript.endedAt,
-                        turns: evidence.transcript.turns,
-                      }
-                }
-              />
-            </section>
+            {voice ? (
+              <section className={SHEET_BLOCK} aria-labelledby="evidence-recording">
+                <h3 className={SHEET_BLOCK_TITLE} id="evidence-recording">
+                  Recording
+                </h3>
+                <RecordingEvidence
+                  active={simulationActive}
+                  recording={recording}
+                  speakerTimeline={
+                    evidence.transcript === null
+                      ? null
+                      : {
+                          startedAt:
+                            recordingOriginOf(evidence.transcript) ??
+                            evidence.transcript.startedAt,
+                          endedAt: evidence.transcript.endedAt,
+                          turns: evidence.transcript.turns,
+                        }
+                  }
+                />
+              </section>
+            ) : null}
             <section
               className={cn(SHEET_BLOCK, "flex-auto")}
               aria-labelledby="evidence-transcript"
@@ -2301,8 +2304,8 @@ function SimulationEvidencePanel({
                     No transcript was filed
                   </strong>
                   <p className={EMPTY_STATE_LEAD}>
-                    Egma has no speech for this simulation. It may not have started,
-                    or it may have stopped before the first turn.
+                    Egma has no conversation turns for this simulation. It may not
+                    have started, or it may have stopped before the first turn.
                   </p>
                 </div>
               ) : (

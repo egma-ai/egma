@@ -190,7 +190,8 @@ const MEASURED_CONNECTION = {
 const LIVEKIT_CONNECTION = {
   ...CONNECTION,
   id: "con_3",
-  name: "livekit room",
+  // A connection created before modality-aware defaults must still be clear.
+  name: "livekit_room-1",
   agentPlatform: "livekit",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
@@ -962,9 +963,45 @@ describe("reading an agent's reach from the list", () => {
       "/projects/prj_1/agents?sheet=connection&agent=agt_1&connection=con_2",
       "/projects/prj_1/agents?sheet=connection&agent=agt_1&connection=con_3",
     ]);
-    expect(panel.getByText("staging")).toBeDefined();
-    expect(panel.getByText("phone line")).toBeDefined();
-    expect(panel.getByText("livekit room")).toBeDefined();
+    const connections = panel
+      .getByRole("heading", { name: "Connections" })
+      .closest("section");
+    expect(connections).not.toBeNull();
+    const rows = within(connections!).getAllByRole("listitem");
+    expect(within(rows[0]!).getByText("staging")).toBeDefined();
+    expect(within(rows[0]!).getByText("Chat")).toBeDefined();
+    expect(within(rows[1]!).getByText("phone line")).toBeDefined();
+    expect(within(rows[1]!).getByText("Voice")).toBeDefined();
+    expect(within(rows[2]!).getByText("livekit_room-1")).toBeDefined();
+    expect(within(rows[2]!).getByText("Voice")).toBeDefined();
+  });
+
+  it("does not present one LiveKit connection's access as an agent fact", async () => {
+    const chat = {
+      ...LIVEKIT_CONNECTION,
+      id: "con_4",
+      name: "livekit_room-2",
+      productLabel: "LiveKit chat",
+      modality: "chat",
+      config: { url: "wss://chat.livekit.cloud", agentName: "chat-worker" },
+    };
+    listOf({
+      ...LISTED_AGENT,
+      agentPlatform: "livekit",
+      connections: [chat, LIVEKIT_CONNECTION],
+    });
+    routed.search = "?sheet=agent&agent=agt_1";
+    render(<AgentsPage />);
+
+    const panel = within(
+      await screen.findByRole("dialog", { name: "Front desk" }),
+    );
+    const facts = panel.getByText("LiveKit agent").closest("section");
+    expect(facts).not.toBeNull();
+    expect(within(facts!).queryByText("Access")).toBeNull();
+    expect(
+      within(facts!).getAllByText("Varies by connection"),
+    ).toHaveLength(2);
   });
 
   it("tells a viewer why the control is not theirs, where a keyboard can reach it", async () => {
@@ -1115,7 +1152,7 @@ describe("goal-first agent setup", () => {
   async function fillLiveKitSimulation(): Promise<void> {
     expect(
       await screen.findByRole("heading", {
-        name: "Connect LiveKit for simulations",
+        name: "Connect LiveKit Voice for simulations",
       }),
     ).toBeDefined();
     const connectionType = screen.getByRole("combobox", {
@@ -2068,7 +2105,7 @@ describe("goal-first agent setup", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Connect LiveKit for simulations",
+        name: "Connect LiveKit Chat for simulations",
       }),
     ).toBeDefined();
     // Egma has to dispatch the worker to tell it the simulation is typed, so
@@ -2252,7 +2289,7 @@ describe("goal-first agent setup", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: "Connect LiveKit for simulations",
+        name: "Connect LiveKit Voice for simulations",
       }),
     ).toBeDefined();
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
@@ -2452,7 +2489,7 @@ describe("goal-first agent setup", () => {
     await chooseLiveKitModality("Voice");
     expect(
       await screen.findByRole("heading", {
-        name: "Connect LiveKit for simulations",
+        name: "Connect LiveKit Voice for simulations",
       }),
     ).toBeDefined();
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
@@ -2530,6 +2567,9 @@ describe("one connection's page", () => {
     expect(screen.queryByText("Platform")).toBeNull();
     expect(screen.queryByText("Env")).toBeNull();
     expect(screen.queryByText(/^Updated/)).toBeNull();
+    const modality = screen.getByText("Modality").parentElement;
+    expect(modality).not.toBeNull();
+    expect(within(modality!).getByText("Chat")).toBeDefined();
     /* The credential is a hint of its last characters, never the secret. */
     expect(screen.getByText("…WXYZ")).toBeDefined();
 
@@ -2616,7 +2656,7 @@ describe("one connection's page", () => {
 
     await openConnectionMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit connection" }));
-    fireEvent.change(screen.getByLabelText("Name*"), {
+    fireEvent.change(screen.getByLabelText("Connection name*"), {
       target: { value: "Primary Retell connection" },
     });
     fireEvent.change(screen.getByLabelText("Retell agent ID*"), {

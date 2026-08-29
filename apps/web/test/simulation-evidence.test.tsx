@@ -337,6 +337,50 @@ describe("one simulation's grades", () => {
     expect(within(summary).queryByText(/overall|verdict/iu)).toBeNull();
   });
 
+  it("presents chat as chat and leaves every audio control out", async () => {
+    page({
+      read: evidence({
+        modality: "chat",
+        providerReference: "egma-sim-chat-1",
+        connection: {
+          id: "con_1",
+          name: "livekit_room-1",
+          archived: false,
+        },
+        connectionSnapshot: {
+          agentPlatform: "livekit",
+          connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
+          modality: "chat",
+          topology: "agent-dials-out",
+          environment: null,
+          config: {},
+        },
+        transcript: null,
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    await screen.findByRole("heading", {
+      name: "Reschedules a booked appointment",
+    });
+    expect(document.body.textContent).toContain(
+      "Impatient Rita chatting with Front desk through livekit_room-1 · Chat",
+    );
+    expect(
+      screen.getByRole("button", { name: "Open transcript" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Open transcript and audio" }),
+    ).toBeNull();
+    const transcript = await screen.findByRole("dialog", { name: "Transcript" });
+    expect(within(transcript).queryByRole("heading", { name: "Recording" })).toBeNull();
+    expect(
+      within(transcript).getByText(/no conversation turns for this simulation/iu),
+    ).toBeTruthy();
+    expect(within(transcript).queryByText(/speech/iu)).toBeNull();
+  });
+
   it("shows a dash for every summary value that was not recorded", async () => {
     page({
       read: evidence({

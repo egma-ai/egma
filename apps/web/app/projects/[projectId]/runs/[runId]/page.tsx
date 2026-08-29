@@ -11,6 +11,7 @@ import {
 } from "@egma/platform-api/client";
 
 import type { Refusal } from "../../../../../lib/api.ts";
+import { modalityLabel } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   platformAnswer,
@@ -609,18 +610,23 @@ function RunDetailView({
                   {read.connection === null ? (
                     "Unavailable"
                   ) : (
-                    <Link
-                      className={SUMMARY_LINK}
-                      href={projectPath(
-                        projectId,
-                        "agents",
-                        read.agentId,
-                        "connections",
-                        read.connection.id,
-                      )}
-                    >
-                      {read.connection.name}
-                    </Link>
+                    <>
+                      <Link
+                        className={SUMMARY_LINK}
+                        href={projectPath(
+                          projectId,
+                          "agents",
+                          read.agentId,
+                          "connections",
+                          read.connection.id,
+                        )}
+                      >
+                        {read.connection.name}
+                      </Link>
+                      <span className="text-faint">
+                        {modalityLabel(read.modality)}
+                      </span>
+                    </>
                   )}
                   {read.connection?.archived === true ? (
                     <span className="text-sm text-warning">Archived</span>

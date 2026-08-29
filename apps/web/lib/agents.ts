@@ -43,6 +43,18 @@ export type AgentPage = ListAgentsResponse;
 
 export type ListedConnection = ListedAgentWithConnections["connections"][number];
 
+/** One stored modality in the words a person reads. */
+export function modalityLabel(modality: string): string {
+  return modality === "voice" ? "Voice" : "Chat";
+}
+
+/** A compact connection identity that never asks the editable name to imply modality. */
+export function connectionLabel(
+  connection: Pick<ListedConnection, "name" | "modality">,
+): string {
+  return `${connection.name} · ${modalityLabel(connection.modality)}`;
+}
+
 /**
  * One agent as a *list* of them answers it: the identity above, and every
  * living way egma can reach it.

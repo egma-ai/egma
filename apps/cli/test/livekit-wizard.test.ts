@@ -1351,7 +1351,7 @@ describe("LiveKit chat in the wizard", () => {
       LIVEKIT_TOKEN_ENDPOINT_VARIANT,
     );
     expect(ui.record.statuses).toContain(
-      "┊ Reachable over livekit_room-1 (LiveKit chat).",
+      "┊ Reachable over livekit_chat-1 (LiveKit chat).",
     );
     expect(JSON.stringify(ui.record.connectionFieldGroups)).not.toContain(
       API_SECRET,
@@ -1461,7 +1461,7 @@ describe("LiveKit chat in the wizard", () => {
       // modality does not read like a second agent.
       expect(two.ui.record.statuses).toContain(
         "┊ This voice agent was already registered as front-desk, so Egma added " +
-          "livekit_room-2 as another way of reaching it. No second agent was registered.",
+          `livekit_${second}-1 as another way of reaching it. No second agent was registered.`,
       );
     },
   );

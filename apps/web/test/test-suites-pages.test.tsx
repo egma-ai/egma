@@ -155,8 +155,8 @@ function gridAnswers(options: {
 function runBuilderAnswers(options: {
   readonly role?: "admin" | "member" | "viewer";
   readonly started?: Stub | readonly Stub[];
-  /** The one connection this agent holds, when the walk needs a named lane. */
-  readonly connection?: Record<string, unknown>;
+  /** The connections this agent holds when a walk needs named lanes. */
+  readonly connections?: readonly Record<string, unknown>[];
 } = {}): void {
   const started = options.started ?? {
     status: 201,
@@ -188,8 +188,8 @@ function runBuilderAnswers(options: {
       status: 200,
       body: {
         agent: { id: "agt_1", name: "Receptionist", archived: false },
-        connections: [
-          options.connection ?? {
+        connections: options.connections ?? [
+          {
             id: "con_1",
             name: "Production",
             productLabel: "Retell",
@@ -216,7 +216,7 @@ async function chooseRunTarget(): Promise<void> {
     target: { value: "ste_1" },
   });
   fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
-  await screen.findByRole("option", { name: "Production" });
+  await screen.findByRole("option", { name: "Production · Voice" });
   fireEvent.change(screen.getByLabelText("Connection *"), {
     target: { value: "con_1" },
   });
@@ -459,8 +459,9 @@ describe("the suite-first Tests route", () => {
     });
     const connection = await within(sheet).findByLabelText("Connection *");
     expect(connection.getAttribute("aria-required")).toBe("true");
-    expect(within(sheet).getByRole("option", { name: "Production" })).toBeTruthy();
-    expect(within(sheet).queryByRole("option", { name: /Retell|voice/ })).toBeNull();
+    expect(
+      within(sheet).getByRole("option", { name: "Production · Voice" }),
+    ).toBeTruthy();
     expect(screen.queryByLabelText("Run name [optional]")).toBeNull();
 
     fireEvent.change(within(sheet).getByLabelText("Connection *"), {
@@ -481,16 +482,18 @@ describe("the suite-first Tests route", () => {
     routed.pathname = "/projects/prj_1/runs/new";
     routed.params = { projectId: "prj_1" };
     runBuilderAnswers({
-      connection: {
-        id: "con_1",
-        name: "Web call",
-        productLabel: "Retell web call",
-        connectionType: "retell_web_call",
-        modality: "voice",
-        mockToolsEnabled: false,
-        environment: null,
-        archived: false,
-      },
+      connections: [
+        {
+          id: "con_1",
+          name: "Web call",
+          productLabel: "Retell web call",
+          connectionType: "retell_web_call",
+          modality: "voice",
+          mockToolsEnabled: false,
+          environment: null,
+          archived: false,
+        },
+      ],
     });
 
     const { unmount } = render(<NewRunPage />);
@@ -509,15 +512,17 @@ describe("the suite-first Tests route", () => {
     unmount();
     cleanup();
     runBuilderAnswers({
-      connection: {
-        id: "con_1",
-        name: "Room",
-        productLabel: "LiveKit room",
-        connectionType: "livekit_room",
-        modality: "voice",
-        environment: null,
-        archived: false,
-      },
+      connections: [
+        {
+          id: "con_1",
+          name: "Room",
+          productLabel: "LiveKit room",
+          connectionType: "livekit_room",
+          modality: "voice",
+          environment: null,
+          archived: false,
+        },
+      ],
     });
 
     render(<NewRunPage />);
@@ -531,6 +536,43 @@ describe("the suite-first Tests route", () => {
     });
     expect(screen.getByLabelText("Run name [optional]")).toBeTruthy();
     expect(room.querySelector('[data-slot="run-lane-note"]')).toBeNull();
+  });
+
+  it("distinguishes legacy LiveKit chat and voice names in the run picker", async () => {
+    routed.pathname = "/projects/prj_1/runs/new";
+    routed.params = { projectId: "prj_1" };
+    runBuilderAnswers({
+      connections: [
+        {
+          id: "con_chat",
+          name: "livekit_room-1",
+          productLabel: "LiveKit chat",
+          modality: "chat",
+          environment: null,
+          archived: false,
+        },
+        {
+          id: "con_voice",
+          name: "livekit_room-2",
+          productLabel: "LiveKit project credentials",
+          modality: "voice",
+          environment: null,
+          archived: false,
+        },
+      ],
+    });
+
+    render(<NewRunPage />);
+    fireEvent.change(await screen.findByLabelText("Agent *"), {
+      target: { value: "agt_1" },
+    });
+
+    expect(
+      await screen.findByRole("option", { name: "livekit_room-1 · Chat" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("option", { name: "livekit_room-2 · Voice" }),
+    ).toBeTruthy();
   });
 
   it.each(["Close", "Cancel"])(
@@ -1961,7 +2003,7 @@ describe("the suite-first Tests route", () => {
     await screen.findByRole("option", { name: "Northside Ford" });
     fireEvent.change(screen.getByLabelText("Test suite *"), { target: { value: "ste_1" } });
     fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
-    await screen.findByRole("option", { name: "Production" });
+    await screen.findByRole("option", { name: "Production · Voice" });
     fireEvent.change(screen.getByLabelText("Connection *"), {
       target: { value: "con_1" },
     });

@@ -97,7 +97,7 @@ function chooseAgent(
   if (selected === null && runnable.length === 0 && agents.length !== 1) {
     return refused(
       "not-connected",
-      "This folder does not name any voice agent with a connection. Run egma connect here first. Nothing was started.",
+      "This folder does not name any agent with a connection. Run egma connect here first. Nothing was started.",
       agents,
     );
   }
@@ -109,25 +109,25 @@ function chooseAgent(
     case "ambiguous":
       return refused(
         "ambiguous-agent",
-        `${JSON.stringify(selected)} exactly matches more than one configured voice agent. Use its stable agent id with --agent. Nothing was started.`,
+        `${JSON.stringify(selected)} exactly matches more than one configured agent. Use its stable agent id with --agent. Nothing was started.`,
         choice.choices,
       );
     case "unknown":
       return refused(
         "unknown-agent",
-        `No configured voice agent exactly matches ${JSON.stringify(selected)}. Choose one with --agent <name-or-id>. Nothing was started.`,
+        `No configured agent exactly matches ${JSON.stringify(selected)}. Choose one with --agent <name-or-id>. Nothing was started.`,
         choice.choices,
       );
     case "unchosen":
       return refused(
         "unchosen-agent",
-        `This folder names ${String(choice.choices.length)} voice agents that can run. Choose one with --agent <name-or-id>. Nothing was started.`,
+        `This folder names ${String(choice.choices.length)} agents that can run. Choose one with --agent <name-or-id>. Nothing was started.`,
         choice.choices,
       );
     case "none":
       return refused(
         "not-connected",
-        "This folder does not name any voice agent with a connection. Run egma connect here first. Nothing was started.",
+        "This folder does not name any agent with a connection. Run egma connect here first. Nothing was started.",
         agents,
       );
   }

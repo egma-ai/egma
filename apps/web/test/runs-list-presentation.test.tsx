@@ -231,6 +231,7 @@ describe("runs list presentation", () => {
     expect(within(table).queryByText("Total avg score")).toBeNull();
     expect(within(table).queryByText("Combined score")).toBeNull();
     expect(within(table).getByText("Front desk")).toBeTruthy();
+    expect(within(table).getByText("Chat")).toBeTruthy();
     const started = within(table).getByText("Aug 25, 2026");
     expect(started.getAttribute("datetime")).toBe("2026-08-25T18:00:01.000Z");
     const headerCells = within(table).getAllByRole("columnheader");

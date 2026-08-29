@@ -178,6 +178,14 @@ describe("the exit line", () => {
     );
 
     expect(
+      buildExitLine({
+        kind: "connected",
+        agentName: "chat-worker",
+        connectionName: "livekit_chat-1",
+      }),
+    ).toBe("Egma connected your agent: chat-worker, over livekit_chat-1.");
+
+    expect(
       buildExitLine({ kind: "unsupported-agent-platform", platform: "pipecat" }),
     ).toContain("CLI support is coming soon");
 

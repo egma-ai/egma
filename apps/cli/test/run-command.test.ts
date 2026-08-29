@@ -83,7 +83,7 @@ beforeEach(async () => {
         {
           id: "agt_one",
           name: "Receptionist",
-          connections: [{ id: "con_one", name: "Phone" }],
+          connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
         },
       ],
     },
@@ -305,14 +305,14 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Phone" }],
+        connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
       },
       {
         id: "agt_two",
         name: "After hours",
         connections: [
-          { id: "con_two", name: "Phone" },
-          { id: "con_three", name: "Chat" },
+          { id: "con_two", name: "Phone", modality: "voice" },
+          { id: "con_three", name: "Chat", modality: "chat" },
         ],
       },
     ]);
@@ -346,7 +346,7 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Phone" }],
+        connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
       },
     ]);
 
@@ -380,12 +380,12 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Phone" }],
+        connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
       },
       {
         id: "agt_two",
         name: "After hours",
-        connections: [{ id: "con_two", name: "Chat" }],
+        connections: [{ id: "con_two", name: "Chat", modality: "chat" }],
       },
     ]);
 
@@ -397,7 +397,7 @@ describe("runRunCommand operational exit behavior", () => {
     expect(answer.lines).toContain("agent-option: agt_two After hours");
     expect(answer.lines).toContain("status: unchosen-agent");
     expect(answer.lines).toContain(
-      "stderr: This folder names 2 voice agents that can run. Choose one with --agent <name-or-id>. Nothing was started.",
+      "stderr: This folder names 2 agents that can run. Choose one with --agent <name-or-id>. Nothing was started.",
     );
   });
 
@@ -407,8 +407,8 @@ describe("runRunCommand operational exit behavior", () => {
         id: "agt_one",
         name: "Receptionist",
         connections: [
-          { id: "con_one", name: "Phone" },
-          { id: "con_two", name: "Chat" },
+          { id: "con_one", name: "Primary", modality: "voice" },
+          { id: "con_two", name: "Primary", modality: "chat" },
         ],
       },
     ]);
@@ -417,8 +417,8 @@ describe("runRunCommand operational exit behavior", () => {
 
     expect(answer.code).toBe(1);
     expect(answer.startedWith).toBeNull();
-    expect(answer.lines).toContain("connection-option: con_one Phone");
-    expect(answer.lines).toContain("connection-option: con_two Chat");
+    expect(answer.lines).toContain("connection-option: con_one Primary (Voice)");
+    expect(answer.lines).toContain("connection-option: con_two Primary (Chat)");
     expect(answer.lines).toContain("status: unchosen-connection");
     expect(answer.lines).toContain(
       'stderr: Agent "Receptionist" has 2 connections. Choose one with --connection <name-or-id>. Nothing was started.',
@@ -430,12 +430,12 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Phone" }],
+        connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
       },
       {
         id: "agt_two",
         name: "After hours",
-        connections: [{ id: "con_two", name: "Chat" }],
+        connections: [{ id: "con_two", name: "Chat", modality: "chat" }],
       },
     ]);
 
@@ -443,8 +443,8 @@ describe("runRunCommand operational exit behavior", () => {
 
     expect(answer.code).toBe(1);
     expect(answer.startedWith).toBeNull();
-    expect(answer.lines).toContain("connection-option: con_one Phone");
-    expect(answer.lines).not.toContain("connection-option: con_two Chat");
+    expect(answer.lines).toContain("connection-option: con_one Phone (Voice)");
+    expect(answer.lines).not.toContain("connection-option: con_two Chat (Chat)");
     expect(answer.lines).toContain("status: unknown-connection");
   });
 
@@ -453,12 +453,12 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Primary" }],
+        connections: [{ id: "con_one", name: "Primary", modality: "voice" }],
       },
       {
         id: "agt_two",
         name: "Receptionist",
-        connections: [{ id: "con_two", name: "Primary" }],
+        connections: [{ id: "con_two", name: "Primary", modality: "chat" }],
       },
     ]);
 
@@ -475,8 +475,8 @@ describe("runRunCommand operational exit behavior", () => {
         id: "agt_one",
         name: "Receptionist",
         connections: [
-          { id: "con_one", name: "Primary" },
-          { id: "con_two", name: "Primary" },
+          { id: "con_one", name: "Primary", modality: "voice" },
+          { id: "con_two", name: "Primary", modality: "chat" },
         ],
       },
     ]);
@@ -485,8 +485,8 @@ describe("runRunCommand operational exit behavior", () => {
     expect(connection.code).toBe(1);
     expect(connection.startedWith).toBeNull();
     expect(connection.lines).toContain("status: ambiguous-connection");
-    expect(connection.lines).toContain("connection-option: con_one Primary");
-    expect(connection.lines).toContain("connection-option: con_two Primary");
+    expect(connection.lines).toContain("connection-option: con_one Primary (Voice)");
+    expect(connection.lines).toContain("connection-option: con_two Primary (Chat)");
   });
 
   it("ignores monitoring-only agents when one runnable target remains", async () => {
@@ -495,7 +495,7 @@ describe("runRunCommand operational exit behavior", () => {
       {
         id: "agt_one",
         name: "Receptionist",
-        connections: [{ id: "con_one", name: "Phone" }],
+        connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
       },
     ]);
 

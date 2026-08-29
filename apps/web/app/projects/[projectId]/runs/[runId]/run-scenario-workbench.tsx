@@ -550,25 +550,27 @@ function TranscriptAndAudio({
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <section aria-labelledby="run-evidence-recording">
-        <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-recording">
-          Recording
-        </h3>
-        <RecordingEvidence
-          active={active}
-          recording={recording}
-          speakerTimeline={
-            evidence.transcript === null
-              ? null
-              : {
-                  startedAt:
-                    recordingStartedAt ?? evidence.transcript.startedAt,
-                  endedAt: evidence.transcript.endedAt,
-                  turns: evidence.transcript.turns,
-                }
-          }
-        />
-      </section>
+      {evidence.modality === "voice" ? (
+        <section aria-labelledby="run-evidence-recording">
+          <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-recording">
+            Recording
+          </h3>
+          <RecordingEvidence
+            active={active}
+            recording={recording}
+            speakerTimeline={
+              evidence.transcript === null
+                ? null
+                : {
+                    startedAt:
+                      recordingStartedAt ?? evidence.transcript.startedAt,
+                    endedAt: evidence.transcript.endedAt,
+                    turns: evidence.transcript.turns,
+                  }
+            }
+          />
+        </section>
+      ) : null}
       <section aria-labelledby="run-evidence-conversation">
         <h3 className="m-0 mb-3 text-base font-medium text-foreground" id="run-evidence-conversation">
           Conversation
@@ -582,7 +584,7 @@ function TranscriptAndAudio({
                 className="m-0 border border-s-[3px] border-border border-s-brand bg-selected px-5 py-3 text-sm text-foreground max-[40rem]:px-4"
                 role="status"
               >
-                {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or speech may be absent.`}
+                {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order, so later tool calls or conversation turns may be absent.`}
               </p>
             ) : null}
             <ChatTranscript
@@ -718,7 +720,9 @@ function EvidenceDetail({
       >
         <TabsList variant="line" className="w-full border-b border-border px-5 max-[40rem]:px-4">
           <TabsTrigger value="results">Results summary</TabsTrigger>
-          <TabsTrigger value="transcript">Transcript &amp; audio</TabsTrigger>
+          <TabsTrigger value="transcript">
+            {evidence.modality === "voice" ? "Transcript & audio" : "Transcript"}
+          </TabsTrigger>
         </TabsList>
         <TabsContent
           value="results"

@@ -2282,18 +2282,23 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       await page.getByRole("button", { name: /Reschedules/u }).first().waitFor({
         timeout: 30_000,
       });
-      await page.getByRole("tab", { name: "Transcript & audio" }).click();
+      await page.getByRole("tab", { name: "Transcript", exact: true }).click();
       // The inline transcript tab comes off the same answer a player would
       // have, so waiting for it is waiting for the read that could contradict
       // the absence below.
       const evidence = page.getByRole("tabpanel", {
-        name: "Transcript & audio",
+        name: "Transcript",
+        exact: true,
       });
       await evidence
         .getByRole("heading", { name: "Conversation", exact: true })
         .waitFor();
 
       expect(await page.locator("audio").count()).toBe(0);
+      expect(
+        await evidence.getByRole("heading", { name: "Recording" }).count(),
+        "a chat does not offer a recording section",
+      ).toBe(0);
       // Not even the line that says a recording is being looked for, which is
       // the one thing on this path that could momentarily imply there is one.
       expect(await page.locator("body").innerText()).not.toContain(
@@ -3160,6 +3165,11 @@ describe("the complete product, walked in order in a second project", () => {
       // the next screen asks for. This walk is the voice one.
       await walk.getByRole("radio", { name: /^Voice/u }).click();
       await walk.getByRole("button", { name: "Continue" }).click();
+      await walk
+        .getByRole("heading", {
+          name: "Connect LiveKit Voice for simulations",
+        })
+        .waitFor();
 
       const deployedName = "appointment-scheduling-langsmith";
       await walk.fill("#livekit-agent-name", deployedName);
@@ -3198,10 +3208,13 @@ describe("the complete product, walked in order in a second project", () => {
       const stored = await instance.database.sql<{
         agent_name: string;
         agent_platform: string;
+        connection_name: string;
         access_variant: string;
+        modality: string;
         config: Record<string, unknown>;
       }>(
-        `select a.name as agent_name, a.agent_platform, c.access_variant, c.config
+        `select a.name as agent_name, a.agent_platform, c.name as connection_name,
+                c.access_variant, c.modality, c.config
            from agent a
            join connection c on c.agent_id = a.id
           where a.project_id = '${second}' and a.name = '${deployedName}'`,
@@ -3210,7 +3223,9 @@ describe("the complete product, walked in order in a second project", () => {
         {
           agent_name: deployedName,
           agent_platform: "livekit",
+          connection_name: "livekit_voice-1",
           access_variant: "livekit_room.project_credentials",
+          modality: "voice",
           config: {
             agentName: deployedName,
             url: "wss://browser-test.livekit.cloud",
@@ -3562,7 +3577,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.selectOption("#run-agent", { label: "The Support line" });
       await walk.waitForSelector("#run-connection");
       await walk.selectOption("#run-connection", {
-        label: "phone_number-1",
+        label: "phone_number-1 · Voice",
       });
 
       expect(await runBuilder.innerText()).toContain(

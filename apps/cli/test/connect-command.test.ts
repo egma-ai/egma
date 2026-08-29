@@ -201,7 +201,7 @@ describe("egma connect", () => {
     // The same four things the wizard's own walk writes, so a repository
     // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
-      format: 2,
+      format: 3,
       platform: { origin: platform.url },
       project: {
         name: "Fixture project",
@@ -211,7 +211,13 @@ describe("egma connect", () => {
         {
           name: said.agent_name,
           id: said.agent_id,
-          connections: [{ name: said.connection_name, id: said.connection_id }],
+          connections: [
+            {
+              name: said.connection_name,
+              id: said.connection_id,
+              modality: "chat",
+            },
+          ],
         },
       ],
     });
@@ -469,6 +475,7 @@ describe("which connection egma creates", () => {
     expect(written.agents[0]?.connections[0]).toEqual({
       name: "phone_number-1",
       id: said.connection_id,
+      modality: "voice",
     });
     expect(JSON.stringify(written)).not.toContain(KEY);
   });

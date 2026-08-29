@@ -66,7 +66,7 @@ describe("the key-pair shape", () => {
     expect(result.registered.result).toBe("created");
     expect(result.registered.agent.name).toBe("front-desk");
     expect(result.registered.connection).toMatchObject({
-      name: "livekit_room-1",
+      name: "livekit_voice-1",
       agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,

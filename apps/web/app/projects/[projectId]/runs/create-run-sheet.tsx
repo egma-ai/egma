@@ -24,10 +24,11 @@ import {
   SheetFooter,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type {
-  AgentDetail,
-  AgentPage,
-  ListedAgentWithConnections,
+import {
+  connectionLabel,
+  type AgentDetail,
+  type AgentPage,
+  type ListedAgentWithConnections,
 } from "../../../../lib/agents.ts";
 import type { Refusal } from "../../../../lib/api.ts";
 import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
@@ -468,7 +469,7 @@ export function CreateRunSheet({
                   <option value="">Choose a connection</option>
                   {connections.map((connection) => (
                     <option key={connection.id} value={connection.id}>
-                      {connection.name}
+                      {connectionLabel(connection)}
                     </option>
                   ))}
                 </Select>
