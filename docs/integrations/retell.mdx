@@ -1,17 +1,20 @@
 ---
 title: "Use Retell with Egma"
 sidebarTitle: "Retell"
-description: "Connect Retell chat and voice agents for simulations, then set up production voice monitoring with Retell API polling."
+description: "Connect a Retell voice agent for simulations over text, web call or phone, then set up production voice monitoring with Retell API polling."
 ---
 
-Retell is an **agent platform**. It is not one connection type. Egma supports
-two Retell simulation paths and one separate production Monitoring strategy:
+Retell is an **agent platform**. It is not one connection type. Egma registers
+Retell **voice** agents, and asks one question when you connect one: *how should
+Egma test this agent?* Each answer is a connection, several may be picked at
+once, and they all land on one Egma agent.
 
-| Purpose | Retell agent | Egma path |
-|---|---|---|
-| Simulation | Chat agent | Retell Chat API |
-| Simulation | Voice agent | Public phone number |
-| Production Monitoring | Voice agent | Retell call-history polling |
+| Purpose | Lane | Egma path | Mock tools |
+|---|---|---|---|
+| Simulation | Text | Retell text mode | On when the connection is created |
+| Simulation | Web call | A call Egma places over the internet | Off until you accept the consent screen |
+| Simulation | Phone call | The public phone number | Never — this lane reaches your real tools |
+| Production Monitoring | — | Retell call-history polling | — |
 
 ## Connect an agent for simulations
 
@@ -21,29 +24,46 @@ Run the wizard from your agent repository:
 npx @egma/cli connect
 ```
 
-The wizard asks for a Retell API key, lists the agents that key can read, and
-then offers the compatible simulation path:
+The wizard asks for a Retell API key, lists the voice agents that key can read,
+and then asks how Egma should test the one you choose. Pick as many lanes as you
+want. The phone-number chooser appears only when you pick the phone lane.
 
-- A Retell chat agent uses `retell_chat_api` with the
-  `retell_chat_api.api_key` access variant and chat modality.
-- A Retell voice agent uses `phone_number` with the
-  `phone_number.public_e164` access variant and voice modality.
+- **Text** uses `retell_text_mode` with the `retell_text_mode.api_key` access
+  variant and chat modality.
+- **Web call** uses `retell_web_call` with the `retell_web_call.api_key` access
+  variant and voice modality.
+- **Phone call** uses `phone_number` with the `phone_number.public_e164` access
+  variant and voice modality.
 
-A voice agent cannot use the Retell Chat API. A chat agent cannot answer a
-phone call. The wizard refuses an incompatible choice before it creates a
-connection.
+A voice agent whose response engine is a custom LLM cannot use text mode: Retell
+holds neither its words nor its tools. The wizard refuses that lane before it
+creates anything, and names the phone lane as the one that does reach it.
 
-### Retell chat
+### Retell text mode
 
-Egma exchanges messages through Retell's Chat API. The connection stores the
-Retell chat agent ID and a sealed API key.
+Egma exchanges messages with the voice agent in text. No call is placed and
+nothing is dialled, so a whole suite runs in seconds. The connection stores the
+Retell agent ID and a sealed API key.
 
 ```text
 agent_platform: retell
-connection_type: retell_chat_api
-access_variant: retell_chat_api.api_key
-product_label: Retell chat
+connection_type: retell_text_mode
+access_variant: retell_text_mode.api_key
+product_label: Retell text mode
 connection_modality: chat
+```
+
+### Retell web call
+
+Egma places a voice call over the internet. Your published number is never
+dialled for it. The connection stores the Retell agent ID and a sealed API key.
+
+```text
+agent_platform: retell
+connection_type: retell_web_call
+access_variant: retell_web_call.api_key
+product_label: Retell web call
+connection_modality: voice
 ```
 
 ### Retell phone
@@ -70,18 +90,18 @@ Pass the key through an environment variable or standard input. Do not put it
 in a command argument, which can enter shell history and process lists.
 
 ```bash
-# Retell chat agent
-EGMA_RETELL_API_KEY=key_live_... egma connect --reach text
+# One lane
+EGMA_RETELL_API_KEY=key_live_... egma connect --lanes text
 
-# Retell voice agent
+# Several lanes, all onto one Egma agent
 EGMA_RETELL_API_KEY=key_live_... egma connect \
-  --reach phone \
+  --lanes text,web-call,phone \
   --phone-number +14155550111
 ```
 
-Pass `--headless` to suppress all prompts. With `--headless` and no `--reach`,
-the command exits with code 5. The selected agent determines the compatible
-value, but you must still state it before the command writes a connection.
+Pass `--headless` to suppress all prompts. With `--headless` and no `--lanes`,
+the command exits with code 5: Egma never picks a lane for you, because one of
+them dials a real telephone.
 
 Useful environment variables:
 
@@ -89,11 +109,11 @@ Useful environment variables:
 |---|---|
 | `EGMA_RETELL_API_KEY` | Retell API key; `RETELL_API_KEY` also works |
 | `EGMA_RETELL_AGENT_ID` | Retell agent to select |
-| `EGMA_REACH` | `text` for a chat agent or `phone` for a voice agent |
+| `EGMA_LANES` | Which lanes to test over: any of `text`, `web-call` and `phone`, comma separated |
 | `EGMA_PHONE_NUMBER` | Public number for a voice agent |
 
 `egma connect` is safe to repeat. It reuses the same Egma agent when it can
-prove the Retell identity, and adds or reuses the requested connection. A phone
+prove the Retell identity, and adds or reuses each requested connection. A phone
 connection itself remains a generic phone path.
 
 The `registration:` output says what happened:

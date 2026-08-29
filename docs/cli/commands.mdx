@@ -30,7 +30,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 | `EGMA_HOME` | The folder Egma stores this machine's credentials in. Default: `~/.egma` |
 | `EGMA_RETELL_API_KEY` | Your Retell API key for `egma connect`. `RETELL_API_KEY` is also accepted, so an environment that already exports it needs no change |
 | `EGMA_RETELL_AGENT_ID` | Which Retell agent to register, equivalent to `--retell-agent` |
-| `EGMA_REACH` | `text` or `phone`, equivalent to `--reach` |
+| `EGMA_LANES` | Which lanes to test over, equivalent to `--lanes` |
 | `EGMA_PHONE_NUMBER` | Which phone number to dial, equivalent to `--phone-number` |
 | `EGMA_RETELL_URL` | The Retell API base URL. Default: `https://api.retellai.com` |
 | `EGMA_EXISTING_TESTS` | Path to your existing test cases, equivalent to `--existing-tests` |
@@ -61,7 +61,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `--coding-agent <id>` | Use one installed coding agent without showing the chooser: `claude`, `codex`, `cursor`, or `opencode` |
     | `--headless` | Run non-interactively; treats the task as already agreed |
     | `--existing-tests <path>` | Path to your existing test cases inside this folder. Your coding agent converts them to test files before generating new ones |
-    | `--reach <text\|phone>` | Required in headless mode: how Egma should reach the agent |
+    | `--lanes <list>` | Required in headless mode: how Egma should test the agent — any of `text`, `web-call`, `phone`, comma separated |
 
     **Exit codes**
 
@@ -144,9 +144,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     | Flag | Description |
     |---|---|
-    | `--reach <text\|phone>` | **Required** in non-interactive mode. For Retell, `text` selects a chat agent and the Chat API; `phone` selects a voice agent and a public number. |
+    | `--lanes <list>` | **Required** in non-interactive mode. Any of `text` (Retell text mode), `web-call` (a call Egma places over the internet) and `phone` (the public number), comma separated. Several lanes land on one Egma agent in one pass. |
     | `--retell-agent <id>` | Which Retell agent to register when the account holds more than one |
-    | `--phone-number <e164>` | Which number to dial when `--reach phone` and the agent has more than one number |
+    | `--phone-number <e164>` | Which number to dial when the `phone` lane is picked and the agent has more than one number |
     | `--repo-prompt <path>` | The prompt file in your repository, so Egma can report whether it and Retell have drifted apart |
 
     **Environment variables**
@@ -155,7 +155,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     |---|---|
     | `EGMA_RETELL_API_KEY` | Retell API key (also `RETELL_API_KEY`) |
     | `EGMA_RETELL_AGENT_ID` | `--retell-agent` |
-    | `EGMA_REACH` | `--reach` |
+    | `EGMA_LANES` | `--lanes` |
     | `EGMA_PHONE_NUMBER` | `--phone-number` |
 
     **Example output**

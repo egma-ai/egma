@@ -37,9 +37,11 @@ in parallel.
 
 Egma works with the two most common voice agent platforms today.
 
-**Retell** is an agent platform with two simulation paths. `egma connect` reads
-the selected agent's modality. A chat agent uses the Retell Chat API. A voice
-agent uses a public phone number. Production monitoring is separate: enter one
+**Retell** is an agent platform with three simulation lanes. `egma connect`
+lists your voice agents and asks how Egma should test the one you choose: in
+text, over a web call Egma places, or down a real phone line. Pick as many as
+you want — each is a connection on the same Egma agent. Production monitoring
+is separate: enter one
 Retell API key when you start monitoring an agent, and Egma polls that Retell
 agent's completed conversations for as long as the agent's switch is on.
 

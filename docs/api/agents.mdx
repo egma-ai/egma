@@ -87,8 +87,9 @@ The `result` field in the response tells you exactly what happened:
       `livekit`, or `null`.
 
       A connection stores no platform of its own. Some connection types reach
-      exactly one platform — `retell_chat_api` reaches Retell, `livekit_room`
-      reaches LiveKit — and for those the type answers and this field
+      exactly one platform — `retell_text_mode` and `retell_web_call` reach
+      Retell, `livekit_room` reaches LiveKit — and for those the type answers
+      and this field
       only selects the combination to check. `phone_number` reaches any
       platform, so a phone connection belongs to whichever platform its **agent**
       declares.
@@ -101,7 +102,8 @@ The `result` field in the response tells you exactly what happened:
 
     <ParamField body="connectionType" type="string" required>
       How the simulator reaches the agent. Current values are
-      `retell_chat_api`, `phone_number`, and `livekit_room`.
+      `retell_text_mode`, `retell_web_call`, `phone_number`, and
+      `livekit_room`.
     </ParamField>
 
     <ParamField body="accessVariant" type="string" required>
@@ -187,7 +189,7 @@ The `result` field in the response tells you exactly what happened:
   </Expandable>
 </ResponseField>
 
-### Example — register a Retell chat agent
+### Example — register a Retell voice agent for text-mode simulations
 
 ```bash
 curl -X POST https://your-egma-host/v1/agents \
@@ -198,8 +200,8 @@ curl -X POST https://your-egma-host/v1/agents \
     "agentPlatform": "retell",
     "connection": {
       "agentPlatform": "retell",
-      "connectionType": "retell_chat_api",
-      "accessVariant": "retell_chat_api.api_key",
+      "connectionType": "retell_text_mode",
+      "accessVariant": "retell_text_mode.api_key",
       "modality": "chat",
       "config": { "retellAgentId": "retell_agent_abc123" },
       "credentials": { "apiKey": "retell_sk_…" }
