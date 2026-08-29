@@ -80,7 +80,6 @@ const CANDIDATE_COLUMNS = {
   type: graderDefinitionVersion.type,
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
-  outputContract: graderDefinitionVersion.outputContract,
   modalities: graderDefinitionVersion.modalities,
   judgeModel: graderDefinitionVersion.judgeModel,
 } as const;

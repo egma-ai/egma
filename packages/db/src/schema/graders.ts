@@ -68,7 +68,6 @@ export const graderDefinitionVersion = pgTable(
     parameterContract: jsonb("parameter_contract")
       .$type<readonly GraderParameter[]>()
       .notNull(),
-    outputContract: jsonb("output_contract"),
     modalities: jsonb("modalities")
       .$type<readonly GraderModality[]>()
       .notNull(),

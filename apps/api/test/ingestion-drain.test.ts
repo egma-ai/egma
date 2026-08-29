@@ -1148,8 +1148,8 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     await setup.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          output_contract, modalities, judge_model)
-       values ($1, 1, 'code', null, '[]'::jsonb, '{}'::jsonb,
+          modalities, judge_model)
+       values ($1, 1, 'code', null, '[]'::jsonb,
                '["voice"]'::jsonb, null)`,
       [productionDefinitionId],
     );

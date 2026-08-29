@@ -2,10 +2,7 @@ import { newId } from "@egma/ids";
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import {
-  NORMALIZED_GRADE_OUTPUT_CONTRACT,
-  PREDEFINED_GRADERS,
-} from "../grader-library/catalog.ts";
+import { PREDEFINED_GRADERS } from "../grader-library/catalog.ts";
 import {
   validateGraderParameterValues,
   type GraderParameterValues,
@@ -531,7 +528,6 @@ export async function createCustomLlmGrader(
       type: "llm_as_judge",
       prompt: gradingInstructions,
       parameterContract: [],
-      outputContract: NORMALIZED_GRADE_OUTPUT_CONTRACT,
       modalities,
       judgeModel: RECOMMENDED_GRADER_MODEL,
     });
@@ -563,7 +559,6 @@ const EXECUTABLE_COLUMNS = {
   type: graderDefinitionVersion.type,
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
-  outputContract: graderDefinitionVersion.outputContract,
   modalities: graderDefinitionVersion.modalities,
   judgeModel: graderDefinitionVersion.judgeModel,
 } as const;

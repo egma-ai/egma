@@ -18,7 +18,6 @@ function definition(): GraderDefinitionSnapshot {
     type: "llm_as_judge",
     prompt: INSTRUCTIONS,
     parameterContract: [],
-    outputContract: null,
     modalities: ["chat", "voice"],
     judgeModel: { provider: "openai", model: "gpt-4o-mini" },
   };

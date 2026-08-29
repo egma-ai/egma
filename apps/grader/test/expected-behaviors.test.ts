@@ -36,7 +36,6 @@ function definition(): GraderDefinitionSnapshot {
     type: found.type,
     prompt: found.prompt,
     parameterContract: found.parameterContract,
-    outputContract: found.outputContract,
     modalities: found.modalities,
     judgeModel: found.judgeModel,
   };

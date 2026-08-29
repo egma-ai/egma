@@ -1,4 +1,3 @@
-import type { GraderOutputContract } from "./catalog.ts";
 import {
   validateGraderParameterContract,
   type GraderParameter,
@@ -17,7 +16,6 @@ export type GraderDefinitionSnapshot = {
   readonly type: GraderDefinitionType;
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
-  readonly outputContract: GraderOutputContract | null;
   readonly modalities: readonly GraderModality[];
   readonly judgeModel: GraderJudgeModel | null;
 };
@@ -28,7 +26,6 @@ export type GraderDefinitionSource = {
   readonly type: string;
   readonly prompt: string | null;
   readonly parameterContract: unknown;
-  readonly outputContract: unknown;
   readonly modalities: unknown;
   readonly judgeModel: unknown;
 };
@@ -58,9 +55,6 @@ export function snapshotGraderDefinition(
   } catch {
     throw malformed("holds a parameter contract Egma never writes");
   }
-  if (source.outputContract !== null && !isObject(source.outputContract)) {
-    throw malformed("holds an output contract Egma never writes");
-  }
   if (
     !Array.isArray(source.modalities) ||
     source.modalities.length === 0 ||
@@ -88,7 +82,6 @@ export function snapshotGraderDefinition(
     type,
     prompt: source.prompt,
     parameterContract,
-    outputContract: source.outputContract as GraderOutputContract | null,
     modalities: source.modalities as readonly GraderModality[],
     judgeModel: source.judgeModel as GraderJudgeModel | null,
   };

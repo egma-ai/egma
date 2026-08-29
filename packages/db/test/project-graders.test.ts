@@ -383,8 +383,8 @@ describe("shared definitions and project grader policy", () => {
       await connection.sql(
         `insert into grader_definition_version
            (definition_id, version, type, prompt, parameter_contract,
-            output_contract, modalities, judge_model)
-         values ($1, 1, 'llm_as_judge', 'Grade it', '[]'::jsonb, '{}'::jsonb,
+            modalities, judge_model)
+         values ($1, 1, 'llm_as_judge', 'Grade it', '[]'::jsonb,
                  '["chat"]'::jsonb,
                  '{"provider":"openai","model":"gpt-5"}'::jsonb)`,
         [definitionId],

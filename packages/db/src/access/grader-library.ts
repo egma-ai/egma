@@ -5,7 +5,6 @@ import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { db, type Queryable } from "../client.ts";
 import {
   GRADER_DEFINITION_CATALOG,
-  type GraderOutputContract,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
@@ -41,7 +40,6 @@ export type GraderLibraryEntry = {
   readonly type: GraderDefinitionType;
   readonly gradingInstructions: string | null;
   readonly parameterContract: readonly GraderParameter[];
-  readonly outputContract: GraderOutputContract | null;
   readonly modalities: readonly GraderModality[];
   readonly activeProjectGraderId: string | null;
   readonly createdAt: Date;
@@ -76,7 +74,6 @@ const VERSION_COLUMNS = {
   type: graderDefinitionVersion.type,
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
-  outputContract: graderDefinitionVersion.outputContract,
   modalities: graderDefinitionVersion.modalities,
   judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
@@ -117,7 +114,6 @@ function libraryEntryFromRow(row: {
   readonly type: string;
   readonly prompt: string | null;
   readonly parameterContract: unknown;
-  readonly outputContract: unknown;
   readonly modalities: unknown;
   readonly judgeModel: unknown;
   readonly activeProjectGraderId: string | null;
@@ -136,7 +132,6 @@ function libraryEntryFromRow(row: {
     type: version.type,
     gradingInstructions: version.prompt,
     parameterContract: version.parameterContract,
-    outputContract: version.outputContract,
     modalities: version.modalities,
     activeProjectGraderId: row.activeProjectGraderId,
     createdAt: row.createdAt,
@@ -216,7 +211,6 @@ function catalogVersion(entry: PredefinedGraderDefinition) {
     type: entry.type,
     prompt: entry.prompt,
     parameterContract: entry.parameterContract,
-    outputContract: entry.outputContract,
     modalities: entry.modalities,
     judgeModel: entry.judgeModel,
   };
@@ -281,7 +275,6 @@ async function reconcileDefinitions(
       type: installed.type,
       prompt: installed.prompt,
       parameterContract: installed.parameterContract,
-      outputContract: installed.outputContract,
       modalities: installed.modalities,
       judgeModel: installed.judgeModel,
     };

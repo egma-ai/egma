@@ -1,0 +1,20 @@
+-- THE OUTPUT CONTRACT GOES: a definition-version column that every grader
+-- wrote, every catalog copied, and nothing ever read.
+--
+-- **Destructive**, under the standing pre-launch allowance README.md sets out
+-- in "Before launch": the column is dropped in one step rather than being
+-- stopped-reading in this release and dropped in a later one. The code that
+-- reads the new shape ships in the same change, so the two are never apart.
+--
+-- Nothing here needs a backfill, and nothing readable is lost. A code audit
+-- (2026-08-29) followed every read of `output_contract` and found none: no
+-- grader executor consults it, no API response carries it, and no screen
+-- draws it. Every row held one of exactly two values — the one shared
+-- constant, or null — so there is no customer answer inside it to carry
+-- across.
+--
+-- Frozen grading work is untouched. A `grading_job` row copies the whole
+-- definition into its own `entries` JSON, so a job frozen before this change
+-- still carries the key inside that snapshot. The snapshot reader names the
+-- fields it wants and ignores the rest, so in-flight work keeps executing.
+ALTER TABLE "grader_definition_version" DROP COLUMN "output_contract";
