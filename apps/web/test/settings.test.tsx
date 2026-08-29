@@ -1623,12 +1623,8 @@ describe("API keys", () => {
     expect(await screen.findByText("egma_sk_the_only_time")).toBeTruthy();
     expect(screen.getByText(/only its hash was kept/)).toBeTruthy();
 
-    /*
-     * And session replay does not read it. A replay records the rest of these
-     * pages, so this is the surface the whole policy exists for: a live
-     * credential drawn as text, for as long as somebody takes to copy it.
-     * `lib/replay-privacy.ts` holds the policy and this is the mark it defines.
-     */
+    // And session replay does not read it. A replay records the rest of these
+    // pages, so this element is the whole of what `lib/replay-privacy.ts` hides.
     expect(
       screen
         .getByText("egma_sk_the_only_time")

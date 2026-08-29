@@ -10,7 +10,6 @@ import type {
   ConfigField,
   CredentialField,
 } from "../../../../../../lib/connection-options.ts";
-import { REPLAY_PRIVATE } from "../../../../../../lib/replay-privacy.ts";
 
 /**
  * The fields one connection shape asks for, drawn from what the server said
@@ -116,12 +115,7 @@ function CredentialControl({
         // A set of headers is secret in its values and ordinary in its names,
         // and it is too long for one line — so it gets room rather than a
         // password box that would hide what somebody is trying to paste.
-        //
-        // Session replay reads a box like this one, and a password box it does
-        // not, so the mark from `lib/replay-privacy.ts` says here what the type
-        // says on every other credential control.
         <Textarea
-          {...REPLAY_PRIVATE}
           id={id}
           value={value}
           rows={3}
