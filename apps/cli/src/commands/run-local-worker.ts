@@ -8,7 +8,7 @@ import {
   startLocalLiveKitWorker,
   type StartLocalLiveKitWorker,
 } from "../livekit/local-worker.ts";
-import { RUN_EXIT } from "./run.ts";
+import { RUN_EXIT, type PreparedRunCommand } from "./run.ts";
 
 const WORKER_FLAGS = [
   "--worker-entrypoint",
@@ -37,8 +37,6 @@ export type RunWithOptionalLocalLiveKitWorkerOptions = {
   readonly startWorker?: StartLocalLiveKitWorker;
 };
 
-type RunWork = (signal: AbortSignal) => Promise<number>;
-
 function refusal(
   options: RunWithOptionalLocalLiveKitWorkerOptions,
   status: string,
@@ -57,14 +55,19 @@ function refusal(
  */
 export async function runWithOptionalLocalLiveKitWorker(
   options: RunWithOptionalLocalLiveKitWorkerOptions,
-  run: RunWork,
+  prepare: () => Promise<PreparedRunCommand>,
 ): Promise<number> {
   const values = [
     options.workerEntrypoint,
     options.workerDependencyManifest,
     options.workerDispatchName,
   ] as const;
-  if (values.every((value) => value === null)) return run(options.signal);
+  if (values.every((value) => value === null)) {
+    const prepared = await prepare();
+    return prepared.kind === "stopped"
+      ? prepared.code
+      : await prepared.run(options.signal);
+  }
 
   if (values.some((value) => value === null || value.trim() === "")) {
     return refusal(
@@ -103,6 +106,9 @@ export async function runWithOptionalLocalLiveKitWorker(
     options.fail(reason);
     return RUN_EXIT.nothing;
   }
+
+  const prepared = await prepare();
+  if (prepared.kind === "stopped") return prepared.code;
 
   const controller = new AbortController();
   const forwardAbort = (): void => controller.abort(options.signal.reason);
@@ -154,10 +160,12 @@ export async function runWithOptionalLocalLiveKitWorker(
   }
   options.out("worker-status: ready");
 
-  const running = Promise.resolve().then(() => run(controller.signal)).then(
-    (code) => ({ kind: "run" as const, code }),
-    (cause: unknown) => ({ kind: "run-error" as const, cause }),
-  );
+  const running = Promise.resolve()
+    .then(() => prepared.run(controller.signal))
+    .then(
+      (code) => ({ kind: "run" as const, code }),
+      (cause: unknown) => ({ kind: "run-error" as const, cause }),
+    );
   let cleaned = false;
   const clean = async (report: boolean): Promise<void> => {
     if (cleaned) return;

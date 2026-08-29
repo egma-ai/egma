@@ -1,16 +1,30 @@
 /** Resource ownership around one raw run that needs a local LiveKit worker. */
 
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   runWithOptionalLocalLiveKitWorker,
   type RunWithOptionalLocalLiveKitWorkerOptions,
 } from "../src/commands/run-local-worker.ts";
+import {
+  prepareRunCommand,
+  type PreparedRunCommand,
+} from "../src/commands/run.ts";
+import {
+  EMPTY_CONFIG,
+  createEgmaFolder,
+  folderPathsIn,
+  serializeSuiteManifest,
+} from "../src/folder/egma-folder.ts";
 import type {
   LocalLiveKitWorkerEnding,
   StartLocalLiveKitWorker,
   StartLocalLiveKitWorkerOptions,
 } from "../src/livekit/local-worker.ts";
+import { makeWorkspace } from "./support/workspace.ts";
 
 function options(
   overrides: Partial<RunWithOptionalLocalLiveKitWorkerOptions> = {},
@@ -66,16 +80,25 @@ function controlledWorker(): {
   };
 }
 
+function ready(
+  run: (signal: AbortSignal) => Promise<number>,
+): () => Promise<PreparedRunCommand> {
+  return async () => ({ kind: "ready", run });
+}
+
 describe("runWithOptionalLocalLiveKitWorker", () => {
   it("leaves an ordinary raw run unchanged when no worker flags were given", async () => {
     const made = options();
     let runs = 0;
 
-    const code = await runWithOptionalLocalLiveKitWorker(made.value, async (signal) => {
-      runs += 1;
-      expect(signal).toBe(made.value.signal);
-      return 5;
-    });
+    const code = await runWithOptionalLocalLiveKitWorker(
+      made.value,
+      ready(async (signal) => {
+        runs += 1;
+        expect(signal).toBe(made.value.signal);
+        return 5;
+      }),
+    );
 
     expect(code).toBe(5);
     expect(runs).toBe(1);
@@ -87,10 +110,10 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
     let runs = 0;
     const partialCode = await runWithOptionalLocalLiveKitWorker(
       partial.value,
-      async () => {
+      ready(async () => {
         runs += 1;
         return 0;
-      },
+      }),
     );
 
     expect(partialCode).toBe(1);
@@ -107,13 +130,17 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
       noFollow: true,
     });
     expect(
-      await runWithOptionalLocalLiveKitWorker(detached.value, async () => 0),
+      await runWithOptionalLocalLiveKitWorker(
+        detached.value,
+        ready(async () => 0),
+      ),
     ).toBe(1);
     expect(detached.lines.join("\n")).toContain("cannot be used with --no-follow");
   });
 
   it("reads all LiveKit credentials only from env and always stops after the run", async () => {
     const worker = controlledWorker();
+    const order: string[] = [];
     const made = options({
       workerEntrypoint: "src/agent.py",
       workerDependencyManifest: "pyproject.toml",
@@ -123,12 +150,25 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
         LIVEKIT_API_KEY: "environment-api-key",
         LIVEKIT_API_SECRET: "environment-api-secret",
       },
-      startWorker: worker.start,
+      startWorker: async (given) => {
+        order.push("worker");
+        return await worker.start(given);
+      },
     });
 
-    const code = await runWithOptionalLocalLiveKitWorker(made.value, async () => 0);
+    const code = await runWithOptionalLocalLiveKitWorker(made.value, async () => {
+      order.push("prepare");
+      return {
+        kind: "ready",
+        run: async () => {
+          order.push("run");
+          return 0;
+        },
+      };
+    });
 
     expect(code).toBe(0);
+    expect(order).toEqual(["prepare", "worker", "run"]);
     expect(worker.stopCount()).toBe(1);
     const started = worker.startedWith();
     expect(started).not.toBeNull();
@@ -164,9 +204,12 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
     });
 
     await expect(
-      runWithOptionalLocalLiveKitWorker(made.value, async () => {
-        throw new Error("run failed outside its normal result contract");
-      }),
+      runWithOptionalLocalLiveKitWorker(
+        made.value,
+        ready(async () => {
+          throw new Error("run failed outside its normal result contract");
+        }),
+      ),
     ).rejects.toThrow("run failed outside its normal result contract");
     expect(worker.stopCount()).toBe(1);
   });
@@ -184,10 +227,15 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
       },
       startWorker: worker.start,
     });
-    const running = runWithOptionalLocalLiveKitWorker(made.value, async (signal) => {
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
-      return 130;
-    });
+    const running = runWithOptionalLocalLiveKitWorker(
+      made.value,
+      ready(async (signal) => {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve()),
+        );
+        return 130;
+      }),
+    );
     await Promise.resolve();
     worker.end({ kind: "failed", reason: "The worker process exited." });
 
@@ -206,12 +254,124 @@ describe("runWithOptionalLocalLiveKitWorker", () => {
       env: { LIVEKIT_API_KEY: "held-key" },
     });
 
-    const code = await runWithOptionalLocalLiveKitWorker(made.value, async () => 0);
+    const code = await runWithOptionalLocalLiveKitWorker(
+      made.value,
+      ready(async () => 0),
+    );
 
     expect(code).toBe(1);
     expect(made.lines).toContain("status: missing-worker-environment");
     expect(made.lines).toContain("missing: LIVEKIT_URL");
     expect(made.lines).toContain("missing: LIVEKIT_API_SECRET");
     expect(made.lines.join("\n")).not.toContain("held-key");
+  });
+
+  it("does not start a worker when the suite preflight finds platform drift", async () => {
+    const repository = await makeWorkspace();
+    try {
+      const url = "https://egma.example";
+      const projectId = "prj_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      const suiteId = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
+      await repository.signIn(url);
+      await createEgmaFolder({
+        repository: repository.dir,
+        config: {
+          ...EMPTY_CONFIG,
+          project: { id: projectId, name: "Northside" },
+          agents: [
+            {
+              id: "agt_one",
+              name: "Receptionist",
+              connections: [
+                { id: "con_one", name: "Phone", modality: "voice" },
+              ],
+            },
+          ],
+        },
+      });
+      const release = path.join(folderPathsIn(repository.dir).tests, "release");
+      await mkdir(release);
+      await writeFile(
+        path.join(release, "suite.yaml"),
+        serializeSuiteManifest({ id: suiteId, name: "Release" }),
+      );
+
+      const worker = controlledWorker();
+      const made = options({
+        cwd: repository.dir,
+        workerEntrypoint: "agent.py",
+        workerDependencyManifest: "requirements.txt",
+        workerDispatchName: "front-desk",
+        env: {
+          LIVEKIT_URL: "wss://project.livekit.cloud",
+          LIVEKIT_API_KEY: "key",
+          LIVEKIT_API_SECRET: "secret",
+        },
+        startWorker: worker.start,
+      });
+      const calls: string[] = [];
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const requested = String(input);
+        calls.push(`${init?.method ?? "GET"} ${requested}`);
+        const json = (body: unknown, status = 200): Response =>
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        if (requested === `${url}/v1/test-suites/${suiteId}`) {
+          return json({ id: suiteId, projectId, name: "Release" });
+        }
+        if (requested.startsWith(`${url}/v1/tests?`)) {
+          return json({
+            tests: [
+              {
+                id: "tst_01K3XQ7M4E8YB2FVN0H9TZQWER",
+                projectId,
+                suiteId,
+                name: "Books a visit",
+                description: "",
+                scenario: "The caller asks for Tuesday.",
+                expectedBehaviors: ["The agent books Tuesday."],
+                personas: [],
+                mockTools: [],
+                versionId: "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER",
+                version: 1,
+                revision: "rev_01K3XQ7M4E8YB2FVN0H9TZQWER",
+              },
+            ],
+            nextPageToken: null,
+          });
+        }
+        return json({ message: `unexpected request: ${requested}` }, 404);
+      };
+
+      const code = await runWithOptionalLocalLiveKitWorker(
+        made.value,
+        async () =>
+          await prepareRunCommand({
+            access: { url, credentialsFile: repository.credentialsFile },
+            cwd: repository.dir,
+            suiteDirectory: "release",
+            out: made.value.out,
+            fail: made.value.fail,
+            fetchImpl,
+          }),
+      );
+
+      expect(code).toBe(1);
+      expect(calls).toContain(`GET ${url}/v1/test-suites/${suiteId}`);
+      expect(calls.some((call) => call.includes("/v1/tests?"))).toBe(true);
+      expect(calls.some((call) => call.startsWith(`POST ${url}/v1/runs`))).toBe(
+        false,
+      );
+      expect(worker.startedWith()).toBeNull();
+      expect(made.lines).toContain("status: not-matched");
+      expect(made.lines.join("\n")).toContain(
+        'Egma test "Books a visit" is missing from egma/tests/release.',
+      );
+      expect(made.lines).not.toContain("worker-status: starting");
+    } finally {
+      await repository.remove();
+    }
   });
 });

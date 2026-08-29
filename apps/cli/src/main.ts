@@ -26,7 +26,7 @@ import { runPersonasCommand } from "./commands/personas.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runWithOptionalLocalLiveKitWorker } from "./commands/run-local-worker.ts";
-import { runRunCommand } from "./commands/run.ts";
+import { prepareRunCommand } from "./commands/run.ts";
 import {
   isSelfHostInvocation,
   runSelfHostCommand,
@@ -436,8 +436,8 @@ async function runFolderVerb(
           out: options.out,
           fail: options.fail,
         },
-        async (signal) =>
-          await runRunCommand({
+        async () =>
+          await prepareRunCommand({
             ...options,
             suiteDirectory: invocation.suiteDirectory ?? "",
             ...(invocation.agentName === null ? {} : { agent: invocation.agentName }),
@@ -449,7 +449,6 @@ async function runFolderVerb(
               ? {}
               : { idempotencyKey: invocation.idempotencyKey }),
             noFollow: invocation.noFollow,
-            signal,
           }),
       );
     }
