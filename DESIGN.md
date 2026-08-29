@@ -124,6 +124,7 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 
 - Dark theme uses neutral dark surfaces and the same Ember focus and action family, lightened where a dark surface needs it. The primary action's text is Ember pulled towards paper rather than Deep Ember: Deep Ember on the dark Ember Wash is 2.69:1 and fails AA, and the lighter step is 5.26:1. (Developer decision, 2026-08-23.)
 - Dense evidence may use a dark contained surface in either theme.
+- **Measure quiet text on the raised surface, not on the canvas.** Dark theme has two grounds, and the lighter one is the harder test. The tertiary text colour was `#82827b`, which measured 4.73:1 on the canvas and passed, but 4.46:1 on a table panel, a form group or a menu — and failed. That is where a timestamp, a hint and an empty-state line are actually drawn. The value is `#94948c` now: 5.98:1 on the canvas, 5.64:1 on the raised surface, still a step below the secondary colour at 6.79:1. (Measured 2026-08-28. This enforces the AA rule under **Accessibility** rather than adding one.)
 - Every shared component must support light and dark themes.
 - Verify text, borders, focus, status, overlays, and disabled states in both themes.
 
