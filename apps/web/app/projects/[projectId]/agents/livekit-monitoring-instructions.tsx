@@ -113,7 +113,9 @@ export function LiveKitMonitoringInstructions({
         <TabsContent className="pt-3" value="javascript">
           <WorkerSteps language="javascript" />
           <p className="mt-4 mb-0 text-sm leading-(--line-normal) text-muted-foreground">
-            This install works after @egma/livekit 0.1.0 is available on npm.
+            This install works after{" "}
+            <code className="font-mono">@egma/livekit 0.1.0</code> is available
+            on npm.
           </p>
         </TabsContent>
       </Tabs>
