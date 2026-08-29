@@ -160,11 +160,17 @@
  * trigger at the top, the middle and the foot of each: all eighteen stay
  * inside the window.
  *
- * The block-end margin is larger than the block-start one on purpose. The
- * start margin is the gap under the trigger; the end margin is what keeps the
- * panel from sitting flush against the window edge, which is the difference
- * between a menu that is scrolling and a menu that looks cut off. `stretch`
- * subtracts both, so the gap is real rather than drawn.
+ * **The block margins are equal, and an unequal pair was tried first.** The
+ * idea was a small gap under the trigger and a larger one at the window edge.
+ * It does not survive the flip: when Chrome places the picker above a trigger
+ * near the foot of the window, the two swap, so the large gap lands against
+ * the trigger and the small one against the window edge — the flush edge this
+ * change exists to remove, moved to the top. Measured across twenty-five
+ * placements, the unequal pair left 1px at the window edge in its worst case,
+ * an equal 12px left 1px, and an equal 8px left 5px with 7px still under the
+ * trigger. So 8px, both sides. `stretch` subtracts margins, so the gap is real
+ * rather than drawn. (Raised by Greptile on the pull request, and its reading
+ * of the flip was right.)
  *
  * `overscroll-behavior` keeps a wheel that reaches the end of the list from
  * carrying on into the page behind the open picker.
@@ -177,7 +183,7 @@
     select, ::picker(select) { appearance: base-select; }
     select { align-items: center; }
     ::picker(select) {
-      margin-block: var(--space-1) var(--space-3);
+      margin-block: var(--space-2);
       padding: var(--space-1);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);

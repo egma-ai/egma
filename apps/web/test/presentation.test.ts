@@ -76,6 +76,27 @@ describe("definition owners", () => {
   });
 });
 
+/**
+ * The text inside one brace-balanced CSS block, opener included in the search.
+ *
+ * A stylesheet assertion that matches anywhere in the file cannot tell a rule
+ * inside `@supports` from the same words moved out of it, and the second is a
+ * behaviour change the first would call green.
+ */
+function blockAfter(css: string, opener: string): string {
+  const start = css.indexOf(opener);
+  if (start === -1) return "";
+  let depth = 0;
+  for (let at = start + opener.length - 1; at < css.length; at += 1) {
+    if (css[at] === "{") depth += 1;
+    else if (css[at] === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(start + opener.length, at);
+    }
+  }
+  return "";
+}
+
 describe("the shared form controls", () => {
   it("centers every enhanced select instead of relying on the browser default", async () => {
     const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -92,11 +113,25 @@ describe("the shared form controls", () => {
    * reads as a broken render rather than as a list that scrolls. A short list
    * hides the fault entirely, so no page test can be trusted to catch it
    * coming back; the cap itself is what this holds.
+   *
+   * **The scope is asserted, not just the words.** A first version of this
+   * test matched the two declarations anywhere in the file, so moving the cap
+   * out of its media query — or out of `@supports` — would have left it green
+   * while the behaviour it names was gone. Both declarations are now read out
+   * of the `@supports (appearance: base-select)` block they belong to, and the
+   * cap out of the viewport query inside it. (Raised by Greptile on the pull
+   * request.)
    */
   it("bounds the open select picker instead of letting it fill the window", async () => {
     const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+    const enhanced = blockAfter(css, "@supports (appearance: base-select) {");
 
-    expect(css).toMatch(/::picker\(select\) \{ max-height: min\(/);
-    expect(css).toMatch(/overscroll-behavior: contain;/);
+    expect(enhanced).toMatch(
+      /@media \(min-height: 32rem\) \{\s*::picker\(select\) \{ max-height: min\(18rem, calc\(50dvh - 2rem\)\); \}/,
+    );
+    /* The newline picks the multi-line rule, not `{ appearance: base-select; }`. */
+    expect(blockAfter(enhanced, "::picker(select) {\n")).toMatch(
+      /overscroll-behavior: contain;/,
+    );
   });
 });
