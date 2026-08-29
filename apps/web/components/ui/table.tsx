@@ -7,9 +7,8 @@ import { cn } from "@/lib/utils";
  *
  * Read off `6ZM-0`, `71F-0` and `710-0` with `get_computed_styles` on
  * 2026-08-23: a Pure Paper panel inside one neutral hairline with the corners
- * clipped and no corner radius; a 40px header row of 14px labels over a
- * hairline, unfilled — see `TableHead` for what ranks them above their column;
- * body rows at least 52px tall with 8px of vertical padding, 16px of
+ * clipped and no corner radius; a 40px header row of quiet 14px labels over a
+ * hairline; body rows at least 52px tall with 8px of vertical padding, 16px of
  * side padding and a hairline between them; and a 48px slot at the trailing
  * edge that every row carries whether or not it holds a menu.
  *
@@ -51,47 +50,6 @@ import { cn } from "@/lib/utils";
  *   rather than a set of columns, so it has no shared edge to keep.
  */
 export const LANE_X = "px-(--row-padding-x)";
-
-/**
- * What ranks a column's name above its column, written once.
- *
- * **A header has to out-rank 14px / 400 values without a fill and without
- * capitals, so weight and space are what it has.** Weight 500 is the ceiling
- * `DESIGN.md` allows and the label tracking opens the word out — about a fifth
- * of its own width on a header of average length — and that air is what the eye
- * reads as a header rather than as a first row of data. The colour is the
- * secondary `--muted` rather than the quieter `--faint`: a label doing more
- * work should not also be the quietest thing in the panel. No fill, and the one
- * hairline under the row is still the only line. (Developer decision,
- * 2026-08-28, from Paper page `09 — Gray chrome variations`, variation V1b.
- * This replaces the quiet regular-weight header read off the boards on
- * 2026-08-23.)
- *
- * The size does not appear here. The header sits at the table's own 14px and
- * has never had a size of its own.
- *
- * It is exported for the same reason `LANE_X` is: the inline-editing suite grid
- * in `tests/tests-grid.tsx` is not built from these parts, and a header's rank
- * declared in two files is a header that drifts.
- */
-export const HEAD_TYPE =
-  "font-medium tracking-(--tracking-label) text-muted-foreground";
-
-/**
- * The same rank, for a narrow layout that has no header row to carry it.
- *
- * A stacked row is a label-and-value list, so each cell prints its own column's
- * name from `data-label` instead. That printed label is the header — said again
- * beside the fact — so it is said the same way, and the two layouts name a
- * column identically. The variants have to be written out rather than composed
- * from `HEAD_TYPE`, because Tailwind finds class names by reading files as
- * text and cannot see a prefix a program adds at runtime.
- */
-export const STACKED_HEAD_TYPE = cn(
-  "stacked:before:font-medium",
-  "stacked:before:tracking-(--tracking-label)",
-  "stacked:before:text-muted-foreground",
-);
 
 /** The bordered surface a table is drawn on. */
 function TablePanel({ className, ...props }: ComponentProps<"div">) {
@@ -140,14 +98,11 @@ function TableRow({ className, ...props }: ComponentProps<"tr">) {
 }
 
 /**
- * A column's name: the same 14px the rows are at, in the header's own rank.
+ * A column's name: quiet, regular weight, and the same 14px the rows are at.
  *
- * The rank is `HEAD_TYPE` above, which is where the reasoning is. The label
- * itself is left in the sentence case it was written in — the treatment is
- * type, not text.
- *
- * The height is fixed rather than a minimum, because a header holds one word
- * and has nothing to grow for.
+ * `DESIGN.md`: "Headers are quiet, regular-weight labels." The height is fixed
+ * rather than a minimum, because a header holds one word and has nothing to
+ * grow for.
  */
 function TableHead({ className, ...props }: ComponentProps<"th">) {
   return (
@@ -156,8 +111,7 @@ function TableHead({ className, ...props }: ComponentProps<"th">) {
       className={cn(
         "h-(--row-height) border-b border-border",
         LANE_X,
-        "text-left whitespace-nowrap",
-        HEAD_TYPE,
+        "text-left font-normal whitespace-nowrap text-faint",
         className,
       )}
       {...props}

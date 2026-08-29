@@ -231,18 +231,7 @@ export function AuthShell({
   return (
     <main
       className={cn(
-        /*
-         * The ground is chrome, and the panel on it is the work — the same
-         * rule the signed-in product took on 2026-08-28, read onto a page
-         * that has no sidebar and no title bar to carry it. An access page is
-         * all frame and one panel, so the frame is the whole ground.
-         *
-         * It reads `--chrome` rather than `--background` because
-         * `--background` is Pure Paper now and the panel below is Pure Paper
-         * too: the two would be one surface with a hairline between them, and
-         * the panel would stop being a panel.
-         */
-        "relative grid min-h-[100svh] place-items-center bg-chrome",
+        "relative grid min-h-[100svh] place-items-center bg-background",
         "px-6 py-16",
         "max-[620px]:py-12 max-[400px]:px-4",
       )}

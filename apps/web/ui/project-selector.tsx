@@ -60,16 +60,7 @@ const TRIGGER_COMPACT = [
   "flex-row items-center gap-2",
   "min-h-(--control-lg) max-w-[220px] rounded-input px-3 py-1",
   "border border-border bg-surface",
-  /*
-   * **The edge answers the pointer; the fill stays where it is.** This form is
-   * drawn on the mobile bar, and that bar is chrome — so the control already
-   * rests a step above what it sits on, and the quiet grey it used to hover to
-   * is the bar's own value in light theme. A control that sank into its bar
-   * the moment somebody pointed at it would be saying the opposite of what a
-   * hover means. The hairline going to ink says it in both themes. The drawer
-   * button beside it in `shell.tsx` is the same control and made the same move.
-   */
-  "pointer-hover:border-border-strong",
+  "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
   "max-[900px]:min-w-0 max-[900px]:max-w-[min(220px,56vw)]",
 ];
 

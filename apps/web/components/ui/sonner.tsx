@@ -72,19 +72,19 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--raised)",
+          "--normal-bg": "var(--surface)",
           "--normal-text": "var(--foreground)",
           "--normal-border": "var(--border)",
-          "--success-bg": "var(--raised)",
+          "--success-bg": "var(--surface)",
           "--success-text": "var(--foreground)",
           "--success-border": "var(--good-border)",
-          "--warning-bg": "var(--raised)",
+          "--warning-bg": "var(--surface)",
           "--warning-text": "var(--foreground)",
           "--warning-border": "var(--warn-border)",
-          "--error-bg": "var(--raised)",
+          "--error-bg": "var(--surface)",
           "--error-text": "var(--foreground)",
           "--error-border": "var(--bad-border)",
-          "--info-bg": "var(--raised)",
+          "--info-bg": "var(--surface)",
           "--info-text": "var(--foreground)",
           "--info-border": "var(--border)",
           /* The card radius, which is what a raised surface this size wears. */

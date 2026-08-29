@@ -162,7 +162,7 @@ export function Toast({
         "w-[min(380px,calc(100vw-(2*var(--space-4))))] min-h-(--tap-target)",
         "grid-cols-[var(--control-sm)_minmax(0,1fr)_var(--control-sm)] gap-3 p-3",
         "rounded-card border border-border border-l-2 border-l-foreground",
-        "bg-raised text-foreground shadow-popover",
+        "bg-surface text-foreground shadow-popover",
         /* The failure colour, for the reason written on `app/ui.tsx`'s notice. */
         "data-[kind=error]:border-l-failure",
         "max-[640px]:right-4 max-[640px]:bottom-4",
