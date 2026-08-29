@@ -560,8 +560,13 @@ describe("a connection's stored credential", () => {
 
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
+    // The chat-native door is dormant, so a form is never offered it; the
+    // text door is the Retell shape a person picks.
     expect(
-      items.find((one) => one.connectionType === "retell_chat_api")
+      items.some((one) => one.connectionType === "retell_chat_api"),
+    ).toBe(false);
+    expect(
+      items.find((one) => one.connectionType === "retell_text_mode")
         ?.credentialRule,
     ).toBe("required");
     expect(

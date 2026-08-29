@@ -763,7 +763,7 @@ describe("LiveKit in the wizard", () => {
       },
     ]);
     expect(ui.record.asked).not.toContain("retell-key");
-    expect(ui.record.asked).not.toContain("reach");
+    expect(ui.record.asked).not.toContain("lanes");
     expect(ui.record.connectionAsks.map((ask) => ask.id)).toContain(
       "connection:variant",
     );

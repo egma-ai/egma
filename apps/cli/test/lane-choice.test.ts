@@ -1,16 +1,20 @@
 /**
- * Text or phone: the choice that decides what egma creates.
+ * The one question — how should Egma test this agent — and what each answer
+ * creates.
  *
  * A fake Retell speaking the shapes the real service answers with, the fixture
  * platform speaking egma's public API, and the headless UI in between. What is
  * asserted is what a developer could check afterwards in their own project: how
  * many connections are on it, what each one holds, and — the whole reason this
- * exists — that the one they did not choose was never created.
+ * exists — that a lane they did not pick was never created.
  *
- * The rule under all of it: **egma creates the selected connection and nothing
- * else.** A wizard that made both would put a connection in somebody's project
- * that they never asked for, and on the phone side that is a connection egma
- * would dial a real telephone over.
+ * The rule under all of it: **egma creates the picked lanes and nothing else.**
+ * A wizard that made a lane nobody asked for would put a connection in
+ * somebody's project they would find later and have to work out, and on the
+ * phone side that is a connection egma would dial a real telephone over.
+ *
+ * Several lanes may be picked in one pass, and they all land on **one** egma
+ * agent: that is what makes one test suite run over text and voice both.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -89,7 +93,8 @@ afterEach(async () => {
 });
 
 type Answers = {
-  readonly reach?: string | null;
+  /** The lanes picked, as the one comma-joined word the answer channel takes. */
+  readonly lanes?: string | null;
   readonly number?: string | null;
   /** Which agent, when the account holds more than one. */
   readonly agent?: string | null;
@@ -112,7 +117,7 @@ class ScriptedUI extends HeadlessUI {
     this.record.asked.push(ask);
     if (ask === "retell-key") return Promise.resolve<string | null>(KEY);
     if (ask === "retell-agent") return Promise.resolve(this.said.agent ?? null);
-    if (ask === "reach") return Promise.resolve(this.said.reach ?? null);
+    if (ask === "lanes") return Promise.resolve(this.said.lanes ?? null);
     if (ask === "phone-number") return Promise.resolve(this.said.number ?? null);
     return Promise.resolve(null);
   }
@@ -165,30 +170,13 @@ function losingTheRace(): typeof fetch {
   }) as typeof fetch;
 }
 
-describe("choosing the phone", () => {
-  it("refuses phone for a Retell chat agent before it writes anything", async () => {
-    retell = await startFakeRetell(CHAT_ACCOUNT);
-
-    const { report, connected } = await run({ reach: "phone" });
-
-    expect(connected).toBeNull();
-    expect(report).toEqual({
-      kind: "failed",
-      reason:
-        "Retell says this is a chat agent. Chat agents require a Chat connection. " +
-        "Choose --reach text and try again. Nothing was written.",
-    });
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    expect(await wroteAnEgmaFolder()).toBe(false);
-  });
-
+describe("picking the phone lane", () => {
   it("creates one phone connection holding the number and nothing else", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const { connected } = await run({ reach: "phone" });
+    const { connected } = await run({ lanes: "phone" });
 
-    expect(connected?.reach).toBe("phone");
+    expect(connected?.lanes).toEqual(["phone"]);
     expect(connected?.number).toBe(DIALLED);
 
     // One connection, and it is the phone one. The retell connection egma used
@@ -219,7 +207,7 @@ describe("choosing the phone", () => {
   it("offers only the numbers Retell routes to the chosen agent", async () => {
     retell = await startFakeRetell(TWO_NUMBERS);
 
-    const { ui } = await run({ reach: "phone", number: "+14155550333" });
+    const { ui } = await run({ lanes: "phone", number: "+14155550333" });
 
     expect(ui.record.numberChoices.map((one) => one.number)).toEqual([
       DIALLED,
@@ -238,7 +226,7 @@ describe("choosing the phone", () => {
   it("asks nothing when Retell routes one number to the agent, and says which", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const { ui } = await run({ reach: "phone" });
+    const { ui } = await run({ lanes: "phone" });
 
     expect(ui.record.asked).not.toContain("phone-number");
     expect(ui.record.statuses).toContain(`◆ Egma will dial ${DIALLED}.`);
@@ -248,7 +236,7 @@ describe("choosing the phone", () => {
     const account = await startFakeRetell(ACCOUNT);
     retell = account;
 
-    await run({ reach: "phone" });
+    await run({ lanes: "phone" });
 
     const asked = account.requests.map((one) => `${one.method} ${one.path}`);
     expect(asked).toContain("GET /v2/list-phone-numbers");
@@ -264,7 +252,7 @@ describe("choosing the phone", () => {
   it("ends plainly when Retell routes no number to the agent, and creates nothing", async () => {
     retell = await startFakeRetell({ ...ACCOUNT, numbers: [] });
 
-    const { ui, report } = await run({ reach: "phone" });
+    const { ui, report } = await run({ lanes: "phone" });
 
     expect(ui.record.statuses).toContain(NO_NUMBERS_LINE);
     expect(report).toEqual({ kind: "failed", reason: NO_NUMBERS_LINE });
@@ -277,7 +265,7 @@ describe("choosing the phone", () => {
   it("ends plainly when several numbers reach the agent and none is chosen", async () => {
     retell = await startFakeRetell(TWO_NUMBERS);
 
-    const { report } = await run({ reach: "phone", number: null });
+    const { report } = await run({ lanes: "phone", number: null });
 
     expect(report).toEqual({
       kind: "failed",
@@ -288,82 +276,163 @@ describe("choosing the phone", () => {
 });
 
 describe("choosing text", () => {
-  it("refuses text for a Retell voice agent before it writes anything", async () => {
+  it("creates one Retell text mode connection for a Retell voice agent", async () => {
+    // A voice agent tested in text is conducted over text mode. The
+    // refusal that used to stand here retired with this lane, the agent being
+    // on a Retell LLM text mode can reach.
     retell = await startFakeRetell(ACCOUNT);
 
-    const { report, connected } = await run({ reach: "text" });
+    const { report, connected } = await run({ lanes: "text" });
 
-    expect(connected).toBeNull();
-    expect(report).toEqual({
-      kind: "failed",
-      reason:
-        "Retell says this is a voice agent. Voice agents require a Phone connection. " +
-        "Choose --reach phone and try again. Nothing was written.",
-    });
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    expect(await wroteAnEgmaFolder()).toBe(false);
-  });
-
-  it("creates one Retell chat connection for the selected chat agent", async () => {
-    retell = await startFakeRetell(CHAT_ACCOUNT);
-
-    const { connected } = await run({ reach: "text" });
-
-    expect(connected?.reach).toBe("text");
+    expect(connected?.lanes).toEqual(["text"]);
     expect(connected?.number).toBeNull();
+    expect(report.kind).toBe("connected");
 
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionType).toBe("retell_chat_api");
-    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
+    // A chat simulation of a voice agent: the connection speaks chat and names
+    // the voice agent it conducts against.
     expect(connection?.modality).toBe("chat");
-    // The selected chat agent's own identity is the connection target.
     expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
     expect(platform.registered.sealed).toEqual([KEY]);
   });
 
+  it("never offers a chat-native Retell agent, because Egma registers voice agents", async () => {
+    // Egma registers Retell **voice** agents only. An account holding nothing
+    // but chat agents reads as an account with nothing egma tests on it, which
+    // is the honest answer rather than an agent picker full of agents no lane
+    // reaches.
+    retell = await startFakeRetell(CHAT_ACCOUNT);
+
+    const { report } = await run({ lanes: "text" });
+
+    expect(report).toEqual({
+      kind: "failed",
+      reason: "there are no agents on that Retell account.",
+    });
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+  });
+
   it("reads no phone number at all, because nothing is going to be dialled", async () => {
-    const account = await startFakeRetell(CHAT_ACCOUNT);
+    // A developer who picked only Text is never asked for a phone number, and
+    // egma never asks Retell for one either.
+    const account = await startFakeRetell(TWO_NUMBERS);
     retell = account;
 
-    await run({ reach: "text" });
+    const { ui } = await run({ lanes: "text" });
+
+    expect(ui.record.asked).not.toContain("phone-number");
+    expect(ui.record.numberChoices).toEqual([]);
 
     const asked = account.requests.map((one) => one.path);
     expect(asked).not.toContain("/v2/list-phone-numbers");
   });
 });
 
-describe("choosing neither", () => {
-  it("offers only phone for a Retell voice agent", async () => {
+/**
+ * The whole point of the multi-pick: one Retell voice agent, several ways of
+ * testing it, one egma agent, one pass.
+ */
+describe("picking several lanes at once", () => {
+  it("lands text, web-call and phone connections on one egma agent in one pass", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const { lines } = await run({ reach: null });
+    const { report, connected } = await run({ lanes: "text,web-call,phone" });
 
-    expect(lines).toContainEqual(expect.stringContaining("reach_option: phone"));
-    expect(lines).not.toContainEqual(expect.stringContaining("reach_option: text"));
+    expect(report.kind).toBe("connected");
+    expect(connected?.lanes).toEqual(["text", "web-call", "phone"]);
+
+    // **One** agent. Two identities for one voice agent would split a team's
+    // results history in half, which is exactly what this pass must not do.
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(3);
+    expect(
+      platform.registered.connections.map((one) => one.connectionType),
+    ).toEqual(["retell_text_mode", "retell_web_call", "phone_number"]);
+
+    // Each lane holds what only it holds: the two Retell doors name the vendor
+    // agent and carry the sealed key; the phone connection carries the number
+    // and no durable credential.
+    const [text, web, phone] = platform.registered.connections;
+    expect(text?.modality).toBe("chat");
+    expect(text?.config).toEqual({ retellAgentId: "agent_0001" });
+    expect(web?.modality).toBe("voice");
+    expect(web?.accessVariant).toBe("retell_web_call.api_key");
+    expect(web?.config).toEqual({ retellAgentId: "agent_0001" });
+    expect(phone?.config).toEqual({ phoneNumber: DIALLED });
+    expect(phone?.credentialsHint).toBeNull();
   });
 
-  it("offers only text for a Retell chat agent", async () => {
-    retell = await startFakeRetell(CHAT_ACCOUNT);
+  it("writes nothing at all when one picked lane cannot reach the agent", async () => {
+    // A custom-LLM agent keeps its words and its tools on its own socket
+    // server, out of text mode's reach. The refusal names the lane that does
+    // reach it — and a pass that half landed would leave a project to unpick,
+    // so nothing is written.
+    retell = await startFakeRetell({
+      ...ACCOUNT,
+      agents: [
+        {
+          agent_id: "agent_0001",
+          agent_name: "front-desk",
+          response_engine: {
+            type: "custom-llm",
+            llm_websocket_url: "wss://example.invalid/llm",
+          },
+        },
+      ],
+    });
 
-    const { lines } = await run({ reach: null });
+    const { report } = await run({ lanes: "text,phone" });
 
-    expect(lines).toContainEqual(expect.stringContaining("reach_option: text"));
-    expect(lines).not.toContainEqual(expect.stringContaining("reach_option: phone"));
+    expect(report.kind).toBe("failed");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+  });
+
+  it("finds every lane it made the first time and writes none of them twice", async () => {
+    retell = await startFakeRetell(ACCOUNT);
+
+    const first = await run({ lanes: "text,phone" });
+    const second = await run({ lanes: "text,phone" });
+
+    expect(first.report.kind).toBe("connected");
+    expect(second.report.kind).toBe("connected");
+    expect(second.connected?.registered.agent.id).toBe(
+      first.connected?.registered.agent.id,
+    );
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(2);
+  });
+});
+
+describe("picking no lane", () => {
+  it("offers all three lanes for a Retell voice agent, with one help line each", async () => {
+    // The one question leads: text, web call, phone call. Every lane is
+    // offered for every voice agent, and none is picked here.
+    retell = await startFakeRetell(ACCOUNT);
+
+    const { lines } = await run({ lanes: null });
+
+    expect(lines).toContain("How should Egma test this agent?");
+    expect(lines).toContainEqual(expect.stringContaining("lane_option: text"));
+    expect(lines).toContainEqual(expect.stringContaining("lane_option: web-call"));
+    expect(lines).toContainEqual(expect.stringContaining("lane_option: phone"));
   });
 
   it("creates nothing, and leaves the repository exactly as it was", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const { ui, report } = await run({ reach: null });
+    const { ui, report } = await run({ lanes: null });
 
-    expect(ui.record.reachOffered).toBe(true);
+    expect(ui.record.lanesOffered).toBe(true);
     expect(report).toEqual({
       kind: "failed",
-      reason: "nobody chose phone, so nothing was created.",
+      reason: "nobody picked Text, Web call, Phone call, so nothing was created.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -377,7 +446,7 @@ describe("choosing neither", () => {
   it("binds the repository at the moment egma is asked to create something", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const { ui } = await run({ reach: "phone" });
+    const { ui } = await run({ lanes: "phone" });
 
     expect(await wroteAnEgmaFolder()).toBe(true);
     expect(ui.record.statuses).toContain(
@@ -390,8 +459,8 @@ describe("running it twice", () => {
   it("finds the phone connection it made the first time, and writes nothing", async () => {
     retell = await startFakeRetell(ACCOUNT);
 
-    const first = await run({ reach: "phone" });
-    const second = await run({ reach: "phone" });
+    const first = await run({ lanes: "phone" });
+    const second = await run({ lanes: "phone" });
 
     expect(first.connected?.registration).toEqual({
       agent: "created",
@@ -406,7 +475,7 @@ describe("running it twice", () => {
       first.connected?.registered.connection.id,
     );
 
-    // One agent, one way of reaching it, however many times this ran. Two
+    // One agent, one way of testing it, however many times this ran. Two
     // identities for one voice agent would split a team's results history in
     // half, and a retry after a network failure nobody could read is ordinary.
     expect(platform.registered.agents).toHaveLength(1);
@@ -442,8 +511,8 @@ describe("running it twice", () => {
     // names a vendor at all. What tells the second walk that this is somebody
     // else's agent is the number: Retell routes it to agent_0001 and not to
     // agent_0002, and that is as good an answer as a vendor id would be.
-    const first = await run({ reach: "phone", agent: "agent_0001" });
-    const second = await run({ reach: "phone", agent: "agent_0002" });
+    const first = await run({ lanes: "phone", agent: "agent_0001" });
+    const second = await run({ lanes: "phone", agent: "agent_0002" });
 
     expect(first.connected?.registered.agent.name).toBe("front-desk");
     expect(second.connected?.registered.agent.name).toBe("front-desk-2");
@@ -469,8 +538,8 @@ describe("running it twice", () => {
   it("reads the winner's connection as a reuse when it loses the race to attach", async () => {
     retell = await startFakeRetell(TWO_NUMBERS);
 
-    const first = await run({ reach: "phone", number: DIALLED });
-    const phone = await run({ reach: "phone", number: "+14155550333" }, losingTheRace());
+    const first = await run({ lanes: "phone", number: DIALLED });
+    const phone = await run({ lanes: "phone", number: "+14155550333" }, losingTheRace());
 
     expect(phone.report.kind).toBe("connected");
     expect(phone.connected?.registration).toEqual({

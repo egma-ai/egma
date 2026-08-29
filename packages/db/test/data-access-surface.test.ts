@@ -96,6 +96,15 @@ const WORK_DISPATCHING = [
   "claimSimulations",
   "recordSimulationHeartbeat",
   "resolveSimulationStanding",
+  // The mock endpoint's own context, derived the same way and for the same
+  // reason: the caller is the customer's agent platform, holding no credential
+  // of egma's, so the run and simulation the URL names are the whole authority.
+  // It answers the three gates and the answers this simulation is served, and
+  // nothing else about the customer.
+  "resolveMockToolCall",
+  "recordMockState",
+  "claimMockDraftFor",
+  "owedMockCleanups",
   "sweepOrphanedSimulations",
   "watchGradingWork",
   // The poller names no customer. It claims the next due pulled agent and
@@ -307,6 +316,12 @@ const CONTEXT_REQUIRING = [
   "testsUsingPersona",
   "traceEvidenceStartedAt",
   "resolveProductionGraders",
+  // The second door to a connection's plaintext, for the run start of a kind
+  // that reads its agent's platform. Narrower than a role: only for a kind
+  // that declares the read, gated on starting a run, and asked with an agent
+  // and connection the caller already named. The key it unseals goes to the
+  // provider read and nowhere the run header can keep it.
+  "resolveRunStartReach",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
   // simulation claim, because conducting is the only thing egma does with a
@@ -318,6 +333,16 @@ const CONTEXT_REQUIRING = [
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
   "seedPersonaLibrary",
+  // What a run built on the agent's platform, written for the teardown that has
+  // to put it back and readable by the landing that stamps a simulation's
+  // coverage from it.
+  // The one mocked world an agent has at a time, claimed under that agent's own
+  // advisory lock. Two mocked runs overlapping is a hijack — one run's teardown
+  // restores routing onto the other's temporary version — so the second run is
+  // refused here rather than queued.
+  // What one agent's runs still owe somebody's platform account: a temporary
+  // version that was never deleted, a pinned number that was never put back.
+  // The sweep's whole input, read inside the project like any other run read.
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
@@ -433,6 +458,10 @@ const VALUES = [
   // to be turned away while a live test named it; a test names no graders, so
   // switching one off is a decision about the project with nothing in its way.
   "LastAdminError",
+  // One agent's mocked-world fence would not come free inside its wait. Its own
+  // class because it is not a fault and not a bad request: the agent is busy,
+  // and the next move is to wait and start again.
+  "MockDraftFenceBusyError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
@@ -502,7 +531,22 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
+  // Whether a run over this kind reads the agent's own platform before it
+  // starts. A word from a closed set, exported so the run route and the one
+  // door that unseals a connection for that read agree on which kinds it is
+  // for — never a config or a credential.
+  "connectionTypeReadsPlatformAtRunStart",
+  "connectionTypeBranchesMockDraft",
+  // Which kinds may carry the mock-tools switch at all, asked by the door that
+  // writes one. A phone connection can never hold it, and saying so from the
+  // registry keeps the write and the CHECK on the column agreeing.
+  "connectionTypeCarriesMockSwitch",
+  "MOCK_SWITCHED_CONNECTION_TYPES",
+  "DRAFT_MOCK_CONNECTION_TYPES",
   "connectionTypeUsesPlatformCarrier",
+  // Which connection lanes a run over them builds a mocked world for. Two
+  // names and no gate: the gate itself is a condition inside the claim, where
+  // nothing outside this package has a query to put it in.
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
@@ -551,6 +595,21 @@ const THE_MOCKED_WORLD = [
   "NO_MOCK_TOOLS",
   "isErrorAnswer",
   "resolveMockTools",
+  // The coverage stamp's vocabulary and its serialization, and the record of
+  // the temporary world a run built. Pure both ways: a stored value or a set of
+  // classes goes in, a checked shape comes out, and no store is touched. They
+  // cross the boundary because both halves of each are in two packages — a
+  // platform read produces the classes and this module stores them — and a
+  // second implementation of either would be a second answer about how isolated
+  // a simulation was.
+  "NO_MOCK_TOOL_COVERAGE",
+  // The world a version-pinned run reads rather than builds: the same two
+  // folds as the mocked world beside them, over the record that says which
+  // version a run conducts against and what that version's tools are.
+  "mockToolCoverageFrom",
+  "mockToolCoverageRow",
+  "mockMetadataFrom",
+  "mockMetadataRow",
 ];
 
 /**

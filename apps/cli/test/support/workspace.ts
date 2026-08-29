@@ -167,7 +167,7 @@ export async function makeWorkspace(
       // And a way to reach an agent that the person running the suite happens
       // to have set is not a way any check may take: which connection egma
       // creates is what several of them are about.
-      if (extra.EGMA_REACH === undefined) delete env.EGMA_REACH;
+      if (extra.EGMA_LANES === undefined) delete env.EGMA_LANES;
       if (extra.EGMA_PHONE_NUMBER === undefined) delete env.EGMA_PHONE_NUMBER;
       return env;
     },

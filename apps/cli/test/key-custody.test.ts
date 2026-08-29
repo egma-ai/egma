@@ -46,7 +46,6 @@ const SCRIPT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_0001",
-      channel: "chat",
       agent_name: "order-line",
       voice_id: "11labs-Adrian",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
@@ -152,7 +151,7 @@ describe("a whole run, swept afterwards", () => {
     const printed: string[] = [];
     const ui = new HeadlessUI({
       write: (line) => printed.push(line),
-      answers: { "retell-key": KEY, reach: "text" },
+      answers: { "retell-key": KEY, lanes: "text" },
     });
 
     // The walk ends in a run, and a result is ready when grading is terminal. The sweep
@@ -247,7 +246,7 @@ describe("a whole run, swept afterwards", () => {
       env: workspace.env({
         EGMA_RETELL_URL: retell.url,
         EGMA_RETELL_API_KEY: KEY,
-        EGMA_REACH: "text",
+        EGMA_LANES: "text",
       }),
     });
     child.stdin.end("");

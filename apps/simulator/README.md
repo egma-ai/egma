@@ -39,15 +39,31 @@ touching the others:
   what answers, so a Retell agent, a Vapi agent and a person behind a
   number are all one plug. `livekit` reaches an agent where it lives: a
   room made in the customer's own LiveKit project, joined outbound, with
-  the agent's worker dispatched into it. To write the next, read the
-  `plugs/__init__.py` docstring; it is the entire brief.
+  the agent's worker dispatched into it. `retell_web_call` reaches a
+  Retell *voice* agent the same way its browser callers do: egma creates
+  the call itself — against a named version of the agent, with this
+  simulation's variables attached — and Retell answers with a way into a
+  LiveKit room, so the plug creates and the room media joins.
+  `retell_text_mode` reaches the same Retell *voice* agent in **text**:
+  it speaks Retell's agent-playground completion API, which keeps nothing
+  between requests, so every request carries the whole history, the
+  version by name, this simulation's variables, egma's own answers as
+  native mocks, and where the engine had got to. It is the one plug that
+  puts egma in the agent's tool path without standing between the two —
+  the platform serves egma's answers itself — and the one lane with no
+  provider reference to offer, because text mode stores nothing. To
+  write the next, read the `plugs/__init__.py` docstring; it is the
+  entire brief.
 - **The media backends** (`media/`) — how a voice exchange's audio
   travels. One driver per way in, behind a four-method seam: create a
   Pipecat transport, dial, wait until somebody answers, tear it down.
   `livekit.py` places real phone calls over the SIP trunk carried by the
-  claimed work order; `livekit_room.py` holds an exchange in the
-  customer's own room and dispatches their agent into it, where "dial" means asking for a
-  worker rather than placing a call; `scripted.py` is the local stand-in
+  claimed work order; `livekit_room.py` holds an exchange in a room
+  joined three ways — one egma makes and dispatches into, one a
+  customer's own endpoint mints the way into, and one a platform opened
+  for a call of its own — where "dial" means asking for a worker rather
+  than placing a call, and asks for nobody at all on the two shapes egma
+  holds no key pair for; `scripted.py` is the local stand-in
   that answers a call nobody placed, and is what CI runs on. The two that
   join a room share `room.py`, which is the joining itself. Nothing above
   the seam — the plug's lifecycle, the pipeline, the recording, the
@@ -374,6 +390,21 @@ protocol needs no account, no key and no network — failure paths included,
 where a refused key and an endpoint nobody answers each end the simulation
 `failed` with an honest reason and no leaked secret.
 
+The `retell_text_mode` plug converses with `tests/text_mode_stub.py`: a
+real local HTTP server shaped like the completion API, which matches and
+serves the mocks each request carries the way the platform does — so a
+plug that forgot to send them would see real answers come back, and the
+plug refuses to stamp a call `mocked` until it has checked that the tool
+was really given Egma's own answer.
+
+Every wire field name that Retell's documentation was not in reach for is
+marked a guess in the plug's docstring. Correcting one after a live run
+means editing **three** places, listed here so none is missed: the plug,
+the stub, and `tests/test_plug_retell_text_mode.py`, which names several
+of the fields in its assertions. The stub deliberately does not import
+the plug's constants — a counterpart that took its wire from the thing it
+is testing would agree with a mistake instead of catching it.
+
 The `phone` plug converses through the scripted media backend the same way: a
 spec naming a number yields a transcript, an ending, per-turn timings and a
 recording without contacting LiveKit or a real carrier. Its failure paths are
@@ -395,16 +426,23 @@ never comes and one that joins and publishes nothing, an agent that
 leaves mid-exchange, and the room deleted however it ended. The
 customer's api secret is a sentinel there too.
 
-One real conversation with a real Retell chat agent is opt-in, and skips
-when the environment is silent, so nothing in CI waits on an account:
+One real chat simulation of a real Retell **voice** agent in text mode is
+opt-in, and skips when the environment is silent, so nothing in CI waits on
+an account:
 
 ```bash
 TEST_RETELL_API_KEY=key_... \
 TEST_RETELL_AGENT_ID=agent_... \
-uv run --frozen pytest tests/test_live_retell.py -v
+TEST_MODEL_API_KEY=sk-... \
+uv run --frozen pytest tests/test_live_text_mode.py -v -s
 ```
 
-`TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
+The agent must be a voice agent on a conversation flow or a Retell LLM: a
+custom-LLM agent holds its words and tools on the customer's own service,
+where this lane reaches neither, and is refused. `TEST_MODEL_API_KEY` is the
+persona's own brain, so the caller reasons for real rather than reading a
+script. `TEST_RETELL_SCENARIO` tunes what the persona calls about, and
+`TEST_RETELL_BASE_URL` points the test somewhere other than Retell.
 
 Real speech is opt-in the same way. Each test skips without its credentials,
 and CI runs none of them:
@@ -491,12 +529,17 @@ src/egma_simulator/
   plugs/          The platform-plug seam. Its __init__ docstring is the
                   plug author's whole brief; scripted.py chats,
                   loopback.py speaks, retell.py is the first real
-                  platform, phone.py dials a number, and livekit.py holds
-                  an exchange in the agent's own room.
+                  platform, phone.py dials a number, livekit.py holds
+                  an exchange in the agent's own room,
+                  retell_web_call.py creates a Retell web call and
+                  conducts it in the room that call opens, and
+                  retell_text_mode.py conducts a Retell voice agent in
+                  text, with no call and no audio anywhere.
   media/          The media-backend seam: how a voice exchange's Pipecat
                   transport is created. Its __init__ docstring is the
                   driver author's whole brief; livekit.py places real calls over a SIP
-                  trunk, livekit_room.py dispatches an agent into a room,
+                  trunk, livekit_room.py joins a room three ways and
+                  dispatches an agent into the one egma makes,
                   room.py is the joining the two of them share, and
                   scripted.py is the one CI converses through.
   pipeline.py     One pipeline per simulation, built from its spec: which

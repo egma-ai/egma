@@ -121,6 +121,15 @@ export type PlatformRun = {
   readonly status: RunStatus;
   readonly agentId: string;
   readonly connectionId: string;
+  /**
+   * The lane this run is over, in the record's own word for it.
+   *
+   * On the answer to the start itself, so a terminal can say what a run reaches
+   * without asking anything else: the committed folder names a connection by id
+   * and name only, and a name is what a person chose to call it, not what it
+   * does.
+   */
+  readonly connectionType: string;
   readonly productLabel: string;
   readonly modality: string;
   readonly expectedSimulationCount: number;
@@ -239,6 +248,7 @@ function runFrom(body: RunWire): PlatformRun {
     status: runStatusOf(body.status),
     agentId: platformText(body.agentId),
     connectionId: platformText(body.connectionId),
+    connectionType: platformText(body.connectionType),
     productLabel: platformText(body.productLabel),
     modality: platformText(body.modality),
     expectedSimulationCount: whole(body.expectedSimulationCount),

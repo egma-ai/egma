@@ -78,21 +78,22 @@ The wizard handles agent registration as part of its flow, but you can run it se
 egma connect
 ```
 
-The CLI asks for your Retell API key (or LiveKit credentials) and then asks how Egma should reach the agent. For Retell, the Retell agent decides the compatible path:
+The CLI asks for your Retell API key (or LiveKit credentials) and then asks one question: **how should Egma test this agent?** Pick as many answers as you want — each one is a connection on the same Egma agent, and one test suite runs over all of them:
 
-- **Text** — for a Retell chat agent. Egma uses the Retell Chat API.
-- **Phone** — for a Retell voice agent. Egma dials one of the agent's public numbers over the telephone network.
+- **Text** — Egma talks to the agent in text. No call is placed, and a run takes seconds.
+- **Web call** — a voice call Egma places over the internet.
+- **Phone call** — Egma dials the real number, so a run has true telephone latency and reaches your real tools.
 
 <Note>
-  Retell is the agent platform, not the connection type. The saved connection is `retell_chat_api` for a chat agent or `phone_number` for a voice agent. A phone connection can also reach an agent on another or unknown platform.
+  Retell is the agent platform, not the connection type. Each lane you pick is one connection: `retell_text_mode` for text, `retell_web_call` for a web call, `phone_number` for the phone. A phone connection can also reach an agent on another or unknown platform.
 </Note>
 
 Pass credentials through environment variables rather than as arguments — arguments are visible to every process on your machine and are saved in shell history:
 
 ```bash
-EGMA_RETELL_API_KEY=key_… egma connect --reach text
+EGMA_RETELL_API_KEY=key_… egma connect --lanes text
 # or
-cat retell-key.txt | egma connect --reach phone --phone-number +14155550111
+cat retell-key.txt | egma connect --lanes text,phone --phone-number +14155550111
 ```
 
 **Expected output:**

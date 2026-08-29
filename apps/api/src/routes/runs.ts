@@ -1,6 +1,7 @@
 import {
   cancelRun,
   connectionTypeOf,
+  connectionTypeReadsPlatformAtRunStart,
   connectionTypeUsesPlatformCarrier,
   getAgent,
   getConnection,
@@ -9,11 +10,13 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
+  mockToolCoverageRow,
   NotPermittedError,
   productLabelOf,
   ProjectOutsideOrganizationError,
   readRunGradingProgress,
   readSimulationGradingStates,
+  resolveRunStartReach,
   runAlreadyStartedFor,
   RUN_STATUSES,
   RunWriteRefusedError,
@@ -21,6 +24,7 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type RunStartReach,
   type ExpectedTestVersion,
   type NewRun,
   type Run,
@@ -52,13 +56,53 @@ import {
   sendRefusal,
   unprocessable,
 } from "../http/refusals.ts";
+import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
+import {
+  readTextModeWorld,
+  readWebCallWorld,
+  type PlatformWorldRead,
+} from "../providers/retell-run-start.ts";
+
+/**
+ * How one connection type reads the agent's platform before its run starts.
+ *
+ * The registry says *which* kinds read; this says *how* each of them does it,
+ * and the two are held level by the check below rather than by anybody
+ * remembering. A kind added to the registry's list with no reader here fails
+ * the run out loud naming itself, which is the same discipline the connection
+ * registry keeps about adapters: nothing may claim what no code can do.
+ */
+type RunStartReader = (
+  reach: RunStartReach,
+  fetchImpl: typeof fetch | undefined,
+) => Promise<PlatformWorldRead>;
+
+const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
+  retell_text_mode: (reach, fetchImpl) =>
+    readTextModeWorld(
+      { apiKey: reach.apiKey, agentId: reach.config["retellAgentId"] ?? "" },
+      fetchImpl,
+    ),
+  retell_web_call: (reach, fetchImpl) =>
+    readWebCallWorld(
+      { apiKey: reach.apiKey, agentId: reach.config["retellAgentId"] ?? "" },
+      fetchImpl,
+    ),
+};
 
 export type RunRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
+  /**
+   * Test seam for the Retell reads and writes a run start makes: the
+   * version-pinning run-start read both Retell lanes do, and the mocked-world
+   * build a ticked web-call connection does after it. The real one is `fetch`,
+   * and a phone run reaches no platform here at all.
+   */
+  readonly retellFetch?: typeof fetch | undefined;
 };
 
 type Body = Record<string, unknown>;
@@ -147,11 +191,22 @@ function completeStatusCounts(counts?: StatusCounts): Record<SimulationStatus, n
   };
 }
 
+/**
+ * One run's header.
+ *
+ * `whole` is the single-run read and is the only caller that gets the temporary
+ * platform world. That world carries every touched number's inbound routing
+ * verbatim — a page of two hundred runs would repeat all of it two hundred
+ * times, for a reader who asked for a list of runs and not for anybody's
+ * telephone routing. It is a fact about one run, so it is answered when one run
+ * is asked for.
+ */
 function describedHeader(
   run: Run,
   counts: StatusCounts | undefined,
   grading: RunGradingProgress | undefined,
   baseUrl: string,
+  whole: boolean,
 ): Record<string, unknown> {
   const simulations = completeStatusCounts(counts);
   return {
@@ -175,6 +230,28 @@ function describedHeader(
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
+    // The version this run conducted against, cheap enough for a list: a
+    // reader scanning a page of runs can see which version each of them
+    // tested.
+    agentVersion: run.agentVersion,
+    // Whether this run was mocked, read off its own frozen snapshot rather
+    // than off the connection, which may have been unticked since.
+    mockToolsEnabled: run.connectionSnapshot.mockToolsEnabled,
+    // What this run put onto the customer's account and what it owes back:
+    // the temporary copy, the cleanup flag, and the put-it-back note. A reader
+    // sees what Egma promised to restore. Absent from a list, on purpose — the
+    // note carries every touched number and a page of two hundred runs would
+    // repeat all of it for a reader who asked for a list of runs.
+    ...(whole
+      ? {
+          tempMockAgentVersion: run.tempMockAgentVersion,
+          tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
+          // The note in the wire's own spelling. The stored row keeps the
+          // record's, which is the one the decisions record settled; a reader
+          // of the API sees the same three facts either way.
+          mockMetadata: run.mockMetadata,
+        }
+      : {}),
     expectedSimulationCount: run.expectedSimulationCount,
     completedCount: run.completedCount,
     failedCount: run.failedCount,
@@ -195,6 +272,7 @@ async function headersOf(
   auth: AuthContext,
   runs: readonly Run[],
   baseUrl: string,
+  whole = false,
 ): Promise<readonly Record<string, unknown>[]> {
   const ids = runs.map((run) => run.id);
   const progressBatches: string[][] = [];
@@ -216,6 +294,7 @@ async function headersOf(
       statusCounts.get(run.id),
       gradingProgress.get(run.id),
       baseUrl,
+      whole,
     ),
   );
 }
@@ -255,11 +334,7 @@ function describedSimulation(
     mockToolCoverage:
       simulation.mockToolCoverage === null
         ? null
-        : {
-            discovered: [...simulation.mockToolCoverage.discovered],
-            covered: [...simulation.mockToolCoverage.covered],
-            uncovered: [...simulation.mockToolCoverage.uncovered],
-          },
+        : mockToolCoverageRow(simulation.mockToolCoverage),
   };
 }
 
@@ -424,7 +499,91 @@ export async function runRoutes(
         }
       }
 
-      const started = await startRun(acting.auth, input);
+      // **A Retell lane reads the serving version before the run row exists.**
+      // A read that failed after the row was written would leave a queued run
+      // nobody can conduct honestly; refused here, nothing was started and the
+      // sentence says so. A run admitted without this read would carry no
+      // version at all, and its result would name no agent a reader could go
+      // back to. The registry says which kinds read; a phone run reads nothing.
+      const kind = await connectionTypeOf(acting.auth, connectionId);
+      let conducted: number | undefined;
+      let conductedIdentity: string | undefined;
+      if (kind !== undefined && connectionTypeReadsPlatformAtRunStart(kind)) {
+        const reach = await resolveRunStartReach(
+          acting.auth,
+          agentId,
+          connectionId,
+        );
+        if (reach === undefined) {
+          return unprocessable(
+            reply,
+            `there is no active connection ${connectionId} on agent ` +
+              `${agentId} that Egma can read the agent's platform with`,
+          );
+        }
+        // Dispatched on the kind the row actually holds, so the registry's
+        // list and the readers above cannot drift apart in silence.
+        const reader = RUN_START_READERS[reach.connectionType];
+        if (reader === undefined) {
+          throw new Error(
+            `a run over a ${reach.connectionType} connection is declared to ` +
+              `read its agent's platform at run start, and nothing here knows ` +
+              `how to read it`,
+          );
+        }
+        const read = await reader(reach, options.retellFetch);
+        if (read.kind === "refused") {
+          return unprocessable(reply, read.message);
+        }
+        if (read.kind !== "world") {
+          return sendRefusal(reply, "provider_unavailable", read.message);
+        }
+        conducted = read.agentVersion;
+        // The fingerprint of the connection the world was read from, carried
+        // into the write so it can refuse if the connection moved in between.
+        conductedIdentity = reach.connectionIdentity;
+      }
+
+      const started = await startRun(acting.auth, {
+        ...input,
+        ...(conducted === undefined
+          ? {}
+          : {
+              agentVersion: conducted,
+              conductedConnectionIdentity: conductedIdentity,
+            }),
+      });
+
+      // **The draft lane builds its mocked world after the run row exists**, on
+      // no other lane. It happens after `startRun` because the temporary
+      // version's tool URLs carry this run's identifier, and nothing races it: a
+      // mocked run's simulations are unclaimable until the record names a
+      // temporary version, from the instant they are written. This is a no-op
+      // for a text-mode run — not a mockable draft lane — and for a web-call run
+      // whose own connection has the mock-tools switch off; only a run whose
+      // frozen snapshot holds both facts reaches Retell here. A world that
+      // cannot be built cancels the run and is answered as itself, never as a
+      // run that started.
+      const world = await buildRunMockedWorld(
+        acting.auth,
+        started,
+        {
+          baseUrl: options.baseUrl,
+          ...(options.retellFetch === undefined
+            ? {}
+            : { retellFetch: options.retellFetch }),
+        },
+        request.log,
+      );
+      if (world.kind === "refused") {
+        return sendRefusal(reply, "mock_tools_unbuildable", world.reason);
+      }
+      // Another run of this agent holds its one mocked world. A conflict, not a
+      // fault: the same request works once that run finishes.
+      if (world.kind === "in-use") {
+        return sendRefusal(reply, "mock_tools_agent_in_use", world.reason);
+      }
+
       const described = await headerOf(
         acting.auth,
         started.id,
@@ -499,7 +658,11 @@ export async function runRoutes(
       const run = await getRun(acting.auth, runId);
       if (run === undefined) return noSuchRun(reply, runId);
       const [header, agent, connection] = await Promise.all([
-        headersOf(acting.auth, [run], options.baseUrl).then((items) => items[0]),
+        // The one read that asked for this run in particular, and the only one
+        // answered with the temporary platform world.
+        headersOf(acting.auth, [run], options.baseUrl, true).then(
+          (items) => items[0],
+        ),
         getAgent(acting.auth, run.agentId),
         getConnection(acting.auth, run.agentId, run.connectionId),
       ]);

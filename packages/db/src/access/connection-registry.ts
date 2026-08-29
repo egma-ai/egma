@@ -326,6 +326,18 @@ export type ReuseRule = {
   readonly identityOf: (
     config: Readonly<Record<string, string>>,
   ) => string | undefined;
+  /**
+   * The identity namespace this rule's answers live in, shared by every
+   * connection type that reaches the same vendor agent a different way.
+   * Retell's chat API, text mode and web call all name one Retell agent, so a
+   * registration through any of the three lands on the one Egma agent the
+   * first door created. Absent means the type is a family of one.
+   *
+   * Two types may declare one family only when their `matchedKeys` narrow the
+   * same way and their `identityOf` answers are mutually comparable — the
+   * shared namespace is what makes comparing identities across types honest.
+   */
+  readonly family?: string;
 };
 
 /**
@@ -499,6 +511,17 @@ type ConnectionOption = {
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly productLabel: string;
+  /**
+   * Whether a flow may offer this combination. Absent means yes.
+   *
+   * **Dormant, not deleted.** Egma registers Retell **voice** agents only, so
+   * no connect flow offers the chat-native door — but rows written through it
+   * still read back with their own label, and the plug that conducts them
+   * still ships. Hiding it is a fact about what is offered, and it belongs
+   * beside the offer rather than in each flow that would otherwise have to
+   * remember.
+   */
+  readonly dormant?: true;
 };
 
 const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
@@ -508,6 +531,21 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     productLabel: "Retell chat",
+    dormant: true,
+  },
+  {
+    agentPlatform: "retell",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
+    modality: "chat",
+    productLabel: "Retell text mode",
+  },
+  {
+    agentPlatform: "retell",
+    connectionType: "retell_web_call",
+    accessVariant: "retell_web_call.api_key",
+    modality: "voice",
+    productLabel: "Retell web call",
   },
   {
     agentPlatform: "retell",
@@ -554,7 +592,7 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
 ] as const;
 
 export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] {
-  return CONNECTION_OPTIONS.map((option) => {
+  return CONNECTION_OPTIONS.filter((option) => option.dormant !== true).map((option) => {
     const descriptor = descriptorOf(option.connectionType);
     const described = accessVariantById(
       option.connectionType,
@@ -568,8 +606,10 @@ export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] 
       );
     }
     const variant = accessVariantMetadata(described);
+    const { dormant, ...offered } = option;
+    void dormant;
     return {
-      ...option,
+      ...offered,
       agentPlatformLabel:
         option.agentPlatform === null
           ? "Any or unknown"
@@ -853,6 +893,37 @@ function jsonObjectText(key: string, value: unknown): string {
  * second check is load-bearing because DNS can change after this write.
  */
 function tokenEndpointUrl(key: string, value: unknown): string {
+  return publicHttpsUrl(key, value, "https://example.com/egma/livekit-token");
+}
+
+/**
+ * An address on the public internet that Egma itself will make a request to.
+ *
+ * **The rule every customer-written outbound address is held to**, written
+ * once because it is one rule: a config key a customer fills in decides where
+ * this platform's own process sends a request, and every such key is therefore
+ * a way to ask Egma to fetch something on the customer's behalf. HTTPS only, a
+ * real hostname, and nothing that resolves inside the deployment: a literal
+ * address, `localhost`, or a name under `.localhost` is refused before it is
+ * ever stored.
+ *
+ * **A private address is an operator's setting, never a customer's.** A
+ * deployment that really does reach a provider through something on its own
+ * network says so in its own configuration, where the person who runs the
+ * platform can see it — not in a connection row any member of any organization
+ * can write. That is the whole distinction: this gate guards a value that
+ * arrives over the API from a customer, and no such value may name the
+ * platform's own neighbourhood.
+ *
+ * A URL carrying its own credentials, a backslash, or a control character is
+ * refused too, because none of the three is an address anybody means and each
+ * is a way to make one string parse two ways.
+ *
+ * This is a check at write time and it is not the whole defence: DNS can move
+ * after the row is written, so a caller that resolves the name again at request
+ * time should say so where it does it.
+ */
+function publicHttpsUrl(key: string, value: unknown, example: string): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   let parsed: URL | undefined;
   try {
@@ -885,7 +956,7 @@ function tokenEndpointUrl(key: string, value: unknown): string {
     throw new AgentWriteRefusedError(
       "not_admitted",
       `the config's ${key} must be a public https URL, which looks like ` +
-        `https://example.com/egma/livekit-token`,
+        example,
     );
   }
   return candidate;
@@ -980,11 +1051,160 @@ export const CONNECTION_REGISTRY: Readonly<
     ],
     // The provider's own agent id: the first vendor to carry a reuse rule, and
     // the simple case the mechanism was built for — one config key, compared as
-    // it was stored, is the whole identity.
+    // it was stored, is the whole identity. The family says text mode and
+    // the web call name the same agents, so any of the three doors lands on
+    // the one Egma agent the first door created.
     reuse: {
+      family: "retellAgentId",
       matchedKeys: ["retellAgentId"],
       identityOf: (config) => config["retellAgentId"],
     },
+    simulatorAdapter: true,
+    usesPlatformCarrier: false,
+  },
+  retell_text_mode: {
+    label: "Retell text mode",
+    agentPlatforms: ["retell"],
+    /**
+     * Chat, and a chat with a **voice** agent — which is the whole of why this
+     * kind exists.
+     *
+     * `retell_chat_api` reaches a Retell *chat* agent. A Retell voice agent has
+     * no chat door there at all, so the only way to test one was to dial it.
+     * Retell's own dashboard tests a voice agent in text through the
+     * agent-playground-completion API, and this is that door: the same test
+     * suite over chat and over voice against one agent, which is the diagnostic
+     * the domain model promises — passes on text, fails on voice means the
+     * prompt is fine and the speech stack is broken.
+     *
+     * Voice is not admitted here, and never will be: a text-mode exchange
+     * synthesizes nothing and hears nothing. A voice simulation of the same
+     * agent is a phone or a web-call connection beside this one, on the same
+     * Egma agent, so both histories accumulate under one identity.
+     */
+    modalities: ["chat"],
+    // Retell brokers the exchange exactly as it brokers a chat session: Egma
+    // makes an outbound request and Retell runs the agent behind it.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_text_mode.api_key",
+        label: "Retell API key",
+        named: "a Retell text mode connection",
+        // `retellAgentId` and nothing else. Where Retell answers is **not** a
+        // stored config key: it is the plug's own test seam, the way it is on
+        // `retell_chat_api`, and `validConfig` refuses `baseUrl` here for the
+        // same reason it refuses it there. A customer-writable address would
+        // decide where this connection's sealed key is sent, which is a read
+        // of a write-only secret by another name.
+        config: { retellAgentId: nonEmptyString },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the text exchanges this connection conducts. A read gives " +
+          "back its last four characters, so you can tell two keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
+      },
+    ],
+    // The same vendor agent as the voice connection beside it, deliberately:
+    // chat and voice land as two connections on **one** Egma agent, so the
+    // comparison the model promises is between two histories of one identity
+    // rather than between twins.
+    reuse: {
+      family: "retellAgentId",
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
+    // The plug ships. `egma_simulator.plugs.retell_text_mode.RetellTextMode`
+    // is registered for this kind and conducts the exchange: the whole history
+    // out, the agent's new messages back, with egma's answers carried on each
+    // request. So a run over a text-mode connection is one egma can conduct,
+    // and this says so in the same change that brought the adapter.
+    simulatorAdapter: true,
+    usesPlatformCarrier: false,
+  },
+  retell_web_call: {
+    label: "Retell web call",
+    agentPlatforms: ["retell"],
+    /**
+     * Voice, and a different voice from the phone lane's.
+     *
+     * A web call is WebRTC: Egma asks Retell to create the call, and joins the
+     * room Retell answers with. There is no carrier and no 8 kHz band, so under
+     * the connection-band rule a simulation over this kind is **a different
+     * unit** from a phone simulation of the same agent, and the recorded
+     * connection is what keeps the two from being compared by accident.
+     *
+     * This is the lane a mocked run uses. The agent's published number is never
+     * dialled for one, so a real caller ringing mid-run reaches the real agent
+     * with real tools.
+     */
+    modalities: ["voice"],
+    // Egma asks Retell to create the call and joins what Retell hands back.
+    // Retell brokers it, exactly as it brokers a chat session.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_web_call.api_key",
+        label: "Retell API key",
+        named: "a Retell web-call connection",
+        config: { retellAgentId: nonEmptyString },
+        fields: [
+          {
+            key: "retellAgentId",
+            label: "Retell agent ID",
+            kind: "text",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the web calls this connection places. A read gives back " +
+          "its last four characters, so you can tell two keys apart.",
+        credentialFields: [
+          {
+            field: "apiKey",
+            label: "Retell API key",
+            kind: "secret",
+            help: "Copied from your Retell dashboard.",
+          },
+        ],
+      },
+    ],
+    // The same family again: a web call reaches the same Retell agents the
+    // chat lanes do, and registering one must never mint that agent a twin.
+    reuse: {
+      family: "retellAgentId",
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
+    // The plug places the call and joins the room Retell opens for it, and the
+    // control plane hands each simulation the version to place it against. A
+    // run over this kind is conductable, so the registry says so.
     simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
@@ -1299,6 +1519,37 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 }
 
 /**
+ * Every connection type whose reuse rule names the same identity namespace as
+ * this one — the family that means one underlying platform agent.
+ *
+ * Two connection types that declare one `family` reach the **same** platform
+ * agents: Retell's chat API, its text mode, and its web call all name one
+ * `retellAgentId`, so a text lane and a voice lane on one Retell agent are two
+ * ways to reach one thing rather than two agents. Registering a second one
+ * therefore lands on the first's Egma agent, whichever door it came through.
+ * A type whose rule declares no family is a family of one — a LiveKit worker
+ * reuses onto itself and nothing else. A type with no reuse rule at all — a
+ * phone number — is in no family and answers an empty list: a number is where
+ * Egma dials, not who answers, and two agents may share one.
+ *
+ * The set always includes the type asked about when it has a reuse rule, so a
+ * caller may treat it as "this connection's whole reuse family".
+ */
+export function reuseFamilyOf(
+  connectionType: ConnectionType,
+): readonly ConnectionType[] {
+  const family = CONNECTION_REGISTRY[connectionType].reuse?.family;
+  if (family === undefined) {
+    return CONNECTION_REGISTRY[connectionType].reuse === undefined
+      ? []
+      : [connectionType];
+  }
+  return CONNECTION_TYPES.filter(
+    (one) => CONNECTION_REGISTRY[one].reuse?.family === family,
+  );
+}
+
+/**
  * Whether this exact stored connection can be handed to a simulator.
  *
  * The modality is checked here as well as at write time. Dispatch trusts only
@@ -1322,6 +1573,36 @@ export function connectionIsConductable(
   // The variant's own list, never the kind's, or a stored row on a narrowed
   // variant would be dispatched for a modality the door refused to write.
   return modalitiesOf(descriptor, variant).includes(modality as Modality);
+}
+
+/**
+ * The connection types whose run start reads the agent's own platform.
+ *
+ * **A named set rather than a fact worked out from something else**, because
+ * what it unlocks is narrow and specific: the one door that opens a
+ * connection's sealed credential outside the simulator. A run over one of these
+ * kinds cannot honestly begin until Egma has read which version the agent
+ * serves, and reading it means reaching the platform with the connection's own
+ * key.
+ *
+ * Every other kind reads nothing at run start and gets nothing unsealed.
+ */
+const READS_PLATFORM_AT_RUN_START: ReadonlySet<string> = new Set([
+  // Text mode names its version on every request, so the version has to be
+  // resolved once before the first one. The same read is where this lane finds
+  // out it cannot reach a custom LLM at all.
+  "retell_text_mode",
+  // A web call is placed against a named version too, and the run records it
+  // whether or not the connection mocks its tools: an unmocked web-call result
+  // that named no version would be a result nobody could tie to an agent.
+  "retell_web_call",
+]);
+
+/** Whether a run over this kind has to read the platform before it starts. */
+export function connectionTypeReadsPlatformAtRunStart(
+  connectionType: string,
+): boolean {
+  return READS_PLATFORM_AT_RUN_START.has(connectionType);
 }
 
 /** Whether this kind needs the deployment carrier on its claimed work order. */

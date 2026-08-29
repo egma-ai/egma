@@ -8,7 +8,7 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk, Reach } from "../../retell/connect.ts";
+import type { KeyAsk, Lane } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
@@ -68,7 +68,7 @@ export type WizardState = {
   /** The account's agents Egma could watch, or `null` when none is offered. */
   readonly monitoringAgentChoices: readonly MonitoringAgentOffer[] | null;
   /** The provider-safe ways currently offered. */
-  readonly reachOptions: readonly Reach[] | null;
+  readonly laneOptions: readonly Lane[] | null;
   /** The numbers a choice is open between, or `null` when none is. */
   readonly numberChoices: readonly RetellNumber[] | null;
   /** The provider field being collected. Its answer never enters this state. */
@@ -118,7 +118,7 @@ export function emptyState(): WizardState {
     keyAsk: null,
     agentChoices: null,
     monitoringAgentChoices: null,
-    reachOptions: null,
+    laneOptions: null,
     numberChoices: null,
     connectionAsk: null,
     connectionFieldsAsk: null,

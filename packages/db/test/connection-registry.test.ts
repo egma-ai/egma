@@ -904,6 +904,10 @@ describe("what the shipped simulator can conduct", () => {
     );
     expect(conductableConnectionTypes()).toEqual([
       "retell_chat_api",
+      // Text mode and the web call both joined the conductable list with
+      // the plugs that place them, in the registry's own order.
+      "retell_text_mode",
+      "retell_web_call",
       "phone_number",
       "livekit_room",
     ]);

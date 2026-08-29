@@ -1,0 +1,104 @@
+{
+  "llm_id": "llm_7f3c2b19aa04",
+  "version": 12,
+  "is_published": false,
+  "general_prompt": "You are a scheduling assistant for a dental practice.",
+  "model": "gpt-4.1",
+  "model_temperature": 0.2,
+  "default_dynamic_variables": { "practice_name": "Northgate Dental" },
+  "starting_state": "triage",
+  "begin_message": "Northgate Dental, how can I help?",
+  "general_tools": [
+    {
+      "type": "custom",
+      "name": "lookup_patient",
+      "description": "Find a patient record by telephone number.",
+      "url": "https://api.example.com/patients/lookup",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer sk_live_FIXTURESECRET_patients_3ce8f1",
+        "X-Practice-Id": "FIXTURESECRET_practice_88ab20"
+      },
+      "query_params": {},
+      "parameters": {
+        "type": "object",
+        "properties": { "phone": { "type": "string" } },
+        "required": ["phone"]
+      },
+      "timeout_ms": 15000,
+      "args_at_root": true
+    },
+    {
+      "type": "end_call",
+      "name": "end_call",
+      "description": "Ends the conversation."
+    }
+  ],
+  "states": [
+    {
+      "name": "triage",
+      "state_prompt": "Find out what the caller needs.",
+      "edges": [{ "destination_state_name": "booking", "description": "wants an appointment" }],
+      "tools": [
+        {
+          "type": "custom",
+          "name": "triage_symptoms",
+          "description": "Classify what the caller describes.",
+          "url": "https://api.example.com/triage",
+          "method": "POST",
+          "headers": { "X-Api-Key": "FIXTURESECRET_triage_6d2201" },
+          "parameters": {
+            "type": "object",
+            "properties": { "described": { "type": "string" } },
+            "required": ["described"]
+          },
+          "args_at_root": true
+        }
+      ]
+    },
+    {
+      "name": "booking",
+      "state_prompt": "Book the appointment.",
+      "edges": [],
+      "tools": [
+        {
+          "type": "custom",
+          "name": "book_slot",
+          "description": "Reserve a slot for the patient.",
+          "url": "https://api.example.com/appointments",
+          "method": "POST",
+          "headers": {
+            "Authorization": "Bearer sk_live_FIXTURESECRET_booking_ad4471"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": { "slot_id": { "type": "string" } },
+            "required": ["slot_id"]
+          },
+          "args_at_root": true
+        },
+        {
+          "type": "transfer_call",
+          "name": "transfer_to_practice_manager",
+          "description": "Hands the caller to a person.",
+          "transfer_destination": { "type": "predefined", "number": "+15550002222" }
+        }
+      ]
+    },
+    {
+      "name": "closing",
+      "state_prompt": "Wrap up.",
+      "edges": [],
+      "tools": []
+    }
+  ],
+  "mcps": [
+    {
+      "mcp_id": "mcp-formulary",
+      "name": "formulary",
+      "url": "https://mcp.example.com/formulary",
+      "headers": { "Authorization": "Bearer FIXTURESECRET_mcp_llm_90fe33" },
+      "timeout_ms": 15000
+    }
+  ]
+}

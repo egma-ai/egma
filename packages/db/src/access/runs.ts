@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
 import { isId, newId } from "@egma/ids";
@@ -20,7 +21,12 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { db, type Queryable, type Transaction } from "../client.ts";
+import {
+  db,
+  dedicatedConnection,
+  type Queryable,
+  type Transaction,
+} from "../client.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -48,14 +54,29 @@ import {
 import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
 import { openCredentials } from "../sealing.ts";
 import {
+  resolveMockTools,
   type MockToolSnapshot,
+  type ResolvedMockTool,
   type SnapshotDefault,
   type SnapshotEntry,
 } from "../mock-tools/resolve.ts";
+import {
+  mockToolCoverageFrom,
+  mockToolCoverageRow,
+  type MockToolCoverage,
+} from "../mock-tools/coverage.ts";
+import {
+  mockMetadataAsRead,
+  mockMetadataFrom,
+  mockMetadataRow,
+  type MockMetadata,
+} from "../mock-tools/record.ts";
+import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
   connectionIsConductable,
+  connectionTypeReadsPlatformAtRunStart,
   noSimulatorAdapterMessage,
   platformOfConnectionType,
 } from "./connection-registry.ts";
@@ -91,6 +112,32 @@ export type NewRun = {
   readonly idempotencyKey: string;
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
+  /**
+   * The serving version this run will conduct against, already resolved from
+   * the agent's platform, for the lanes that name a version.
+   *
+   * **Read outside this call and handed in, deliberately.** Resolving a version
+   * is a request to somebody else's API, and this function's whole body is one
+   * database transaction holding a lock on a test suite. A provider that
+   * answers slowly would hold that lock for as long as it took. So the caller
+   * reads first and fails the run out loud when the read fails — never a silent
+   * conduct against an unread version — and what arrives here is a settled fact
+   * to write down.
+   *
+   * Absent on every other lane, where nothing names a version.
+   */
+  readonly agentVersion?: number | undefined;
+  /**
+   * A fingerprint of the connection the version above was read from.
+   *
+   * Travels with `agentVersion` and only with it: the version was read from a
+   * target before this transaction opened, and this is how the transaction
+   * proves the target has not moved since. Under the lock `startRun` already
+   * holds on the connection, the fingerprint taken now must equal this one, or
+   * the connection was edited mid-creation and the run is refused rather than
+   * written against a target its record would misname.
+   */
+  readonly conductedConnectionIdentity?: string | undefined;
 };
 
 export type ConnectionSnapshot = {
@@ -101,6 +148,16 @@ export type ConnectionSnapshot = {
   readonly topology: Topology;
   readonly environment: string | null;
   readonly config: unknown;
+  /**
+   * Whether this run is mocked, frozen from the connection's own switch at the
+   * moment it started.
+   *
+   * **The run reads this and never the connection row.** A switch unticked
+   * mid-run does not change the world a run is already in, and a run started
+   * before the switch existed is honestly unmocked — so the fact the claim
+   * gate, the report and the endpoint all read is the one stamped here.
+   */
+  readonly mockToolsEnabled: boolean;
 };
 
 export type Run = {
@@ -116,6 +173,14 @@ export type Run = {
   readonly triggeredVia: RunTrigger;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: ConnectionSnapshot;
+  /** The serving version this run conducted against, or null for no pin. */
+  readonly agentVersion: number | null;
+  /** The temporary copy this run branched, or null when it branched none. */
+  readonly tempMockAgentVersion: number | null;
+  /** Null = no copy was made; false = cleanup owed; true = account put back. */
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  /** The put-it-back note, or null when nothing was put onto the account. */
+  readonly mockMetadata: MockMetadata | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -127,11 +192,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type MockToolCoverage = {
-  readonly discovered: readonly string[];
-  readonly covered: readonly string[];
-  readonly uncovered: readonly string[];
-};
+export type { MockToolCoverage, MockMetadata };
 
 export type Simulation = {
   readonly id: string;
@@ -196,6 +257,10 @@ const RUN_COLUMNS = {
   triggeredVia: run.triggeredVia,
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
+  agentVersion: run.agentVersion,
+  tempMockAgentVersion: run.tempMockAgentVersion,
+  tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
+  mockMetadata: run.mockMetadata,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -243,6 +308,10 @@ type RunRow = {
   readonly triggeredVia: string;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
+  readonly agentVersion: number | null;
+  readonly tempMockAgentVersion: number | null;
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  readonly mockMetadata: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -283,11 +352,7 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
     write.recordingReference = facts.recordingReference.trim() || null;
   }
   if (facts.mockToolCoverage !== undefined) {
-    write.mockToolCoverage = {
-      discovered: [...facts.mockToolCoverage.discovered],
-      covered: [...facts.mockToolCoverage.covered],
-      uncovered: [...facts.mockToolCoverage.uncovered],
-    };
+    write.mockToolCoverage = mockToolCoverageRow(facts.mockToolCoverage);
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
@@ -317,6 +382,7 @@ function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSna
     topology: row.topology as Topology,
     environment: row.environment as string | null,
     config: row.config,
+    mockToolsEnabled: row.mockToolsEnabled === true,
   };
 }
 
@@ -324,6 +390,11 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   const malformed = () => new Error(`run ${runId} holds a malformed mock-tool snapshot`);
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw malformed();
   const { defaults, overrides } = value as Record<string, unknown>;
+  // The header freezes the project's answers and **only** those. What a pinned
+  // test version overrode lives on that version, which is immutable, so there
+  // is nothing about it to freeze — it is merged in per simulation at the
+  // moment a call is served. A stored override would be a second copy of an
+  // immutable thing, free to disagree with it, so the shape refuses one.
   if (
     !Array.isArray(defaults) ||
     typeof overrides !== "object" ||
@@ -353,20 +424,15 @@ function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapsho
   };
 }
 
-function mockToolCoverageFromRow(value: unknown, simulationId: string): MockToolCoverage | null {
-  if (value === null) return null;
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-  }
-  const row = value as Record<string, unknown>;
-  const list = (key: string): readonly string[] => {
-    const held = row[key];
-    if (!Array.isArray(held) || held.some((one) => typeof one !== "string")) {
-      throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
-    }
-    return held as string[];
-  };
-  return { discovered: list("discovered"), covered: list("covered"), uncovered: list("uncovered") };
+function mockToolCoverageFromRow(
+  value: unknown,
+  simulationId: string,
+): MockToolCoverage | null {
+  return mockToolCoverageFrom(
+    value,
+    () =>
+      new Error(`simulation ${simulationId} holds malformed mock-tool coverage`),
+  );
 }
 
 function runFromRow(
@@ -374,7 +440,8 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const { status, triggeredVia, connectionSnapshot, ...rest } = row;
+  const { status, triggeredVia, connectionSnapshot, mockMetadata, ...rest } =
+    row;
   return {
     ...rest,
     suiteName,
@@ -382,6 +449,14 @@ function runFromRow(
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
+    // Without the comparison value: the teardown's read keeps it, a reader's
+    // does not. See `mockMetadataAsRead`.
+    mockMetadata: mockMetadataAsRead(
+      mockMetadataFrom(
+        mockMetadata,
+        () => new Error(`run ${row.id} holds a malformed mock-tool note`),
+      ),
+    ),
   };
 }
 
@@ -608,6 +683,8 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
+          mockToolsEnabled: connection.mockToolsEnabled,
+          credentials: connection.credentials,
         })
         .from(connection)
         .innerJoin(agent, eq(connection.agentId, agent.id))
@@ -623,6 +700,58 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
       if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
+      }
+      // A kind whose run start reads the agent's platform carries two demands
+      // that a kind reading nothing does not, and both live here so they are
+      // properties of the write rather than habits of one caller.
+      if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
+        // **Never a silent conduct against an unnamed version.** The run cannot
+        // begin without what the read produced: the one serving version every
+        // request will name and this row will record. The caller does the
+        // reading — it is somebody else's API and this is one transaction
+        // holding a lock — but arriving here without it is a bug in the caller,
+        // not a run to write, and a run written without it would leave a result
+        // no reader could tie back to an agent.
+        if (input.agentVersion === undefined) {
+          throw new Error(
+            `a run over a ${reached.connectionType} connection is conducted ` +
+              `against a named version, so it cannot be started without the ` +
+              `run-start read of the agent's platform`,
+          );
+        }
+        // **The world was read from this exact connection, and it still is.**
+        // The read happened before this transaction, so the connection could
+        // have been edited in between — its agent moved, its address changed,
+        // its key rotated — and the version and tools frozen from the old
+        // target would then be stamped onto a run whose snapshot names the new
+        // one. The `for("share")` above holds the row still for the rest of
+        // this transaction, so the fingerprint taken now is the connection as
+        // it will be written; if it does not match the fingerprint the world
+        // was read at, the connection moved during creation. The fingerprint
+        // is over the identity the world depends on — the config and the
+        // sealed key — never a clock, so an edit inside the same millisecond
+        // is caught like any other. Refuse loudly and write nothing; the
+        // caller reads the connection again and retries.
+        const identityNow = connectionIdentityToken(
+          stringRecordFromRow(
+            reached.config,
+            () =>
+              new Error(
+                `connection ${input.connectionId} holds config in a shape ` +
+                  `Egma never writes`,
+              ),
+          ),
+          reached.credentials,
+        );
+        if (input.conductedConnectionIdentity !== identityNow) {
+          refuseRun(
+            "not_admitted",
+            `connection ${input.connectionId} was edited while Egma was ` +
+              `reading the agent's platform for this run, so the version it ` +
+              `read may not be the one this connection now reaches. Nothing ` +
+              `was started; read the connection again and retry.`,
+          );
+        }
       }
 
       const graderCandidates = await applicableGraders(auth, tx, projectId);
@@ -675,8 +804,19 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: reached.topology,
           environment: reached.environment,
           config: reached.config,
+          // The switch, frozen with the rest of the connection. Every later
+          // reader — the claim gate, the report, the endpoint — asks the run
+          // rather than the connection, so unticking mid-run changes nothing
+          // about a run already going.
+          mockToolsEnabled: reached.mockToolsEnabled,
         },
         mockToolSnapshot,
+        // Read before this transaction opened; written down here so that every
+        // request this run makes names the same version, and a concurrent edit
+        // on the account cannot move what the suite is testing halfway through.
+        ...(input.agentVersion === undefined
+          ? {}
+          : { agentVersion: input.agentVersion }),
         expectedSimulationCount,
         createdAt: at,
       }).returning(RUN_COLUMNS);
@@ -783,6 +923,141 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
   return created;
 }
 
+/**
+ * How a run-start read reaches the agent's platform: the connection's own
+ * config, and the key sealed on it.
+ *
+ * **The second door onto a connection's plaintext, and it is deliberately not
+ * the first one widened.** `resolveSimulationConnection` unseals for the
+ * simulator and for nothing else, because conducting is the only thing done
+ * there. This one exists because a run over some kinds cannot honestly begin
+ * until Egma has read the agent's own configuration — which version is serving,
+ * and what tools that version has — and reading it means reaching the platform
+ * with the key that will conduct over it.
+ *
+ * It is held narrow in four ways at once, and each one is load-bearing:
+ *
+ * - **Only for the kinds that declare a run-start read.** Every other kind
+ *   answers `undefined` however well-formed the request is, so this can never
+ *   become "unseal any connection".
+ * - **Gated on `start_and_cancel_runs`**, the permission for the act it serves,
+ *   rather than on read.
+ * - **Asked with an agent and a connection the caller already named**, in their
+ *   own tenancy, so there is no argument by which it could be pointed at
+ *   somebody else's row.
+ * - **The key goes to the provider client and nowhere else.** It is never part
+ *   of a run header, never in a refusal, and never logged — the run route hands
+ *   it straight to the read and lets it go.
+ */
+/**
+ * A deterministic fingerprint of the target a run-start read reached: the
+ * connection's non-secret config and the sealed shape of its credential.
+ *
+ * **Every field the world depends on, and nothing a timestamp does.** Which
+ * version a run reads and which tools it stamps are decided by the agent the
+ * config names, the address it names, and the key sealed beside it. A clock
+ * says only *when* the row was last written and lands on the millisecond, so
+ * two edits inside one millisecond share a stamp and one slips through. This
+ * hashes the identity itself, so a change to any of it changes the token and no
+ * granularity can hide it.
+ *
+ * **The sealed envelope, never the key inside it.** The credential is folded in
+ * as the ciphertext exactly as the row stores it — a re-seal with the very same
+ * key mints a fresh envelope and so reads as a change, which is the safe way to
+ * be wrong: a needless refusal a retry clears, never a key swap slipping past.
+ * The plaintext never enters the token and the token is a one-way hash, so it
+ * carries nothing a log or a run header must not hold.
+ */
+function connectionIdentityToken(
+  config: Readonly<Record<string, string>>,
+  credentialsEnvelope: string | null,
+): string {
+  const canonicalConfig = Object.keys(config)
+    .sort()
+    .map((key) => `${key}=${config[key]}`)
+    .join(" ");
+  return createHash("sha256")
+    .update(canonicalConfig)
+    .update("  ")
+    .update(credentialsEnvelope ?? " none")
+    .digest("hex");
+}
+
+export type RunStartReach = {
+  /** Which reader the run route hands this to. */
+  readonly connectionType: ConnectionType;
+  readonly config: Readonly<Record<string, string>>;
+  readonly apiKey: string;
+  /**
+   * A fingerprint of the exact target this reach read, carried into the write.
+   *
+   * The world is read from this target *before* the run's transaction opens,
+   * because reading it is a network call and the transaction holds a lock. So
+   * the connection could be edited — its agent, its address, its key — between
+   * this read and the write that snapshots it, and the run would then store a
+   * world read from one target while its record named another. `startRun` reads
+   * the connection again under its lock, fingerprints it the same way, and
+   * refuses if the two differ — so the world it froze and the target it names
+   * are always the same one.
+   */
+  readonly connectionIdentity: string;
+};
+
+export async function resolveRunStartReach(
+  auth: AuthContext,
+  agentId: string,
+  connectionId: string,
+): Promise<RunStartReach | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.projectId === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      connectionType: connection.connectionType,
+      config: connection.config,
+      credentials: connection.credentials,
+    })
+    .from(connection)
+    .where(
+      within(
+        auth,
+        connection,
+        and(
+          eq(connection.id, connectionId),
+          eq(connection.agentId, agentId),
+          eq(connection.projectId, auth.projectId),
+          isNull(connection.archivedAt),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+  if (!connectionTypeReadsPlatformAtRunStart(row.connectionType)) {
+    return undefined;
+  }
+  if (row.credentials === null) return undefined;
+
+  const apiKey = openedApiKey(row.credentials);
+  if (apiKey === null) return undefined;
+
+  const config = stringRecordFromRow(
+    row.config,
+    () =>
+      new Error(
+        `connection ${connectionId} holds config in a shape Egma never ` +
+          `writes; the row needs repairing before anybody can run over it`,
+      ),
+  );
+
+  return {
+    connectionType: row.connectionType as ConnectionType,
+    config,
+    apiKey,
+    connectionIdentity: connectionIdentityToken(config, row.credentials),
+  };
+}
+
 export async function runAlreadyStartedFor(
   auth: AuthContext,
   input: NewRun,
@@ -813,6 +1088,460 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
   if (row === undefined) return undefined;
   const { suiteName, suiteDeletedAt, ...header } = row;
   return runFromRow(header, suiteName, suiteDeletedAt !== null);
+}
+
+/**
+ * Write down what this run has put onto the agent's platform, and what it owes
+ * the account.
+ *
+ * Called several times across one run, and deliberately: once when the numbers
+ * have been read and before anything is changed, again when the copy lands, and
+ * once more as each part of the teardown lands. Each call replaces the record
+ * whole, because a half-written note is worse than a stale one — the teardown
+ * reads what is here and acts on it.
+ *
+ * **It is the one thing a finished run may still be told.** A run's header
+ * freezes when its counts land, and two of these columns are carved out of that
+ * freeze: the cleanup flag and the note are bookkeeping about somebody's Retell
+ * account, not about this run's numbers, and a crashed run's litter is cleared
+ * after the run is over by definition. The migration's guard permits a change
+ * to those two columns and to nothing else.
+ */
+export type MockRunState = {
+  /** The temporary copy that exists right now, or null when none does. */
+  readonly tempMockAgentVersion: number | null;
+  /** Null = no copy was made; false = cleanup owed; true = account put back. */
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  readonly mockMetadata: MockMetadata | null;
+  /**
+   * The serving version this run conducts against, where the build is what
+   * resolved it.
+   *
+   * Absent leaves it as it is. Every Retell run has it written by `startRun`
+   * from the run-start read; a mocked web-call run resolves the same `latest`
+   * again while branching its copy, and writes that number down here — the same
+   * number, from the agent it is about to branch, landing before the run's
+   * counts do and so inside the header's freeze.
+   */
+  readonly agentVersion?: number | undefined;
+};
+
+export async function recordMockState(
+  auth: AuthContext,
+  runId: string,
+  state: MockRunState,
+): Promise<Run | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const [updated] = await db()
+    .update(run)
+    .set({
+      tempMockAgentVersion: state.tempMockAgentVersion,
+      tempMockAgentVersionCleanup: state.tempMockAgentVersionCleanup,
+      mockMetadata:
+        state.mockMetadata === null ? null : mockMetadataRow(state.mockMetadata),
+      ...(state.agentVersion === undefined
+        ? {}
+        : { agentVersion: state.agentVersion }),
+    })
+    .where(theRun(auth, runId))
+    .returning({ id: run.id });
+  if (updated === undefined) return undefined;
+  return getRun(auth, runId);
+}
+
+export type MockDraftClaim =
+  | { readonly kind: "claimed" }
+  /** Another run of this agent holds the one temporary copy. */
+  | { readonly kind: "taken"; readonly byRunId: string };
+
+/**
+ * The fence's key: this one agent, of this one customer. Nothing else waits
+ * behind it, and it is derived here alone so the claim and the teardown can
+ * never end up fencing on two different keys.
+ */
+function mockDraftFenceKey(auth: AuthContext, agentId: string): string {
+  return `egma-mock-draft:${auth.organizationId}:${agentId}`;
+}
+
+/**
+ * The fences **this piece of work** is holding, carried down its own calls.
+ *
+ * Per async context and not per process, because the guard below is about one
+ * caller's own discipline. A process-wide set says "somebody here holds agent
+ * A's fence", which is true and useless: an unrelated request that forgot to
+ * open the fence would sail past the check precisely while a concurrent build
+ * held it — defeated exactly when the exclusion matters. What the guard has to
+ * ask is whether *this* call chain opened it, and that is what an async context
+ * knows.
+ */
+const heldMockDraftFences = new AsyncLocalStorage<ReadonlySet<string>>();
+
+const NO_FENCES: ReadonlySet<string> = new Set();
+
+/** The fences this call chain holds, which is none outside every fence. */
+function fencesHeldHere(): ReadonlySet<string> {
+  return heldMockDraftFences.getStore() ?? NO_FENCES;
+}
+
+/**
+ * Refuse work that must not be done outside the fence.
+ *
+ * Cross-process exclusion is Postgres's job; this catches the one mistake a
+ * person makes — writing a new caller that forgets to open the fence — where it
+ * is cheap to catch, in the caller's own call chain, rather than as a race a
+ * customer finds.
+ */
+function requireMockDraftFence(
+  auth: AuthContext,
+  agentId: string,
+  doing: string,
+): void {
+  if (fencesHeldHere().has(mockDraftFenceKey(auth, agentId))) return;
+  throw new Error(
+    `refusing to ${doing} without this agent's mocked-world fence: open it ` +
+      "with owedMockCleanups and do the work inside it",
+  );
+}
+
+/**
+ * Somebody else's process holds this agent's fence and would not let go.
+ *
+ * **Its own error, because it is not a fault.** The one request that produces
+ * it is a second mocked run of an agent whose first run is still building, or
+ * whose holder was killed hard enough that Postgres has not yet noticed the
+ * socket. Both answer the same way the ordinary collision does: wait, then
+ * start again.
+ */
+export class MockDraftFenceBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MockDraftFenceBusyError";
+  }
+}
+
+/**
+ * How long a waiter sits on the fence before it is told to come back.
+ *
+ * Several multiples of a build, which is a handful of Retell requests, so a
+ * genuine queue behind a working run always wins the lock rather than being
+ * refused. What it bounds is the case a queue cannot survive: a holder killed
+ * with its socket still open, whose session Postgres reaps on its own TCP
+ * keepalive clock — two hours by default. Every mocked run start on that agent
+ * would hang its HTTP request until then, one server backend per waiter.
+ */
+const FENCE_WAIT_MILLISECONDS = 120_000;
+
+/** Postgres's own code for "the lock_timeout ran out". */
+const LOCK_NOT_AVAILABLE = "55P03";
+
+/**
+ * Hold one agent's mocked-world fence for as long as `held` runs.
+ *
+ * **A session-scoped Postgres advisory lock on a connection of this process's
+ * own**, not a transaction-scoped one, because what it fences is not a query:
+ * it is a claim, a teardown and a build, each of them several requests to
+ * Retell. A transaction held open across those would pin a pooled connection
+ * for a minute at a time — and every statement the fenced work runs is on a
+ * *different* pooled connection, so a transaction-scoped lock would deadlock
+ * against the fenced work's own claim rather than protect it.
+ *
+ * Postgres drops a session's advisory locks when the session ends, so closing
+ * the connection is the release, and a process that dies *cleanly* mid-hold
+ * releases it too.
+ *
+ * **The wait is bounded, because one death is not clean.** A holder killed
+ * without its socket closing leaves its session — and its lock — standing until
+ * Postgres reaps the connection on its TCP keepalive clock, hours later. An
+ * unbounded waiter would hang its whole HTTP request for that long, and every
+ * later start would queue another one behind it. So the wait gives up after
+ * `FENCE_WAIT_MILLISECONDS` and says the agent is in use, which is the true
+ * sentence either way and the one whose next move — wait, then start again — is
+ * already right.
+ *
+ * **A nested hold of the same key is a bug and is refused as one.** The lock is
+ * session-scoped and each hold opens its own session, so the inner one would
+ * wait on the outer one's lock forever: not re-entrant, and quietly so. A
+ * caller inside the fence already has it and must simply do the work.
+ */
+async function withMockDraftFence<T>(
+  key: string,
+  whileHeld: () => Promise<T>,
+): Promise<T> {
+  const alreadyHeld = fencesHeldHere();
+  if (alreadyHeld.has(key)) {
+    throw new Error(
+      `this work already holds the mocked-world fence ${key}: the lock lives ` +
+        "on its own session, so opening it a second time would wait on the " +
+        "first one forever. Do the work inside the fence already open.",
+    );
+  }
+
+  const connection = dedicatedConnection();
+  // A connection that dies has to arrive here rather than at an unhandled
+  // rejection. The fence goes with it either way.
+  connection.on("error", () => undefined);
+  try {
+    // Inside the try, so a connect that rejects still reaches the end below.
+    await connection.connect();
+    // The bound, set on this session before the one statement that can wait.
+    // Every other statement this session runs is the lock and nothing else.
+    await connection.query(`set lock_timeout = ${FENCE_WAIT_MILLISECONDS}`);
+    try {
+      await connection.query(
+        "select pg_advisory_lock(hashtextextended($1::text, 0))",
+        [key],
+      );
+    } catch (cause) {
+      if (
+        typeof cause === "object" &&
+        cause !== null &&
+        (cause as { code?: unknown }).code === LOCK_NOT_AVAILABLE
+      ) {
+        throw new MockDraftFenceBusyError(
+          "Another run of this agent is holding its mocked world and did not " +
+            "let go. Egma builds one mocked world per agent at a time, so " +
+            "nothing was started. Wait for that run to finish, then start " +
+            "this one again.",
+        );
+      }
+      throw cause;
+    }
+    return await heldMockDraftFences.run(
+      new Set([...alreadyHeld, key]),
+      whileHeld,
+    );
+  } finally {
+    // Ending the session is the unlock, and it is the one that also runs when
+    // the connection has gone bad under us.
+    await connection.end().catch(() => undefined);
+  }
+}
+
+/**
+ * Claim this agent's **one** temporary copy for this run, or say who holds it.
+ *
+ * ## Why one at a time
+ *
+ * Two mocked runs of one agent overlapping is not a slow path — it is a hijack.
+ * Run one pins a number riding `latest` to numeric version V and records the
+ * binding it must put back. Run two then starts, reads that number as *numeric*
+ * — a safe verdict, no pin needed — and branches its own copy. Run one finishes
+ * and restores `latest`, exactly as it promised. But run two's copy still
+ * exists and, being the most recently minted version, is what `latest` now
+ * resolves to: every real caller reaches a mocked agent.
+ *
+ * Delete-before-restore protects a run from **its own** copy and cannot see
+ * another run's. So the overlap itself is what is refused, and this is the one
+ * place that decides it.
+ *
+ * ## What blocks, and what does not
+ *
+ * A run of this agent blocks while its cleanup flag stands `false` **and it has
+ * not finished and is not stale**: still claiming, branched, or torn down but
+ * for a pin still outstanding.
+ *
+ * A **finished** run never blocks, whatever it left behind — its litter is the
+ * sweep's job, and the caller sweeps before it branches, so a finished run's
+ * pin is restored before this run mints anything. When the sweep cannot restore
+ * it, the caller refuses to branch at all rather than mint the copy a later
+ * retry of that restore would route real callers to. A **stale** run — pending,
+ * still holding no copy, and older than the build window — never blocks either:
+ * its process died mid-build and it is swept, not waited for. The caller owns
+ * that window and passes it, so the sweep and this check cannot disagree about
+ * which runs are alive.
+ *
+ * ## The fence this runs behind
+ *
+ * A check without a lock is a time-of-check-to-time-of-use race: two runs
+ * starting together would both read "nobody holds it" and both build. And a
+ * lock held for only this check is barely better — the branch, the pins and the
+ * teardown all happen after it is let go, so a settle of a *finished* run could
+ * still be halfway through its restore while a new run mints the version that
+ * restore would route real callers onto.
+ *
+ * So the lock is not taken here. It is `owedMockCleanups` above, held from
+ * before this check until after the caller has finished building — and held by
+ * the settle path over the whole teardown too, so the two can never overlap.
+ * This function is the check-and-claim inside it, and refuses to run outside
+ * it: the fence key is derived in one place, and a caller that forgot the fence
+ * is a bug rather than a silent race.
+ *
+ * The claim itself is the cleanup flag written onto the run, so the winner is
+ * visible to a later sweep by the same one indexed query from the instant it
+ * wins — including if the process building it dies immediately after.
+ */
+export async function claimMockDraftFor(
+  auth: AuthContext,
+  input: {
+    readonly runId: string;
+    readonly agentId: string;
+    /**
+     * How long a run may sit pending with no copy before it counts as a build
+     * that died. The caller's own sweep window, passed in so the two agree.
+     */
+    readonly staleBuildMilliseconds: number;
+  },
+): Promise<MockDraftClaim> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  const staleSeconds = Math.max(0, input.staleBuildMilliseconds) / 1000;
+  requireMockDraftFence(auth, input.agentId, "claim this agent's mocked world");
+
+  return db().transaction(async (tx): Promise<MockDraftClaim> => {
+    const [held] = await tx
+      .select({ id: run.id })
+      .from(run)
+      .where(
+        within(
+          auth,
+          run,
+          and(
+            eq(run.agentId, input.agentId),
+            sql`${run.id} <> ${input.runId}`,
+            eq(run.tempMockAgentVersionCleanup, false),
+            // A finished run never blocks: its litter is the sweep's.
+            isNull(run.finishedAt),
+            // Nor does a build that died — pending, no copy, past the window.
+            sql`not (
+              ${run.status} = 'pending'
+              and ${run.tempMockAgentVersion} is null
+              and ${run.createdAt} < now() - make_interval(secs => ${staleSeconds})
+            )`,
+          ),
+        ),
+      )
+      .orderBy(asc(run.id))
+      .limit(1);
+
+    if (held !== undefined) return { kind: "taken", byRunId: held.id };
+
+    await tx
+      .update(run)
+      .set({ tempMockAgentVersionCleanup: false })
+      .where(theRun(auth, input.runId));
+    return { kind: "claimed" };
+  });
+}
+
+/** One run's outstanding obligation to somebody's Retell account. */
+export type OwedMockCleanup = {
+  readonly runId: string;
+  /** The temporary copy still to be deleted, or null once it is gone. */
+  readonly tempMockAgentVersion: number | null;
+  /** The put-it-back note, or null where the run never wrote one. */
+  readonly metadata: MockMetadata | null;
+  readonly status: RunStatus;
+  readonly createdAt: Date;
+  /** Null while the run could still be conducting something. */
+  readonly finishedAt: Date | null;
+};
+
+/**
+ * Every cleanup this agent's runs still owe the account — one indexed query,
+ * over the partial index on `temp_mock_agent_version_cleanup = false` — read
+ * **under this agent's mocked-world fence** and handed to the caller for as
+ * long as it holds it.
+ *
+ * The sweep's whole input, and the claim's. A run answers here from the moment
+ * it claims the agent until the moment its teardown lands, which covers both
+ * questions at once: a copy that must be deleted or a pin that must be put
+ * back, and a run that might have lost the process that was building its world.
+ * The caller decides whether it is truly stuck (its clock is past the build
+ * window and it still holds no copy) or just waiting for a free simulator.
+ *
+ * A run that finished and settled its account — the ordinary end — carries
+ * `true` and matches nothing here, so the common case is not re-read on every
+ * landing.
+ *
+ * Ordered oldest first, because the oldest litter is the litter most likely to
+ * be a crash rather than a run still in flight.
+ *
+ * ## Why the read and the acting on it are one call
+ *
+ * **Reading what is owed is worth nothing unless nobody else may act between
+ * the read and the acting.** A settle that read "run one owes a restore",
+ * then waited on a Retell request while a new run claimed the agent, swept the
+ * same run, and branched its own copy, would land its restore onto that copy —
+ * a `latest` binding pointing at a mocked version, which is the exact hijack
+ * the whole design exists to prevent, and one that no per-write guard can see
+ * (the new run pinned the number to the same numeric version the old one did).
+ *
+ * So the fence is opened here, the rows are read inside it, and `whileHeld`
+ * runs before it is let go. A cleanup flag that somebody else flipped to `true`
+ * in the meantime is simply not in the list, which is what makes a duplicated
+ * settle a no-op rather than a second restore.
+ *
+ * `fence`:
+ * - `"only-when-owed"` — the ordinary landing. The list is read first without
+ *   the fence, and an agent that owes nothing answers with an empty list and no
+ *   lock at all: there is nothing to act on, so there is nothing to serialize
+ *   against, and a report landing should not open a connection to learn it.
+ *   Where something *is* owed, the fence is opened and the list re-read under
+ *   it, because the first read is only a hint.
+ * - `"take"` — for the caller that is about to *make* something. The fence is
+ *   held whether or not anything is owed, because what needs the exclusion is
+ *   the claim and the branch that follow, not the litter.
+ */
+export async function owedMockCleanups<T>(
+  auth: AuthContext,
+  agentId: string,
+  options: {
+    readonly exceptRunId?: string;
+    readonly fence: "take" | "only-when-owed";
+  },
+  whileHeld: (owed: readonly OwedMockCleanup[]) => Promise<T>,
+): Promise<T> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (options.fence === "only-when-owed") {
+    const hint = await owedMockCleanupRows(auth, agentId, options);
+    if (hint.length === 0) return await whileHeld([]);
+  }
+  return await withMockDraftFence(mockDraftFenceKey(auth, agentId), async () =>
+    whileHeld(await owedMockCleanupRows(auth, agentId, options)),
+  );
+}
+
+/** The indexed read itself. Only ever called with the fence decided above. */
+async function owedMockCleanupRows(
+  auth: AuthContext,
+  agentId: string,
+  options: { readonly exceptRunId?: string },
+): Promise<readonly OwedMockCleanup[]> {
+  const rows = await db()
+    .select({
+      id: run.id,
+      tempMockAgentVersion: run.tempMockAgentVersion,
+      mockMetadata: run.mockMetadata,
+      status: run.status,
+      createdAt: run.createdAt,
+      finishedAt: run.finishedAt,
+    })
+    .from(run)
+    .where(
+      within(
+        auth,
+        run,
+        and(
+          eq(run.agentId, agentId),
+          eq(run.tempMockAgentVersionCleanup, false),
+          options.exceptRunId === undefined
+            ? undefined
+            : sql`${run.id} <> ${options.exceptRunId}`,
+        ),
+      ),
+    )
+    .orderBy(asc(run.id));
+
+  return rows.map((row) => ({
+    runId: row.id,
+    tempMockAgentVersion: row.tempMockAgentVersion,
+    metadata: mockMetadataFrom(
+      row.mockMetadata,
+      () => new Error(`run ${row.id} holds a malformed mock-tool note`),
+    ),
+    status: row.status as RunStatus,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
+  }));
 }
 
 export type SimulationExecutionEvidence = {
@@ -1362,7 +2091,14 @@ export async function claimSimulations(
     const candidates = await tx
       .select({ id: simulation.id })
       .from(simulation)
-      .where(eq(simulation.status, "queued"))
+      // Queued, **and** its run is ready to be conducted. For every run that
+      // mocks nothing the second condition is true by construction; for a run
+      // that owes itself a mocked world it stays false until the temporary
+      // version exists, so a run that cannot build its world never has a
+      // simulation conducted against the real tools. See `mock-tools/lanes.ts`.
+      .where(
+        and(eq(simulation.status, "queued"), runIsReadyToConduct(simulation.runId)),
+      )
       .orderBy(asc(simulation.id))
       .limit(capacity)
       .for("update", { skipLocked: true });
@@ -1508,6 +2244,167 @@ export async function resolveSimulationStanding(
     cancelRequestedAt: row.cancelRequestedAt,
     auth: conductingContext(row.organizationId, row.projectId),
   };
+}
+
+/**
+ * Everything the mock endpoint needs to answer one tool call, in one read.
+ *
+ * The request arrives from the agent's platform with no credential of egma's,
+ * so this read carries the whole of what the three gates ask: whether the run
+ * named is still live, whether the simulation named is that run's, and what
+ * that simulation's answers are. It takes no `AuthContext` for the same reason
+ * `resolveSimulationStanding` beside it takes none — there is no caller to
+ * resolve, and the row is the authority.
+ *
+ * `signingKey` is the agent's sealed platform key, opened. It is used to
+ * **verify** a signature the platform put on the request and for nothing else:
+ * nothing on this path spends it, and it never reaches an answer, a log, or a
+ * refusal.
+ *
+ * `undefined` means no such run, which is the first gate's answer.
+ */
+export type MockToolCallTarget = {
+  readonly runId: string;
+  /** Whether the run can still be conducting simulations. */
+  readonly runIsLive: boolean;
+  /** The simulation named, or `undefined` when it is not this run's. */
+  readonly simulation:
+    | {
+        readonly id: string;
+        readonly agentId: string;
+        readonly testVersionId: string;
+        readonly personaVersionId: string;
+        readonly status: SimulationStatus;
+        /** What this simulation is answered, project defaults and overrides merged. */
+        readonly answers: readonly ResolvedMockTool[];
+      }
+    | undefined;
+  readonly auth: AuthContext;
+  readonly signingKey: string | null;
+};
+
+export async function resolveMockToolCall(
+  runId: string,
+  simulationId: string,
+): Promise<MockToolCallTarget | undefined> {
+  const [header] = await db()
+    .select({
+      id: run.id,
+      organizationId: run.organizationId,
+      projectId: run.projectId,
+      status: run.status,
+      finishedAt: run.finishedAt,
+      mockToolSnapshot: run.mockToolSnapshot,
+      signingKey: agent.monitoringApiKey,
+    })
+    .from(run)
+    .innerJoin(agent, eq(run.agentId, agent.id))
+    .where(eq(run.id, runId))
+    .limit(1);
+  if (header === undefined) return undefined;
+
+  const [row] = await db()
+    .select({
+      id: simulation.id,
+      agentId: simulation.agentId,
+      testVersionId: simulation.testVersionId,
+      personaVersionId: simulation.personaVersionId,
+      status: simulation.status,
+    })
+    .from(simulation)
+    .where(and(eq(simulation.id, simulationId), eq(simulation.runId, runId)))
+    .limit(1);
+
+  const frozen = mockToolSnapshotFromRow(header.mockToolSnapshot, header.id);
+  const auth = conductingContext(header.organizationId, header.projectId);
+
+  // The run header freezes the **project's** answers and nothing else. What a
+  // pinned test version overrode is on that version, which is immutable — so
+  // there is nothing to freeze and nothing that can move underneath a run, and
+  // the two are merged here, per simulation, at the moment a call is served.
+  // That is what makes a per-test branch cost the draft nothing: one temporary
+  // version carries URLs, never answers, so it serves every override.
+  //
+  // The same merge `getSimulationExecutionEvidence` performs for the simulator,
+  // performed for the endpoint — one resolution, one answer to "what was this
+  // simulation served".
+  const answers =
+    row === undefined
+      ? []
+      : await answersFor(auth, frozen, row.testVersionId, simulationId);
+
+  return {
+    runId: header.id,
+    // Live means the run can still be conducting: it has not been finished,
+    // and it has not been canceled. A finished run's world has been torn down,
+    // so an answer served after it would be an answer from a world that no
+    // longer exists.
+    runIsLive:
+      header.finishedAt === null &&
+      (header.status === "pending" || header.status === "running"),
+    simulation:
+      row === undefined
+        ? undefined
+        : {
+            id: row.id,
+            agentId: row.agentId,
+            testVersionId: row.testVersionId,
+            personaVersionId: row.personaVersionId,
+            status: row.status as SimulationStatus,
+            answers,
+          },
+    auth,
+    signingKey:
+      header.signingKey === null ? null : openedApiKey(header.signingKey),
+  };
+}
+
+/**
+ * The run's frozen defaults merged with what this simulation's pinned test
+ * version overrode.
+ *
+ * A version that cannot be read is a refusal rather than a silent fall back to
+ * the project's defaults: serving the default where a test authored a branch
+ * would answer the wrong world and put it on the record as though it were
+ * asked for.
+ */
+async function answersFor(
+  auth: AuthContext,
+  frozen: MockToolSnapshot,
+  testVersionId: string,
+  simulationId: string,
+): Promise<readonly ResolvedMockTool[]> {
+  const version = await getTestVersionExecutionContent(auth, testVersionId);
+  if (version === undefined) {
+    throw new Error(
+      `simulation ${simulationId} pins unreadable test version ${testVersionId}`,
+    );
+  }
+  return resolveMockTools(
+    {
+      defaults: frozen.defaults,
+      overrides: { [testVersionId]: version.mockOverrides },
+    },
+    testVersionId,
+  );
+}
+
+/** The plaintext key inside a sealed `{ apiKey }` envelope, or null. */
+function openedApiKey(envelope: string): string | null {
+  try {
+    const opened = openCredentials(envelope);
+    if (
+      typeof opened === "object" &&
+      opened !== null &&
+      !Array.isArray(opened) &&
+      typeof (opened as { apiKey?: unknown }).apiKey === "string"
+    ) {
+      return (opened as { apiKey: string }).apiKey;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**

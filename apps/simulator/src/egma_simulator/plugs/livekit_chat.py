@@ -284,13 +284,17 @@ class LiveKitChat:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str,
+        agent_version: object = None,
+        dynamic_variables: object = None,
         mock_tools: MockToolSeam | None = None,
         media: object = None,
         driver: Any = None,
     ) -> None:
         # A room is reached with this connection's URL and authority, and a
-        # typed one reaches the telephone network not at all.
-        del media
+        # typed one reaches the telephone network not at all. A worker is
+        # whatever the customer is running: LiveKit keeps no versions of it,
+        # so the two version-shaped fields have nothing to name here.
+        del media, agent_version, dynamic_variables
 
         if modality != "chat":
             raise PlugError(

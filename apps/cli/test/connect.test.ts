@@ -21,7 +21,7 @@ import {
   KEY_ASK_LINE,
   CUSTODY_LINE,
   NO_AGENTS_LINE,
-  VOICE_REQUIRES_PHONE_LINE,
+  TEXT_MODE_REFUSES_CUSTOM_LLM,
 } from "../src/retell/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
@@ -43,7 +43,6 @@ const ONE_CHAT_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
-      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001", version: 3 },
       extra: { language: "en-GB", webhook_url: null },
     },
@@ -80,12 +79,30 @@ const ONE_VOICE_AGENT: FakeRetellScript = {
   numbers: NUMBERS,
 };
 
+/** A voice agent whose brain is a custom LLM, so Retell holds no words for it. */
+const ONE_VOICE_CUSTOM_LLM_AGENT: FakeRetellScript = {
+  keys: [KEY],
+  agents: [
+    {
+      agent_id: "agent_0001",
+      agent_name: "order-line",
+      channel: "voice",
+      voice_id: "11labs-Adrian",
+      response_engine: {
+        type: "custom-llm",
+        llm_websocket_url: "wss://example.invalid/llm",
+      },
+    },
+  ],
+  numbers: NUMBERS,
+};
+
 const THREE_AGENTS: FakeRetellScript = {
   keys: [KEY],
   agents: [
     { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
     { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0002" } },
-    { agent_id: "agent_0003", agent_name: "chat-desk", channel: "chat", response_engine: { type: "custom-llm", llm_websocket_url: "wss://example.invalid/llm" } },
+    { agent_id: "agent_0003", agent_name: "chat-desk", response_engine: { type: "custom-llm", llm_websocket_url: "wss://example.invalid/llm" } },
   ],
   llms: [
     { llm_id: "llm_0001", general_prompt: PROMPT },
@@ -120,7 +137,7 @@ type RunOptions = {
    * the phone: every check written before there was a choice is about the
    * connection egma made then, and text is that connection.
    */
-  readonly reach?: string | null;
+  readonly lanes?: string | null;
   /** Which number they pick, when Retell routes the agent more than one. */
   readonly number?: string | null;
   /** Where the coding agent said the repository keeps its prompt. */
@@ -136,14 +153,14 @@ type RunOptions = {
 class ScriptedUI extends HeadlessUI {
   private readonly keys: (string | null)[];
   private readonly agent: string | null;
-  private readonly reach: string | null;
+  private readonly lanes: string | null;
   private readonly number: string | null;
 
   constructor(options: RunOptions) {
     super();
     this.keys = [...options.keys];
     this.agent = options.agent ?? null;
-    this.reach = options.reach === undefined ? "text" : options.reach;
+    this.lanes = options.lanes === undefined ? "text" : options.lanes;
     this.number = options.number ?? null;
   }
 
@@ -151,7 +168,7 @@ class ScriptedUI extends HeadlessUI {
     this.record.asked.push(ask);
     if (ask === "retell-key") return Promise.resolve(this.keys.shift() ?? null);
     if (ask === "retell-agent") return Promise.resolve(this.agent);
-    if (ask === "reach") return Promise.resolve(this.reach);
+    if (ask === "lanes") return Promise.resolve(this.lanes);
     if (ask === "phone-number") return Promise.resolve(this.number);
     return Promise.resolve(null);
   }
@@ -215,7 +232,7 @@ describe("the key, and the two failures worth a second try", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
   });
 
@@ -233,7 +250,7 @@ describe("the key, and the two failures worth a second try", () => {
     // The second ask carries the reason the first answer did not work.
     expect(ui.record.keyAsks[1]?.problem).toBe(INVALID_KEY_LINE);
     expect(CUSTODY_LINE).toBe(
-      "Egma uses this key now to read your Retell agents and confirm the selected setup. For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
+      "Egma uses this key now to read your Retell agents and confirm the selected setup. For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
     );
   });
 
@@ -266,14 +283,14 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
   });
 
   it("offers a choice when there are several, and registers the one chosen", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
-    const { ui, report } = await run({ keys: [KEY], agent: "agent_0003" });
+    const { ui, report } = await run({ keys: [KEY], agent: "agent_0002" });
 
     expect(ui.record.asked).toContain("retell-agent");
     expect(ui.record.agentChoices.map((agent) => agent.id)).toEqual([
@@ -283,12 +300,12 @@ describe("one agent, and several", () => {
     ]);
     expect(report).toEqual({
       kind: "connected",
-      agentName: "chat-desk",
-      connectionName: "retell_chat_api-1",
+      agentName: "after-hours",
+      connectionName: "retell_text_mode-1",
     });
 
     const [connection] = platform.registered.connections;
-    expect(connection?.config).toEqual({ retellAgentId: "agent_0003" });
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
   });
 
   it("follows the listing's pages, so an account bigger than one page is whole", async () => {
@@ -318,37 +335,61 @@ describe("one agent, and several", () => {
     expect(platform.registered.agents).toHaveLength(0);
   });
 
-  it("makes a text connection a chat one for a Retell chat agent", async () => {
+  it("makes a text connection text mode one for a Retell voice agent", async () => {
+    // agent_0002 is a voice agent on a Retell LLM, so text is a chat simulation
+    // over text mode rather than the phone. The refusal that used to stand
+    // here retired with this lane.
     retell = await startFakeRetell(THREE_AGENTS);
 
-    const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
-    expect(connected?.config.modality).toBe("chat");
-    expect(platform.registered.connections[0]?.modality).toBe("chat");
-    // A custom model is the customer's own service, so Retell holds no prompt.
-    expect(connected?.config.prompt).toBeNull();
+    const { connected } = await run({ keys: [KEY], agent: "agent_0002" });
+
+    expect(connected?.lanes).toEqual(["text"]);
+    expect(connected?.config.modality).toBe("voice");
+    const [connection] = platform.registered.connections;
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
+    // A chat simulation of a voice agent: the connection speaks chat, and it
+    // names the voice agent it conducts against.
+    expect(connection?.modality).toBe("chat");
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
+    expect(connection?.productLabel).toBe("Retell text mode");
+    // The key conducts every text-mode exchange, so it is sealed on the
+    // connection exactly as the chat API's is.
+    expect(connection?.credentialsHint).toBe(KEY.slice(-4));
   });
 
-  it("refuses text for a Retell voice agent before it writes anything", async () => {
-    retell = await startFakeRetell(THREE_AGENTS);
+  it("refuses text for a voice agent whose engine is a custom LLM, at the door", async () => {
+    // Text mode reaches an agent's words and tools through Retell, and a
+    // custom LLM keeps both on the customer's own socket. So the choice is
+    // refused with its reason, before anything is written, and phone is named
+    // as the door that does reach it.
+    retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
 
-    const voice = await run({ keys: [KEY], agent: "agent_0002" });
-    expect(voice.connected).toBeNull();
-    expect(voice.report).toEqual({ kind: "failed", reason: VOICE_REQUIRES_PHONE_LINE });
+    const refused = await run({ keys: [KEY], lanes: "text" });
+
+    expect(refused.connected).toBeNull();
+    expect(refused.report).toEqual({
+      kind: "failed",
+      reason: TEXT_MODE_REFUSES_CUSTOM_LLM,
+    });
+    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("custom LLM");
+    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("--lanes phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });
 
-  it("reads a chat agent at the address Retell keeps chat agents at", async () => {
-    retell = await startFakeRetell(THREE_AGENTS);
+  it("still conducts a custom-LLM voice agent over the phone, which reaches it", async () => {
+    // The refusal is text mode's alone: a phone connection dials the
+    // agent the way its callers do, whatever engine answers behind the line.
+    retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
 
-    await run({ keys: [KEY], agent: "agent_0003" });
+    const { connected, report } = await run({ keys: [KEY], lanes: "phone" });
 
-    // One listing answers with both kinds and each is then read at its own
-    // address. Knocking on the other one answers nothing on a real account,
-    // and the developer would be told their agent had gone away.
-    expect(retell.requests.map((asked) => asked.path)).toContain("/get-chat-agent/agent_0003");
-    expect(retell.requests.map((asked) => asked.path)).not.toContain("/get-agent/agent_0003");
+    expect(report.kind).toBe("connected");
+    expect(connected?.lanes).toEqual(["phone"]);
+    expect(platform.registered.connections[0]?.connectionType).toBe("phone_number");
   });
+
 });
 
 describe("what lands on the platform", () => {
@@ -367,7 +408,7 @@ describe("what lands on the platform", () => {
     const provider = await startFakeRetell(ONE_VOICE_AGENT);
     retell = provider;
 
-    const { connected } = await run({ keys: [KEY], reach: "phone" });
+    const { connected } = await run({ keys: [KEY], lanes: "phone" });
 
     // Both halves were really read, each at its own address.
     const asked = provider.requests.map((one) => one.path);
@@ -382,7 +423,7 @@ describe("what lands on the platform", () => {
     expect(connected?.config.engine).toBe("retell-llm");
     expect(connected?.config.prompt).toBe(PROMPT);
     expect(connected?.config.tools).toHaveLength(1);
-    expect(connected?.reach).toBe("phone");
+    expect(connected?.lanes).toEqual(["phone"]);
     expect(platform.registered.connections[0]?.modality).toBe("voice");
 
     // None of it went to egma. The agent it just registered holds its identity
@@ -433,8 +474,8 @@ describe("what lands on the platform", () => {
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001" },
           credentials: { apiKey: KEY },
@@ -466,12 +507,12 @@ describe("what lands on the platform", () => {
     expect(agent?.name).toBe("order-line");
     expect(agent?.id).toMatch(/^agt_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(connection?.name).toBe("retell_chat_api-1");
+    expect(connection?.name).toBe("retell_text_mode-1");
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionType).toBe("retell_chat_api");
-    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
     expect(connection?.modality).toBe("chat");
-    expect(connection?.productLabel).toBe("Retell chat");
+    expect(connection?.productLabel).toBe("Retell text mode");
     expect(connection?.topology).toBe("hosted-broker");
     expect(connection?.agentId).toBe(agent?.id);
   });
@@ -508,7 +549,7 @@ describe("what lands on the platform", () => {
     expect(second.report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
     expect(second.connected?.registered.result).toBe("reused");
     expect(first.connected?.registered.result).toBe("created");
@@ -527,7 +568,7 @@ describe("what lands on the platform", () => {
 
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
-      "This voice agent was already registered as order-line, and retell_chat_api-1 was " +
+      "This voice agent was already registered as order-line, and retell_text_mode-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
@@ -539,6 +580,74 @@ describe("what lands on the platform", () => {
       agent: "created",
       connection: "created",
     });
+  });
+});
+
+describe("one agent, two connections", () => {
+  /**
+   * The chat-versus-voice diagnostic the model promises needs both histories
+   * under one identity. So registering the same Retell agent again with the
+   * other modality attaches to the agent the first walk wrote, never a twin —
+   * in either order, because a developer sets one up today and the other
+   * tomorrow and cannot be made to remember which came first.
+   */
+  it("attaches text after phone to the one agent, never a twin", async () => {
+    retell = await startFakeRetell(ONE_VOICE_AGENT);
+
+    const phone = await run({ keys: [KEY], lanes: "phone" });
+    const text = await run({ keys: [KEY], lanes: "text" });
+
+    expect(phone.connected?.lanes).toEqual(["phone"]);
+    expect(text.connected?.lanes).toEqual(["text"]);
+
+    // One egma agent holds both ways of reaching the one Retell agent.
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
+    expect(text.connected?.registered.agent.id).toBe(phone.connected?.registered.agent.id);
+
+    // The phone was written first; text mode was added to the same agent.
+    expect(phone.connected?.registration).toEqual({ agent: "created", connection: "created" });
+    expect(text.connected?.registration).toEqual({ agent: "reused", connection: "created" });
+    expect(text.connected?.registered.result).toBe("connection_added");
+
+    const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
+    expect(kinds).toEqual(["phone_number", "retell_text_mode"]);
+  });
+
+  it("attaches phone after text to the one agent, never a twin", async () => {
+    retell = await startFakeRetell(ONE_VOICE_AGENT);
+
+    const text = await run({ keys: [KEY], lanes: "text" });
+    const phone = await run({ keys: [KEY], lanes: "phone" });
+
+    expect(text.connected?.lanes).toEqual(["text"]);
+    expect(phone.connected?.lanes).toEqual(["phone"]);
+
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
+    expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
+
+    // Text mode was written first; the phone was added to the same agent.
+    expect(text.connected?.registration).toEqual({ agent: "created", connection: "created" });
+    expect(phone.connected?.registration).toEqual({ agent: "reused", connection: "created" });
+    expect(phone.connected?.registered.result).toBe("connection_added");
+
+    const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
+    expect(kinds).toEqual(["phone_number", "retell_text_mode"]);
+  });
+
+  it("reuses the text-mode connection when the same modality is registered twice", async () => {
+    // Registering text twice is one connection, rotated: the within-type reuse
+    // rule the platform already keeps, now for text mode too.
+    retell = await startFakeRetell({ ...ONE_VOICE_AGENT, keys: [KEY, OTHER_KEY] });
+
+    const first = await run({ keys: [KEY], lanes: "text" });
+    const second = await run({ keys: [OTHER_KEY], lanes: "text" });
+
+    expect(first.connected?.registered.result).toBe("created");
+    expect(second.connected?.registered.result).toBe("reused");
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.connectionType).toBe("retell_text_mode");
+    // The key it was just given replaces the old one whole.
+    expect(platform.registered.connections[0]?.credentialsHint).toBe(OTHER_KEY.slice(-4));
   });
 });
 
@@ -699,8 +808,8 @@ describe("the platform's own rules, held by the fixture", () => {
         agentPlatform: "retell",
         connection: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
           credentials: { apiKey: KEY },
@@ -751,8 +860,8 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0002" },
         credentials: { apiKey: OTHER_KEY },
@@ -761,17 +870,17 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(second.status).toBe(201);
     expect(((await second.json()) as { connection: { name: string } }).connection.name).toBe(
-      "retell_chat_api-2",
+      "retell_text_mode-2",
     );
 
     const clash = await fetch(`${platform.url}/v1/agents/${agentId}/connections`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        name: "retell_chat_api-1",
+        name: "retell_text_mode-1",
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0003" },
         credentials: { apiKey: OTHER_KEY },

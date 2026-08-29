@@ -407,12 +407,14 @@ class RunningSimulation:
             },
         )
 
-    async def _on_turn(self, speaker: str, text: str) -> None:
+    async def _on_turn(
+        self, speaker: str, text: str, platform_notes: tuple[str, ...] = ()
+    ) -> None:
         # The turn itself goes one way only: into the spans. What the
         # lifecycle keeps is the count, which is a fact about the whole
         # simulation rather than about any turn — so it is tallied here, as
         # the turns are observed, and rides the terminal transition.
-        self._spans.turn(speaker, text)
+        self._spans.turn(speaker, text, platform_notes)
         self._reporter.turn_count += 1
         loop = asyncio.get_running_loop()
         if speaker == "human" and self._first_human_at is None:

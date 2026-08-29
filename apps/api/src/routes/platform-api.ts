@@ -119,6 +119,13 @@ export async function platformApiRoutes(
     ...credentialed,
     baseUrl: options.baseUrl,
     carrierRoute: options.carrierRoute,
+    // The one Retell seam the run start needs, for everything it reads or
+    // writes at creation: the version-pinning run-start read both Retell lanes
+    // do, and the mocked-world build a web-call connection with the switch on
+    // does after it. Same test seam the two provider groups above take.
+    ...(options.retellFetch === undefined
+      ? {}
+      : { retellFetch: options.retellFetch }),
   });
   void app.register(simulationRoutes, credentialed);
   void app.register(recordingRoutes, { ...credentialed, blob: options.blob });

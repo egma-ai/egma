@@ -25,15 +25,31 @@ from egma_simulator.redaction import REDACTED
 SENTINEL_KEY = "SENTINEL-retell-key-9f2c4a7b1e8d"
 
 
+UNSET = object()
+"""What "the spec carried nothing here" looks like to the builder below,
+told apart from an explicit ``None`` that a test means to hand over."""
+
+
 def retell(
-    config: dict, *, modality: str = "chat", key: str | None = SENTINEL_KEY
+    config: dict,
+    *,
+    modality: str = "chat",
+    key: str | None = SENTINEL_KEY,
+    agent_version: object = UNSET,
+    dynamic_variables: object = UNSET,
 ) -> RetellChat:
     credentials = None if key is None else {"apiKey": key}
+    carried: dict = {}
+    if agent_version is not UNSET:
+        carried["agent_version"] = agent_version
+    if dynamic_variables is not UNSET:
+        carried["dynamic_variables"] = dynamic_variables
     return RetellChat(
         modality=modality,
         access_variant="retell_chat_api.api_key",
         config=config,
         credentials=credentials,
+        **carried,
     )
 
 
@@ -177,6 +193,170 @@ async def test_an_answer_that_carried_no_words_is_an_answer_without_words(
 
     assert await plug.deliver("Hello?") == AgentReply(text=None, ended=False)
     await plug.close()
+
+
+# -- Conducting over a named version, with this simulation's variables -------
+
+
+async def test_a_chat_carrying_neither_asks_for_exactly_what_it_always_did(
+    start_retell_stub,
+):
+    """The unchanged case, pinned at the wire rather than described.
+
+    Most chats name no version and carry no variables, and for those the
+    request is the one this plug has always sent — the agent and nothing
+    else. An absent field is absent: Retell renders an empty variable block
+    as values, and a version it was not asked for is a version it chooses
+    itself.
+    """
+    running = await start_retell_stub(api_key=SENTINEL_KEY, greeting="Front desk.")
+    plug = retell({"retellAgentId": "agent_plain", "baseUrl": running.base_url})
+    await plug.open()
+    await plug.close()
+
+    assert running.stub.calls[0]["body"] == {"agent_id": "agent_plain"}
+
+
+@pytest.mark.parametrize(
+    ("spelled", "sent"),
+    [
+        (106, 106),
+        ("latest", "latest"),
+        ("prod", "prod"),
+        # The wire asks a name only to say something, so a padded one is a
+        # document the schema accepts and this side has to settle: space
+        # around a version is spacing and never part of it, and asking a
+        # platform for the version named "  latest  " would fail in the
+        # platform's own words, a long way from the spec that said it.
+        ("  latest  ", "latest"),
+    ],
+)
+async def test_a_chat_is_opened_against_the_version_the_spec_named(
+    start_retell_stub, spelled: object, sent: object
+):
+    """A version rides to Retell exactly as the spec spelled it.
+
+    A number stays a number and a name stays a name: the platform is the
+    only thing that knows what either means, and a mocked run's whole
+    isolation rests on the exchange landing on the version egma branched
+    rather than on whatever is newest by the time the chat opens.
+    """
+    running = await start_retell_stub(api_key=SENTINEL_KEY, greeting="Front desk.")
+    plug = retell(
+        {"retellAgentId": "agent_drafted", "baseUrl": running.base_url},
+        agent_version=spelled,
+    )
+    await plug.open()
+    await plug.close()
+
+    assert running.stub.calls[0]["body"] == {
+        "agent_id": "agent_drafted",
+        "agent_version": sent,
+    }
+
+
+async def test_this_simulations_variables_reach_retell_byte_for_byte(
+    start_retell_stub,
+):
+    """What the run resolved is what the agent's platform renders.
+
+    Egma's own attribution variable is among them, and it is what a tool
+    call Retell makes rides back to this simulation on — so a plug that
+    tidied, dropped or renamed one would take the simulation's tool facts
+    with it. An empty value is carried too: it renders as nothing, which is
+    not what a variable nobody set does.
+    """
+    carried = {
+        "egma_simulation": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
+        "is_existing": "false",
+        "caller_name": "",
+        "note": "  spaces the author meant  ",
+    }
+    running = await start_retell_stub(api_key=SENTINEL_KEY, greeting="Front desk.")
+    plug = retell(
+        {"retellAgentId": "agent_varied", "baseUrl": running.base_url},
+        agent_version=106,
+        dynamic_variables=carried,
+    )
+    await plug.open()
+    await plug.close()
+
+    assert running.stub.calls[0]["body"] == {
+        "agent_id": "agent_varied",
+        "agent_version": 106,
+        "retell_llm_dynamic_variables": carried,
+    }
+
+
+@pytest.mark.parametrize(
+    ("agent_version", "dynamic_variables"),
+    [
+        (None, None),
+        (None, {}),
+        (UNSET, {}),
+        (None, UNSET),
+    ],
+)
+async def test_nothing_carried_is_nothing_sent_however_it_is_spelled(
+    start_retell_stub, agent_version: object, dynamic_variables: object
+):
+    """No version and no variables, in every shape the control plane can
+    write them: the request stays the one it always was."""
+    running = await start_retell_stub(api_key=SENTINEL_KEY, greeting="Front desk.")
+    plug = retell(
+        {"retellAgentId": "agent_plain", "baseUrl": running.base_url},
+        agent_version=agent_version,
+        dynamic_variables=dynamic_variables,
+    )
+    await plug.open()
+    await plug.close()
+
+    assert running.stub.calls[0]["body"] == {"agent_id": "agent_plain"}
+
+
+@pytest.mark.parametrize(
+    ("agent_version", "dynamic_variables"),
+    [
+        ("   ", UNSET),
+        (-1, UNSET),
+        (10.5, UNSET),
+        (True, UNSET),
+        ({"version": 106}, UNSET),
+        (UNSET, "egma_simulation=sim_1"),
+        (UNSET, {"egma_simulation": 7}),
+        (UNSET, {"egma_simulation": None}),
+        (UNSET, {"": "sim_1"}),
+    ],
+)
+def test_a_version_or_a_variable_the_plug_cannot_send_is_refused(
+    agent_version: object, dynamic_variables: object
+):
+    """Refused at construction, before a chat exists.
+
+    These travel to the agent under test unread, so this is the last place a
+    mistake in them can be named at all — and naming it here costs a
+    simulation nothing, because nothing has been opened yet.
+    """
+    with pytest.raises(PlugError):
+        retell(
+            {"retellAgentId": "agent_1"},
+            agent_version=agent_version,
+            dynamic_variables=dynamic_variables,
+        )
+
+
+def test_a_refusal_about_a_variable_names_it_and_never_its_value():
+    """What a simulation carries can be a caller's own details, so a
+    sentence about a mistake in them must not repeat them."""
+    with pytest.raises(PlugError) as refusal:
+        retell(
+            {"retellAgentId": "agent_1"},
+            dynamic_variables={"patient_record": 8842, "caller_name": "Margaret Hale"},
+        )
+    told = str(refusal.value)
+    assert "patient_record" in told
+    assert "8842" not in told
+    assert "Margaret Hale" not in told
 
 
 @pytest.mark.parametrize(

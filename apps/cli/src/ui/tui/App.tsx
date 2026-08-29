@@ -21,7 +21,7 @@ import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { MonitoringAgentScreen } from "./screens/MonitoringAgentScreen.tsx";
 import { PhoneNumberScreen } from "./screens/PhoneNumberScreen.tsx";
-import { ReachScreen } from "./screens/ReachScreen.tsx";
+import { LaneScreen } from "./screens/LaneScreen.tsx";
 import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
 import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
 import { RunScreen } from "./screens/RunScreen.tsx";
@@ -126,11 +126,15 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       />
     );
   }
-  if (screen === "reach") {
+  if (screen === "lanes") {
     return (
-      <ReachScreen
-        options={state.reachOptions ?? []}
-        onAnswer={(reach) => store.answer("reach", reach)}
+      <LaneScreen
+        options={state.laneOptions ?? []}
+        // One answer channel carries every question, so the set travels as the
+        // one word the channel takes and is read back by `lanesFrom`.
+        onAnswer={(lanes) =>
+          store.answer("lanes", lanes === null ? null : lanes.join(","))
+        }
       />
     );
   }

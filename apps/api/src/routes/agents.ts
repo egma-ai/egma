@@ -6,6 +6,7 @@ import {
   authorize,
   archiveAgent,
   archiveConnection,
+  createMockTool,
   enablePullProductionCalls,
   connectionOptionMetadata,
   ConnectionRestoreRefusedError,
@@ -14,6 +15,8 @@ import {
   IdentityConflictError,
   listAgents,
   listConnections,
+  listMockTools,
+  MockToolTakenError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   registerAgent,
@@ -53,6 +56,11 @@ import {
   confirmRetellCandidate,
   discoverRetellAgents,
 } from "../providers/retell.ts";
+import {
+  discoverMockTools,
+  type MockToolsDiscovery,
+} from "../providers/retell-mock-tools.ts";
+import type { DiscoveredTool } from "@egma/retell";
 import {
   CODES,
   identityConflict,
@@ -341,6 +349,7 @@ async function actingProject(
 }
 
 const AGENT_EDIT_KEYS = ["name"] as const;
+const MOCK_TOOL_DISCOVERY_KEYS = ["seed"] as const;
 const ARCHIVE_KEYS = [] as const;
 const AGENT_RESTORE_KEYS = ["name"] as const;
 const CONNECTION_EDIT_KEYS = [
@@ -348,6 +357,7 @@ const CONNECTION_EDIT_KEYS = [
   "environment",
   "config",
   "credentials",
+  "mockToolsEnabled",
 ] as const;
 const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
@@ -555,6 +565,123 @@ function retellChoiceIn(
   };
 }
 
+function seedFlagIn(value: unknown): boolean | Refusal {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    return invalid("seed is written as true or false");
+  }
+  return value;
+}
+
+/**
+ * Read the account and answer the whole mock-tools question for one agent.
+ *
+ * One function for the consent screen's read and for the tick's own check, so
+ * a person can never be shown one answer and refused by another.
+ */
+async function discoveryFor(
+  acting: AuthContext,
+  agentId: string,
+  options: AgentRoutesOptions,
+): Promise<MockToolsDiscovery | Refusal> {
+  const one = await getAgent(acting, agentId);
+  if (one === undefined) return NO_SUCH_AGENT;
+  if (one.agentPlatform !== "retell") {
+    return invalid(
+      "mock tools during simulations is a Retell seam. A LiveKit agent's " +
+        "tools run in your own process, where the Egma SDK already stands in " +
+        "front of them.",
+    );
+  }
+  // The same promise the store's own constraint holds, said one step earlier
+  // and in the same words. The constraint stays the backstop; this is what a
+  // person reads, and it arrives before Egma has tried to read an account it
+  // has no key for.
+  const platformAgentId = one.platformAgentId ?? "";
+  const apiKey =
+    platformAgentId === ""
+      ? undefined
+      : await agentMonitoringKey(acting, agentId);
+  if (platformAgentId === "" || apiKey === undefined) {
+    return invalid(
+      "mock tools during simulations needs this agent's platform identity " +
+        "and key: Egma reads the agent's tools with the key stored on it, and " +
+        "builds the mocked world by creating a temporary version of the agent " +
+        "on its own platform. Connect the agent to its platform first.",
+    );
+  }
+
+  const connections = (await listConnections(acting, agentId)) ?? [];
+  return discoverMockTools({
+    apiKey,
+    platformAgentId,
+    lanes: connections.map((connection) => ({
+      connectionType: connection.connectionType,
+      platformAgentId: connection.config["retellAgentId"] ?? "",
+    })),
+    ...(options.retellFetch === undefined
+      ? {}
+      : { fetchImpl: options.retellFetch }),
+  });
+}
+
+/** Every tool name this project already answers for. */
+async function answeredToolNames(
+  acting: AuthContext,
+): Promise<ReadonlySet<string>> {
+  const names = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await listMockTools(acting, {
+      limit: 200,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const one of page.items) names.add(one.toolName);
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
+  return names;
+}
+
+/**
+ * Seed a mock tool for every interceptable tool nobody answers for yet.
+ *
+ * **It never overwrites an authored answer.** A name this project already
+ * answers for keeps its row, whatever is in it — the duplicate-name refusal the
+ * store already raises is what says so, and it is read as "already answered"
+ * rather than as a failure. So re-discovery only ever adds, and a developer who
+ * has spent an afternoon authoring branches can press it without fear.
+ *
+ * Scoped to the agent it was discovered on, because that is where the tool was
+ * found. Answers the names it actually wrote.
+ */
+async function seedMockTools(
+  acting: AuthContext,
+  agentId: string,
+  tools: readonly DiscoveredTool[],
+): Promise<readonly string[]> {
+  const seeded: string[] = [];
+  const attempted = new Set<string>();
+  for (const tool of tools) {
+    if (tool.seededAnswer === null) continue;
+    // Two states of one agent can declare a tool of the same name. One row
+    // answers for both, so the second is not attempted.
+    if (attempted.has(tool.name)) continue;
+    attempted.add(tool.name);
+    try {
+      await createMockTool(acting, {
+        toolName: tool.name,
+        answer: { answer: tool.seededAnswer },
+        agentIds: [agentId],
+      });
+      seeded.push(tool.name);
+    } catch (cause) {
+      if (cause instanceof MockToolTakenError) continue;
+      throw cause;
+    }
+  }
+  return seeded;
+}
+
 /** Whether this save also starts pulling the agent's production calls. */
 function pullFlagIn(value: unknown): boolean | Refusal {
   if (value === undefined || value === null) return false;
@@ -635,12 +762,36 @@ async function confirmRetellAgent(
 
   const candidate = (() => {
     if (
+      wanted.connectionType === "retell_text_mode" &&
+      wanted.accessVariant === "retell_text_mode.api_key" &&
+      wanted.modality === "chat"
+    ) {
+      return {
+        connectionType: "retell_text_mode" as const,
+        config: { retellAgentId: choice.platformAgentId },
+      };
+    }
+    if (
       wanted.connectionType === "retell_chat_api" &&
       wanted.accessVariant === "retell_chat_api.api_key" &&
       wanted.modality === "chat"
     ) {
       return {
         connectionType: "retell_chat_api" as const,
+        config: { retellAgentId: choice.platformAgentId },
+      };
+    }
+    // The web-call lane. Like the chat one, it names the platform agent in its
+    // own config and needs nothing of the customer's to be routed: Egma places
+    // the call itself. It is also the lane a mocked run is conducted over, so
+    // an agent set up through this flow can be ticked.
+    if (
+      wanted.connectionType === "retell_web_call" &&
+      wanted.accessVariant === "retell_web_call.api_key" &&
+      wanted.modality === "voice"
+    ) {
+      return {
+        connectionType: "retell_web_call" as const,
         config: { retellAgentId: choice.platformAgentId },
       };
     }
@@ -659,8 +810,8 @@ async function confirmRetellAgent(
   })();
   if (candidate === undefined) {
     return invalid(
-      "a Retell connection is the chat API or a phone number, and a phone " +
-        "connection carries the number Egma dials in config.phoneNumber",
+      "a Retell connection is text mode, a web call, or a phone number, and " +
+        "a phone connection carries the number Egma dials in config.phoneNumber",
     );
   }
 
@@ -669,6 +820,11 @@ async function confirmRetellAgent(
     choice.platformAgentId,
     candidate,
     fetchImpl,
+    // Gated by the registry before it reaches here, and the same value the
+    // run-start read will use.
+    typeof wanted.config["baseUrl"] === "string"
+      ? wanted.config["baseUrl"]
+      : undefined,
   );
   if (checked.kind === "invalid_key") {
     return {
@@ -694,7 +850,13 @@ async function confirmRetellAgent(
       accessVariant: checked.candidate.accessVariant,
       modality: checked.candidate.modality,
       config: checked.candidate.config,
-      ...(checked.candidate.connectionType === "retell_chat_api"
+      // The kinds that conduct with a key of their own keep a copy on the
+      // connection: every exchange they conduct needs it — the chat API, the
+      // text mode, and the web call Egma opens itself. A phone connection
+      // dials with the deployment's carrier and holds none.
+      ...(checked.candidate.connectionType === "retell_chat_api" ||
+      checked.candidate.connectionType === "retell_text_mode" ||
+      checked.candidate.connectionType === "retell_web_call"
         ? { credentials: { apiKey } }
         : {}),
     },
@@ -926,6 +1088,9 @@ function describedConnection(one: Connection): Record<string, unknown> {
     // and never a blank field a serializer could one day be taught to fill.
     credentialPresent: one.credentialsHint !== null,
     credentialsHint: one.credentialsHint,
+    // The switch, per connection: whether a run over this lane is conducted
+    // with Egma's mock tools in front of the agent's own.
+    mockToolsEnabled: one.mockToolsEnabled,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -1603,10 +1768,14 @@ export async function agentRoutes(
    * column was dropped pre-launch (ADR-0015), so two people editing one agent
    * from two browsers is a silent overwrite.
    *
-   * The name and nothing else. The provider's prompt, model and tools are not
+   * The name, and nothing else. The provider's prompt, model and tools are not
    * here, are not in the read, and are not coming: they live where the customer
    * configures them, and egma being a second place to edit them would make two
    * answers to one question with no rule to choose between.
+   *
+   * **Mocking is not an agent setting.** It is a switch on each connection,
+   * because the lane is what decides whether a mocked run is a thing Egma can
+   * conduct — so it is edited where a connection is edited.
    */
   registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1628,6 +1797,74 @@ export async function agentRoutes(
 
     if (updated === undefined) return refused(reply, NO_SUCH_AGENT);
     return reply.send({ agent: describedAgent(updated) });
+  });
+
+  /**
+   * What ticking the box would find — and, when asked, what it seeds.
+   *
+   * The consent screen's read. It reaches Retell and writes nothing unless
+   * `seed` says so, so a person can be shown exactly what a mocked run would
+   * cover, what it would not, what would really happen anyway, and which of
+   * their telephone numbers Egma would have to pin, before they agree to any
+   * of it.
+   */
+  registerPlatformOperation(app, agentOperations.discoverMockTools, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { agentId } = request.params as { agentId: string };
+    const body = (request.body ?? {}) as Body;
+
+    const unknown = unknownKeyIn(
+      body,
+      MOCK_TOOL_DISCOVERY_KEYS,
+      "a mock-tool discovery",
+    );
+    if (unknown !== undefined) return refused(reply, unknown);
+
+    const seed = seedFlagIn(body.seed);
+    if (isRefusal(seed)) return refused(reply, seed);
+
+    const acting = await actingProject(
+      auth,
+      request,
+      seed ? "writes into" : "reads",
+    );
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    // Read with consent granted, because this read is what the consent is
+    // asked *from*: refusing the pin question here would hide the numbers the
+    // question is about. The tick itself asks again, and refuses without it.
+    const found = await discoveryFor(acting, agentId, options);
+    if (isRefusal(found)) return refused(reply, found);
+
+    const answered = await answeredToolNames(acting);
+    const seededNames = seed
+      ? await seedMockTools(acting, agentId, found.tools)
+      : [];
+
+    return reply.send({
+      // A number needing a pin is not a refusal of this read; it is the
+      // question this read exists to put. The tick is what refuses without an
+      // answer to it, and `numbers` below is what a screen asks it from.
+      mockable: found.mockable,
+      refusal: found.refusal,
+      engine: found.engine,
+      servingVersion: found.servingVersion,
+      tools: found.tools.map((tool) => ({
+        name: tool.name,
+        type: tool.type,
+        coverage: tool.coverage,
+        answered:
+          answered.has(tool.name) || seededNames.includes(tool.name),
+      })),
+      warnings: found.warnings,
+      numbers: found.numbers.map((number) => ({
+        number: number.number,
+        label: number.label,
+        verdicts: number.verdicts,
+        pin: number.pin,
+      })),
+      seeded: seededNames,
+    });
   });
 
   /**
@@ -1734,11 +1971,26 @@ export async function agentRoutes(
           : textWhenGiven(body.environment, "a connection's environment");
       if (isRefusal(environment)) return refused(reply, environment);
 
+      // Absence is "keep" rather than "off": somebody renaming a connection
+      // must not silently turn its mocked world off.
+      if (
+        body.mockToolsEnabled !== undefined &&
+        typeof body.mockToolsEnabled !== "boolean"
+      ) {
+        return refused(
+          reply,
+          invalid("mockToolsEnabled is written as true or false"),
+        );
+      }
+
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
       const updated = await updateConnection(acting, agentId, connectionId, {
         ...(name === undefined ? {} : { name }),
+        ...(body.mockToolsEnabled === undefined
+          ? {}
+          : { mockToolsEnabled: body.mockToolsEnabled }),
         ...(body.environment === undefined ? {} : { environment }),
         ...(body.config === undefined
           ? {}

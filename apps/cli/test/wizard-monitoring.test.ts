@@ -85,7 +85,6 @@ const RETELL_ACCOUNT: FakeRetellScript = {
   agents: [
     {
       agent_id: PLATFORM_AGENT,
-      channel: "chat",
       agent_name: AGENT_NAME,
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
@@ -502,7 +501,7 @@ describe("choosing monitoring on Retell", () => {
     });
 
     expect(buildExitLine(report)).toContain("Monitoring page");
-    expect(ui.record.asked).not.toContain("reach");
+    expect(ui.record.asked).not.toContain("lanes");
   });
 
   /**
@@ -937,7 +936,7 @@ describe("choosing both", () => {
       goal: "both",
       steps: retellDiscovery(),
       stepsByTask: [{ contains: GENERATE_TASK, steps: writesOneTest("late-repair") }],
-      answers: { "retell-key": KEY, reach: "text" },
+      answers: { "retell-key": KEY, lanes: "text" },
       retell,
     });
 

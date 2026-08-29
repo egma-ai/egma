@@ -26,7 +26,7 @@ export type ScreenId =
   | "retell-key"
   | "retell-agent"
   | "monitoring-agent"
-  | "reach"
+  | "lanes"
   | "phone-number"
   | "existing-tests"
   | "generating"

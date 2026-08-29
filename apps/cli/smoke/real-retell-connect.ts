@@ -225,10 +225,10 @@ async function main(): Promise<void> {
     // connects straight away; several are listed and refused, which is the
     // promptless surface behaving exactly as it should.
     //
-    // The reach is said, because egma will not choose between text and phone
-    // on anybody's behalf. Text here: this check has no platform to dial from
-    // and no business registering somebody's telephone number.
-    const first = await egma(["connect", "--url", platformUrl, "--reach", "text"], env, workdir);
+    // The lane is said, because egma will not choose between text, a web call
+    // and a phone on anybody's behalf. Text here: this check has no platform to
+    // dial from and no business registering somebody's telephone number.
+    const first = await egma(["connect", "--url", platformUrl, "--lanes", "text"], env, workdir);
     const listed = agentIdsIn(first.stdout);
 
     let connected = first;
@@ -243,7 +243,7 @@ async function main(): Promise<void> {
       for (const id of listed.slice(0, MOST_AGENTS_TRIED)) {
         chosen += 1;
         connected = await egma(
-          ["connect", "--url", platformUrl, "--reach", "text", "--retell-agent", id],
+          ["connect", "--url", platformUrl, "--lanes", "text", "--retell-agent", id],
           env,
           workdir,
         );
@@ -390,7 +390,7 @@ async function main(): Promise<void> {
         "connect",
         "--url",
         platformUrl,
-        "--reach",
+        "--lanes",
         "phone",
         "--retell-agent",
         result.retell_agent_id ?? "",

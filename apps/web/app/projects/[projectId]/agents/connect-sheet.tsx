@@ -11,6 +11,7 @@ import {
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   RadioCardIndicator,
@@ -39,8 +40,16 @@ import {
   agentSetupPlan,
   previousAgentSetupStep,
   retellAgentsForPlan,
+  retellCandidateForLane,
   retellCandidateValue,
   retellCandidatesForPlan,
+  retellLanesInOrder,
+  RETELL_LANES,
+  RETELL_LANE_HELP,
+  RETELL_LANE_LABELS,
+  RETELL_LANE_QUESTION,
+  stepAfterRetellLanes,
+  type RetellLane,
   stepAfterLiveKitChat,
   stepAfterLiveKitCredentials,
   stepAfterPlatform,
@@ -186,6 +195,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   >(null);
   const [retellAgentId, setRetellAgentId] = useState("");
   const [retellRoute, setRetellRoute] = useState("");
+  // How the developer wants to test a voice agent: chat over text mode, or
+  // voice down a call. The modality question the flow leads with for a voice
+  // agent whose goal is a simulation.
+  /**
+   * The lanes ticked in the one question, in the order they were ticked.
+   *
+   * Several at once is the point: text and voice land as connections on **one**
+   * egma agent in one pass, so the same suite runs over both. Nothing starts
+   * ticked — one lane dials a real telephone.
+   */
+  const [lanes, setLanes] = useState<readonly RetellLane[]>([]);
   const [discovering, setDiscovering] = useState(false);
 
   const [livekitModality, setLivekitModality] = useState<"chat" | "voice" | "">(
@@ -213,6 +233,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
+    setLanes([]);
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -304,14 +325,29 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const selectedRetellAgent = visibleRetellAgents.find(
     (one) => one.platformAgentId === retellAgentId,
   );
-  const selectedModality = retellModality(selectedRetellAgent);
   const selectedRoutes =
     plan === null ? [] : retellCandidatesForPlan(plan, selectedRetellAgent);
-  const voiceRoutes = selectedRoutes.filter((one) => one.modality === "voice");
-  const chatRoute = selectedRoutes.find((one) => one.modality === "chat");
+  // The phone chooser lists numbers and nothing else. The web-call candidate
+  // discovery also answers with carries no number, so it would sit here as a
+  // blank option and — being first — become the step's default, saving a web
+  // call where the person asked for a phone. It is picked by its own tick in
+  // the one question instead.
+  const voiceRoutes = selectedRoutes.filter(
+    (one) => one.connectionType === "phone_number",
+  );
   const selectedVoiceRoute = voiceRoutes.find(
     (one) => retellCandidateValue(one) === retellRoute,
   );
+  /** The lanes picked, in reading order, whatever order they were ticked in. */
+  const pickedLanes = retellLanesInOrder(lanes);
+  /**
+   * Every lane the goal will save, and the candidate that saves it.
+   *
+   * A monitoring goal skips the question and saves the phone lane alone, which
+   * is what production pull needs. A simulation goal saves what was ticked.
+   */
+  const lanesToSave: readonly RetellLane[] =
+    plan?.asksHowToTest === true ? pickedLanes : ["phone"];
 
   const livekitOptions =
     platform === "livekit"
@@ -383,6 +419,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
+    setLanes([]);
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -466,6 +503,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(answer.value.agents);
     setRetellAgentId("");
     setRetellRoute("");
+    setLanes([]);
     transition("retell-agent");
   }
 
@@ -512,11 +550,19 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   async function saveConnection(
     name: string,
     body: ConnectionBody,
+    /**
+     * The agent an earlier lane in this same pass landed on, when there is one.
+     *
+     * It is what makes several lanes one agent: the first lane registers, and
+     * every lane after it is added to what came back.
+     */
+    landedOn?: string,
   ): Promise<ConnectSheetResult | null> {
     setSaving(true);
     setRefused(null);
 
-    if (agentId === undefined || agentId === NEW_AGENT) {
+    const onto = landedOn ?? agentId;
+    if (onto === undefined || onto === NEW_AGENT) {
       const answer = await platformAnswer(
         registerAgent(
           {
@@ -540,14 +586,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
 
     const answer = await platformAnswer(
       addConnection(
-        { agentId, projectId, ...body },
+        { agentId: onto, projectId, ...body },
         { client: platformClient },
       ),
     );
     setSaving(false);
     if (!finishAnswer(answer)) return null;
     return {
-      agentId,
+      agentId: onto,
       connectionId: answer.value.connection.id,
       created: false,
     };
@@ -602,51 +648,53 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     return { agentId, connectionId: null, created: false };
   }
 
-  async function finishRetellVoice(): Promise<void> {
-    if (
-      goal === "" ||
-      selectedRetellAgent === undefined ||
-      selectedVoiceRoute === undefined
-    ) {
-      return;
-    }
+  /**
+   * Every picked lane, written onto **one** egma agent, in one pass.
+   *
+   * The first lane registers the agent (or finds the one that is already
+   * there); every lane after it is an addition to *that* agent. Two egma agents
+   * for one Retell voice agent would split a team's results history in half,
+   * which is the failure this loop exists to prevent.
+   *
+   * A lane that will not save stops the pass and says so, rather than carrying
+   * on and leaving a half-connected agent nobody asked for.
+   */
+  async function finishRetellLanes(): Promise<void> {
+    if (goal === "" || selectedRetellAgent === undefined) return;
+    if (lanesToSave.length === 0) return;
 
-    const option = optionNamed(catalog, selectedVoiceRoute);
-    if (option === undefined) return;
     const resumesStoredMonitoring =
       goal === "monitoring" &&
       storedRetellKey &&
       agentId !== undefined &&
       agentId !== NEW_AGENT &&
       known?.platformAgentId === selectedRetellAgent.platformAgentId;
-    const result = resumesStoredMonitoring
-      ? await resumeRetellMonitoring()
-      : await saveConnection(
-          selectedRetellAgent.name,
-          connectionBody(
-            option,
-            selectedVoiceRoute,
-            plan?.pullWithConnection === true,
-          ),
-        );
-    if (result !== null) onConnected(result);
-  }
-
-  async function finishRetellChat(): Promise<void> {
-    if (
-      goal === "" ||
-      selectedRetellAgent === undefined ||
-      chatRoute === undefined
-    ) {
+    if (resumesStoredMonitoring) {
+      const resumed = await resumeRetellMonitoring();
+      if (resumed !== null) onConnected(resumed);
       return;
     }
-    const option = optionNamed(catalog, chatRoute);
-    if (option === undefined) return;
-    const result = await saveConnection(
-      selectedRetellAgent.name,
-      connectionBody(option, chatRoute, false),
-    );
-    if (result !== null) onConnected(result);
+
+    let landed: ConnectSheetResult | null = null as ConnectSheetResult | null;
+    for (const lane of lanesToSave) {
+      const candidate = retellCandidateForLane(selectedRoutes, lane, retellRoute);
+      if (candidate === undefined) return;
+      const option = optionNamed(catalog, candidate);
+      if (option === undefined) return;
+      const result = await saveConnection(
+        selectedRetellAgent.name,
+        connectionBody(
+          option,
+          candidate,
+          // Production pull rides on the voice connection, and only once.
+          plan?.pullWithConnection === true && lane === "phone",
+        ),
+        landed?.agentId,
+      );
+      if (result === null) return;
+      landed = { ...result, agentId: landed === null ? result.agentId : landed.agentId };
+    }
+    if (landed !== null) onConnected(landed);
   }
 
   async function finishLiveKit(): Promise<void> {
@@ -687,23 +735,36 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-key":
         await findRetellAgents();
         return;
-      case "retell-agent":
-        if (selectedModality === null) return;
-        if (selectedModality === "voice") {
+      case "retell-agent": {
+        if (goal === "" || plan === null || selectedRetellAgent === undefined) {
+          return;
+        }
+        const next = stepAfterRetellAgent(plan);
+        // A goal that skips the question saves the phone lane, so it needs its
+        // first routed number chosen for it; the question's own walk waits.
+        if (next === "retell-phone") {
           const first = voiceRoutes[0];
           setRetellRoute(first === undefined ? "" : retellCandidateValue(first));
         }
-        transition(stepAfterRetellAgent(selectedModality));
+        transition(next);
         return;
-      case "retell-phone":
-        await finishRetellVoice();
-        return;
-      case "retell-chat":
-        if (goal === "monitoring") {
-          onClose();
-        } else {
-          await finishRetellChat();
+      }
+      case "retell-lanes": {
+        if (pickedLanes.length === 0) return;
+        const next = stepAfterRetellLanes(pickedLanes);
+        // The phone-number chooser appears only when Phone call is picked.
+        // Every other set of picks has nothing left to ask and saves here.
+        if (next === null) {
+          await finishRetellLanes();
+          return;
         }
+        const first = voiceRoutes[0];
+        setRetellRoute(first === undefined ? "" : retellCandidateValue(first));
+        transition(next);
+        return;
+      }
+      case "retell-phone":
+        await finishRetellLanes();
         return;
       case "livekit-modality":
         if (livekitModality !== "") transition("livekit-simulation");
@@ -764,7 +825,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       step === "livekit-modality" ||
       step === "livekit-simulation" ||
       step === "retell-phone" ||
-      (step === "retell-chat" && goal !== "monitoring");
+      // The one question can save on Continue when no phone lane was picked,
+      // and that needs the option catalog to name the rows it writes.
+      step === "retell-lanes";
     if (needsCatalog && catalogRefused !== null) {
       return (
         <Failure
@@ -880,7 +943,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 }
                 lead={
                   boundRetellPlatformAgentId === null
-                    ? "This Retell account does not contain a voice or chat agent."
+                    ? "This Retell account does not contain a voice agent."
                     : "Egma could not find the Retell agent already connected here in this account."
                 }
               />
@@ -891,6 +954,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 onValueChange={(value) => {
                   setRetellAgentId(value);
                   setRetellRoute("");
+                  setLanes([]);
                 }}
               >
                 {visibleRetellAgents.map((one) => {
@@ -907,9 +971,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                             (phones === 1
                               ? " phone number available"
                               : " phone numbers available"))
-                      : modality === "chat"
-                        ? "Chat agent · available for simulations"
-                        : "No supported connection available";
+                      : "No supported connection available";
                   return (
                     <ChoiceCard
                       key={one.platformAgentId}
@@ -923,8 +985,62 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               </RadioGroup>
             )}
             <InfoBox>
-              Voice agents use a phone number. Chat agents connect through the
-              Retell Chat API.
+              Egma lists your Retell voice agents. You choose how to test the
+              one you pick next.
+            </InfoBox>
+          </div>
+        );
+      case "retell-lanes":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title={RETELL_LANE_QUESTION}
+              description={
+                "Pick as many as you want. Each one is a connection on " +
+                String(selectedRetellAgent?.name ?? "this agent") +
+                ", and one test suite runs over all of them."
+              }
+            />
+            <fieldset className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
+              <legend className="sr-only">{RETELL_LANE_QUESTION}</legend>
+              {RETELL_LANES.map((lane) => (
+                <div
+                  className="flex min-w-0 items-start gap-3 border border-border p-4"
+                  key={lane}
+                >
+                  <Checkbox
+                    checked={lanes.includes(lane)}
+                    id={`retell-lane-${lane}`}
+                    onChange={(event) =>
+                      setLanes((held) =>
+                        event.target.checked
+                          ? [...held.filter((one) => one !== lane), lane]
+                          : held.filter((one) => one !== lane),
+                      )
+                    }
+                  />
+                  <span className="flex min-w-0 flex-col gap-1">
+                    {/*
+                      The visible copy stays visible and points at the control
+                      with `htmlFor`, which makes the whole line a target as
+                      well as naming the box.
+                    */}
+                    <label
+                      className="cursor-pointer text-sm font-medium text-foreground"
+                      htmlFor={`retell-lane-${lane}`}
+                    >
+                      {RETELL_LANE_LABELS[lane]}
+                    </label>
+                    <span className="text-sm text-faint">
+                      {RETELL_LANE_HELP[lane]}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </fieldset>
+            <InfoBox>
+              Text and voice land as connections on one agent, so the same tests
+              run across all of them. A phone run reaches your real tools.
             </InfoBox>
           </div>
         );
@@ -969,68 +1085,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               Egma reads this number from Retell. It does not change your Retell
               routing.
             </Help>
-          </div>
-        );
-      case "retell-chat":
-        if (goal === "simulation") {
-          return (
-            <div className="flex flex-col gap-5">
-              <StepIntro
-                title="Connect this chat agent for simulations"
-                description={
-                  "Egma can run simulations with " +
-                  String(selectedRetellAgent?.name ?? "this agent") +
-                  " through the Retell Chat API."
-                }
-              />
-              <SummaryRows
-                rows={[
-                  ["Retell agent", selectedRetellAgent?.name ?? ""],
-                  ["Connection", "Chat"],
-                ]}
-              />
-              <InfoBox>This connection is ready for simulation setup.</InfoBox>
-            </div>
-          );
-        }
-        return (
-          <div className="flex flex-col gap-5">
-            <StepIntro
-              title="Production monitoring needs a voice agent"
-              description={
-                String(selectedRetellAgent?.name ?? "This agent") +
-                " is a chat agent. Retell chat agents do not produce calls that Egma can monitor."
-              }
-            />
-            <SummaryRows
-              rows={[
-                ["Retell agent", selectedRetellAgent?.name ?? ""],
-                ["Connection", "Chat"],
-              ]}
-            />
-            <InfoBox title="Production monitoring needs a voice agent.">
-              {boundRetellPlatformAgentId !== null
-                ? goal === "both"
-                  ? "Set up simulations for this chat agent, then return to Agents and connect a Retell voice agent for monitoring."
-                  : "Return to Agents and connect a Retell voice agent to monitor production calls."
-                : goal === "both"
-                  ? "Choose a voice agent to set up monitoring, or continue with simulations only."
-                  : "Choose a Retell voice agent to monitor production calls."}
-            </InfoBox>
-            {boundRetellPlatformAgentId === null ? (
-              <Button
-                type="button"
-                size="lg"
-                variant="secondary"
-                onClick={() => {
-                  setRetellAgentId("");
-                  setRetellRoute("");
-                  transition("retell-agent");
-                }}
-              >
-                Choose a voice agent
-              </Button>
-            ) : null}
           </div>
         );
       case "livekit-modality":
@@ -1096,11 +1150,19 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     step === "retell-agent" ||
     step === "livekit-modality"
       ? "Continue"
-      : step === "retell-key"
-        ? discovering
-          ? "Finding agents…"
-          : "Find agents"
-        : step === "retell-phone"
+      : step === "retell-lanes"
+        ? // Picking the phone lane carries on to the number chooser; every
+          // other set of picks has nothing left to ask and saves here.
+          pickedLanes.includes("phone")
+          ? "Continue"
+          : saving
+            ? "Setting up…"
+            : "Set up simulation"
+        : step === "retell-key"
+          ? discovering
+            ? "Finding agents…"
+            : "Find agents"
+          : step === "retell-phone"
           ? saving
             ? "Finishing…"
             : goal === "simulation"
@@ -1108,13 +1170,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               : goal === "monitoring"
                 ? "Start monitoring"
                 : "Set up both"
-          : step === "retell-chat"
-            ? goal === "monitoring"
-              ? "Return to agents"
-              : saving
-                ? "Setting up…"
-                : "Set up simulation"
-            : step === "livekit-simulation"
+          : step === "livekit-simulation"
               ? saving
                 ? "Saving…"
                 : // A chat walk has the setup instructions after this screen,
@@ -1135,10 +1191,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     (step === "goal" && goal === "") ||
     (step === "platform" && platform === "") ||
     (step === "retell-key" && !keyReady) ||
-    (step === "retell-agent" && selectedModality === null) ||
+    (step === "retell-agent" && selectedRetellAgent === undefined) ||
+    // Nothing picked yet, or a set that saves here picked before the catalog
+    // it writes from arrived.
+    (step === "retell-lanes" &&
+      (pickedLanes.length === 0 ||
+        (!pickedLanes.includes("phone") && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
-    (step === "retell-chat" && goal !== "monitoring" && catalog === null) ||
     (step === "livekit-modality" && livekitModality === "") ||
     (step === "livekit-simulation" && completed === null && !livekitReady);
 

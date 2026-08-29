@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   claimSimulations,
   catalogEntry,
+  connectionTypeCarriesMockSwitch,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
@@ -22,6 +23,7 @@ import {
   credentialFor,
   type ProviderCredentialSource,
 } from "@egma/provider-credentials";
+import { SIMULATION_VARIABLE } from "@egma/retell";
 import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
@@ -236,6 +238,72 @@ async function modelsBlock(
   };
 }
 
+/**
+ * The version this simulation is placed against and the variables it carries —
+ * one code path for both lanes that name a version, or nothing at all.
+ *
+ * **The version** is named explicitly, because the platform's own default is
+ * "the newest version" — which a concurrent edit or a branch can move between
+ * one simulation and the next. Where it comes from is the only thing the two
+ * lanes differ on:
+ *
+ * - **the draft lane** hands the DRAFT version Egma branched, so the
+ *   conversation reaches the mocked tools on the temporary version;
+ * - **the text-mode lane** hands the RESOLVED serving version the run read
+ *   once at start, so every simulation of the run tests the one version a real
+ *   caller reaches.
+ *
+ * The temporary version wins when both are present, because a run that branched
+ * one is being conducted against the mocked tools on it and nothing else would
+ * be honest: the serving version beside it is what the copy was branched from.
+ *
+ * **The variables** are what the platform renders per call, and Egma passes only
+ * its own: the attribution variable that carries this simulation's identifier
+ * into the tool URL. Everything else falls back to the version's declared
+ * defaults. Both lanes hand it, because both render variables.
+ *
+ * The attribution variable is **asserted rather than assumed**. The whole tool
+ * record of a mocked simulation rides on it: the swapped URL carries
+ * `{{egma_simulation}}` as a path segment, and a spec that omitted it would send
+ * every tool call to a path naming no simulation — which the endpoint refuses,
+ * silently losing every tool fact the run exists to collect. Nothing else
+ * catches that, so it is caught here, where the value is put in.
+ */
+function runVersionSpecOf(
+  run: Run,
+  simulationId: string,
+): Record<string, unknown> {
+  const version = run.tempMockAgentVersion ?? run.agentVersion ?? undefined;
+  if (version === null || version === undefined) return {};
+
+  const variables = dynamicVariablesFor(simulationId);
+  if (variables[SIMULATION_VARIABLE] !== simulationId) {
+    throw new Error(
+      `simulation ${simulationId} would be conducted against a named version ` +
+        `whose variables do not carry ${SIMULATION_VARIABLE}, so no tool call ` +
+        "it made could be traced back to it",
+    );
+  }
+
+  return {
+    agent_version: version,
+    dynamic_variables: variables,
+  };
+}
+
+/**
+ * The variables one simulation is conducted with.
+ *
+ * One entry today, and the assertion above is on its answer rather than inside
+ * it deliberately: authored caller-context variables are a named later chapter,
+ * and the day this function merges a second source is the day it could drop the
+ * first. The check is placed where it will still be looking at the whole answer
+ * when that happens.
+ */
+function dynamicVariablesFor(simulationId: string): Record<string, string> {
+  return { [SIMULATION_VARIABLE]: simulationId };
+}
+
 /** What a claim request said, once every field has been read and refused for itself. */
 type ClaimAsk = {
   readonly claimant: string;
@@ -427,12 +495,29 @@ async function assembledSpec(
   // mid-run tears nothing. The simulator receives the answers already
   // decided, exactly as it receives everything else: flattened, with
   // nothing left to look up and nothing left to choose between.
-  const mockTools = resolveMockTools(
+  const resolved = resolveMockTools(
     evidence.mockToolSnapshot,
     claim.testVersionId,
-  ).map((mock) => ({
+  );
+
+  // **Whether this run is mocked is read from its own snapshot**, on every
+  // lane the switch governs. The switch lives on the connection, and the run
+  // froze it at start — so a switch unticked mid-run leaves this run in the
+  // world it began in, and a text run started with the switch off carries no
+  // answers and goes real. Nothing consults the connection row here.
+  //
+  // A lane the switch does not govern keeps the behaviour it has: the LiveKit
+  // in-room seam serves what the run resolved because Egma *is* in the tool
+  // path there by construction.
+  const mocked =
+    !connectionTypeCarriesMockSwitch(run.connectionSnapshot.connectionType) ||
+    run.connectionSnapshot.mockToolsEnabled;
+  const mockTools = (mocked ? resolved : []).map((mock) => ({
     tool_name: mock.toolName,
     answer: mock.answer,
+    // Carried on every lane, and deliberately never spent on a chat one: a
+    // declared delay is speech-world fidelity, which is the layer chat leaves
+    // out. It rides along so one authored answer serves every modality.
     delay_milliseconds: mock.delayMilliseconds,
   }));
 
@@ -457,6 +542,11 @@ async function assembledSpec(
     throw fault;
   }
 
+  // The version this simulation is placed against and the variables it carries,
+  // for whichever lane named a version — the draft lane's temporary version or
+  // the text-mode lane's resolved serving version, in one code path.
+  const versionSpec = runVersionSpecOf(run, claim.id);
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -468,6 +558,7 @@ async function assembledSpec(
       config: connection.config,
       credentials: connection.credentials,
     },
+    ...versionSpec,
     // Flat and whole, straight off the pinned version: the name this person
     // gives the agent, who they are, and the language the roleplay runs in.
     // The identity name is the authored one — never the team's label for the
@@ -480,7 +571,14 @@ async function assembledSpec(
     },
     models,
     scenario: { instructions: testVersion.scenario },
+    // The same walls the chat lane has always had, by modality and by nothing
+    // else. A text-mode exchange is a chat, so it gets the chat numbers.
     limits: SIMULATION_LIMITS[claim.modality],
+    // `agent_version` and `dynamic_variables` are handed by `versionSpec` above,
+    // one path for both lanes — the draft lane's temporary version and the
+    // text-mode lane's resolved serving version alike. They are not written a
+    // second time here.
+    //
     // Left out entirely where the run mocks nothing, which is what most
     // runs do: a simulation egma answers no tool for is byte for byte the
     // work order it was before mock tools existed, and an empty list

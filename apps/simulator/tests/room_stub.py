@@ -55,6 +55,9 @@ The script it is built with:
   under test.
 - ``refuses_room`` / ``refuses_dispatch`` — the platform's own words when
   it will not make the room, or will not dispatch into it.
+- ``refuses_join`` — the platform's own words when it will not take the
+  way in at all, which is what a spent or expired token looks like from
+  egma's seat.
 - ``refuses_rpc`` — a participant that will not take the mock-tool methods
   at all, which must cost the exchange and never the conversation.
 - ``refuses_the_offer_at_the_join`` — a participant that will not take them
@@ -250,7 +253,22 @@ class StubRoom:
         return self._transport.media
 
     async def wait_connected(self) -> None:
-        """The local room is connected as soon as its processors exist."""
+        """The local room is connected as soon as its processors exist —
+        unless this LiveKit will not take the way in it was offered.
+
+        A token that opens one room once is refused the second time and
+        after it has waited too long, and what egma sees then is a room it
+        cannot get into. The refusal is built by the driver's own
+        :func:`platform_refusal`, so the sentence a person reads is
+        production's rather than this file's.
+        """
+        refusal = self._backend.stub.refuses_join
+        if refusal is not None:
+            raise platform_refusal(
+                "the room could not be joined",
+                "permission_denied",
+                self._backend.quotable(refusal),
+            )
         return None
 
     async def leave(self) -> None:
@@ -384,8 +402,17 @@ class RoomStubBackend(LiveKitRoomBackend):
 
     @property
     def endpoint_dispatches(self) -> bool:
-        """Whether getting the agent in was somebody else's job."""
+        """Whether getting the agent in was somebody else's job.
+
+        True for both shapes that were handed a token: egma holds no key
+        pair, so the agent arrives because whoever minted the token put it
+        there, or does not arrive at all.
+        """
         return not self._settings.mints_its_own
+
+    def quotable(self, told: str) -> str:
+        """The driver's own scrubbing, reachable from the room beside it."""
+        return self._quotable(told)
 
     # -- Where the driver reaches a LiveKit, and this stands in for one -------
 
@@ -476,6 +503,9 @@ class RoomStub:
     calls a present agent a worker that never came."""
     refuses_room: str | None = None
     refuses_dispatch: str | None = None
+    refuses_join: str | None = None
+    """A LiveKit that will not take the way in it was offered — a token
+    already spent, or one that waited too long to be used."""
     refuses_rpc: str | None = None
     """A participant that will not take the mock-tool methods at all — the
     one refusal that must cost the exchange and nothing else."""

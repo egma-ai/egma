@@ -161,6 +161,16 @@
   --bad-border: color-mix(in srgb, var(--bad) 38%, var(--border));
 
   /*
+   * The fill of a note that carries a state — a warning the reader must see, a
+   * refusal explaining why something cannot happen. The state color pulled
+   * nearly all the way back to paper, so the note reads as a quiet tinted panel
+   * rather than a coloured block, with its `-border` edge above carrying the
+   * meaning. Derived like the edges, so one declaration follows both themes.
+   */
+  --warn-surface: color-mix(in srgb, var(--warn) 6%, var(--surface));
+  --bad-surface: color-mix(in srgb, var(--bad) 6%, var(--surface));
+
+  /*
    * The dialog scrim, which is what makes the page behind one read as inert.
    *
    * It is mixed from Midnight Ink rather than from `--foreground`, and that is
@@ -452,7 +462,27 @@
   --surface-active: #43241c;
   --foreground: #f2f2ed;
   --muted: #a3a39b;
-  --faint: #82827b;
+  /*
+   * Lifted from `#82827b`, which failed AA on the surface it is most often
+   * drawn on.
+   *
+   * The tertiary step has two grounds in dark theme and they are not the same
+   * test. On the canvas, `#151514`, the old value measured 4.73:1 and passed.
+   * On the raised surface, `#1b1b1a` — a table panel, a form group, a menu —
+   * it measured **4.46:1 and failed**, and that is where a timestamp, a hint
+   * and an empty-state line actually live. A value that passes on the page and
+   * fails inside every panel on it is a value that fails.
+   *
+   * `#94948c` measures 5.98:1 on the canvas and 5.64:1 on the raised surface,
+   * so the worst ground now clears AA with room rather than by a rounding
+   * step. It stays a step below `--muted`, which is 6.79:1 on the same ground:
+   * the three-level hierarchy is what it was, one rung less quiet at the
+   * bottom.
+   *
+   * Light theme was measured too and did not move — its `--faint` is 5.33:1 on
+   * Pure Paper.
+   */
+  --faint: #94948c;
   --border: #30302d;
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
@@ -708,6 +738,9 @@
   --color-success-border: var(--good-border);
   --color-warning-border: var(--warn-border);
   --color-failure-border: var(--bad-border);
+  /* The quiet tinted fill of a state note, derived above beside the edges. */
+  --color-warning-surface: var(--warn-surface);
+  --color-failure-surface: var(--bad-surface);
   --color-scrim: var(--scrim);
 
   /* ----------------------------------------------------------------- Shape */
@@ -1299,18 +1332,29 @@
     }
   }
 
-  /* The arriving section, and the still form of it. */
-  [data-slot="retell-account"] {
+  /*
+   * The arriving section, and the still form of it.
+   *
+   * Two sections use it, for the same reason: a piece of a panel that a person
+   * did not put there — a Retell account read back from a pasted key, and what
+   * a mocked run would cover, read back from the agent's own account — travels
+   * a few pixels while it fades, so the arrival is explained rather than
+   * decorated.
+   */
+  [data-slot="retell-account"],
+  [data-slot="mock-tools-arrival"] {
     animation: egma-section-arrive var(--duration-popover-in) var(--ease-out);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="retell-account"] {
+    [data-slot="retell-account"],
+    [data-slot="mock-tools-arrival"] {
       animation: egma-fade-in var(--duration-hover) linear;
     }
   }
 
-  [data-preview="reduced-motion"] [data-slot="retell-account"] {
+  [data-preview="reduced-motion"] [data-slot="retell-account"],
+  [data-preview="reduced-motion"] [data-slot="mock-tools-arrival"] {
     animation: egma-fade-in var(--duration-hover) linear;
   }
 

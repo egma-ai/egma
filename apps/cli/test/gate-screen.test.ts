@@ -45,7 +45,6 @@ const ONE_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
-      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
   ],
@@ -172,7 +171,9 @@ async function toTheGate(
 
   // The provider offers the reach that matches this agent. Egma still requires
   // confirmation before it creates the connection.
-  await showing(run, "How should Egma reach this agent?");
+  await showing(run, "How should Egma test this agent?");
+  run.write(" ");
+  await showing(run, "[x] Text");
   run.write("\r");
 
   await chooseNoExistingTests(run);
@@ -325,7 +326,9 @@ describe("the files arriving", () => {
 
     // Text or phone. Not this check's subject, and not skippable
     // either: egma never picks one of the two for a developer.
-    await showing(run, "How should Egma reach this agent?");
+    await showing(run, "How should Egma test this agent?");
+    run.write(" ");
+    await showing(run, "[x] Text");
     run.write("\r");
     await showing(run, "Do you already have test cases", "› No", "[enter] choose this one");
 

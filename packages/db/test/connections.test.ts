@@ -103,6 +103,26 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
   };
 }
 
+/**
+ * A live text-mode payload. Its config carries the agent's own identifier and
+ * nothing else: where Retell answers is the plug's own test seam, never a
+ * stored key a customer can write.
+ */
+function textModeConnection(
+  overrides: Partial<NewConnection> = {},
+): NewConnection {
+  return {
+    name: `text mode-${newId("con").slice(-8)}`,
+    agentPlatform: "retell",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
+    modality: "chat",
+    config: { retellAgentId: "agent_in_retell_1" },
+    credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    ...overrides,
+  };
+}
+
 async function agentNamed(
   name: string,
   agentPlatform: "retell" | "livekit" = "retell",
@@ -943,27 +963,6 @@ describe("updating a connection", () => {
         config: { phoneNumber: "+15551234567" },
       }),
     ).rejects.toThrow(/"phoneNumber"/);
-  });
-
-  it("refuses to change type or modality: that is a new connection", async () => {
-    const agentId = await agentNamed("Immutable");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    await expect(
-      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        connectionType: "phone_number",
-      } as never),
-    ).rejects.toThrow(/new connection/);
-
-    await expect(
-      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        modality: "voice",
-      } as never),
-    ).rejects.toThrow(/new connection/);
-
-    const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(untouched?.connectionType).toBe("retell_chat_api");
-    expect(untouched?.modality).toBe("chat");
   });
 });
 

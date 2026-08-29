@@ -15,6 +15,20 @@
       "when": 1787726983377,
       "tag": "0001_persona_rework",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787961265658,
+      "tag": "0002_retell_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787961288915,
+      "tag": "0003_retell_mock_tools",
+      "breakpoints": true
     }
   ]
 }

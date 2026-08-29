@@ -105,7 +105,12 @@ export async function ping(): Promise<void> {
 export function dedicatedConnection(): pg.Client {
   const url = databaseUrl;
   if (url === undefined) throw new Error("not connected to Postgres");
-  return new pg.Client({ connectionString: url });
+  // Bounded, because nothing above this waits on a clock of its own. A TCP
+  // connect with no timeout hangs on the operating system's, which is minutes,
+  // and both callers here are on the path of a request somebody is waiting on.
+  // Generous for establishing a connection and authenticating; a network that
+  // cannot do it inside this is one whose caller deserves the error now.
+  return new pg.Client({ connectionString: url, connectionTimeoutMillis: 10_000 });
 }
 
 /** A connection held open on one channel; closing it is the only thing to do. */

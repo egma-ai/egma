@@ -13,7 +13,7 @@
 import type { LoginPrompt } from "../platform/login.ts";
 import type { DiscoveredAgent } from "../platform/monitoring.ts";
 import type { RetellAgent, RetellNumber } from "../retell/client.ts";
-import type { KeyAsk, Reach } from "../retell/connect.ts";
+import type { KeyAsk, Lane } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
 import type { Detection } from "../wizard/detection.ts";
@@ -125,7 +125,7 @@ export type AskId =
    * behalf. Only one of the two dials a real telephone, and egma choosing that
    * for somebody would be egma spending their money.
    */
-  | "reach"
+  | "lanes"
   /** Which of the agent's numbers to dial, when Retell routes it more than one. */
   | "phone-number"
   | "existing-tests"
@@ -288,7 +288,7 @@ export interface WizardUI {
    * list comes from the selected platform agent, so the screen cannot offer a
    * connection the agent platform will refuse.
    */
-  setReachOffer(offered: readonly Reach[] | null): void;
+  setLaneOffer(offered: readonly Lane[] | null): void;
 
   /**
    * The numbers Retell routes to the chosen agent, while a choice among them is

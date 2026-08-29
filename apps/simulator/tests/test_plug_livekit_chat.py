@@ -265,7 +265,10 @@ async def chat_walk(
     turns: list[tuple[str, str]] = []
     calls: list[tuple[str, str | None]] = []
 
-    async def on_turn(speaker: str, text: str) -> None:
+    async def on_turn(
+        speaker: str, text: str, notes: tuple[str, ...] = ()
+    ) -> None:
+        del notes
         turns.append((speaker, text))
 
     async def on_tool_call(name: str, arguments: str | None) -> None:

@@ -5,6 +5,8 @@ import type {
 } from "posthog-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
+
 const init = vi.hoisted(() => vi.fn());
 
 vi.mock("posthog-js", () => ({ default: { init } }));
@@ -16,7 +18,7 @@ afterEach(() => {
 });
 
 describe("browser platform telemetry", () => {
-  it("removes page content and URL secrets before PostHog can record them", async () => {
+  it("masks only the marked secret, and strips URL secrets", async () => {
     vi.stubEnv("NEXT_PUBLIC_EGMA_TELEMETRY", "on");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://us.i.posthog.com");
@@ -31,7 +33,8 @@ describe("browser platform telemetry", () => {
       logs: { captureConsoleLogs: false },
       session_recording: {
         maskAllInputs: true,
-        maskTextSelector: "*",
+        // The mark rather than everything: the pages are what a replay is for.
+        maskTextSelector: `[${REPLAY_PRIVATE_ATTRIBUTE}]`,
         recordHeaders: false,
         recordBody: false,
         recordCrossOriginIframes: false,
@@ -66,8 +69,15 @@ describe("browser platform telemetry", () => {
     expect(JSON.stringify(request)).not.toContain("secret");
     expect(JSON.stringify(request)).not.toContain("private transcript");
 
+    /*
+     * The recording player's `src` is a presigned GET whose signature is its
+     * query string, so an unstripped `src` in a snapshot is a working link to
+     * a customer's call. Everything else about an attribute is left alone.
+     */
     const maskAttribute = config.session_recording.maskAttributeFn;
-    expect(maskAttribute?.("aria-label", "private transcript")).toBe("");
+    expect(
+      maskAttribute?.("src", "https://store.egma.ai/call.wav?X-Amz-Signature=abc"),
+    ).toBe("https://store.egma.ai/call.wav");
     expect(maskAttribute?.("class", "recording-player")).toBe("recording-player");
   });
 });

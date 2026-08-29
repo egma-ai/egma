@@ -33,7 +33,6 @@ const ONE_AGENT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_0001",
-      channel: "chat",
       agent_name: "order-line",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },
@@ -111,7 +110,7 @@ async function walk(generated: readonly FakeStep[], howManyTests: number) {
     ],
   });
   const ui = new HeadlessUI({
-    answers: { "retell-key": KEY, reach: "text" },
+    answers: { "retell-key": KEY, lanes: "text" },
   });
   const grading = gradeEveryRun(platform);
   try {
