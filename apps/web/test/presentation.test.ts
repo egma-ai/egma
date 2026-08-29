@@ -80,8 +80,23 @@ describe("the shared form controls", () => {
   it("centers every enhanced select instead of relying on the browser default", async () => {
     const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-    expect(css).toMatch(
-      /select, ::picker\(select\) \{ appearance: base-select; align-items: center; \}/,
-    );
+    expect(css).toMatch(/select, ::picker\(select\) \{ appearance: base-select; \}/);
+    expect(css).toMatch(/select \{ align-items: center; \}/);
+  });
+
+  /*
+   * The picker is the product's box to size once `base-select` is asked for,
+   * and Chrome's default for a box nobody sized is `max-height: stretch` —
+   * as tall as the space allows. A project with thirty test suites opened a
+   * picker 584px tall whose lower edge sat flush against the window, which
+   * reads as a broken render rather than as a list that scrolls. A short list
+   * hides the fault entirely, so no page test can be trusted to catch it
+   * coming back; the cap itself is what this holds.
+   */
+  it("bounds the open select picker instead of letting it fill the window", async () => {
+    const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+    expect(css).toMatch(/::picker\(select\) \{ max-height: min\(/);
+    expect(css).toMatch(/overscroll-behavior: contain;/);
   });
 });
