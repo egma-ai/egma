@@ -11,6 +11,11 @@ import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { hydrateRun, startRun } from "../platform/runs.ts";
 import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
+import {
+  laneOfConnectionType,
+  LANE_NAMES,
+  PHONE_RUN_REACHES_REAL_TOOLS,
+} from "../retell/connect.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import {
   changeLines,
@@ -143,6 +148,15 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
 
   const header = answer.run;
   options.out(`run: ${header.id}`);
+  // **The lane, at the start, off the answer to the start itself.** The folder
+  // this run was resolved from stores a connection's id and its name, and a
+  // name is what somebody chose to call it — so the lane is read from the run
+  // the platform just wrote, which names the kind. A lane this build has no
+  // word for falls back to the platform's own product label rather than being
+  // called something it is not.
+  const lane = laneOfConnectionType(header.connectionType);
+  options.out(`lane: ${lane === null ? header.productLabel : LANE_NAMES[lane]}`);
+  if (lane === "phone") options.out(`note: ${PHONE_RUN_REACHES_REAL_TOOLS}`);
   options.out(`tests: ${selection.pinned.length}`);
   options.out(`simulations: ${header.expectedSimulationCount}`);
   options.out(`results: ${header.resultsUrl}`);

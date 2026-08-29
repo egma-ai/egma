@@ -131,12 +131,14 @@ function runHeader(
   status = "pending",
   agentId = "agt_one",
   connectionId = "con_one",
+  connectionType = "retell_web_call",
 ): Record<string, unknown> {
   return {
     id: "run_one",
     status,
     agentId,
     connectionId,
+    connectionType,
     productLabel: "Fixture",
     modality: "chat",
     expectedSimulationCount: 1,
@@ -166,12 +168,15 @@ async function followedRun(input: {
   readonly stop?: AbortController;
   readonly agent?: string;
   readonly connection?: string;
+  /** The lane the platform says the started run is over. */
+  readonly connectionType?: string;
 }): Promise<{
   readonly code: number;
   readonly lines: readonly string[];
   readonly startedWith: Readonly<Record<string, unknown>> | null;
 }> {
   const status = input.status ?? "completed";
+  const connectionType = input.connectionType ?? "retell_web_call";
   const gradingState = status === "completed" ? (input.gradingState ?? "complete") : null;
   const lines: string[] = [];
   let moved = false;
@@ -196,13 +201,18 @@ async function followedRun(input: {
             "pending",
             String(startedWith.agentId),
             String(startedWith.connectionId),
+            connectionType,
           ),
         ),
         { status: 201 },
       );
     }
     if (url === `${URL}/v1/runs/run_one`) {
-      return new JsonResponse(JSON.stringify(runHeader(moved ? "completed" : "pending")));
+      return new JsonResponse(
+        JSON.stringify(
+          runHeader(moved ? "completed" : "pending", "agt_one", "con_one", connectionType),
+        ),
+      );
     }
     if (url === `${URL}/v1/runs/run_one/simulations`) {
       return new JsonResponse(
@@ -329,6 +339,40 @@ describe("runRunCommand operational exit behavior", () => {
       agentId: "agt_two",
       connectionId: "con_three",
     });
+  });
+
+  it("names the lane at the start, and says plainly what a phone run reaches", async () => {
+    await writeTargets([
+      {
+        id: "agt_one",
+        name: "Receptionist",
+        connections: [{ id: "con_one", name: "Phone" }],
+      },
+    ]);
+
+    // The folder stores a connection's id and the name somebody gave it, and
+    // "Phone" is a name rather than a fact. The lane comes off the run the
+    // platform just wrote.
+    const phone = await followedRun({ connectionType: "phone_number" });
+    expect(phone.code).toBe(0);
+    expect(phone.lines).toContain("lane: Phone call");
+    expect(phone.lines).toContain(
+      "note: Egma dials the real number, so this run reaches your real tools.",
+    );
+
+    // Every other lane names itself and claims nothing more: whether its tools
+    // are mocked is the connection's own switch, not the lane's promise.
+    const webCall = await followedRun({ connectionType: "retell_web_call" });
+    expect(webCall.lines).toContain("lane: Web call");
+    expect(webCall.lines.some((line) => line.startsWith("note: "))).toBe(false);
+
+    const text = await followedRun({ connectionType: "retell_text_mode" });
+    expect(text.lines).toContain("lane: Text");
+
+    // A kind this build has no lane word for is called what the platform calls
+    // it, never a lane it is not.
+    const other = await followedRun({ connectionType: "livekit_room" });
+    expect(other.lines).toContain("lane: Fixture");
   });
 
   it("refuses to guess between runnable agents and prints each exact choice", async () => {

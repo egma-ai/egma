@@ -118,6 +118,35 @@ export const LANE_LINES: Readonly<Record<Lane, string>> = {
     "latency and reaches your real tools.",
 };
 
+/**
+ * Which lane a connection type is, for a surface holding a record rather than
+ * a choice.
+ *
+ * The connect flow goes the other way — a lane is picked and a connection is
+ * written for it — but a run is started against a connection that already
+ * exists, and what it reaches is a fact about that connection's kind. `null`
+ * for a kind that is not one of these three: the chat API and every LiveKit
+ * door are reached through the same runs and are not part of this vocabulary,
+ * and calling one of them a lane it is not would be worse than saying nothing.
+ */
+export function laneOfConnectionType(connectionType: string): Lane | null {
+  if (connectionType === "retell_text_mode") return "text";
+  if (connectionType === "retell_web_call") return "web-call";
+  if (connectionType === "phone_number") return "phone";
+  return null;
+}
+
+/**
+ * What a phone run reaches, said at its start and not only at its setup.
+ *
+ * The one lane with no mocked world at all. A developer who picked it weeks ago
+ * and starts a suite today is told again, at the moment the calls are about to
+ * be placed, because this is the run that bills real minutes and moves whatever
+ * the agent's tools move.
+ */
+export const PHONE_RUN_REACHES_REAL_TOOLS =
+  "Egma dials the real number, so this run reaches your real tools.";
+
 /** The word a lane is said with on a flag, in an answer, and in a check. */
 export function laneNamed(said: string): Lane | null {
   const word = said.trim().toLowerCase();
