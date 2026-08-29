@@ -165,7 +165,7 @@ describe("discovering simulation agents", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("returns normalized text mode, web-call, chat and phone candidates, never provider data or the key", async () => {
+  it("returns normalized text-mode, web-call and phone candidates for voice agents only, never provider data or the key", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
@@ -266,21 +266,6 @@ describe("discovering simulation agents", () => {
               modality: "voice",
               productLabel: "Retell phone",
               config: { phoneNumber: "+14155550100" },
-            },
-          ],
-        },
-        {
-          platformAgentId: "agent_chat_1",
-          name: "Chat only",
-          modality: "chat",
-          connectionCandidates: [
-            {
-              agentPlatform: "retell",
-              connectionType: "retell_chat_api",
-              accessVariant: "retell_chat_api.api_key",
-              modality: "chat",
-              productLabel: "Retell chat",
-              config: { retellAgentId: "agent_chat_1" },
             },
           ],
         },
