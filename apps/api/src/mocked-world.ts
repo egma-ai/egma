@@ -101,10 +101,12 @@ function reachOf(reach: MockedWorldReach) {
  * Build the temporary world this run will be conducted in, or refuse.
  *
  * **Whether this run is one at all is decided from the same two facts the
- * queue's own gate reads** — the agent's tick and the run's own recorded
- * connection type — so the two can never disagree about which runs wait for a
- * world. The connection type is checked first because it costs nothing: every
- * run over a lane that is never mocked leaves here without a read.
+ * queue's own gate reads**, both frozen onto this run's own connection snapshot
+ * at start — the recorded connection type, and that connection's own
+ * `mockToolsEnabled` switch — so the two can never disagree about which runs
+ * wait for a world. The connection type is checked first because it costs
+ * nothing: every run over a lane that is never mocked leaves here without a
+ * read.
  *
  * On a refusal the run is canceled here rather than left for somebody to
  * notice: its simulations are unclaimable, so a run left alone would sit

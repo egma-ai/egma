@@ -102,19 +102,20 @@ export const CODES = {
   no_adapter: 422,
   phone_setup_required: 422,
   /**
-   * A run over an agent with mock tools turned on, whose mocked world could not
-   * be built.
+   * A run over a connection with mock tools switched on, whose temporary
+   * mocked version could not be built.
    *
-   * **Its own code, because the alternative was conducting the run anyway.** A
-   * ticked agent promises every simulation runs in a mocked world; a run that
-   * quietly fell back to the real tools would be a green result over the
-   * customer's production backend. So the run is canceled and this is what the
-   * caller is told, with the platform's own reason in the sentence.
+   * **Its own code, because the alternative was conducting the run anyway.** The
+   * switch on that one connection promises the run's tool calls reach Egma's
+   * stand-ins and not the customer's backend; a run that quietly fell back to
+   * the real tools would be a green result over production. So the run is
+   * canceled and this is what the caller is told, with the platform's own reason
+   * in the sentence.
    */
   mocked_world_unbuildable: 422,
   /**
    * A second mocked run asked for while another run of the same agent still
-   * holds its one mocked world.
+   * holds its one temporary version.
    *
    * **Its own code, and a conflict rather than an unprocessable one**, because
    * nothing about the request is wrong: the same request will work once the

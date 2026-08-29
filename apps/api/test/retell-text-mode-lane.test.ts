@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
-import { readTextModeWorld } from "../src/providers/retell-text-mode.ts";
+import { readTextModeWorld } from "../src/providers/retell-run-start.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
@@ -410,7 +410,7 @@ describe("one Retell agent through both a text and a voice door, on the web's fr
 });
 
 describe("the run-start read", () => {
-  it("resolves the serving version and classes that version's tools", async () => {
+  it("resolves the serving version, and answers that and nothing else", async () => {
     const { fetchImpl, asked } = retell();
     const read = await readTextModeWorld(
       { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
@@ -420,14 +420,11 @@ describe("the run-start read", () => {
     expect(read.kind).toBe("world");
     if (read.kind !== "world") return;
     expect(read.agentVersion).toBe(SERVING_VERSION);
-    // One tool of each class, from the configuration and not from a guess.
-    // Answered to the caller and stored nowhere: it is what an enable-time
-    // screen shows, computed live.
-    expect(read.coverage).toEqual({
-      mocked: ["check_availability"],
-      notInterceptable: ["transfer_to_front_desk"],
-      notInThisVersion: ["inventory"],
-    });
+    // The version is the whole answer. The engine is read as a gate — can this
+    // lane reach this agent at all — and dropped; the three classes of a
+    // version's tools belong to the enable-time screen, which computes them
+    // live rather than off a list a run start froze.
+    expect(Object.keys(read)).toEqual(["kind", "agentVersion"]);
 
     // It asks for `latest` exactly once, and reads the engine at the number
     // that came back. That is the opposite of leaning on the default: the

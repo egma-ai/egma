@@ -1582,16 +1582,20 @@ export function connectionIsConductable(
  * what it unlocks is narrow and specific: the one door that opens a
  * connection's sealed credential outside the simulator. A run over one of these
  * kinds cannot honestly begin until Egma has read which version the agent
- * serves and what that version's tools are, and reading either means reaching
- * the platform with the connection's own key.
+ * serves, and reading it means reaching the platform with the connection's own
+ * key.
  *
  * Every other kind reads nothing at run start and gets nothing unsealed.
  */
 const READS_PLATFORM_AT_RUN_START: ReadonlySet<string> = new Set([
-  // Text mode names its version on every request, so the version has to
-  // be resolved once before the first one — and the three-class coverage stamp
-  // comes from the same read.
+  // Text mode names its version on every request, so the version has to be
+  // resolved once before the first one. The same read is where this lane finds
+  // out it cannot reach a custom LLM at all.
   "retell_text_mode",
+  // A web call is placed against a named version too, and the run records it
+  // whether or not the connection mocks its tools: an unmocked web-call result
+  // that named no version would be a result nobody could tie to an agent.
+  "retell_web_call",
 ]);
 
 /** Whether a run over this kind has to read the platform before it starts. */

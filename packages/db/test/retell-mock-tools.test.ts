@@ -456,6 +456,29 @@ describe("the four fields one run records", () => {
     });
   });
 
+  it("says an unmocked web call conducted against a version and copied nothing", async () => {
+    const agentId = await anAgent("Web call unmocked");
+    const lane: Lane = { ...WEB_CALL, mockToolsEnabled: false };
+    const connectionId = await aConnection(agentId, lane);
+    const { runId } = await seedRun(agentId, connectionId, lane);
+    await database.sql("update run set agent_version = 105 where id = $1", [
+      runId,
+    ]);
+
+    const run = await getRun(acting(), runId);
+    // The version is set on every web-call run, mocked or not. The switch
+    // decides whether a temporary copy exists, never whether Egma knows which
+    // version answered — a voice result nobody can tie to a version is one
+    // nobody can act on.
+    expect(run?.connectionSnapshot.mockToolsEnabled).toBe(false);
+    expect(await fieldsOf(runId)).toEqual({
+      agentVersion: 105,
+      tempMockAgentVersion: null,
+      tempMockAgentVersionCleanup: null,
+      mockMetadata: null,
+    });
+  });
+
   it("says a phone run named no version and touched nothing", async () => {
     const agentId = await anAgent("Phone run");
     const lane: Lane = {

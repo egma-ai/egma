@@ -8,7 +8,7 @@ import {
   type RetellCredential,
 } from "@egma/retell";
 
-import { readTextModeWorld } from "./retell-text-mode.ts";
+import { readTextModeWorld } from "./retell-run-start.ts";
 
 /**
  * The small, read-only Retell account seam used by provider setup.

@@ -704,14 +704,13 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       // that a kind reading nothing does not, and both live here so they are
       // properties of the write rather than habits of one caller.
       if (connectionTypeReadsPlatformAtRunStart(reached.connectionType)) {
-        // **Never a silent conduct against an unread world.** The run cannot
-        // begin without what the read produced: the version every request
-        // will name, and the tool classes its coverage stamp is built from.
-        // The caller does the reading — it is somebody else's API and this is
-        // one transaction holding a lock — but arriving here without it is a
-        // bug in the caller, not a run to write, and a run written without it
-        // would conduct against a world nobody looked at and stamp a claim
-        // nobody checked.
+        // **Never a silent conduct against an unnamed version.** The run cannot
+        // begin without what the read produced: the one serving version every
+        // request will name and this row will record. The caller does the
+        // reading — it is somebody else's API and this is one transaction
+        // holding a lock — but arriving here without it is a bug in the caller,
+        // not a run to write, and a run written without it would leave a result
+        // no reader could tie back to an agent.
         if (input.agentVersion === undefined) {
           throw new Error(
             `a run over a ${reached.connectionType} connection is conducted ` +
@@ -1117,11 +1116,11 @@ export type MockRunState = {
    * The serving version this run conducts against, where the build is what
    * resolved it.
    *
-   * Absent leaves it as it is. A text-mode run has it written by `startRun`
-   * from the run-start read; a mocked web-call run resolves it while building
-   * its world, and that is where it is written down — before the run's counts
-   * land, so it is inside the header's freeze exactly as it is on the other
-   * lane.
+   * Absent leaves it as it is. Every Retell run has it written by `startRun`
+   * from the run-start read; a mocked web-call run resolves the same `latest`
+   * again while branching its copy, and writes that number down here — the same
+   * number, from the agent it is about to branch, landing before the run's
+   * counts do and so inside the header's freeze.
    */
   readonly agentVersion?: number | undefined;
 };

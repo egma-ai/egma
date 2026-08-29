@@ -518,6 +518,48 @@ describe("one mocked run, from the tick to the teardown", () => {
   });
 });
 
+describe("a web-call run whose connection has the switch off", () => {
+  it("still records the version it conducted against, and branches nothing", async () => {
+    const ready = await aTickedAgent("web_call_unmocked_row");
+    // The same connection, switched off. What changes is the mocked world, not
+    // whether Egma knows which version answered: a result nobody can tie to a
+    // version is a result nobody can act on, mocked or not.
+    const untick = await ask(
+      api.app,
+      "PATCH",
+      `/v1/agents/${ready.agentId}/connections/${ready.connectionId}`,
+      ready.key,
+      { mockToolsEnabled: false },
+    );
+    expect(untick.statusCode, JSON.stringify(untick.body)).toBe(200);
+
+    const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+
+    // The fourth sample row of the four-field table: one version, three nulls.
+    const header = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${String(started.body.id)}`,
+      ready.key,
+    );
+    expect(header.body.agentVersion).toBe(105);
+    expect(header.body.tempMockAgentVersion).toBeNull();
+    expect(header.body.tempMockAgentVersionCleanup).toBeNull();
+    expect(header.body.mockMetadata).toBeNull();
+
+    // And the account is untouched: no version was branched, and the number
+    // that rides `latest` was never repointed.
+    expect([...ready.state.versions]).toEqual([105]);
+    expect(ready.state.writes).toEqual([]);
+  });
+});
+
 describe("a run whose world cannot be built", () => {
   it("is refused with the reason, before a single simulation is conducted", async () => {
     // The fork guard's case: Retell answers a branch that still points at the

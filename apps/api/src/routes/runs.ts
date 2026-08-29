@@ -60,8 +60,9 @@ import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
 import {
   readTextModeWorld,
+  readWebCallWorld,
   type PlatformWorldRead,
-} from "../providers/retell-text-mode.ts";
+} from "../providers/retell-run-start.ts";
 
 /**
  * How one connection type reads the agent's platform before its run starts.
@@ -83,6 +84,11 @@ const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
       { apiKey: reach.apiKey, agentId: reach.config["retellAgentId"] ?? "" },
       fetchImpl,
     ),
+  retell_web_call: (reach, fetchImpl) =>
+    readWebCallWorld(
+      { apiKey: reach.apiKey, agentId: reach.config["retellAgentId"] ?? "" },
+      fetchImpl,
+    ),
 };
 
 export type RunRoutesOptions = {
@@ -91,10 +97,10 @@ export type RunRoutesOptions = {
   readonly baseUrl: string;
   readonly carrierRoute: CarrierRoute | undefined;
   /**
-   * Test seam for the Retell reads and writes a run start makes, on the two
-   * lanes that reach the platform: the draft lane's mocked-world build, and the
-   * text-mode lane's version-pinning run-start read. The real one is `fetch`,
-   * and a run that neither mocks nor pins a version reaches no platform here.
+   * Test seam for the Retell reads and writes a run start makes: the
+   * version-pinning run-start read both Retell lanes do, and the mocked-world
+   * build a ticked web-call connection does after it. The real one is `fetch`,
+   * and a phone run reaches no platform here at all.
    */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -493,16 +499,12 @@ export async function runRoutes(
         }
       }
 
-      // Two lanes reach the platform when a run starts, and a run is over at
-      // most one of them. They are dispatched by connection type and never both
-      // run for one run.
-      //
-      // **The text-mode lane reads its world before the run row exists.** A
-      // resolve or a tool read that failed after the row was written would leave
-      // a queued run nobody can conduct honestly; refused here, nothing was
-      // started and the sentence says so. A run admitted without this read would
-      // conduct against a world Egma never looked at, whose coverage stamp would
-      // be a claim about tools nobody saw.
+      // **A Retell lane reads the serving version before the run row exists.**
+      // A read that failed after the row was written would leave a queued run
+      // nobody can conduct honestly; refused here, nothing was started and the
+      // sentence says so. A run admitted without this read would carry no
+      // version at all, and its result would name no agent a reader could go
+      // back to. The registry says which kinds read; a phone run reads nothing.
       const kind = await connectionTypeOf(acting.auth, connectionId);
       let conducted: number | undefined;
       let conductedIdentity: string | undefined;
@@ -557,10 +559,11 @@ export async function runRoutes(
       // version's tool URLs carry this run's identifier, and nothing races it: a
       // mocked run's simulations are unclaimable until the record names a
       // temporary version, from the instant they are written. This is a no-op
-      // for a text-mode run — not a mockable draft lane — and for an unticked
-      // agent; only a run over a mockable draft lane whose agent carries the
-      // tick reaches Retell here. A world that cannot be built cancels the run
-      // and is answered as itself, never as a run that started.
+      // for a text-mode run — not a mockable draft lane — and for a web-call run
+      // whose own connection has the mock-tools switch off; only a run whose
+      // frozen snapshot holds both facts reaches Retell here. A world that
+      // cannot be built cancels the run and is answered as itself, never as a
+      // run that started.
       const world = await buildRunMockedWorld(
         acting.auth,
         started,
