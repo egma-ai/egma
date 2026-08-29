@@ -72,24 +72,29 @@ The coding agent does not stop for repeated confirmation between these states.
    agent asks only when the request or repository leaves a real choice.
 4. The coding agent resolves the exact remote target from repository and CLI
    facts before `connect` or `monitoring enable` runs.
-5. For testing, the coding agent connects the agent, lists valid personas,
-   creates one suite, writes the smallest grounded test set, and adds the LiveKit
-   mocked world when the target is LiveKit.
+5. For supported testing, the coding agent connects the agent, lists valid
+   personas, creates one suite, writes the smallest grounded test set, and adds
+   the mocked world for a Python LiveKit worker.
 6. The coding agent runs repository checks and `egma validate`, reads every
    changed file back, and shows the complete change.
 7. The coding agent runs `egma push` as part of the requested end-to-end work.
 8. The coding agent names the suite, agent, connection, modality, and simulation
    count. A real phone run is the exception: the coding agent warns that it
    places real calls and can cost money, then waits for approval.
-9. The coding agent runs and follows the suite. For a repository-local LiveKit
-   worker, the same `egma run` command starts, owns, and always stops the worker.
+9. The coding agent runs and follows the suite. For a repository-local Python
+   LiveKit worker, the same `egma run` command starts, owns, and always stops the
+   worker.
 10. For monitoring or both, the coding agent runs `egma monitoring enable` on
     the settled agent, then reads
     `egma monitoring status`.
 
 A monitoring-only integration skips the simulation connection, suite, test
-files, publish, and run. A both integration finishes only after the run and the
-monitoring status are complete.
+files, publish, and run. A Both integration with supported testing finishes
+only after the run and monitoring status are complete. JavaScript LiveKit
+supports monitoring, but not simulation testing because its mocks are not
+isolated between sessions. A JavaScript Testing request stops before remote
+testing setup. A JavaScript Both request completes monitoring and reports the
+testing boundary without claiming that Both completed.
 
 ## Sign in
 
@@ -317,10 +322,11 @@ printed remote suite definitely exists. Run `egma pull` before any other create
 attempt, then use the pulled suite when it exists.
 
 The coding agent then writes the smallest grounded Markdown test set under
-`egma/tests/receptionist-core/`. For LiveKit testing it also connects the Egma
-SDK test entry and writes the project-wide external-dependency answers in
+`egma/tests/receptionist-core/`. For Python LiveKit testing it also connects the
+Egma SDK test entry and writes the project-wide external-dependency answers in
 `egma/mock-tools.md`, with test-specific overrides only where a case needs a
-different branch.
+different branch. JavaScript LiveKit testing stops before this setup because
+the SDK does not provide session-isolated simulation mocks.
 
 The repository folder is safe to commit:
 
@@ -441,8 +447,11 @@ cat retell-key.txt | egma monitoring enable \
 egma monitoring status
 ```
 
-For LiveKit, the coding agent first adds `monitor_livekit(ctx)` to the selected
-worker, then enables the exact monitoring target:
+For LiveKit, the coding agent installs the latest unpinned Egma SDK with the
+repository's package manager. It adds `monitor_livekit(ctx)` to a Python worker
+or `monitorLiveKit(ctx)` to a JavaScript worker. If `@egma/livekit` is not
+available from the package registry, it stops and reports that release boundary
+instead of using a local checkout. It then enables the exact monitoring target:
 
 ```bash
 egma monitoring enable --platform livekit

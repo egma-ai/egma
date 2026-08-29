@@ -196,9 +196,12 @@ repository. The prompt includes this self-hosted platform address. The coding
 agent uses existing credentials, runs browser login when needed, and completes
 the Retell or LiveKit setup through the current CLI.
 
-For a manual LiveKit setup, install the Egma Python SDK in the agent process.
-Set `EGMA_URL` to the API address and `EGMA_API_KEY` to a project key, then call
-`monitor_livekit(ctx)` before `AgentSession.start`.
+For a manual LiveKit setup, install the [Python SDK](/integrations/python-sdk)
+or [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
+`EGMA_URL` to the API address and `EGMA_API_KEY` to a project key. Call
+`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+`AgentSession.start`. For JavaScript, complete the npm availability check on
+the linked setup page first.
 
 ```bash
 export EGMA_URL=http://localhost:3100

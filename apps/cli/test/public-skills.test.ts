@@ -149,7 +149,10 @@ describe("the public skill source", () => {
     );
 
     expect(onboarding).toMatch(
-      /For both outcomes, create the simulation connection first, then enable\s+monitoring on that recorded agent/u,
+      /When Both supports testing, create the simulation connection first, then enable\s+monitoring on that recorded agent/u,
+    );
+    expect(onboarding).toMatch(
+      /For JavaScript Both, skip simulation setup,\s+complete monitoring, and finish at `unsupported-capability`/u,
     );
     expect(onboarding).toMatch(
       /both to `monitoring-setup` after execution and grading are terminal/u,
@@ -171,6 +174,7 @@ describe("the public skill source", () => {
       "complete",
       "no-agent",
       "unsupported-platform",
+      "unsupported-capability",
     ]);
     for (const line of stateLines) {
       expect(line.match(/[.!?](?=\s|$)/gu) ?? [], line).toHaveLength(1);
@@ -201,18 +205,30 @@ describe("the public skill source", () => {
     expect(liveKitWorker).toContain(
       "egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python",
     );
-    expect(liveKitWorker).toMatch(/Do not add an SDK version, tag, or commit/u);
+    expect(liveKitWorker).toMatch(
+      /Do not add an\s+SDK version, tag, or commit/u,
+    );
     expect([skill, onboarding, liveKitWorker].join("\n")).not.toMatch(
       /https:\/\/github\.com\/egma-ai\/egma\/archive\//u,
     );
     expect(liveKitWorker).not.toMatch(/[a-f0-9]{40}/u);
 
-    expect(onboarding).toMatch(/Retell or LiveKit/u);
+    expect(onboarding).toMatch(/For Retell,/u);
+    expect(onboarding).toMatch(/For LiveKit,/u);
     expect(onboarding).toMatch(
       /Report\s+Pipecat or Vapi accurately even though the CLI cannot connect them yet/u,
     );
     expect(liveKitWorker).toContain("`@livekit/agents`");
-    expect(liveKitWorker).toMatch(/Egma SDK hooks are not supported there yet/u);
+    expect(liveKitWorker).toMatch(
+      /JavaScript workers[\s\S]*support monitoring through `@egma\/livekit`/u,
+    );
+    expect(liveKitWorker).toMatch(
+      /JavaScript Testing request[\s\S]*stop before remote testing setup/u,
+    );
+    expect(liveKitWorker).toMatch(
+      /JavaScript Both request[\s\S]*do not claim\s+that Both completed/u,
+    );
+    expect(liveKitWorker).not.toContain("@egma/livekit@");
 
     expect(skill).toMatch(
       /Pause only when the developer must approve browser login, supply a credential/u,
@@ -227,7 +243,7 @@ describe("the public skill source", () => {
     expect(liveKitWorker).toContain("`BackgroundAudioPlayer`");
     expect(liveKitWorker).toMatch(/Start\s+each publisher only outside the chat branch/u);
     expect(liveKitWorker).toMatch(
-      /Disabling session audio does not\s+silence an independent publisher/u,
+      /Disabling\s+session audio does not silence an independent publisher/u,
     );
 
     expect([skill, onboarding, liveKitWorker].join("\n")).not.toMatch(CLI_MARKER);

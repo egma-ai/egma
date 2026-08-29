@@ -145,14 +145,24 @@ describe("the egma command", () => {
     const result = await egma(["livekit"], workspace);
 
     expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(result.stdout).toContain("integration: livekit-python");
+    expect(result.stdout).toContain("integration: livekit");
     expect(result.stdout).toContain(
-      "testing_call: await mockable(agent, ctx, session)",
+      "python_testing_call: await mockable(agent, ctx, session)",
     );
-    expect(result.stdout).toContain("monitoring_call: monitor_livekit(ctx)");
+    expect(result.stdout).toContain(
+      "python_monitoring_call: monitor_livekit(ctx)",
+    );
+    expect(result.stdout).toContain("javascript_testing: unsupported");
+    expect(result.stdout).toContain(
+      "javascript_monitoring_package: @egma/livekit",
+    );
+    expect(result.stdout).toContain(
+      "javascript_monitoring_call: monitorLiveKit(ctx)",
+    );
     expect(result.stdout).toContain("chat_rule:");
     expect(result.stdout).toContain("status: ready");
     expect(result.stdout).not.toContain("dependency:");
+    expect(result.stdout).not.toContain("@egma/livekit@");
     expect(result.stdout).not.toContain("approve_url:");
   });
 

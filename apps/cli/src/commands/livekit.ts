@@ -14,17 +14,33 @@ export type LiveKitContractCommandOptions = {
 export function runLiveKitContractCommand(
   options: LiveKitContractCommandOptions,
 ): number {
-  options.out("integration: livekit-python");
+  options.out("integration: livekit");
   options.out("python: 3.11-or-newer");
-  options.out("testing_import: from egma import mockable");
-  options.out("testing_call: await mockable(agent, ctx, session)");
+  options.out("python_testing: supported");
+  options.out("python_testing_import: from egma import mockable");
+  options.out("python_testing_call: await mockable(agent, ctx, session)");
   options.out(
-    "testing_position: after the initial agent and AgentSession exist; before AgentSession.start",
+    "python_testing_position: after the initial agent and AgentSession exist; before AgentSession.start",
   );
-  options.out("monitoring_import: from egma import monitor_livekit");
-  options.out("monitoring_call: monitor_livekit(ctx)");
+  options.out("python_monitoring: supported");
+  options.out("python_monitoring_import: from egma import monitor_livekit");
+  options.out("python_monitoring_call: monitor_livekit(ctx)");
   options.out(
-    "monitoring_position: first statement in the job entrypoint; before ctx.connect and AgentSession.start",
+    "python_monitoring_position: first statement in the job entrypoint; before ctx.connect and AgentSession.start",
+  );
+  options.out("javascript: node-22-or-newer");
+  options.out("javascript_testing: unsupported");
+  options.out(
+    "javascript_testing_reason: LiveKit Agents JS has process-wide mocks without session isolation",
+  );
+  options.out("javascript_monitoring: supported");
+  options.out("javascript_monitoring_package: @egma/livekit");
+  options.out(
+    'javascript_monitoring_import: import { monitorLiveKit } from "@egma/livekit"',
+  );
+  options.out("javascript_monitoring_call: monitorLiveKit(ctx)");
+  options.out(
+    "javascript_monitoring_position: first statement in the job entrypoint; before ctx.connect and AgentSession.start",
   );
   options.out("simulation_room_prefix: egma-sim-");
   options.out("chat_room_prefix: egma-sim-chat-");
@@ -32,9 +48,8 @@ export function runLiveKitContractCommand(
     "chat_rule: disable AgentSession audio input, audio output, and transcription sync, and do not start any independent audio publisher",
   );
   options.out(
-    "dispatch_name: use the exact registered WorkerOptions agent_name; add one when the worker has none",
+    "dispatch_name: use the exact registered worker name for the discovered language; add one when the worker has none",
   );
-  options.out("node_worker: chat setup only; the Egma SDK does not support Node workers");
   options.out("status: ready");
   return 0;
 }

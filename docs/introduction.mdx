@@ -32,8 +32,8 @@ simulations.
 
 - For Retell, Egma polls the selected Retell agent for completed calls while its
   **pull production calls** switch is on.
-- For LiveKit, the Egma Python SDK configures OpenTelemetry export in the
-  running worker. The worker pushes its own production evidence to Egma.
+- For LiveKit, the Egma Python or JavaScript SDK configures OpenTelemetry export
+  in the running worker. The worker pushes its own production evidence to Egma.
 
 Both paths produce production conversation records. Egma shows the transcript,
 supported metrics, and grades when project graders apply. Egma keeps provider
@@ -75,10 +75,12 @@ in the prompt and tools Retell actually runs. Production monitoring uses
 Retell's call-history APIs.
 
 **LiveKit** uses room connections with project credentials or a customer token
-endpoint. The coding agent grounds setup in committed worker source, connects
-the Egma SDK test entry, and can let `egma run` own a repository-local worker.
-Production monitoring calls `monitor_livekit(ctx)` before the worker starts its
-agent runtime.
+endpoint. The coding agent grounds setup in committed worker source. Python
+workers support simulation testing and can let `egma run` own a
+repository-local worker. Production monitoring calls `monitor_livekit(ctx)` in
+Python or, after the npm availability check, `monitorLiveKit(ctx)` in
+JavaScript before `AgentSession.start`. The JavaScript SDK supports monitoring,
+but not simulation testing.
 
 ## How setup works
 

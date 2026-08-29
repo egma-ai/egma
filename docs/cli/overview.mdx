@@ -127,9 +127,13 @@ cost money.
     response or a local manifest failure, it pulls before any new create.
   </Step>
   <Step title="Integrate the LiveKit test path">
-    For LiveKit testing, the coding agent adds the Egma SDK testing entry to the
-    worker and writes grounded answers for external-dependency tools. Retell
-    does not need this source integration.
+    For a Python LiveKit worker, the coding agent adds the Egma SDK testing
+    entry and writes grounded answers for external-dependency tools. The
+    JavaScript SDK supports monitoring only because LiveKit Agents JS does not
+    isolate mocks between sessions. A JavaScript Testing request stops before
+    remote testing setup. A JavaScript Both request completes monitoring, then
+    reports that simulation remains unsupported instead of claiming that Both
+    completed. Retell does not need this source integration.
   </Step>
   <Step title="Validate and review">
     The coding agent runs focused repository checks and `egma validate`, reads
@@ -144,10 +148,15 @@ cost money.
     start uses that key without creating a second run.
   </Step>
   <Step title="Enable monitoring">
-    `egma monitoring enable` configures the selected
-    Retell or LiveKit production path. LiveKit enable writes its new secret only
-    to a regular `.env` that Git ignores; it never prints that secret. The
-    coding agent runs `egma monitoring status` to read the final state.
+    `egma monitoring enable` configures the selected Retell or LiveKit
+    production path. For LiveKit, the coding agent installs the latest unpinned
+    Egma SDK for the detected language and adds `monitor_livekit(ctx)` in
+    Python or `monitorLiveKit(ctx)` in JavaScript. See the
+    [Python SDK](/integrations/python-sdk) and
+    [JavaScript SDK](/integrations/javascript-sdk). LiveKit enable writes its
+    new secret only to a regular `.env` that Git ignores; it never prints that
+    secret. The coding agent runs `egma monitoring status` to read the final
+    state.
   </Step>
 </Steps>
 

@@ -107,6 +107,12 @@ Choose one outcome:
   no simulation connection, suite, tests, or run.
 - **Both** completes the testing and monitoring outcomes for the same agent.
 
+LiveKit JavaScript is the current exception: it supports Monitoring, but its
+simulation mocks are not isolated between sessions. For JavaScript Testing,
+the coding agent reports that boundary before remote testing setup. For
+JavaScript Both, it completes Monitoring and reports that Testing remains
+unsupported instead of claiming that Both completed.
+
 The coding agent resolves the exact Egma platform, agent, provider target,
 modality, access method, and resources from repository evidence and live CLI
 facts. It asks only when those facts leave a material choice.
@@ -144,6 +150,9 @@ the committed prompt and provider prompt have drifted. It does not hide or
 silently resolve that difference.
 
 ### LiveKit
+
+The simulation path in this section supports Python workers. A JavaScript
+worker follows the Monitoring path in section 8 instead.
 
 The coding agent reads the selected Egma instance's LiveKit catalog through
 three iterative, read-only calls. The first call lists modalities:
@@ -308,7 +317,7 @@ path. It converts any existing cases you supplied before it adds new coverage.
 Each Markdown test names at least one persona and contains a scenario plus
 judgeable expected behaviors.
 
-For LiveKit testing, the coding agent also:
+For Python LiveKit testing, the coding agent also:
 
 - connects the Egma SDK test entry to the selected worker;
 - writes one grounded project-wide answer for each external-dependency tool in
@@ -383,7 +392,7 @@ egma run receptionist-core \
 Never reuse that key with changed inputs or for a new run. When the CLI prints
 a `run:` ID, use that existing run instead of starting it again.
 
-For a local LiveKit worker, one command owns the worker and the run:
+For a local Python LiveKit worker, one command owns the worker and the run:
 
 ```bash
 LIVEKIT_URL=wss://acme.livekit.cloud \
@@ -426,8 +435,11 @@ cat retell-key.txt | egma monitoring enable \
 egma monitoring status
 ```
 
-For LiveKit, the coding agent first adds `monitor_livekit(ctx)` to the selected
-worker and runs its focused checks, then enables the exact monitoring target:
+For LiveKit, the coding agent installs the latest unpinned Egma SDK with the
+repository's package manager. It adds `monitor_livekit(ctx)` to a Python worker
+or `monitorLiveKit(ctx)` to a JavaScript worker and runs focused checks. If the
+JavaScript package is not available from the registry, it stops instead of
+using a local checkout. It then enables the exact monitoring target:
 
 ```bash
 egma monitoring enable --platform livekit
@@ -443,8 +455,10 @@ the key ID that the developer must revoke before retrying. The coding agent
 does not read the file or repeat its secret.
 
 A monitoring-only task ends after the CLI enables monitoring and the coding
-agent reads the status receipt. A both task ends only after the run and the
-monitoring status reach their required end states.
+agent reads the status receipt. A Both task with supported testing ends only
+after the run and monitoring status reach their required end states. A
+JavaScript Both task ends after monitoring with a clear report that simulation
+testing remains unsupported.
 
 ## Keep tests in step
 
@@ -471,5 +485,11 @@ egma run <suite-directory>
   </Card>
   <Card title="Retell" icon="phone" href="/integrations/retell">
     Retell simulation lanes, provider context, and production monitoring.
+  </Card>
+  <Card title="LiveKit Monitoring" icon="python" href="/integrations/python-sdk">
+    Add `monitor_livekit(ctx)` to a Python worker.
+  </Card>
+  <Card title="LiveKit JavaScript Monitoring" icon="code" href="/integrations/javascript-sdk">
+    Check the npm release, then add `monitorLiveKit(ctx)` to a JavaScript worker.
   </Card>
 </CardGroup>

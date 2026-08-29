@@ -3155,6 +3155,10 @@ describe("the complete product, walked in order in a second project", () => {
         "an old narrowed link still offers all three current outcomes",
       ).toEqual(["Simulation", "Monitoring", "Both"]);
       expect(await sheet.getByText(/monitor_livekit\(ctx\)/u).count()).toBe(0);
+      expect(await sheet.getByText(/monitorLiveKit\(ctx\)/u).count()).toBe(0);
+      expect(await sheet.getByText(/npm install @egma\/livekit/u).count()).toBe(
+        0,
+      );
 
       const cookie = (await walk.context().cookies(origin))
         .map((one) => `${one.name}=${one.value}`)
@@ -3183,7 +3187,6 @@ describe("the complete product, walked in order in a second project", () => {
         }),
       });
       expect(connected.status, await connected.clone().text()).toBe(201);
-
       const stored = await instance.database.sql<{
         agent_name: string;
         agent_platform: string;

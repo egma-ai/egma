@@ -8,7 +8,7 @@ name: Tests
 # needs to see.
 #
 # A pull request **into `main`** gets everything: the cheap lane plus the
-# real-browser proof, the simulator tests, the Python SDK tests and the fixture
+# real-browser proof, the simulator tests, the SDK tests and the fixture
 # tests. That is the handoff gate, and nothing in it is allowed to skip.
 #
 # A push to `main` runs the same six jobs again on the tree `main` now owns.
@@ -17,7 +17,7 @@ name: Tests
 #
 # The split is deliberate rather than thrifty. An effort lands as a dozen pull
 # requests into one integration branch and then one pull request from that
-# branch into `main`. Running the browser proof and three Python suites on each
+# branch into `main`. Running the browser proof and separate SDK suites on each
 # of the dozen would pay for the complete proof twelve times and gate on it
 # once — which is the wrong way round. So the trigger is broad and the scope
 # depends on the branch being merged into: `github.base_ref`, which on a pull
@@ -73,7 +73,7 @@ jobs:
             echo "Into main — the complete proof: lint, typecheck, the fast lane, the browser lane, the simulator, SDK and fixture tests."
           else
             echo "Into $BASE — the cheap lane: lint, typecheck and the fast lane."
-            echo "The browser lane and the Python suites run at the gate into main."
+            echo "The browser lane and the complete SDK suites run at the gate into main."
           fi
 
       # Actions are pinned to a commit rather than a tag, the way
@@ -278,7 +278,7 @@ jobs:
         run: pnpm test:simulator
 
   sdk:
-    name: Python SDK tests
+    name: SDK tests
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
@@ -302,10 +302,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Install uv
+      - name: Install the Python SDK toolchain
         run: pipx install uv
 
-      - name: Run the SDK tests
+      - name: Run the Python and JavaScript SDK tests
         run: pnpm test:sdk
 
   fixture:

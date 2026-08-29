@@ -7,7 +7,7 @@ description: "Set up platform-specific production monitoring, then read real con
 Egma receives real production conversations two ways, and which one depends on
 the agent platform. Retell is **pulled**: Egma polls Retell for an agent whose
 switch is on, after each voice conversation finishes. LiveKit is
-**pushed**: the running Python agent process sends OpenTelemetry to Egma.
+**pushed**: the running agent process sends OpenTelemetry to Egma.
 
 Both paths produce the same Egma conversation record. Egma shows a structured
 transcript, tool evidence, supported measures, and production grader work when
@@ -29,10 +29,11 @@ the agent platform.
   imports the previous 30 days and then polls about every 30 seconds. The
   switch lives on the agent, so each agent is started and stopped on its own.
   See [Retell](/integrations/retell).
-- **LiveKit is pushed.** Install the Egma Python SDK and call
-  `monitor_livekit(ctx)` before `AgentSession.start`. The worker sends OTLP to
-  `POST /v1/traces`. There is nothing to switch on: the conversations appear as
-  soon as the worker sends them.
+- **LiveKit is pushed.** Install the Egma SDK for the worker's language. Call
+  `monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+  `AgentSession.start`. The worker sends OTLP to `POST /v1/traces`. There is
+  nothing to switch on: the conversations appear as soon as the worker sends
+  them.
 
 See [Monitoring API](/api/monitoring) for the start and stop doors.
 
@@ -67,9 +68,11 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
 **Leave `/v1/traces` off the end.** The exporter appends the signal's own path. Give it the base origin.
 </Warning>
 
-### LiveKit
+## LiveKit SDKs
 
-Install the Egma Python SDK:
+### Python
+
+Install the Python SDK:
 
 ```bash
 pip install 'egma>=0.2.0'
@@ -103,11 +106,41 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 The same helper works for customer-hosted and LiveKit Cloud-hosted Python agents. It preserves a compatible existing provider and LiveKit Cloud observability, sends batches to Egma, and flushes the last batch when the job stops. See [Egma Python SDK](/integrations/python-sdk) for the complete setup and health limits.
 
+### JavaScript
+
+First complete the npm availability check on the
+[JavaScript SDK setup page](/integrations/javascript-sdk). Then install the
+JavaScript SDK:
+
+```bash
+npm install @egma/livekit
+```
+
+Use the same `EGMA_URL` and `EGMA_API_KEY` values, then call the JavaScript
+helper first in the job entrypoint:
+
+```typescript
+import { monitorLiveKit } from "@egma/livekit";
+import { type JobContext } from "@livekit/agents";
+
+export async function entrypoint(ctx: JobContext) {
+  monitorLiveKit(ctx);
+  // Build the agent and session here.
+  await session.start({ agent, room: ctx.room });
+}
+```
+
+The helper preserves LiveKit Cloud observability when it owns setup before the
+session starts, sends batches to Egma, and flushes its own last batch when the
+job stops. It refuses to replace a custom provider that another integration
+installed first. See [Egma JavaScript SDK](/integrations/javascript-sdk) for
+the complete setup and current testing boundary.
+
 ## API key requirements
 
 The API key you use for customer OTLP production export must be **project-scoped**. Egma rejects an organization-wide key before it decodes or stores the request body. Organization-wide keys can still use the trace read APIs to query across the organization.
 
-To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first open the agent and check its **pull production calls** switch, then widen the transcript time window.
+To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If Retell calls are missing under **Monitoring**, open the agent and check its **pull production calls** switch. If LiveKit conversations are missing, check the worker export logs and its access to `EGMA_URL`. Then widen the transcript time window.
 
 ## Querying traces
 

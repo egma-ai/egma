@@ -36,7 +36,9 @@
     "apps/api/test/**/*.ts",
     "apps/grader/test/**/*.ts",
     "apps/cli/test/**/*.ts",
-    "apps/cli/smoke/**/*.ts"
+    "apps/cli/smoke/**/*.ts",
+    "sdks/livekit-js/test/**/*.ts",
+    "sdks/livekit-js/vitest.config.ts"
   ],
   "exclude": [
     // A committed fixture repository is another project's source, kept as it

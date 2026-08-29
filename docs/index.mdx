@@ -44,10 +44,10 @@ behaviors you expect.
     ```
   </Step>
   <Step title="Connect and author">
-    The `integrate-egma` skill keeps discovery read-only, resolves the exact
-    setup from live facts, and uses named commands to connect Retell or LiveKit.
-    It lists valid personas, creates one suite, and writes the smallest grounded
-    test set.
+    For supported testing, the `integrate-egma` skill keeps discovery read-only,
+    resolves the exact setup from live facts, and uses named commands to connect
+    Retell or LiveKit. It lists valid personas, creates one suite, and writes the
+    smallest grounded test set.
 
     ```bash
     egma personas
@@ -56,9 +56,9 @@ behaviors you expect.
     ```
   </Step>
   <Step title="Publish and run">
-    Your end-to-end prompt already asks the coding agent to push the complete
-    repository and follow one suite. A real phone run includes a cost warning
-    and waits for approval.
+    For supported testing, your end-to-end prompt already asks the coding agent
+    to push the complete repository and follow one suite. A real phone run
+    includes a cost warning and waits for approval.
 
     ```bash
     egma push
@@ -68,8 +68,10 @@ behaviors you expect.
 </Steps>
 
 Monitoring is a separate requested outcome. A monitoring-only integration skips
-connections, suites, tests, and runs. A both integration finishes the reviewed
-run and confirms `egma monitoring status`.
+connections, suites, tests, and runs. When testing is supported, a Both
+integration finishes the reviewed run and confirms `egma monitoring status`.
+JavaScript LiveKit Both completes monitoring and reports that simulation
+testing remains unsupported.
 
 ## Key integrations
 
@@ -79,5 +81,8 @@ run and confirms `egma monitoring status`.
   </Card>
   <Card title="Python SDK" icon="python" href="/integrations/python-sdk">
     Connect LiveKit simulations to mock tools and send production spans to Monitoring.
+  </Card>
+  <Card title="JavaScript SDK" icon="code" href="/integrations/javascript-sdk">
+    Check the npm release, then send LiveKit Agents JS spans to Monitoring.
   </Card>
 </CardGroup>
