@@ -8,6 +8,7 @@ import {
   recordMockState,
   type AuthContext,
   type MockRunState,
+  type OwedMockCleanup,
   type Run,
 } from "@egma/db";
 import {
@@ -311,6 +312,15 @@ export type SweptMockedWorlds =
  * retries later and must never find a draft to route `latest` onto. Anything
  * that keeps this sweep from *knowing* the agent is clean — the read failing,
  * the platform key gone — is therefore `unsettled` too, never a shrug.
+ *
+ * **Under this agent's mocked-world fence, from the read to the last restore.**
+ * A teardown that ran beside a new run's claim would be the hijack itself: this
+ * settle deletes a draft and then puts a `latest` binding back, while the new
+ * run — which a *finished* run never blocks — branches the version that binding
+ * would then resolve to. The fence is what makes the two take turns, and the
+ * re-read inside it is what makes the loser harmless: whoever gets there second
+ * finds the cleanup flag already `true`, has nothing in its list, and restores
+ * nothing.
  */
 export async function settleOwedMockCleanups(
   auth: AuthContext,
@@ -319,14 +329,19 @@ export async function settleOwedMockCleanups(
   log: { error: (payload: unknown, message?: string) => void },
   options: { readonly exceptRunId?: string } = {},
 ): Promise<SweptMockedWorlds> {
-  let outstanding;
   try {
-    outstanding = await owedMockCleanups(auth, agentId, options);
+    return await owedMockCleanups(
+      auth,
+      agentId,
+      { ...options, fence: "only-when-owed" },
+      async (outstanding) =>
+        settleTheseMockCleanups(auth, agentId, outstanding, reach, log),
+    );
   } catch (cause) {
     log.error(
       platformEvent(
         "egma.mock_tools.sweep_failed",
-        "the outstanding mocked worlds of an agent could not be read",
+        "the outstanding mocked worlds of an agent could not be settled",
         {
           "egma.agent_id": agentId,
           "error.type": "mock_tools_sweep_failed",
@@ -339,6 +354,23 @@ export async function settleOwedMockCleanups(
       reason: "what this agent's runs still owe could not be read",
     };
   }
+}
+
+/**
+ * The settling itself, over rows already read under the fence — and only ever
+ * called inside one, by the two callers above.
+ *
+ * Split from the fence rather than nested inside it because the build path
+ * holds one fence over its claim, this sweep and its whole build: two holds
+ * would be this process waiting on a lock it is already holding.
+ */
+async function settleTheseMockCleanups(
+  auth: AuthContext,
+  agentId: string,
+  outstanding: readonly OwedMockCleanup[],
+  reach: MockedWorldReach,
+  log: { error: (payload: unknown, message?: string) => void },
+): Promise<SweptMockedWorlds> {
   if (outstanding.length === 0) return { kind: "settled" };
 
   const agent = await getAgent(auth, agentId);

@@ -268,6 +268,8 @@ export function CreateRunSheet({
     suiteHasTests &&
     agentId !== "" &&
     connectionId !== "";
+  /** The connection this run will be conducted over, once one is chosen. */
+  const chosenConnection = connections.find((one) => one.id === connectionId);
   const whyNot = !mayStart
     ? "Your role cannot start a run."
     : emptySuite
@@ -479,6 +481,10 @@ export function CreateRunSheet({
           </div>
         )}
 
+        {chosenConnection === undefined ? null : (
+          <LaneNote connection={chosenConnection} />
+        )}
+
         {connectionId === "" ? null : (
           <div>
             <Field label="Run name [optional]" htmlFor="run-name">
@@ -582,5 +588,44 @@ export function CreateRunSheet({
         </form>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Which lane this run will take, said before it starts.
+ *
+ * **A phone run says plainly that it reaches real tools.** It is the real
+ * telephony lane by design and can never be mocked, so a person about to start
+ * one must never believe otherwise — hitting a real backend believing it was
+ * mocked is the failure this line exists to prevent. Every other lane says
+ * whether its own switch is on, which is a fact about *that* connection and
+ * never about the agent.
+ */
+function LaneNote({
+  connection,
+}: {
+  readonly connection: {
+    readonly connectionType: string;
+    readonly mockToolsEnabled?: boolean;
+  };
+}) {
+  const phone = connection.connectionType === "phone_number";
+  const mocked = connection.mockToolsEnabled === true;
+  return (
+    <p
+      className={
+        phone || !mocked
+          ? "m-0 border border-warning-border bg-warning-surface p-4 text-sm text-foreground"
+          : "m-0 border border-border p-4 text-sm text-faint"
+      }
+      data-slot="run-lane-note"
+      role="note"
+    >
+      {phone
+        ? "This run dials the real number and reaches your real tools. A phone run is never mocked."
+        : mocked
+          ? "Mock tools are on for this connection, so this run is conducted with mocked tools. Tools Egma cannot intercept still run for real."
+          : "Mock tools are off for this connection, so this run reaches your real tools."}
+    </p>
   );
 }

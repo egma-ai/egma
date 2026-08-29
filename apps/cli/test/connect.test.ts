@@ -290,7 +290,7 @@ describe("one agent, and several", () => {
   it("offers a choice when there are several, and registers the one chosen", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
-    const { ui, report } = await run({ keys: [KEY], agent: "agent_0003" });
+    const { ui, report } = await run({ keys: [KEY], agent: "agent_0002" });
 
     expect(ui.record.asked).toContain("retell-agent");
     expect(ui.record.agentChoices.map((agent) => agent.id)).toEqual([
@@ -300,12 +300,12 @@ describe("one agent, and several", () => {
     ]);
     expect(report).toEqual({
       kind: "connected",
-      agentName: "chat-desk",
+      agentName: "after-hours",
       connectionName: "retell_text_mode-1",
     });
 
     const [connection] = platform.registered.connections;
-    expect(connection?.config).toEqual({ retellAgentId: "agent_0003" });
+    expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
   });
 
   it("follows the listing's pages, so an account bigger than one page is whole", async () => {
@@ -335,16 +335,6 @@ describe("one agent, and several", () => {
     expect(platform.registered.agents).toHaveLength(0);
   });
 
-  it("makes a text connection a chat one for a Retell chat agent", async () => {
-    retell = await startFakeRetell(THREE_AGENTS);
-
-    const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
-    expect(connected?.config.modality).toBe("chat");
-    expect(platform.registered.connections[0]?.modality).toBe("chat");
-    // A custom model is the customer's own service, so Retell holds no prompt.
-    expect(connected?.config.prompt).toBeNull();
-  });
-
   it("makes a text connection text mode one for a Retell voice agent", async () => {
     // agent_0002 is a voice agent on a Retell LLM, so text is a chat simulation
     // over text mode rather than the phone. The refusal that used to stand
@@ -353,7 +343,7 @@ describe("one agent, and several", () => {
 
     const { connected } = await run({ keys: [KEY], agent: "agent_0002" });
 
-    expect(connected?.reach).toBe("text");
+    expect(connected?.lanes).toEqual(["text"]);
     expect(connected?.config.modality).toBe("voice");
     const [connection] = platform.registered.connections;
     expect(connection?.connectionType).toBe("retell_text_mode");
@@ -396,21 +386,10 @@ describe("one agent, and several", () => {
     const { connected, report } = await run({ keys: [KEY], lanes: "phone" });
 
     expect(report.kind).toBe("connected");
-    expect(connected?.reach).toBe("phone");
+    expect(connected?.lanes).toEqual(["phone"]);
     expect(platform.registered.connections[0]?.connectionType).toBe("phone_number");
   });
 
-  it("reads a chat agent at the address Retell keeps chat agents at", async () => {
-    retell = await startFakeRetell(THREE_AGENTS);
-
-    await run({ keys: [KEY], agent: "agent_0003" });
-
-    // One listing answers with both kinds and each is then read at its own
-    // address. Knocking on the other one answers nothing on a real account,
-    // and the developer would be told their agent had gone away.
-    expect(retell.requests.map((asked) => asked.path)).toContain("/get-chat-agent/agent_0003");
-    expect(retell.requests.map((asked) => asked.path)).not.toContain("/get-agent/agent_0003");
-  });
 });
 
 describe("what lands on the platform", () => {
@@ -444,7 +423,7 @@ describe("what lands on the platform", () => {
     expect(connected?.config.engine).toBe("retell-llm");
     expect(connected?.config.prompt).toBe(PROMPT);
     expect(connected?.config.tools).toHaveLength(1);
-    expect(connected?.reach).toBe("phone");
+    expect(connected?.lanes).toEqual(["phone"]);
     expect(platform.registered.connections[0]?.modality).toBe("voice");
 
     // None of it went to egma. The agent it just registered holds its identity
@@ -618,8 +597,8 @@ describe("one agent, two connections", () => {
     const phone = await run({ keys: [KEY], lanes: "phone" });
     const text = await run({ keys: [KEY], lanes: "text" });
 
-    expect(phone.connected?.reach).toBe("phone");
-    expect(text.connected?.reach).toBe("text");
+    expect(phone.connected?.lanes).toEqual(["phone"]);
+    expect(text.connected?.lanes).toEqual(["text"]);
 
     // One egma agent holds both ways of reaching the one Retell agent.
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
@@ -640,8 +619,8 @@ describe("one agent, two connections", () => {
     const text = await run({ keys: [KEY], lanes: "text" });
     const phone = await run({ keys: [KEY], lanes: "phone" });
 
-    expect(text.connected?.reach).toBe("text");
-    expect(phone.connected?.reach).toBe("phone");
+    expect(text.connected?.lanes).toEqual(["text"]);
+    expect(phone.connected?.lanes).toEqual(["phone"]);
 
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
     expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);

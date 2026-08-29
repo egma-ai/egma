@@ -13,7 +13,9 @@ import {
   updateConnection,
   type AuthContext,
   type ConnectionType,
+  type MockDraftClaim,
   type MockMetadata,
+  type OwedMockCleanup,
 } from "@egma/db";
 
 import {
@@ -608,6 +610,38 @@ describe("the gate that keeps a mocked run honest", () => {
 describe("the claim, and the fence around a cleanup that is owed", () => {
   const STALE = 15 * 60 * 1000;
 
+  /**
+   * The fence both callers hold — the build over its claim, its sweep and its
+   * whole build, and the teardown over every restore it makes. A claim is only
+   * ever taken inside one, so a test takes one the same way the caller does.
+   */
+  async function claimUnderTheFence(
+    agentId: string,
+    runId: string,
+  ): Promise<MockDraftClaim> {
+    return await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "take" },
+      async () =>
+        claimMockDraftFor(acting(), {
+          runId,
+          agentId,
+          staleBuildMilliseconds: STALE,
+        }),
+    );
+  }
+
+  /** What this agent's runs owe right now, read the way a landing reads it. */
+  async function owedOn(agentId: string): Promise<readonly OwedMockCleanup[]> {
+    return await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "only-when-owed" },
+      async (owed) => owed,
+    );
+  }
+
   async function finishRun(runId: string): Promise<void> {
     await database.sql(
       "update run set status = 'running', started_at = now() where id = $1",
@@ -628,23 +662,16 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
     const first = await seedRun(agentId, connectionId);
     const second = await seedRun(agentId, connectionId);
 
-    expect(
-      await claimMockDraftFor(acting(), {
-        runId: first.runId,
-        agentId,
-        staleBuildMilliseconds: STALE,
-      }),
-    ).toEqual({ kind: "claimed" });
+    expect(await claimUnderTheFence(agentId, first.runId)).toEqual({
+      kind: "claimed",
+    });
 
     // The claim itself is the durable marker, so the second run is refused
     // from the instant the first one wins.
-    expect(
-      await claimMockDraftFor(acting(), {
-        runId: second.runId,
-        agentId,
-        staleBuildMilliseconds: STALE,
-      }),
-    ).toEqual({ kind: "taken", byRunId: first.runId });
+    expect(await claimUnderTheFence(agentId, second.runId)).toEqual({
+      kind: "taken",
+      byRunId: first.runId,
+    });
   });
 
   it("lets exactly one of two simultaneous claims through", async () => {
@@ -654,19 +681,74 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
     const second = await seedRun(agentId, connectionId);
 
     const both = await Promise.all([
-      claimMockDraftFor(acting(), {
-        runId: first.runId,
-        agentId,
-        staleBuildMilliseconds: STALE,
-      }),
-      claimMockDraftFor(acting(), {
-        runId: second.runId,
-        agentId,
-        staleBuildMilliseconds: STALE,
-      }),
+      claimUnderTheFence(agentId, first.runId),
+      claimUnderTheFence(agentId, second.runId),
     ]);
     expect(both.filter((one) => one.kind === "claimed")).toHaveLength(1);
     expect(both.filter((one) => one.kind === "taken")).toHaveLength(1);
+  });
+
+  it("refuses a claim that was not taken inside the fence", async () => {
+    const agentId = await anAgent("Unfenced agent");
+    const connectionId = await aConnection(agentId, WEB_CALL);
+    const { runId } = await seedRun(agentId, connectionId);
+
+    // Not a race a customer finds later: the caller that forgot the fence is
+    // stopped in the same process, before it writes the marker.
+    await expect(
+      claimMockDraftFor(acting(), {
+        runId,
+        agentId,
+        staleBuildMilliseconds: STALE,
+      }),
+    ).rejects.toThrow(/fence/u);
+    expect((await getRun(acting(), runId))?.tempMockAgentVersionCleanup).toBe(
+      null,
+    );
+  });
+
+  it("never lets two holders of one agent's fence overlap", async () => {
+    const agentId = await anAgent("Fenced agent");
+    // What the two callers do inside the fence is several requests to Retell,
+    // so the proof that matters is that one is finished before the other
+    // starts — not that a single query serialized.
+    const order: string[] = [];
+    const insideFor = async (name: string): Promise<void> => {
+      await owedMockCleanups(acting(), agentId, { fence: "take" }, async () => {
+        order.push(`${name} in`);
+        await new Promise((resume) => setTimeout(resume, 25));
+        order.push(`${name} out`);
+      });
+    };
+
+    await Promise.all([insideFor("first"), insideFor("second")]);
+
+    expect(order).toHaveLength(4);
+    expect(order[1]).toBe(`${String(order[0]).split(" ")[0]} out`);
+    expect(order[3]).toBe(`${String(order[2]).split(" ")[0]} out`);
+  });
+
+  it("holds no fence over an agent that owes nothing", async () => {
+    const agentId = await anAgent("Quiet agent");
+    // The ordinary landing: nothing is owed, so nothing has to take turns, and
+    // a report should not open a connection to learn it. The fence is free
+    // while the read runs.
+    let insideFence = false;
+    await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "only-when-owed" },
+      async (owed) => {
+        expect(owed).toEqual([]);
+        insideFence = await owedMockCleanups(
+          acting(),
+          agentId,
+          { fence: "take" },
+          async () => true,
+        );
+      },
+    );
+    expect(insideFence).toBe(true);
   });
 
   it("finds a predecessor's owed cleanup by one indexed query", async () => {
@@ -680,7 +762,7 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
     });
     await finishRun(crashed.runId);
 
-    const owed = await owedMockCleanups(acting(), agentId);
+    const owed = await owedOn(agentId);
     expect(owed).toHaveLength(1);
     expect(owed[0]?.runId).toBe(crashed.runId);
     expect(owed[0]?.tempMockAgentVersion).toBe(106);
@@ -692,13 +774,9 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
     // the caller refuses to branch rather than mint the copy the late restore
     // would route real callers to.
     const next = await seedRun(agentId, connectionId);
-    expect(
-      await claimMockDraftFor(acting(), {
-        runId: next.runId,
-        agentId,
-        staleBuildMilliseconds: STALE,
-      }),
-    ).toEqual({ kind: "claimed" });
+    expect(await claimUnderTheFence(agentId, next.runId)).toEqual({
+      kind: "claimed",
+    });
   });
 
   it("stops answering once the cleanup flag says the account is back", async () => {
@@ -710,28 +788,20 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
       tempMockAgentVersionCleanup: true,
       mockMetadata: NOTE,
     });
-    expect(await owedMockCleanups(acting(), agentId)).toEqual([]);
+    expect(await owedOn(agentId)).toEqual([]);
   });
 
   it("does not let one agent's owed cleanup block another agent's run", async () => {
     const held = await anAgent("Busy agent");
     const heldConnection = await aConnection(held, WEB_CALL);
     const busy = await seedRun(held, heldConnection);
-    await claimMockDraftFor(acting(), {
-      runId: busy.runId,
-      agentId: held,
-      staleBuildMilliseconds: STALE,
-    });
+    await claimUnderTheFence(held, busy.runId);
 
     const other = await anAgent("Free agent");
     const otherConnection = await aConnection(other, WEB_CALL);
     const free = await seedRun(other, otherConnection);
-    expect(
-      await claimMockDraftFor(acting(), {
-        runId: free.runId,
-        agentId: other,
-        staleBuildMilliseconds: STALE,
-      }),
-    ).toEqual({ kind: "claimed" });
+    expect(await claimUnderTheFence(other, free.runId)).toEqual({
+      kind: "claimed",
+    });
   });
 });
