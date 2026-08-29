@@ -4,6 +4,7 @@ import {
   claimMockDraftFor,
   connectionTypeBranchesMockDraft,
   getAgent,
+  MockDraftFenceBusyError,
   owedMockCleanups,
   recordMockState,
   type AuthContext,
@@ -195,103 +196,115 @@ export async function buildRunMockedWorld(
   // first record would otherwise leave a null cleanup flag no sweep ever sees,
   // and its simulations — unclaimable until a draft exists — would sit queued
   // forever.
-  return await owedMockCleanups(
-    auth,
-    run.agentId,
-    { exceptRunId: run.id, fence: "take" },
-    async (outstanding): Promise<MockedWorldOutcome> => {
-      const claim = await claimMockDraftFor(auth, {
-        runId: run.id,
-        agentId: run.agentId,
-        staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
-      });
-      if (claim.kind === "taken") {
-        return await refuseInUse(auth, run, claim.byRunId, log);
-      }
+  //
+  // The fence's own wait is bounded, and a wait that runs out is answered as an
+  // in-use refusal rather than thrown: it means the agent is held by work this
+  // process cannot see — another instance still building, or a holder killed
+  // with its session still standing — and "wait for that run, then start again"
+  // is the true next move either way.
+  try {
+    return await owedMockCleanups(
+      auth,
+      run.agentId,
+      { exceptRunId: run.id, fence: "take" },
+      async (outstanding): Promise<MockedWorldOutcome> => {
+        const claim = await claimMockDraftFor(auth, {
+          runId: run.id,
+          agentId: run.agentId,
+          staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
+        });
+        if (claim.kind === "taken") {
+          return await refuseInUse(auth, run, claim.byRunId, log);
+        }
 
-      // The sweep, before anything new is made. Litter from a crashed or
-      // finished run is cleared while it is still only litter — and,
-      // critically, **before this run branches**: a finished run's outstanding
-      // pin is restored while no draft of this run's exists yet, so that
-      // restore can never resolve `latest` onto something this run minted.
-      //
-      // And when the sweep could not clear it, nothing new is made at all. An
-      // unsettled world still owes a restore, and that restore retries on a
-      // later terminal report; a draft branched now is exactly what the
-      // agent's restored `latest` binding would then resolve to. Refusing here
-      // is what makes the retry safe: a restore only ever runs while no
-      // temporary version of this agent exists.
-      const swept = await settleTheseMockCleanups(
-        auth,
-        run.agentId,
-        outstanding,
-        reach,
-        log,
-      );
-      if (swept.kind === "unsettled") {
-        return await refuseRun(
+        // The sweep, before anything new is made. Litter from a crashed or
+        // finished run is cleared while it is still only litter — and,
+        // critically, **before this run branches**: a finished run's outstanding
+        // pin is restored while no draft of this run's exists yet, so that
+        // restore can never resolve `latest` onto something this run minted.
+        //
+        // And when the sweep could not clear it, nothing new is made at all. An
+        // unsettled world still owes a restore, and the next mocked run of this
+        // agent is what retries it; a draft branched now is exactly what the
+        // agent's restored `latest` binding would then resolve to. Refusing here
+        // is what makes the retry safe: a restore only ever runs while no
+        // temporary version of this agent exists.
+        const swept = await settleTheseMockCleanups(
           auth,
-          run,
-          "An earlier mocked run of this agent could not be fully given back " +
-            `to Retell: ${swept.reason}. Egma does not branch a new temporary ` +
-            "version while that cleanup is owed — the moment the cleanup " +
-            "lands, it would point the agent's restored routing at this run's " +
-            "draft. The cleanup retries on the earlier run's next terminal " +
-            "report and before the next mocked run; settle it (a revoked " +
-            "platform key is the usual cause), then start this run again.",
+          run.agentId,
+          outstanding,
+          reach,
           log,
         );
-      }
+        if (swept.kind === "unsettled") {
+          return await refuseRun(
+            auth,
+            run,
+            "An earlier mocked run of this agent could not be fully given back " +
+              `to Retell: ${swept.reason}. Egma does not branch a new temporary ` +
+              "version while that cleanup is owed — the moment the cleanup " +
+              "lands, it would point the agent's restored routing at this run's " +
+              "draft. The earlier run has already finished, so this is the only " +
+              "thing that retries the cleanup: settle whatever stopped it (a " +
+              "revoked platform key is the usual cause), then start this run " +
+              "again.",
+            log,
+          );
+        }
 
-      const built = await buildMockedWorld(
-        key,
-        {
-          agentId: platformAgentId,
-          target: { base: mockToolBase(reach.baseUrl), runId: run.id },
-          record: async (state) => {
-            await recordMockState(auth, run.id, asStoredState(state));
-          },
-        },
-        reachOf(reach),
-      ).catch((cause: unknown) => ({
-        kind: "refused" as const,
-        reason:
-          "Egma could not finish building the mocked world for this run " +
-          `(${safeExceptionType(cause)}).`,
-        state: null,
-      }));
-
-      if (built.kind === "built") {
-        // The serving version this run conducts against, written down once the
-        // build has resolved it. Every request of the run names the temporary
-        // copy beside it, and this is what the copy was branched from — so a
-        // reader asking what real traffic reaches gets an answer on the same
-        // row.
-        await recordMockState(auth, run.id, {
-          ...built.state,
-          agentVersion: built.agentVersion,
-        });
-        return { kind: "built" };
-      }
-
-      // Whatever was made before the refusal is given back at once, in the one
-      // order that is safe, and then the run is failed.
-      if (built.state !== null) {
-        await finishMockedWorld(
+        const built = await buildMockedWorld(
           key,
           {
             agentId: platformAgentId,
-            state: built.state,
+            target: { base: mockToolBase(reach.baseUrl), runId: run.id },
             record: async (state) => {
               await recordMockState(auth, run.id, asStoredState(state));
             },
           },
           reachOf(reach),
-        ).catch(() => undefined);
-      }
-      return await refuseRun(auth, run, built.reason, log);
-    },
-  );
+        ).catch((cause: unknown) => ({
+          kind: "refused" as const,
+          reason:
+            "Egma could not finish building the mocked world for this run " +
+            `(${safeExceptionType(cause)}).`,
+          state: null,
+        }));
+
+        if (built.kind === "built") {
+          // The serving version this run conducts against, written down once the
+          // build has resolved it. Every request of the run names the temporary
+          // copy beside it, and this is what the copy was branched from — so a
+          // reader asking what real traffic reaches gets an answer on the same
+          // row.
+          await recordMockState(auth, run.id, {
+            ...built.state,
+            agentVersion: built.agentVersion,
+          });
+          return { kind: "built" };
+        }
+
+        // Whatever was made before the refusal is given back at once, in the one
+        // order that is safe, and then the run is failed.
+        if (built.state !== null) {
+          await finishMockedWorld(
+            key,
+            {
+              agentId: platformAgentId,
+              state: built.state,
+              record: async (state) => {
+                await recordMockState(auth, run.id, asStoredState(state));
+              },
+            },
+            reachOf(reach),
+          ).catch(() => undefined);
+        }
+        return await refuseRun(auth, run, built.reason, log);
+      },
+    );
+  } catch (cause) {
+    if (!(cause instanceof MockDraftFenceBusyError)) throw cause;
+    return await standDownInUse(auth, run, cause.message, log);
+  }
 }
 
 /** What the sweep left behind: nothing owed, or a debt it could not clear. */
@@ -530,13 +543,37 @@ async function refuseInUse(
   byRunId: string,
   log: { error: (payload: unknown, message?: string) => void },
 ): Promise<MockedWorldOutcome> {
-  const reason =
+  return await standDownInUse(
+    auth,
+    run,
     `Run ${byRunId} is already running against this agent with mock tools on, ` +
-    "and Egma builds one mocked world per agent at a time. Two at once cannot " +
-    "be made safe: each run puts the agent's phone routing back as it found " +
-    "it, and the other run's temporary version would be what that routing " +
-    "then points at — so a real caller would reach a test version. Wait for " +
-    `run ${byRunId} to finish, then start this one again.`;
+      "and Egma builds one mocked world per agent at a time. Two at once " +
+      "cannot be made safe: each run puts the agent's phone routing back as " +
+      "it found it, and the other run's temporary version would be what that " +
+      "routing then points at — so a real caller would reach a test version. " +
+      `Wait for run ${byRunId} to finish, then start this one again.`,
+    log,
+    byRunId,
+  );
+}
+
+/**
+ * Give this run up because the agent is somebody else's, said one way.
+ *
+ * Two things reach here. The claim finds a named run holding the copy, which is
+ * the ordinary collision. Or the fence itself would not come free inside its
+ * wait — a holder in another process still building, or one killed hard enough
+ * that Postgres has not yet reaped its session. The second names no run,
+ * because there is no row to name: what is known is that the agent is busy,
+ * which is the whole of what the caller has to act on.
+ */
+async function standDownInUse(
+  auth: AuthContext,
+  run: Run,
+  reason: string,
+  log: { error: (payload: unknown, message?: string) => void },
+  byRunId?: string,
+): Promise<MockedWorldOutcome> {
   log.error(
     platformEvent(
       "egma.mock_tools.agent_in_use",
@@ -544,7 +581,7 @@ async function refuseInUse(
       {
         "egma.run_id": run.id,
         "egma.agent_id": run.agentId,
-        "egma.holding_run_id": byRunId,
+        ...(byRunId === undefined ? {} : { "egma.holding_run_id": byRunId }),
         "error.type": "mock_tools_agent_in_use",
       },
     ),

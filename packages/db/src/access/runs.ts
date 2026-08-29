@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 
 import { isId, newId } from "@egma/ids";
@@ -1162,28 +1163,76 @@ function mockDraftFenceKey(auth: AuthContext, agentId: string): string {
   return `egma-mock-draft:${auth.organizationId}:${agentId}`;
 }
 
-/** Every fence this process is holding right now, by key. */
-const heldMockDraftFences = new Set<string>();
+/**
+ * The fences **this piece of work** is holding, carried down its own calls.
+ *
+ * Per async context and not per process, because the guard below is about one
+ * caller's own discipline. A process-wide set says "somebody here holds agent
+ * A's fence", which is true and useless: an unrelated request that forgot to
+ * open the fence would sail past the check precisely while a concurrent build
+ * held it — defeated exactly when the exclusion matters. What the guard has to
+ * ask is whether *this* call chain opened it, and that is what an async context
+ * knows.
+ */
+const heldMockDraftFences = new AsyncLocalStorage<ReadonlySet<string>>();
+
+const NO_FENCES: ReadonlySet<string> = new Set();
+
+/** The fences this call chain holds, which is none outside every fence. */
+function fencesHeldHere(): ReadonlySet<string> {
+  return heldMockDraftFences.getStore() ?? NO_FENCES;
+}
 
 /**
  * Refuse work that must not be done outside the fence.
  *
  * Cross-process exclusion is Postgres's job; this catches the one mistake a
  * person makes — writing a new caller that forgets to open the fence — where it
- * is cheap to catch, in the same process, rather than as a race a customer
- * finds.
+ * is cheap to catch, in the caller's own call chain, rather than as a race a
+ * customer finds.
  */
 function requireMockDraftFence(
   auth: AuthContext,
   agentId: string,
   doing: string,
 ): void {
-  if (heldMockDraftFences.has(mockDraftFenceKey(auth, agentId))) return;
+  if (fencesHeldHere().has(mockDraftFenceKey(auth, agentId))) return;
   throw new Error(
     `refusing to ${doing} without this agent's mocked-world fence: open it ` +
       "with owedMockCleanups and do the work inside it",
   );
 }
+
+/**
+ * Somebody else's process holds this agent's fence and would not let go.
+ *
+ * **Its own error, because it is not a fault.** The one request that produces
+ * it is a second mocked run of an agent whose first run is still building, or
+ * whose holder was killed hard enough that Postgres has not yet noticed the
+ * socket. Both answer the same way the ordinary collision does: wait, then
+ * start again.
+ */
+export class MockDraftFenceBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MockDraftFenceBusyError";
+  }
+}
+
+/**
+ * How long a waiter sits on the fence before it is told to come back.
+ *
+ * Several multiples of a build, which is a handful of Retell requests, so a
+ * genuine queue behind a working run always wins the lock rather than being
+ * refused. What it bounds is the case a queue cannot survive: a holder killed
+ * with its socket still open, whose session Postgres reaps on its own TCP
+ * keepalive clock — two hours by default. Every mocked run start on that agent
+ * would hang its HTTP request until then, one server backend per waiter.
+ */
+const FENCE_WAIT_MILLISECONDS = 120_000;
+
+/** Postgres's own code for "the lock_timeout ran out". */
+const LOCK_NOT_AVAILABLE = "55P03";
 
 /**
  * Hold one agent's mocked-world fence for as long as `held` runs.
@@ -1197,32 +1246,70 @@ function requireMockDraftFence(
  * against the fenced work's own claim rather than protect it.
  *
  * Postgres drops a session's advisory locks when the session ends, so closing
- * the connection is the release, and a process that dies mid-hold releases it
- * too. The wait is unbounded on purpose, exactly as every other advisory lock
- * in this package is: what is on the other side is bounded by the caller's own
- * request timeout, and a waiter that gave up would be a second run branching
- * beside the first, which is the hazard the fence exists for.
+ * the connection is the release, and a process that dies *cleanly* mid-hold
+ * releases it too.
+ *
+ * **The wait is bounded, because one death is not clean.** A holder killed
+ * without its socket closing leaves its session — and its lock — standing until
+ * Postgres reaps the connection on its TCP keepalive clock, hours later. An
+ * unbounded waiter would hang its whole HTTP request for that long, and every
+ * later start would queue another one behind it. So the wait gives up after
+ * `FENCE_WAIT_MILLISECONDS` and says the agent is in use, which is the true
+ * sentence either way and the one whose next move — wait, then start again — is
+ * already right.
+ *
+ * **A nested hold of the same key is a bug and is refused as one.** The lock is
+ * session-scoped and each hold opens its own session, so the inner one would
+ * wait on the outer one's lock forever: not re-entrant, and quietly so. A
+ * caller inside the fence already has it and must simply do the work.
  */
 async function withMockDraftFence<T>(
   key: string,
-  held: () => Promise<T>,
+  whileHeld: () => Promise<T>,
 ): Promise<T> {
+  const alreadyHeld = fencesHeldHere();
+  if (alreadyHeld.has(key)) {
+    throw new Error(
+      `this work already holds the mocked-world fence ${key}: the lock lives ` +
+        "on its own session, so opening it a second time would wait on the " +
+        "first one forever. Do the work inside the fence already open.",
+    );
+  }
+
   const connection = dedicatedConnection();
   // A connection that dies has to arrive here rather than at an unhandled
   // rejection. The fence goes with it either way.
   connection.on("error", () => undefined);
-  await connection.connect();
   try {
-    await connection.query(
-      "select pg_advisory_lock(hashtextextended($1::text, 0))",
-      [key],
-    );
-    heldMockDraftFences.add(key);
+    // Inside the try, so a connect that rejects still reaches the end below.
+    await connection.connect();
+    // The bound, set on this session before the one statement that can wait.
+    // Every other statement this session runs is the lock and nothing else.
+    await connection.query(`set lock_timeout = ${FENCE_WAIT_MILLISECONDS}`);
     try {
-      return await held();
-    } finally {
-      heldMockDraftFences.delete(key);
+      await connection.query(
+        "select pg_advisory_lock(hashtextextended($1::text, 0))",
+        [key],
+      );
+    } catch (cause) {
+      if (
+        typeof cause === "object" &&
+        cause !== null &&
+        (cause as { code?: unknown }).code === LOCK_NOT_AVAILABLE
+      ) {
+        throw new MockDraftFenceBusyError(
+          "Another run of this agent is holding its mocked world and did not " +
+            "let go. Egma builds one mocked world per agent at a time, so " +
+            "nothing was started. Wait for that run to finish, then start " +
+            "this one again.",
+        );
+      }
+      throw cause;
     }
+    return await heldMockDraftFences.run(
+      new Set([...alreadyHeld, key]),
+      whileHeld,
+    );
   } finally {
     // Ending the session is the unlock, and it is the one that also runs when
     // the connection has gone bad under us.

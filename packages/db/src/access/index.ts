@@ -412,6 +412,7 @@ export {
   resolveRunStartReach,
   resolveSimulationConnection,
   claimMockDraftFor,
+  MockDraftFenceBusyError,
   owedMockCleanups,
   recordMockState,
   resolveMockToolCall,

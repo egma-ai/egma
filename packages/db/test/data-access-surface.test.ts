@@ -458,6 +458,10 @@ const VALUES = [
   // to be turned away while a live test named it; a test names no graders, so
   // switching one off is a decision about the project with nothing in its way.
   "LastAdminError",
+  // One agent's mocked-world fence would not come free inside its wait. Its own
+  // class because it is not a fault and not a bad request: the agent is busy,
+  // and the next move is to wait and start again.
+  "MockDraftFenceBusyError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
@@ -533,6 +537,11 @@ const VALUES = [
   // for — never a config or a credential.
   "connectionTypeReadsPlatformAtRunStart",
   "connectionTypeBranchesMockDraft",
+  // Which kinds may carry the mock-tools switch at all, asked by the door that
+  // writes one. A phone connection can never hold it, and saying so from the
+  // registry keeps the write and the CHECK on the column agreeing.
+  "connectionTypeCarriesMockSwitch",
+  "MOCK_SWITCHED_CONNECTION_TYPES",
   "DRAFT_MOCK_CONNECTION_TYPES",
   "connectionTypeUsesPlatformCarrier",
   // Which connection lanes a run over them builds a mocked world for. Two

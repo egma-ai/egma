@@ -730,6 +730,65 @@ describe("the claim, and the fence around a cleanup that is owed", () => {
     );
   });
 
+  it("refuses a claim taken while somebody else's task holds the fence", async () => {
+    const agentId = await anAgent("Someone else's fence");
+    const connectionId = await aConnection(agentId, WEB_CALL);
+    const { runId } = await seedRun(agentId, connectionId);
+
+    // The guard asks whether **this** work opened the fence, not whether
+    // anything in this process did. An unrelated task that forgot it must be
+    // stopped exactly while a real holder is inside — the moment the exclusion
+    // is worth something — and a process-wide answer would wave it through.
+    let letGo = (): void => undefined;
+    const untilLetGo = new Promise<void>((resume) => {
+      letGo = () => resume();
+    });
+    // A second task, whose call chain never went through the fence — started
+    // here rather than from inside it, which is what makes it somebody else's.
+    const holding = owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "take" },
+      async () => untilLetGo,
+    );
+    await new Promise((resume) => setTimeout(resume, 50));
+
+    const refused = await claimMockDraftFor(acting(), {
+      runId,
+      agentId,
+      staleBuildMilliseconds: STALE,
+    }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    letGo();
+    await holding;
+
+    expect(String(refused)).toMatch(/fence/u);
+    expect((await getRun(acting(), runId))?.tempMockAgentVersionCleanup).toBe(
+      null,
+    );
+  });
+
+  it("refuses to open one agent's fence twice from inside itself", async () => {
+    const agentId = await anAgent("Nested fence");
+
+    // The lock is session-scoped and every hold opens its own session, so a
+    // nested hold of the same key would wait on the outer one until the outer
+    // one's own wait ran out — a self-deadlock, quietly. It is a programming
+    // mistake, so it is refused where it is made.
+    await expect(
+      owedMockCleanups(acting(), agentId, { fence: "take" }, async () =>
+        owedMockCleanups(acting(), agentId, { fence: "take" }, async () => true),
+      ),
+    ).rejects.toThrow(/already holds the mocked-world fence/u);
+
+    // And the outer fence is let go, so the agent is free afterwards.
+    expect(
+      await owedMockCleanups(acting(), agentId, { fence: "take" }, async () => true),
+    ).toBe(true);
+  });
+
   it("never lets two holders of one agent's fence overlap", async () => {
     const agentId = await anAgent("Fenced agent");
     // What the two callers do inside the fence is several requests to Retell,
