@@ -158,6 +158,8 @@ describe("the public skill source", () => {
     expect(finding).toContain("Vapi");
     expect(finding).toContain("Dispatch name");
     expect(finding).toContain("Entrypoint");
+    expect(finding).toContain("Confirm that `HEAD` exists");
+    expect(finding).toContain("all-untracked working tree");
     expect(retell).toContain("retell-sdk");
     expect(onboarding).toContain("The coding agent runs `<egma> login`");
     expect(onboarding).toMatch(/Browser approval is the developer's\s+action/u);
@@ -181,12 +183,20 @@ describe("the public skill source", () => {
     expect(onboarding).toContain("but no secret");
     expect(onboarding).toMatch(/Ask for\s+explicit publish approval/u);
     expect(connectLiveKit).toContain("EGMA_LIVEKIT_API_KEY");
+    expect(connectLiveKit).toContain("use `chat` when it is offered");
+    expect(connectLiveKit).toMatch(/Always\s+present every offered access variant/u);
     expect(connectLiveKit).toContain("receipt: livekit-registration");
     expect(connectLiveKit).toContain("<egma> connect record");
     expect(connectLiveKit).toContain("--livekit-url <approved-wss-url>");
     expect(retell).toContain("--retell-agent <selected-provider-id>");
     expect(retell).toContain("--lanes <text|web-call|phone>");
     expect(authorLiveKitMocks).toContain("AgentTask.complete");
+    expect(integrating).toContain("`BackgroundAudioPlayer`");
+    expect(integrating).toContain("it does not stop a separate publisher");
+    expect(integrating).toContain(
+      "egma @ https://github.com/egma-ai/egma/archive/ee0a8fb58a6a095ccd5313f7b3f2c94569f026f1.zip#subdirectory=sdks/python",
+    );
+    expect(integrating).toContain("a bare package-index requirement, machine-local");
     expect(livekit).toContain("LiveKit CLI 2.18.2 or newer");
     expect(livekit).toContain("create `.venv`");
     expect(livekit).toContain("`winget` on Windows");

@@ -46,6 +46,12 @@ from livekit.agents.voice.room_io import RoomOptions, TextOutputOptions
 await session.start(agent=agent, room=ctx.room, room_options=options)
 ```
 
+Trace the rest of the entrypoint for independent audio publishers such as a
+`BackgroundAudioPlayer`, ambient loop, or direct track publication. Start each
+one only when `chat` is false. `audio_output=False` controls the session output;
+it does not stop a separate publisher. Cover both the silent chat branch and
+the unchanged voice branch with focused checks.
+
 This is the whole chat setup. It needs no Egma package and no Egma import, and
 a worker built with `@livekit/agents` takes the same change through its own
 input and output options.
@@ -68,12 +74,22 @@ or both. Ensure every requested entry is present and preserve every existing
 Egma entry. An integration adds capabilities; it removes one only when the
 developer asks for that removal explicitly.
 
-The Python package is named `egma`. Require `egma>=0.2.0` and add it through the
-dependency file the repository already uses. `0.2.0` is the first release in
+The Python package is named `egma`. Until its official package-index release is
+verified, add version `0.2.0` through the dependency file the repository already
+uses with this public, immutable source requirement:
+
+```text
+egma @ https://github.com/egma-ai/egma/archive/ee0a8fb58a6a095ccd5313f7b3f2c94569f026f1.zip#subdirectory=sdks/python
+```
+
+Use the dependency manager's native form of that same URL when needed. Keep the
+exact commit and subdirectory; a bare package-index requirement, machine-local
+checkout, or unpinned branch is not the verified source for this workflow.
+`0.2.0` is the first release in
 which both entries read the job's room name, which is the only signal that
-reaches the worker on all three LiveKit dispatch paths. The Egma SDK does not yet support
-a worker built with `@livekit/agents`; report that boundary and leave a Node
-worker unchanged.
+reaches the worker on all three LiveKit dispatch paths. The Egma SDK does not
+yet support a worker built with `@livekit/agents`; report that boundary and
+leave a Node worker unchanged.
 
 ### Testing entry
 

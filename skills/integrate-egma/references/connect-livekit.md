@@ -17,9 +17,14 @@ Read the catalog in promptless, read-only steps:
    `required_field` and `required_secret` fact for that catalog entry.
 
 Each incomplete command exits with an unchosen or missing-input status and
-writes nothing. Present multiple modalities or access variants to the
-developer and use only the exact selected value. Do not add credentials until
-the fields and exact remote setup have been approved.
+writes nothing. When the developer asks for a first end-to-end test without
+naming a modality, use `chat` when it is offered and state that low-cost default
+in the setup plan instead of asking a separate modality question. Ask for the
+modality when `chat` is unavailable or the requested proof needs audio. Always
+present every offered access variant and ask when more than one is available.
+For every other request, present multiple modalities to the developer and use
+only the exact selected value. Do not add credentials until the fields and
+exact remote setup have been approved.
 
 Read `<egma> connect --help` for the current option names. A complete command
 has this shape:
