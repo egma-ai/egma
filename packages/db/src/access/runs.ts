@@ -65,6 +65,7 @@ import {
   type MockToolCoverage,
 } from "../mock-tools/coverage.ts";
 import {
+  mockMetadataAsRead,
   mockMetadataFrom,
   mockMetadataRow,
   type MockMetadata,
@@ -447,9 +448,13 @@ function runFromRow(
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
-    mockMetadata: mockMetadataFrom(
-      mockMetadata,
-      () => new Error(`run ${row.id} holds a malformed mock-tool note`),
+    // Without the comparison value: the teardown's read keeps it, a reader's
+    // does not. See `mockMetadataAsRead`.
+    mockMetadata: mockMetadataAsRead(
+      mockMetadataFrom(
+        mockMetadata,
+        () => new Error(`run ${row.id} holds a malformed mock-tool note`),
+      ),
     ),
   };
 }

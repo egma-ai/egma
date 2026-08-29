@@ -128,6 +128,25 @@ export function mockMetadataFrom(
   };
 }
 
+/**
+ * The note as a **reader of the run** sees it: everything except the print.
+ *
+ * The print is egma's working note to itself — the whole of the serving
+ * version's tools in one line — and it belongs to the teardown that has to
+ * prove that version never moved. A run header is a report to a person about
+ * what egma promised to put back, and a canonicalized copy of the customer's
+ * tool declarations is neither something they can act on nor something a page
+ * of runs should carry. So the sweep's read keeps it and the run's read drops
+ * it, which is also why the published shape of the note does not name it.
+ */
+export function mockMetadataAsRead(
+  metadata: MockMetadata | null,
+): MockMetadata | null {
+  if (metadata === null) return null;
+  const { toolPrint: _print, ...engine } = metadata.engine;
+  return { engine, numbers: metadata.numbers };
+}
+
 /** The note as a row stores it. Copied, so no caller holds the stored value. */
 export function mockMetadataRow(
   metadata: MockMetadata,

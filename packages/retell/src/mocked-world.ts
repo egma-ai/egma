@@ -121,6 +121,7 @@ import type { RetellCredential, RetellFailure, RetellReach } from "./transport.t
 import {
   branchAgentVersion,
   deleteAgentVersion,
+  engineTypeOf,
   readEngineConfiguration,
   resolveAgentVersion,
   writeEngineTools,
@@ -389,7 +390,7 @@ function stateOf(
   tempMockAgentVersion: number | null,
   engine: EngineReference,
   /** What that engine declared when this run captured it. */
-  toolPrint: string,
+  capturedPrint: string,
   numbers: readonly MockNumberNote[],
 ): MockRunRecord {
   return {
@@ -403,7 +404,7 @@ function stateOf(
         type: engine.type,
         engineId: engine.engineId,
         version: engine.version,
-        toolPrint,
+        toolPrint: capturedPrint,
       },
       numbers: numbers.map((one) => ({ ...one })),
     },
