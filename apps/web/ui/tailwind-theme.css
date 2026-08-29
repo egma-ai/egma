@@ -462,7 +462,27 @@
   --surface-active: #43241c;
   --foreground: #f2f2ed;
   --muted: #a3a39b;
-  --faint: #82827b;
+  /*
+   * Lifted from `#82827b`, which failed AA on the surface it is most often
+   * drawn on.
+   *
+   * The tertiary step has two grounds in dark theme and they are not the same
+   * test. On the canvas, `#151514`, the old value measured 4.73:1 and passed.
+   * On the raised surface, `#1b1b1a` — a table panel, a form group, a menu —
+   * it measured **4.46:1 and failed**, and that is where a timestamp, a hint
+   * and an empty-state line actually live. A value that passes on the page and
+   * fails inside every panel on it is a value that fails.
+   *
+   * `#94948c` measures 5.98:1 on the canvas and 5.64:1 on the raised surface,
+   * so the worst ground now clears AA with room rather than by a rounding
+   * step. It stays a step below `--muted`, which is 6.79:1 on the same ground:
+   * the three-level hierarchy is what it was, one rung less quiet at the
+   * bottom.
+   *
+   * Light theme was measured too and did not move — its `--faint` is 5.33:1 on
+   * Pure Paper.
+   */
+  --faint: #94948c;
   --border: #30302d;
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
