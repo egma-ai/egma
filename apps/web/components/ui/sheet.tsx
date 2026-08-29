@@ -173,7 +173,7 @@ function SheetContent({
         className={cn(
           "fixed inset-y-0 right-0 z-30 flex w-[min(var(--sheet-width),100vw)] flex-col gap-5",
           size === "wide" && "w-[min(var(--sheet-width-wide),100vw)]",
-          "border-l border-border bg-surface p-6 text-foreground shadow-modal",
+          "border-l border-border bg-raised p-6 text-foreground shadow-modal",
           "outline-none",
           className,
         )}

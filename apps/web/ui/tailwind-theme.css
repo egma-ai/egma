@@ -103,9 +103,33 @@
    * The canvas, routine hover, progress, and read-only surfaces stay neutral.
    * Pale orange is reserved for selected, current, open, cited, and other
    * active-attention states.
+   *
+   * **Gray is the chrome, and white is the work.** `--chrome` fills the
+   * application frame — the sidebar and the page title bar — and `--background`
+   * is the content area under it, which is Pure Paper. The two were the other
+   * way round until the developer approved variation V1b on the Paper page
+   * `09 — Gray chrome variations`, 2026-08-28. Going down a page a reader now
+   * crosses three surfaces and not four: the chrome, the content, and the
+   * hairlines that draw structure inside the content.
+   *
+   * `--chrome` spells its own mix rather than reading `--surface-soft`, which
+   * lands on the same `#f3f3f3` in light theme today. They are two facts — the
+   * fill of the application frame, and the quiet neutral step for hover and
+   * read-only — and they part company in dark theme, where the chrome is
+   * `#0f0f0e` and the quiet step is `#262624`.
    */
-  --background: color-mix(in srgb, var(--color-graphite) 3%, var(--color-paper));
+  --background: var(--color-paper);
+  --chrome: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
   --surface: var(--color-paper);
+  /*
+   * What is raised off the page: menus, popovers, dialogs, side sheets, toasts.
+   *
+   * In light theme it is the flush surface exactly, because `DESIGN.md` puts
+   * every raised surface on Pure Paper and because the shared orange-brown
+   * shadow is what separates a menu from the paper under it. Dark theme lifts
+   * it away from the page, and the dark block below says why it has to.
+   */
+  --raised: var(--surface);
   --surface-soft: color-mix(in srgb, var(--color-graphite) 6%, var(--color-paper));
   --surface-active: var(--color-ember-wash);
   --foreground: var(--color-midnight);
@@ -439,9 +463,57 @@
  */
 :root[data-theme="dark"],
 [data-theme="dark"] {
-  --background: #151514;
-  --surface: #1b1b1a;
-  --surface-soft: #222220;
+  /*
+   * **Dark theme separates by surface, not by hairline alone.**
+   *
+   * The chrome is `#0f0f0e` and the content is `#1e1e1c` — about fifteen steps
+   * apart out of 255, in the darkest range where the eye separates best. The
+   * pair before this was `#151514` under `#1b1b1a`: six steps, behind a
+   * `#30302d` hairline, and the whole product read as one flat black. The
+   * hairline lifts with them, and so do the two quiet text colours, so a
+   * secondary label on the lighter content surface stays legible. (Developer
+   * decision, 2026-08-28, Paper page `09 — Gray chrome variations`, V1b.)
+   *
+   * `--surface` and `--background` are deliberately one value. A flush panel —
+   * a table, a form group, an empty-state card — is drawn by its hairline
+   * rather than by a fill of its own, which is the same thing light theme does
+   * now that both are Pure Paper.
+   */
+  --background: #1e1e1c;
+  --chrome: #0f0f0e;
+  --surface: #1e1e1c;
+  --surface-soft: #262624;
+  /*
+   * The one dark value `DESIGN.md` does not name, and the reason it is here.
+   *
+   * `--surface` and `--background` are one value now, so a raised surface can
+   * no longer be told from the page by its fill — and on dark it has nothing
+   * else to fall back on. The shared shadow starts at `rgb(122 49 23 / 0.12)`,
+   * which over `#1e1e1c` resolves to `#29201b`: **lighter** than the page it
+   * falls on. A warm shadow on a dark page is a faint halo at about 1.05:1 at
+   * its strongest point, not a shadow. That leaves the hairline, and
+   * `DESIGN.md` rules that out in as many words: "Dark theme separates by
+   * surface, not by hairline alone."
+   *
+   * The step is small and hemmed in on both sides. Six percent of paper into
+   * the page gives `#2c2c2a`: **1.19:1 against the content**, where the pair it
+   * replaces managed 1.06:1; **1.12:1 against the hairline**, so the panel
+   * keeps its own outline; and **1.08:1 against `--surface-soft`**, so a
+   * highlighted menu item still reads — the same step strength dark theme had
+   * before. Eight percent buries the hairline. Five percent loses the
+   * highlight.
+   *
+   * **The menu highlight now darkens where it used to lighten.** That is the
+   * light theme's own direction — `#f3f3f3` under a white menu — and the
+   * alternative was a raised value *below* `--surface-soft`, where the whole
+   * gap between the page and the quiet step is four steps out of 255.
+   *
+   * A reading side sheet is what makes this load-bearing rather than tidy.
+   * `ui/dialog.tsx` opens one with `modal={false}` and draws no overlay, so it
+   * sits on a live page with one left hairline and nothing else. A dialog and a
+   * drawer have the scrim to fall back on; that sheet has nothing.
+   */
+  --raised: color-mix(in srgb, var(--color-paper) 6%, var(--surface));
   /*
    * The designer's own dark wash, read from the Paper file's tokens
    * (`--color-dark-surface-active`). It was a `color-mix` of Ember into the
@@ -451,9 +523,9 @@
    */
   --surface-active: #43241c;
   --foreground: #f2f2ed;
-  --muted: #a3a39b;
-  --faint: #82827b;
-  --border: #30302d;
+  --muted: #b6b6ae;
+  --faint: #94948c;
+  --border: #34342f;
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
   --accent: var(--color-ember);
@@ -589,18 +661,27 @@
   /* ---------------------------------------------------------------- Colour */
 
   /*
-   * Surfaces. Neutral Paper is the canvas; Pure Paper is what is raised off it,
-   * which `DESIGN.md` names as menus, dialogs, and form groups — so shadcn's
-   * `card` and `popover` are both that one surface.
+   * Surfaces. `--chrome` fills the application frame — the sidebar and the page
+   * title bar — and Pure Paper is the content area under it. `--raised` is what
+   * floats above that content, which `DESIGN.md` names as menus, dialogs, and
+   * side sheets, so shadcn's `popover` is that surface.
+   *
+   * **`card` is not, and the split is the one thing to keep straight here.**
+   * `DESIGN.md`, Elevation: "Tables, sidebars, topbars, inputs, search boxes,
+   * and ordinary cards do not float. They carry a hairline and nothing else."
+   * A card wearing the raised fill would be a panel claiming a layer it does
+   * not have — visible the moment dark theme lifts that fill off the page.
    */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-chrome: var(--chrome);
   --color-surface: var(--surface);
+  --color-raised: var(--raised);
   --color-surface-soft: var(--surface-soft);
   --color-surface-active: var(--surface-active);
   --color-card: var(--surface);
   --color-card-foreground: var(--foreground);
-  --color-popover: var(--surface);
+  --color-popover: var(--raised);
   --color-popover-foreground: var(--foreground);
 
   /*

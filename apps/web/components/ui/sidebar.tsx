@@ -328,7 +328,18 @@ function SidebarMenuButton({
         "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "before:absolute before:inset-y-2 before:left-0 before:w-0.5",
         "before:rounded-chip before:bg-transparent before:content-['']",
-        "pointer-hover:data-[active=false]:bg-surface-soft pointer-hover:data-[active=false]:text-foreground",
+        /*
+         * **The quiet hover is paper, because the row stands on the chrome.**
+         * It was `--surface-soft` while the bar was paper, and the bar is
+         * `--chrome` now — one value with `--surface-soft` in light theme, so
+         * the plate would have been drawn in exactly the colour under it and
+         * the busiest hover in the product would have gone silent. A row lifts
+         * towards the work surface instead, which reads in both themes and is
+         * the movement every other control on the chrome makes. `shell.tsx`
+         * states the rule; the drawer wears the chrome fill so this one class
+         * is true in both places the bar is drawn.
+         */
+        "pointer-hover:data-[active=false]:bg-surface pointer-hover:data-[active=false]:text-foreground",
         "data-[active=true]:bg-selected data-[active=true]:text-foreground",
         "data-[active=true]:before:bg-brand",
         /*

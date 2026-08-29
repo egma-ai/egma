@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  STACKED_HEAD_TYPE,
   Table,
   TableBody,
   TableCell,
@@ -31,7 +32,7 @@ import { ROW_HOVER } from "./evidence.tsx";
  * agents should be a list of forty agents rather than four screens of scroll.
  *
  * **The frame is the kit's `Table`, and the numbers are the boards'.** A Pure
- * Paper panel inside one hairline with no corner; a 40px header of quiet
+ * Paper panel inside one hairline with no corner; a 40px header of unfilled
  * labels; rows at least 52px with a hairline between them and none after the
  * last; and a fixed 48px slot at the trailing edge that every row carries, so
  * the ⋮ menus line up in one lane down the table whether or not a given row
@@ -382,18 +383,29 @@ export function DataTable<Row>({
                              * **The lane carries no label, in either layout.**
                              * The header cell is empty by the boards' own
                              * drawing and the control inside names itself, so
-                             * a stacked row that wrote "ACTIONS" above a ⋮
-                             * would be saying the same word twice — once in
-                             * capitals. What is left is the control alone, at
-                             * the trailing edge, which is the lane.
+                             * a stacked row that wrote "Actions" above a ⋮
+                             * would be saying the same word twice. What is
+                             * left is the control alone, at the trailing
+                             * edge, which is the lane.
                              */
                             "stacked:justify-end"
                           : stacks
                             ? [
-                              /* The header is the label, said again beside the fact. */
+                              /*
+                               * The header is the label, said again beside
+                               * the fact — so it is said the same way. This
+                               * is `TableHead`'s recipe on a pseudo-element:
+                               * the 14px step, weight 500, the label tracking
+                               * and the secondary `--muted`. The capitals it
+                               * used to print went with the header they were
+                               * copying; the label is drawn in the sentence
+                               * case the column was written in, so the two
+                               * layouts name a column one way. (Developer
+                               * decision, 2026-08-28, from Paper page `09 —
+                               * Gray chrome variations`, variation V1b.)
+                               */
                               "stacked:before:flex-none stacked:before:text-xs",
-                              "stacked:before:tracking-(--tracking-label) stacked:before:text-faint",
-                              "stacked:before:uppercase",
+                              STACKED_HEAD_TYPE,
                               "stacked:before:content-[attr(data-label)]",
                               ]
                             : undefined,

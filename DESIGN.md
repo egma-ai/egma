@@ -6,7 +6,7 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
-The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. On 2026-08-26, the run-flow refinement removed decorative markers from settled run states, reserved a spinner for active work, and moved grader verdict meaning into explicit `Result · Passed` or `Result · Failed` text. The palette and the logo's own treatment rules did not move.
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; Egma identity returned to the signed-in sidebar; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. On 2026-08-24, the approved Paper refinement replaced the full sidebar wordmark with the Egma mark beside organization context and made the account avatar square. The same session's agents-and-tests rework added three rules and changed one: the `*` and `[optional]` label grammar, the Ember top-line on a segmented control's chosen segment, square status markers, and — the one change — **quiet text-field focus**. On 2026-08-26, the run-flow refinement removed decorative markers from settled run states, reserved a spinner for active work, and moved grader verdict meaning into explicit `Result · Passed` or `Result · Failed` text. On 2026-08-28, the approved Paper page "09 — Gray chrome variations" moved three more, in variation V1b: **gray is the chrome and white is the work**, so the sidebar and the page title bar take the soft gray `--chrome` fill and the content area is pure paper; **a table column header earns its rank from weight and tracking**, not from a fill; and **dark theme separates by surface**, not by a hairline alone. The palette and the logo's own treatment rules did not move.
 
 ## Product context
 
@@ -80,8 +80,8 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 
 | Token | Value | Use |
 | --- | --- | --- |
-| Neutral Paper | 3% Graphite mixed with Pure Paper | Application canvas |
-| Pure Paper | `#ffffff` | Raised surfaces, menus, dialogs, and form groups |
+| Neutral Paper | 6% Graphite mixed with Pure Paper | Application chrome: the sidebar, the page title bar, and the Settings rail |
+| Pure Paper | `#ffffff` | The content area, and the raised surfaces, menus, dialogs, and form groups on it |
 | Midnight Ink | `#1f1f1f` | Primary text and dark application surfaces |
 | Carbon | `#000000` | Maximum contrast and rare dark application surfaces |
 | Graphite | `#3c3c3c` | Secondary text and stronger neutral states |
@@ -93,9 +93,9 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 
 ### Color rules
 
-- The application canvas is Neutral Paper.
+- **Gray is the chrome, and white is the work.** The application chrome is Neutral Paper, and the token for that fill is `--chrome`. Chrome is the frame a person moves in: the sidebar, the page title bar, the drawer and top bar those two become on a narrow screen, and the Settings rail beside a page. The content area is Pure Paper. Going down a page a reader crosses three surfaces and not four: the chrome, the content, and the hairlines that draw structure inside the content. A table panel, a form group and an empty-state card stay Pure Paper on Pure Paper, so each one is drawn by its hairline alone. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b; the developer named Browserbase as the reference. This replaces the rule that made the canvas the one gray region and the sidebar a quiet paper region.)
 - Ordinary borders use a neutral mix of Graphite and Pure Paper.
-- Quiet hover, read-only, progress, and supporting surfaces use a neutral Graphite-and-Paper mix.
+- Quiet hover, read-only, progress, and supporting surfaces use a neutral Graphite-and-Paper mix. **On the chrome, that quiet step goes up to Pure Paper instead.** The chrome fill and the quiet mix are the same value in light theme, so a control standing on the chrome moves towards the work surface rather than into the fill it already sits on. The two are still separate facts and they part company in dark theme, where the chrome is `#0f0f0e` and the quiet step is `#262624`. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b.)
 - Ember is the main brand signal. Use it for focus, icons, marks, and narrow active edges.
 - Deep Ember is the primary action's text on Ember Wash. Its contrast on that fill is above 7:1. (Developer decision, 2026-08-23: the filled Deep Ember button with white text is retired.)
 - Ember Wash is the primary action's fill, and the surface for selected, current, open, cited, or active-attention states.
@@ -123,6 +123,8 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 ### Dark theme
 
 - Dark theme uses neutral dark surfaces and the same Ember focus and action family, lightened where a dark surface needs it. The primary action's text is Ember pulled towards paper rather than Deep Ember: Deep Ember on the dark Ember Wash is 2.69:1 and fails AA, and the lighter step is 5.26:1. (Developer decision, 2026-08-23.)
+- **Dark theme separates by surface, not by hairline alone.** The chrome is `#0f0f0e` and the content surface is `#1e1e1c`: about fifteen steps apart out of 255, in the darkest range where the eye separates best. The hairline lifts with them to `#34342f`, and so do the two quiet text colours — secondary from `#a3a39b` to `#b6b6ae`, and tertiary from `#82827b` to `#94948c` — so a quiet label on the lighter content surface stays legible. The tertiary colour is the one that had to move: it was 4.46:1 on the old surface, which is under AA, and it is 5.47:1 on the new one. The pair before this was `#151514` under `#1b1b1a`, six steps apart at 1.06:1, behind a `#30302d` hairline at about 1.3:1 against the surface it divided, and the whole product read as one flat black. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b.)
+- **What is raised carries its own fill in dark theme.** A menu, a dialog and a side sheet read `--raised`, which is the content surface with 6% Pure Paper mixed in. In light theme `--raised` is Pure Paper and the shared orange-brown shadow does the separating; on a dark page that shadow resolves lighter than the page it falls on, so it is a faint halo rather than a shadow, and the rule above forbids leaving the hairline to do the work alone. A flush panel — a table, a form group, an ordinary card — does not take this fill. It carries a hairline and nothing else, in both themes. (Read off `tailwind-theme.css`, 2026-08-28. It is the dark half of the surface rule above rather than a rule of its own.)
 - Dense evidence may use a dark contained surface in either theme.
 - Every shared component must support light and dark themes.
 - Verify text, borders, focus, status, overlays, and disabled states in both themes.
@@ -148,7 +150,8 @@ Use `system-ui` first, then Helvetica, Arial, and the system sans-serif fallback
 Rules:
 
 - Hierarchy comes from size, space, and restrained use of weight 500.
-- The micro label is for the two letter-spaced uppercase labels the sidebar carries — `Project` over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px.
+- The micro label is the 12px step, and it stays reserved for the two letter-spaced uppercase labels the sidebar carries — `Project` over the project name, and the role under the account's email. Nothing else uses that size. The scale still starts at 14px.
+- **The 0.08em label tracking is not reserved with it.** A table column header wears the same tracking at the 14px caption step, in sentence case and at weight 500. The size and the tracking are two facts: 12px belongs to those two sidebar labels alone, and the tracking is a way to give a label rank without a fill. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b. This is the first use of the label tracking outside the sidebar, and it does not move the micro label's own rule above.)
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
 - Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
@@ -190,6 +193,7 @@ Most structure comes from contrast and borders.
 - Menus, side sheets, and dialogs use one shared orange-brown shadow: the two-layer stack below. There is no separate shorter menu shadow; the boards draw all three raised surfaces the same way. (Read off the boards, 2026-08-23.)
 - Large showcase panels may use the full orange-brown shadow stack.
 - Tables, sidebars, topbars, inputs, search boxes, and ordinary cards do not float. They carry a hairline and nothing else.
+- The chrome and the content area are told apart by their two surfaces and by the hairline between them. A surface step is contrast, not elevation: the sidebar and the page title bar stay flat and still carry a hairline and no shadow. A table column header takes no fill for the same reason — a filled band inside a panel makes a surface where no new layer starts. What is truly raised keeps the shadow, and in dark theme it also takes the `--raised` fill named under **Dark theme**, because a warm shadow on a dark page does not separate anything. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b.)
 - Do not use cool gray shadows.
 
 The shared shadow, worn by every menu, sheet, and dialog:
@@ -212,14 +216,14 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 ### Shell
 
-- Neutral Paper is the application canvas.
-- The sidebar is a quiet paper region separated by a neutral hairline.
+- Neutral Paper is the application chrome: the sidebar, the page title bar across the top of the content, and the drawer and top bar those two become under the layout breakpoint. The content area itself is Pure Paper.
+- The sidebar is a chrome region, separated from the content by a neutral hairline.
 - The organization control is the topmost thing in the sidebar. It holds the Egma mark, organization name and paired arrows in a bar of its own.
 - The project selector is a separate control under the organization bar and keeps the word `Project` visible.
 - Navigation uses text and small line icons.
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
-- Every page has a title bar of its own, the same height as the wordmark bar, holding the page title alone. A purpose statement, where a form or settings page needs one, is the first quiet line of the page body; list screens carry none (read off the boards, 2026-08-23). Page actions are not in that bar.
+- Every page has a title bar of its own, on the chrome surface, the same height as the sidebar's organization bar, holding the page title alone. A purpose statement, where a form or settings page needs one, is the first quiet line of the page body; list screens carry none (read off the boards, 2026-08-23). Page actions are not in that bar.
 - A page below a section carries one uniform trail into its record in that bar, and **the trail is one line that ends with the record** — `Tests / Livekit agent suite`. A page passes the real trail, ending with the record's own name; `PageNavigation` draws that final step as the page's only `h1`. Every segment and separator uses the 14px / 400 step, so the current page never jumps in size or weight. Parent steps are muted links, `/` separates every adjacent step, pointer hover reveals an underline, and keyboard focus uses the standard two-pixel Ember indicator. Page changes are immediate and carry no transition. The bar used to draw the trail short of the record and the record beside it as a larger heading, which read as a small underlined link stuck to a big title with no separator between them. (Developer decision, 2026-08-26, from the selected Paper PageHeader refinement. This replaces the never-repeat-the-title rule read off the boards on 2026-08-23. A page with no trail still draws its title alone in the bar.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
 - The toolbar row is 52px, and the last 16px of it is the gap to whatever it stands over. The page body adds no gutter of its own under a toolbar row, so a list's panel begins 132px down the page: the 56px title bar, the 24px gutter, and the 52px row. A page whose header draws no toolbar row keeps the 24px gutter, because then nothing above it carries one. (Read off `71N-0` and `6ZM-0` on `6ZJ-0`, 2026-08-23; the application had been drawing the panel at 156.)
@@ -284,7 +288,7 @@ The measurements, all of them theme values:
 - A table is a Pure Paper panel inside one neutral hairline, with its corners clipped.
 - Table text starts at 14px.
 - Neutral hairlines separate rows. There is no hairline after the last row.
-- Headers are quiet, regular-weight labels in a 40px row. A body row is at least 52px.
+- **A column header earns its rank from weight and tracking, not from a fill.** The header row carries no fill of its own. It is the 14px caption step in sentence case, weight 500, with the 0.08em label tracking, in the secondary text colour, over one hairline, in a 40px row. A body row is at least 52px. The header was weight 400 in the tertiary colour before this. A soft gray fill was drawn and then removed, and so were the capitals a later variant tried: a fill makes a second surface inside a panel that is already one surface, and capitals slow a word down and buy nothing. The stacked mobile row names its columns with the same recipe, so a column is named one way in both layouts. (Developer decision, 2026-08-28, from the approved Paper page `09 — Gray chrome variations`, variation V1b.)
 - Every row ends with the same fixed slot for its row menu, whether or not it has one, so the menus line up in one lane down the table.
 - Selected or active rows use Ember Wash plus a non-color state mark.
 - Mobile may restyle the same DOM as rows. It must not duplicate interactive content.
@@ -303,7 +307,7 @@ The measurements, all of them theme values:
 
 - One record is created, read, and edited in a side sheet anchored to the right edge: agents, connections, personas, and tests. The list stays on screen behind it. (Developer decision, 2026-08-23.)
 - **There are two side-sheet behaviours and one wider production reading variant.** The **modal** sheet is the create, read, and edit surface named above: it is 440px, sits over a scrim, and makes the page behind it inert. The **wide reading** sheet is the evidence surface — a transcript beside its grader results, a persona's version history — it is 640px, has no scrim, and deliberately leaves the page beside it usable. The production trace uses that same reading behaviour but progressively widens from 640px to 760px when the viewport has room, so more of the transcript stays visible. A production transcript closes after a primary pointer press on the page beside it. Simulation transcript-and-audio evidence stays open while its grader results are used for comparison. Every width is a theme value. (Developer decision, 2026-08-23; production-transcript outside dismissal and wider production reading variant added by developer decision, 2026-08-28.)
-- A side sheet is full height, on Pure Paper behind a hairline on its left edge.
+- A side sheet is full height, on the raised surface behind a hairline on its left edge. That surface is Pure Paper in light theme and the lifted `--raised` fill in dark theme, because a reading sheet opens over a live page with no scrim and has nothing else to stand on.
 - Its head is the record's name at the lead step with a close beside it, over a hairline. Its body is the fields and scrolls. Its footer is pinned to the bottom: the answer and the way out at the left, the one destructive action at the right.
 - It travels from the edge it is attached to, on the drawer's durations, and fades in place under reduced motion.
 - It traps focus, makes the page behind it inert, closes with Escape, and restores the exact opener.

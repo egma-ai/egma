@@ -440,7 +440,7 @@ export function DesignSystemProof() {
                   Theme, straight from the tokens
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="h-10 rounded-input border border-border bg-background" title="Neutral Paper" />
+                  <div className="h-10 rounded-input border border-border bg-chrome" title="Neutral Paper" />
                   <div className="h-10 rounded-input border border-border bg-surface-soft" title="Quiet neutral" />
                   <div className="h-10 rounded-input border border-border bg-selected" title="Ember Wash" />
                   <div className="h-10 rounded-input border border-border bg-primary" title="Deep Ember" />
