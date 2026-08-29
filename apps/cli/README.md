@@ -128,15 +128,15 @@ the screen says what happens to it before you type it:
 ```
 ◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
   Egma uses this key now to read your Retell agents and confirm the selected setup.
-  For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API.
+  For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell.
   For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.
   › ●●●●●●●●●●●●●●●●
 ```
 
 That sentence is the whole promise, and it is enforced rather than intended.
-The key is held in memory and sent to Retell during setup. For Chat, Egma also
-sends it to the platform, which seals it for simulations. For Phone, setup does
-not send it to the platform. It is written to no repository file, printed in no
+The key is held in memory and sent to Retell during setup. For Text and Web
+call, Egma also sends it to the platform, which seals it for simulations. For
+Phone, setup does not send it to the platform. It is written to no repository file, printed in no
 line, kept in no log, and never passed as a command argument — arguments are
 readable by every process on your machine and are kept in your shell history.
 

@@ -193,7 +193,7 @@ describe("egma connect", () => {
     // The custody sentence is said before the key is asked for, on this
     // surface as much as on the wizard's.
     expect(result.stdout).toContain(
-      "note: Egma uses this key now to read your Retell agents and confirm the selected setup. For Chat, Egma stores it encrypted and uses it to run each simulation through Retell's chat API. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
+      "note: Egma uses this key now to read your Retell agents and confirm the selected setup. For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);

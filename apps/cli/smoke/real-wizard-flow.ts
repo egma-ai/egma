@@ -376,11 +376,11 @@ async function register(
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
   check(first(ran.said, "agent_platform") === "retell", "the agent platform is Retell");
   check(
-    first(ran.said, "connection_type") === "retell_chat_api",
-    "the connection uses the Retell chat API",
+    first(ran.said, "connection_type") === "retell_text_mode",
+    "the connection uses the Retell text door",
   );
   check(
-    first(ran.said, "access_variant") === "retell_chat_api.api_key",
+    first(ran.said, "access_variant") === "retell_text_mode.api_key",
     "the connection uses a Retell API key",
   );
   check(

@@ -513,12 +513,20 @@ async function walkOnce(options: {
       terminal.write("\r");
     }
 
-    /* [human 3c] text or phone, and for the phone the number to dial */
+    /* [human 3c] the lanes, and for the phone the number to dial */
     await showing(terminal, "the choice of lane", BUDGET.lane, "How should Egma test this agent?");
     if (lane === "phone") {
-      terminal.write("\u001B[B");
-      await showing(terminal, "the phone row", BUDGET.lane, "\u203a Phone");
+      await walkTo(terminal, /\u203a[^\n]*Phone call/u, 3, "the phone row");
     }
+    // Nothing starts ticked — one lane dials a real telephone — so the wanted
+    // lane is ticked with space before enter confirms the pick.
+    terminal.write(" ");
+    await showing(
+      terminal,
+      "the ticked lane",
+      BUDGET.lane,
+      lane === "phone" ? "[x] Phone call" : "[x] Text",
+    );
     terminal.write("\r");
 
     if (lane === "phone") {

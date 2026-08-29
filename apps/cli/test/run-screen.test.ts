@@ -234,8 +234,11 @@ async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
-  // This Retell chat agent supports text. Egma still requires confirmation.
-  await showing(run, "How should Egma reach this agent?");
+  // Nothing starts ticked — one lane dials a real telephone — so the text
+  // lane is ticked with space before enter confirms the pick.
+  await showing(run, "How should Egma test this agent?");
+  run.write(" ");
+  await showing(run, "[x] Text");
   run.write("\r");
 
   await chooseNoExistingTests(run);
