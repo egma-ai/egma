@@ -19,10 +19,10 @@ import type { RetellAgent, RetellNumber } from "../retell/client.ts";
 import {
   keyAskLines,
   NUMBER_ASK_LINE,
-  REACH_ASK_LINE,
-  REACH_LINES,
+  LANE_ASK_LINE,
+  LANE_LINES,
   type KeyAsk,
-  type Reach,
+  type Lane,
 } from "../retell/connect.ts";
 import {
   gradeProjectionLines,
@@ -71,9 +71,9 @@ export type HeadlessRecord = {
   /** The account's agents a monitoring choice was offered between. */
   monitoringAgentChoices: MonitoringAgentOffer[];
   /** Whether the choice between text and phone was ever put to anybody. */
-  reachOffered: boolean;
+  lanesOffered: boolean;
   /** The provider-safe options shown at that choice. */
-  reachOptions: Reach[];
+  laneOptions: Lane[];
   /** The numbers a choice was offered between, when one was. */
   numberChoices: RetellNumber[];
   /** Provider fields shown, never the answers typed into them. */
@@ -115,8 +115,8 @@ export class HeadlessUI implements WizardUI {
     keyAsks: [],
     agentChoices: [],
     monitoringAgentChoices: [],
-    reachOffered: false,
-    reachOptions: [],
+    lanesOffered: false,
+    laneOptions: [],
     numberChoices: [],
     connectionAsks: [],
     connectionFieldGroups: [],
@@ -256,13 +256,13 @@ export class HeadlessUI implements WizardUI {
    * It is printed even though nobody is here to answer it, so the output says
    * exactly which provider-safe paths were available.
    */
-  setReachOffer(offered: readonly Reach[] | null): void {
+  setLaneOffer(offered: readonly Lane[] | null): void {
     if (offered === null) return;
-    this.record.reachOffered = true;
-    this.record.reachOptions = [...offered];
-    this.write(REACH_ASK_LINE);
-    for (const way of offered) {
-      this.write(`reach_option: ${way} ${REACH_LINES[way]}`);
+    this.record.lanesOffered = true;
+    this.record.laneOptions = [...offered];
+    this.write(LANE_ASK_LINE);
+    for (const lane of offered) {
+      this.write(`lane_option: ${lane} ${LANE_LINES[lane]}`);
     }
   }
 

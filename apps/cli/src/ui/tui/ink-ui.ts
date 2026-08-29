@@ -12,7 +12,7 @@ import type {
   ConnectionFieldsAnswer,
   ConnectionFieldsAsk,
 } from "../wizard-ui.ts";
-import type { KeyAsk, Reach } from "../../retell/connect.ts";
+import type { KeyAsk, Lane } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
@@ -90,8 +90,8 @@ export class InkUI implements WizardUI {
     this.store.setMonitoringAgentChoices(agents);
   }
 
-  setReachOffer(offered: readonly Reach[] | null): void {
-    this.store.setReachOffer(offered);
+  setLaneOffer(offered: readonly Lane[] | null): void {
+    this.store.setLaneOffer(offered);
   }
 
   setNumberChoices(numbers: readonly RetellNumber[] | null): void {

@@ -11,14 +11,15 @@
  * flow runs on a screen, in a pipe, and in a check with nobody watching.
  *
  * Six things happen in order and each one can end the flow honestly: the key is
- * taken, it is checked by listing the account's agents, one agent is settled
- * on, its configuration is pulled, the developer says whether egma should reach
- * it by text or by phone — and, for the phone, which of the numbers Retell
- * routes to that agent egma should dial. Then one connection is written: **the
- * one that was chosen, and only that one.** A key that is wrong and an account
- * that is empty are told apart by name and each is worth one more try — a typo
- * should cost seconds, and a second wrong answer means the answer is somewhere
- * else.
+ * taken, it is checked by listing the account's **voice** agents, one agent is
+ * settled on, its configuration is pulled, the developer says how egma should
+ * test it — text, web call, phone call, **any of them, several at once** — and,
+ * only when the phone was picked, which of the numbers Retell routes to that
+ * agent egma should dial. Then one connection is written per lane picked, all
+ * of them onto **one** egma agent in one pass: **the lanes that were chosen,
+ * and only those.** A key that is wrong and an account that is empty are told
+ * apart by name and each is worth one more try — a typo should cost seconds,
+ * and a second wrong answer means the answer is somewhere else.
  *
  * **Nothing here writes to Retell.** Every request it makes is a read: the
  * account's agents, one agent's own document, its response engine, the
@@ -73,39 +74,55 @@ export const INVALID_KEY_LINE =
 
 /** The exact failure for a key that works on an account with nothing on it. */
 export const NO_AGENTS_LINE =
-  "That key works, and there are no agents on the Retell account it belongs to. " +
-  "Paste a key for the account your voice agent is on.";
+  "That key works, and there are no voice agents on the Retell account it " +
+  "belongs to. Paste a key for the account your voice agent is on.";
 
 /** What egma calls the agent when the customer never named it on Retell. */
 export const DEFAULT_AGENT_NAME = "voice-agent";
 
 /**
- * How egma reaches the agent, chosen by the developer and never by egma.
+ * How egma tests the agent, chosen by the developer and never by egma.
  *
- * A Retell voice agent is reached either way: by phone, dialling one of its
- * numbers, or by text, conducting a chat simulation over the Retell text mode.
- * A genuine Retell chat agent is reached by text alone, over the chat API. So
- * text means two different connections depending on the agent it is chosen for
- * — text mode for a voice agent, the chat API for a chat one — which is
- * `selectionFor`'s whole job below.
+ * Three lanes, and a Retell voice agent can be tested over any of them — or
+ * over several at once, which is the point: chat and voice land as connections
+ * on **one** egma agent, and one test suite runs over all of them. Each lane is
+ * one connection, and each connection that can run mocked carries its own
+ * switch.
+ *
+ * - `text` — the Retell text mode door, mocks on the moment it is created.
+ * - `web-call` — a voice call egma places over the internet, mocks off until
+ *   the one consent screen is accepted.
+ * - `phone` — the real telephone line, real tools, never mocked.
  */
-export type Reach = "text" | "phone";
+export type Lane = "text" | "web-call" | "phone";
+
+/** Every lane, in the order a developer reads them: fastest first. */
+export const LANES: readonly Lane[] = ["text", "web-call", "phone"];
 
 /** What the developer is choosing between, said the same way on every surface. */
-export const REACH_ASK_LINE = "How should Egma reach this agent?";
+export const LANE_ASK_LINE = "How should Egma test this agent?";
 
-/** One line per way, said in what it tests rather than in what it is made of. */
-export const REACH_LINES: Readonly<Record<Reach, string>> = {
-  text: "Chat — Egma exchanges messages with the agent. No phone call, nothing dialled.",
-  phone:
-    "Phone — Egma dials one of the agent's numbers and talks to it over the " +
-    "telephone network, the way the people who call it do.",
+/** The short name of each lane, which is the word on every surface. */
+export const LANE_NAMES: Readonly<Record<Lane, string>> = {
+  text: "Text",
+  "web-call": "Web call",
+  phone: "Phone call",
 };
 
-/** What a developer can do after asking Retell for a phone connection to chat. */
-export const CHAT_REQUIRES_TEXT_LINE =
-  "Retell says this is a chat agent. Chat agents require a Chat connection. " +
-  "Choose --reach text and try again. Nothing was written.";
+/** One help line per lane, in what it tests rather than what it is made of. */
+export const LANE_LINES: Readonly<Record<Lane, string>> = {
+  text: "Text — Egma talks to the agent in text. No call is placed, and a run takes seconds.",
+  "web-call": "Web call — a voice call Egma places over the internet.",
+  phone:
+    "Phone call — Egma dials the real number, so a run has true telephone " +
+    "latency and reaches your real tools.",
+};
+
+/** The word a lane is said with on a flag, in an answer, and in a check. */
+export function laneNamed(said: string): Lane | null {
+  const word = said.trim().toLowerCase();
+  return (LANES as readonly string[]).includes(word) ? (word as Lane) : null;
+}
 
 /**
  * Why text cannot reach a voice agent whose engine is a custom LLM.
@@ -118,7 +135,7 @@ export const CHAT_REQUIRES_TEXT_LINE =
  * the run-start read and the web flow give, at the moment the engine is read.
  */
 export const TEXT_MODE_REFUSES_CUSTOM_LLM =
-  `${CUSTOM_LLM_HAS_NO_CONFIGURATION} Choose --reach phone and test this agent ` +
+  `${CUSTOM_LLM_HAS_NO_CONFIGURATION} Choose --lanes phone and test this agent ` +
   "over its phone line instead, which reaches it the way its callers do. " +
   "Nothing was written.";
 
@@ -204,19 +221,30 @@ export type Registration = {
   readonly connection: WriteResult;
 };
 
+/** One lane that was picked, and the connection egma wrote for it. */
+export type ConnectedLane = {
+  readonly lane: Lane;
+  readonly connection: RegisteredConnection;
+  /** Whether this connection was written or found already there. */
+  readonly written: WriteResult;
+};
+
 export type ConnectOutcome =
   | {
       readonly kind: "connected";
+      /** The last write's answer, which carries the one agent every lane landed on. */
       readonly registered: Registered;
       readonly config: RetellConfig;
       readonly drift: Drift;
       /** How many agents the account holds, which is why a picker appeared. */
       readonly onTheAccount: number;
-      /** Which way the developer chose, and the only one egma wrote. */
-      readonly reach: Reach;
-      /** The number egma will dial, or `null` for a Chat connection. */
+      /** Every lane the developer chose, and none that they did not. */
+      readonly lanes: readonly Lane[];
+      /** One entry per lane, in the order they were written. */
+      readonly connections: readonly ConnectedLane[];
+      /** The number egma will dial, or `null` when the phone lane was not picked. */
       readonly number: string | null;
-      /** Whether each half was written or found already there. */
+      /** Whether the agent and the first connection were written or found. */
       readonly registration: Registration;
     }
   /** Nobody gave a key, so there is nothing to connect with. */
@@ -227,21 +255,21 @@ export type ConnectOutcome =
   | { readonly kind: "no-agents" }
   /** Several agents, and nobody said which. */
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
-  /** Nobody chose one of the provider-safe ways offered for this agent. */
-  | { readonly kind: "unchosen-reach"; readonly offered: readonly Reach[] }
+  /** Nobody picked a lane, so there is nothing to write. */
+  | { readonly kind: "unchosen-lanes"; readonly offered: readonly Lane[] }
   /**
-   * The requested reach cannot reach this agent, and the reason says why.
+   * A picked lane cannot reach this agent, and the reason says why.
    *
-   * Two shapes, one outcome: a chat agent asked for by phone, which has no
-   * number to dial, and a voice agent asked for by text whose engine is a
-   * custom LLM, which text mode cannot reach. Each names the reach that
-   * does work — text for the first, phone for the second — and the reason a
-   * developer reads.
+   * One shape today: a voice agent picked for text whose response engine is a
+   * custom LLM, which text mode cannot reach because Retell holds neither its
+   * words nor its tools. It names the lane that does work and the reason a
+   * developer reads, and **nothing at all is written** — a pass that half
+   * landed would leave a project the developer has to unpick.
    */
   | {
-      readonly kind: "incompatible-reach";
-      readonly requested: Reach;
-      readonly compatible: Reach;
+      readonly kind: "incompatible-lane";
+      readonly requested: Lane;
+      readonly compatible: Lane;
       readonly reason: string;
     }
   /** Retell routes no number to the chosen agent, so there is nothing to dial. */
@@ -264,13 +292,16 @@ export type ConnectOptions = {
   /** Which of several, by id, or `null` when nobody chose. */
   readonly chooseAgent: (agents: readonly RetellAgent[]) => Promise<string | null>;
   /**
-   * The `text` or `phone` reach flag, or `null` when nobody chose.
+   * Which lanes to test over, or `null`/empty when nobody picked one.
    *
    * Asked once the agent is settled and never before it: which numbers exist
    * is a fact about *that* agent, so there is nothing honest to offer until
-   * egma knows which one is under test.
+   * egma knows which one is under test. Several may come back, and each one
+   * becomes a connection on the same egma agent in this one pass.
    */
-  readonly chooseReach: (offered: readonly Reach[]) => Promise<Reach | null>;
+  readonly chooseLanes: (
+    offered: readonly Lane[],
+  ) => Promise<readonly Lane[] | null>;
   /**
    * Which number to dial, in E.164, or `null` when nobody chose.
    *
@@ -358,14 +389,20 @@ async function keyAndAgents(
     if (options.signal.aborted) return { kind: "interrupted" };
 
     switch (listed.kind) {
-      case "agents":
-        if (listed.agents.length > 0) return { kind: "ok", key, agents: listed.agents };
+      case "agents": {
+        // Egma registers Retell **voice** agents only, so a chat-native agent
+        // is never offered: the product would have nothing to ask about it.
+        // The account being all chat agents reads as an empty one here, which
+        // is the honest answer — there is nothing on it egma tests.
+        const voice = listed.agents.filter((agent) => agent.modality === "voice");
+        if (voice.length > 0) return { kind: "ok", key, agents: voice };
         if (attempt === 0) {
           refusedFor = "no-agents";
           options.say(NO_AGENTS_LINE);
           break;
         }
         return { kind: "no-agents" };
+      }
       case "invalid-key":
         if (attempt === 0) {
           refusedFor = "invalid-key";
@@ -388,71 +425,83 @@ async function keyAndAgents(
 /** The key, carried between the two halves of the flow, never stored. */
 type KeyedOptions = ConnectOptions & { readonly key: RetellKey };
 
-/** What egma is being asked to write, once the reach has been chosen. */
+/** What egma is being asked to write, for one picked lane. */
 type Selected = {
-  readonly reach: Reach;
-  /** The connection body for the chosen reach, and no other. */
+  readonly lane: Lane;
+  /** The connection body for that lane, and no other. */
   readonly connection: NewConnection;
-  /** The number egma will dial, or `null` for a Chat connection. */
-  readonly number: string | null;
 };
 
 /**
- * The one connection the chosen reach means.
+ * The one connection a lane means.
  *
- * **Text means two different connections, and the agent decides which.** A
- * genuine Retell chat agent is reached over the chat API; a Retell voice agent
- * is reached over text mode, which conducts a chat simulation of it in
- * text. Both carry the vendor's own agent id and the Retell key, because both
- * conduct every simulation through Retell — and they differ only in the two
- * technical axes that name which door egma knocks on. **Phone carries the
- * destination number and no durable connection credential.** Its request-only
- * platform selection carries the Retell key so the API can confirm the routing
- * during the write, then discard the key. The separate agent-platform field
- * records that this onboarding flow found the agent in Retell.
+ * **Three lanes, three doors, and the developer picks the doors.** Text is
+ * conducted over Retell's text mode, which runs a chat simulation of a voice
+ * agent; a web call is one egma places over the internet; phone dials a real
+ * number. The two Retell doors carry the vendor's own agent id and the Retell
+ * key, because both conduct their simulations through Retell. **Phone carries
+ * the destination number and no durable connection credential** — its
+ * request-only platform selection carries the Retell key so the API can confirm
+ * the routing during the write, then discards it. The separate agent-platform
+ * field records that this onboarding flow found the agent in Retell.
+ *
+ * Egma registers Retell voice agents only, so there is no second text door to
+ * choose between: the chat-native `retell_chat_api` is dormant and no flow
+ * offers it.
  */
 function selectionFor(
-  reach: Reach,
+  lane: Lane,
   config: RetellConfig,
   key: RetellKey,
   number: string | null,
 ): Selected {
-  if (reach === "phone") {
-    return {
-      reach,
-      // No name: the platform's own default is the convention, and one
-      // convention in one place cannot drift from itself.
-      connection: {
-        agentPlatform: "retell",
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "voice",
-        config: { phoneNumber: number ?? "" },
-        agentPlatformSelection: {
-          platformAgentId: config.agentId,
+  switch (lane) {
+    case "phone":
+      return {
+        lane,
+        // No name: the platform's own default is the convention, and one
+        // convention in one place cannot drift from itself.
+        connection: {
+          agentPlatform: "retell",
+          connectionType: "phone_number",
+          accessVariant: "phone_number.public_e164",
+          modality: "voice",
+          config: { phoneNumber: number ?? "" },
+          agentPlatformSelection: {
+            platformAgentId: config.agentId,
+            credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
+          },
+        },
+      };
+    case "web-call":
+      // Mocks stay off on a web call until the one consent screen is accepted,
+      // so this flow never asks for them: the connection arrives unmocked and
+      // the consent flow is the only thing that turns the switch on.
+      return {
+        lane,
+        connection: {
+          agentPlatform: "retell",
+          connectionType: "retell_web_call",
+          accessVariant: "retell_web_call.api_key",
+          modality: "voice",
+          config: { retellAgentId: config.agentId },
           credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
         },
-      },
-      number,
-    };
+      };
+    case "text":
+      return {
+        lane,
+        connection: {
+          agentPlatform: "retell",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
+          // Text mode conducts a chat simulation of a voice agent.
+          modality: "chat",
+          config: { retellAgentId: config.agentId },
+          credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
+        },
+      };
   }
-  // A voice agent tested in text is conducted over text mode, which is the
-  // only text door any flow offers: Egma registers Retell voice agents, and
-  // discovery lists no other kind. The engine that cannot take text mode — a
-  // custom LLM — has already been refused before this is reached.
-  return {
-    reach,
-    connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_text_mode",
-      accessVariant: "retell_text_mode.api_key",
-      // Text mode conducts a chat simulation of a voice agent.
-      modality: "chat",
-      config: { retellAgentId: config.agentId },
-      credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
-    },
-    number: null,
-  };
 }
 
 /** Whether a connection already on the platform is the one being asked for. */
@@ -739,6 +788,73 @@ async function register(
 }
 
 /**
+ * One more lane onto the agent the first lane already landed on.
+ *
+ * The first picked lane goes through `register`, which settles which egma agent
+ * this Retell agent is. Every lane after it is an addition to *that* agent, and
+ * that is the whole point of the multi-pick: several ways of testing one voice
+ * agent, one results history.
+ *
+ * A lane already attached is answered rather than written twice, exactly as a
+ * repeated single-lane connect is, so running the same pass again is free.
+ */
+async function attachLane(
+  options: ConnectOptions,
+  agentId: string,
+  selected: Selected,
+): Promise<
+  | { readonly kind: "attached"; readonly connection: RegisteredConnection; readonly written: WriteResult }
+  | ConnectOutcome
+> {
+  const platform: RegisterOptions = {
+    url: options.platform.url,
+    key: options.platform.key,
+    fetchImpl: options.fetchImpl,
+    signal: options.signal,
+  };
+  const notSignedIn: ConnectOutcome = {
+    kind: "failed",
+    reason: "Egma would not take this machine's key. Run egma login, then try again.",
+  };
+
+  const held = await readAgent(agentId, platform);
+  if (options.signal.aborted) return { kind: "interrupted" };
+  if (held.kind === "not-authenticated") return notSignedIn;
+  if (held.kind === "refused" || held.kind === "unreachable") {
+    return { kind: "failed", reason: held.reason };
+  }
+  if (held.kind !== "agent") {
+    return {
+      kind: "failed",
+      reason: `Egma lost the agent this walk had just registered, so ${LANE_NAMES[selected.lane]} was not added. Run egma connect again.`,
+    };
+  }
+
+  const already = held.connections.find((one) => isTheSameReach(one, selected.connection));
+  if (already !== undefined) return { kind: "attached", connection: already, written: "reused" };
+
+  const added = await addConnection(agentId, selected.connection, platform);
+  if (options.signal.aborted) return { kind: "interrupted" };
+  switch (added.kind) {
+    case "added":
+      return { kind: "attached", connection: added.connection, written: "created" };
+    case "not-authenticated":
+      return notSignedIn;
+    case "not-found":
+    case "name-taken":
+      return {
+        kind: "failed",
+        reason:
+          `Egma would not add the ${LANE_NAMES[selected.lane]} connection to ` +
+          `${held.agent.name}. The lanes before it were written. Run egma connect again.`,
+      };
+    case "refused":
+    case "unreachable":
+      return { kind: "failed", reason: added.reason };
+  }
+}
+
+/**
  * The number egma will dial, out of the ones Retell routes to this agent.
  *
  * Two reads, and both of them are reads. The account's numbers are listed
@@ -877,47 +993,37 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
 
   const config = pulled.config;
 
-  // The agent is settled, so what egma may offer is settled with it. This is
-  // the modality question, and it leads: for a voice agent the developer says
-  // chat or voice — text over text mode, or phone down a line — before
-  // any number is read. A chat agent has one door, text over the chat API, so
-  // there is nothing to ask it and text is all that is offered.
-  const offered: readonly Reach[] =
-    config.modality === "voice" ? ["text", "phone"] : ["text"];
-  const reach = await options.chooseReach(offered);
+  // The agent is settled, so the one question can be asked: how should Egma
+  // test it. Three lanes, several pickable at once, and each pick is one
+  // connection on this one egma agent. Egma registers voice agents only, so
+  // every lane is offered for every agent that got this far.
+  const offered = LANES;
+  const picked = (await options.chooseLanes(offered)) ?? [];
   if (options.signal.aborted) return { kind: "interrupted" };
-  if (reach === null) return { kind: "unchosen-reach", offered };
-  // A chat agent has no number to dial, so phone is the wrong door for it.
-  if (config.modality === "chat" && reach !== "text") {
+  if (picked.length === 0) return { kind: "unchosen-lanes", offered };
+  // Deduplicated and put back in the reading order, so two surfaces answering
+  // the same set write the same connections in the same order.
+  const lanes = offered.filter((lane) => picked.includes(lane));
+
+  // A voice agent tested in text is conducted over text mode, which reaches an
+  // agent's words and tools through Retell — and a custom LLM keeps both on its
+  // own socket server, out of that reach. So the engine, already read when the
+  // agent was pulled, is refused here, at the door, with its reason and the
+  // phone line as the lane that does reach it. Nothing is written: a pass that
+  // half landed would leave a project the developer has to unpick.
+  if (lanes.includes("text") && config.engine === "custom-llm") {
     return {
-      kind: "incompatible-reach",
-      requested: reach,
-      compatible: "text",
-      reason: CHAT_REQUIRES_TEXT_LINE,
-    };
-  }
-  // A voice agent tested in text is conducted over text mode, which
-  // reaches an agent's words and tools through Retell — and a custom LLM keeps
-  // both on its own socket server, out of that reach. So the engine, already
-  // read when the agent was pulled, is refused here, at the door, with its
-  // reason and the phone line as the way that does reach it.
-  if (
-    config.modality === "voice" &&
-    reach === "text" &&
-    config.engine === "custom-llm"
-  ) {
-    return {
-      kind: "incompatible-reach",
-      requested: reach,
+      kind: "incompatible-lane",
+      requested: "text",
       compatible: "phone",
       reason: TEXT_MODE_REFUSES_CUSTOM_LLM,
     };
   }
 
-  // Read once at most, and only where it is needed: by the phone branch, which
+  // Read once at most, and only where it is needed: by the phone lane, which
   // needs it to offer anything at all, and by a name clash that has nothing
-  // else to go on. A text connect on an account nobody has clashed with never
-  // asks Retell about telephone numbers.
+  // else to go on. A text-only connect on an account nobody has clashed with
+  // never asks Retell about telephone numbers.
   let routed: readonly string[] | null | undefined;
   const numbersOfTheAgent = async (): Promise<readonly string[] | null> => {
     if (routed !== undefined) return routed;
@@ -929,14 +1035,39 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     return routed;
   };
 
-  const dialling = reach === "phone" ? await pickNumber(options, key, config) : null;
+  // The number chooser appears only when the phone lane was picked. A developer
+  // who picked only Text is never asked for a phone number.
+  const dialling = lanes.includes("phone")
+    ? await pickNumber(options, key, config)
+    : null;
   if (dialling !== null && dialling.kind !== "number") return dialling;
   if (dialling !== null) routed = dialling.routed;
-  const selected = selectionFor(reach, config, key, dialling?.number ?? null);
+
+  const selections = lanes.map((lane) =>
+    selectionFor(lane, config, key, dialling?.number ?? null),
+  );
+  const first = selections[0] as Selected;
 
   await options.beforeRegistering?.();
-  const written = await register(keyed, config, selected, numbersOfTheAgent);
+  const written = await register(keyed, config, first, numbersOfTheAgent);
   if (written.kind !== "registered") return written;
+
+  const connections: ConnectedLane[] = [
+    {
+      lane: first.lane,
+      connection: written.registered.connection,
+      written: written.registration.connection,
+    },
+  ];
+  for (const selected of selections.slice(1)) {
+    const attached = await attachLane(options, written.registered.agent.id, selected);
+    if (attached.kind !== "attached") return attached;
+    connections.push({
+      lane: selected.lane,
+      connection: attached.connection,
+      written: attached.written,
+    });
+  }
 
   // Shown, never blocking: the drift is worked out after everything that
   // matters is already written, so a slow or unreadable file cannot cost the
@@ -954,8 +1085,9 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     config,
     drift,
     onTheAccount: agents.length,
-    reach: selected.reach,
-    number: selected.number,
+    lanes,
+    connections,
+    number: dialling?.number ?? null,
     registration: written.registration,
   };
 }

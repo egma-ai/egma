@@ -29,7 +29,9 @@ import {
   registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
-  type Reach,
+  laneNamed,
+  LANE_NAMES,
+  type Lane,
   type Registration,
 } from "../retell/connect.ts";
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
@@ -73,9 +75,14 @@ export type ConnectionSetupStepOptions = {
   readonly fetchImpl?: ConnectOptions["fetchImpl"];
 };
 
-/** The two words a reach screen may answer with, and nothing else. */
-function reachFrom(answer: string | null): Reach | null {
-  return answer === "text" || answer === "phone" ? answer : null;
+/** The lanes a screen answered with, and nothing that is not one. */
+function lanesFrom(answer: string | null): readonly Lane[] | null {
+  if (answer === null) return null;
+  const lanes = answer
+    .split(",")
+    .map(laneNamed)
+    .filter((lane): lane is Lane => lane !== null);
+  return lanes.length === 0 ? null : lanes;
 }
 
 /** The line the wizard closes on, for every way this step can end. */
@@ -95,12 +102,12 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
       return { kind: "failed", reason: "there are no agents on that Retell account." };
     case "unchosen":
       return { kind: "failed", reason: "nobody said which Retell agent to test." };
-    case "unchosen-reach":
+    case "unchosen-lanes":
       return {
         kind: "failed",
-        reason: `nobody chose ${outcome.offered.join(" or ")}, so nothing was created.`,
+        reason: `nobody picked ${outcome.offered.map((lane) => LANE_NAMES[lane]).join(", ")}, so nothing was created.`,
       };
-    case "incompatible-reach":
+    case "incompatible-lane":
       return { kind: "failed", reason: outcome.reason };
     case "no-numbers":
       return { kind: "failed", reason: NO_NUMBERS_LINE };
@@ -126,9 +133,9 @@ export type Connected = {
   readonly connected: {
     readonly registered: Registered;
     readonly config: RetellConfig;
-    /** Which way the developer chose, and the only one egma created. */
-    readonly reach: Reach;
-    /** The number egma will dial, or `null` for a text connection. */
+    /** Every lane the developer picked, and none that they did not. */
+    readonly lanes: readonly Lane[];
+    /** The number egma will dial, or `null` when the phone lane was not picked. */
     readonly number: string | null;
     /** Whether the agent and the connection were written or found. */
     readonly registration: Registration;
@@ -214,11 +221,11 @@ export async function connectionSetupStep(options: ConnectionSetupStepOptions): 
       ui.setAgentChoices(null);
       return chosen ?? null;
     },
-    chooseReach: async (offered) => {
-      ui.setReachOffer(offered);
-      const chosen = await untilAborted(ui.waitForAnswer("reach"), signal);
-      ui.setReachOffer(null);
-      return reachFrom(chosen ?? null);
+    chooseLanes: async (offered) => {
+      ui.setLaneOffer(offered);
+      const chosen = await untilAborted(ui.waitForAnswer("lanes"), signal);
+      ui.setLaneOffer(null);
+      return lanesFrom(chosen ?? null);
     },
     chooseNumber: async (numbers) => {
       ui.setNumberChoices(numbers);
@@ -229,7 +236,7 @@ export async function connectionSetupStep(options: ConnectionSetupStepOptions): 
     // The last moment before this repository owns anything that only one
     // platform can resolve, and the reason this hook exists at all: every
     // ending above it — no key, a key Retell will not take, an empty account,
-    // an unanswered choice of agent, reach or number — must leave the
+    // an unanswered choice of agent, lanes or number — must leave the
     // repository exactly as the walk found it. Bound any earlier and a wizard
     // closed at the key box would leave an egma folder behind holding nothing
     // but a binding.
@@ -280,7 +287,7 @@ export async function connectionSetupStep(options: ConnectionSetupStepOptions): 
       connected: {
         registered,
         config,
-        reach: outcome.reach,
+        lanes: outcome.lanes,
         number: outcome.number,
         registration: outcome.registration,
       },

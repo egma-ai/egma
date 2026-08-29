@@ -19,7 +19,7 @@ import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
-import type { KeyAsk, Reach } from "../../retell/connect.ts";
+import type { KeyAsk, Lane } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
 import type { Detection } from "../../wizard/detection.ts";
@@ -95,8 +95,8 @@ export const WIZARD_SCREENS: Sequence = [
   // The one question that decides what egma creates. Never skipped and never
   // answered for the developer.
   {
-    id: "reach",
-    show: (state) => state.phase === "connection-setup" && state.asking === "reach",
+    id: "lanes",
+    show: (state) => state.phase === "connection-setup" && state.asking === "lanes",
   },
   // Never reached when Retell routes one number to the agent, because the flow
   // only opens this question when there is a choice to make.
@@ -323,8 +323,8 @@ export class WizardStore {
     this.change({ monitoringAgentChoices });
   }
 
-  setReachOffer(reachOptions: readonly Reach[] | null): void {
-    this.change({ reachOptions });
+  setLaneOffer(laneOptions: readonly Lane[] | null): void {
+    this.change({ laneOptions });
   }
 
   setNumberChoices(numberChoices: readonly RetellNumber[] | null): void {
