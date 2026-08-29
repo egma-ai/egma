@@ -504,7 +504,7 @@ async function refuseRun(
       {
         "egma.run_id": run.id,
         "egma.agent_id": run.agentId,
-        "error.type": "mocked_world_unbuildable",
+        "error.type": "mock_tools_unbuildable",
       },
     ),
     reason,
@@ -545,7 +545,7 @@ async function refuseInUse(
         "egma.run_id": run.id,
         "egma.agent_id": run.agentId,
         "egma.holding_run_id": byRunId,
-        "error.type": "mocked_world_in_use",
+        "error.type": "mock_tools_agent_in_use",
       },
     ),
     reason,

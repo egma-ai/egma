@@ -575,7 +575,7 @@ describe("a run whose world cannot be built", () => {
       idempotencyKey: newId("run"),
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(refused.body.error).toBe("mocked_world_unbuildable");
+    expect(refused.body.error).toBe("mock_tools_unbuildable");
     expect(String(refused.body.message)).toContain("wrote nothing and stopped");
 
     // Nothing was written to the version the customer's callers are served
@@ -633,7 +633,7 @@ describe("a second mocked run on an agent already holding its world", () => {
 
     // Refused as a conflict, naming the run to wait for.
     expect(second.statusCode, JSON.stringify(second.body)).toBe(409);
-    expect(second.body.error).toBe("mocked_world_in_use");
+    expect(second.body.error).toBe("mock_tools_agent_in_use");
     expect(String(second.body.message)).toContain(firstRunId);
     expect(String(second.body.message)).toContain("one mocked world per agent");
 
@@ -841,7 +841,7 @@ describe("a mocked run after a predecessor's teardown failed", () => {
       idempotencyKey: newId("run"),
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(422);
-    expect(second.body.error).toBe("mocked_world_unbuildable");
+    expect(second.body.error).toBe("mock_tools_unbuildable");
     expect(String(second.body.message)).toContain(firstRunId);
     expect(String(second.body.message)).toContain("could not be fully given back");
     expect([...ready.state.versions].sort()).toEqual([105, 106]);

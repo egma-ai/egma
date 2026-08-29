@@ -112,7 +112,7 @@ export const CODES = {
    * canceled and this is what the caller is told, with the platform's own reason
    * in the sentence.
    */
-  mocked_world_unbuildable: 422,
+  mock_tools_unbuildable: 422,
   /**
    * A second mocked run asked for while another run of the same agent still
    * holds its one temporary version.
@@ -123,7 +123,7 @@ export const CODES = {
    * the agent's phone routing back as it found it, and the other's temporary
    * version would be what that routing then points at.
    */
-  mocked_world_in_use: 409,
+  mock_tools_agent_in_use: 409,
   too_many_requests: 429,
   /**
    * A fault, answered without relaying whatever the fault said.

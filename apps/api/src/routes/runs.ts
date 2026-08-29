@@ -576,12 +576,12 @@ export async function runRoutes(
         request.log,
       );
       if (world.kind === "refused") {
-        return sendRefusal(reply, "mocked_world_unbuildable", world.reason);
+        return sendRefusal(reply, "mock_tools_unbuildable", world.reason);
       }
       // Another run of this agent holds its one mocked world. A conflict, not a
       // fault: the same request works once that run finishes.
       if (world.kind === "in-use") {
-        return sendRefusal(reply, "mocked_world_in_use", world.reason);
+        return sendRefusal(reply, "mock_tools_agent_in_use", world.reason);
       }
 
       const described = await headerOf(
