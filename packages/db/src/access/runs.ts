@@ -20,7 +20,12 @@ import {
   type SQL,
 } from "drizzle-orm";
 
-import { db, type Queryable, type Transaction } from "../client.ts";
+import {
+  db,
+  dedicatedConnection,
+  type Queryable,
+  type Transaction,
+} from "../client.ts";
 import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
@@ -1145,6 +1150,83 @@ export type MockDraftClaim =
   | { readonly kind: "taken"; readonly byRunId: string };
 
 /**
+ * The fence's key: this one agent, of this one customer. Nothing else waits
+ * behind it, and it is derived here alone so the claim and the teardown can
+ * never end up fencing on two different keys.
+ */
+function mockDraftFenceKey(auth: AuthContext, agentId: string): string {
+  return `egma-mock-draft:${auth.organizationId}:${agentId}`;
+}
+
+/** Every fence this process is holding right now, by key. */
+const heldMockDraftFences = new Set<string>();
+
+/**
+ * Refuse work that must not be done outside the fence.
+ *
+ * Cross-process exclusion is Postgres's job; this catches the one mistake a
+ * person makes — writing a new caller that forgets to open the fence — where it
+ * is cheap to catch, in the same process, rather than as a race a customer
+ * finds.
+ */
+function requireMockDraftFence(
+  auth: AuthContext,
+  agentId: string,
+  doing: string,
+): void {
+  if (heldMockDraftFences.has(mockDraftFenceKey(auth, agentId))) return;
+  throw new Error(
+    `refusing to ${doing} without this agent's mocked-world fence: open it ` +
+      "with owedMockCleanups and do the work inside it",
+  );
+}
+
+/**
+ * Hold one agent's mocked-world fence for as long as `held` runs.
+ *
+ * **A session-scoped Postgres advisory lock on a connection of this process's
+ * own**, not a transaction-scoped one, because what it fences is not a query:
+ * it is a claim, a teardown and a build, each of them several requests to
+ * Retell. A transaction held open across those would pin a pooled connection
+ * for a minute at a time — and every statement the fenced work runs is on a
+ * *different* pooled connection, so a transaction-scoped lock would deadlock
+ * against the fenced work's own claim rather than protect it.
+ *
+ * Postgres drops a session's advisory locks when the session ends, so closing
+ * the connection is the release, and a process that dies mid-hold releases it
+ * too. The wait is unbounded on purpose, exactly as every other advisory lock
+ * in this package is: what is on the other side is bounded by the caller's own
+ * request timeout, and a waiter that gave up would be a second run branching
+ * beside the first, which is the hazard the fence exists for.
+ */
+async function withMockDraftFence<T>(
+  key: string,
+  held: () => Promise<T>,
+): Promise<T> {
+  const connection = dedicatedConnection();
+  // A connection that dies has to arrive here rather than at an unhandled
+  // rejection. The fence goes with it either way.
+  connection.on("error", () => undefined);
+  await connection.connect();
+  try {
+    await connection.query(
+      "select pg_advisory_lock(hashtextextended($1::text, 0))",
+      [key],
+    );
+    heldMockDraftFences.add(key);
+    try {
+      return await held();
+    } finally {
+      heldMockDraftFences.delete(key);
+    }
+  } finally {
+    // Ending the session is the unlock, and it is the one that also runs when
+    // the connection has gone bad under us.
+    await connection.end().catch(() => undefined);
+  }
+}
+
+/**
  * Claim this agent's **one** temporary copy for this run, or say who holds it.
  *
  * ## Why one at a time
@@ -1177,15 +1259,21 @@ export type MockDraftClaim =
  * that window and passes it, so the sweep and this check cannot disagree about
  * which runs are alive.
  *
- * ## The lock
+ * ## The fence this runs behind
  *
  * A check without a lock is a time-of-check-to-time-of-use race: two runs
- * starting together would both read "nobody holds it" and both build. So the
- * whole check-and-claim is one transaction behind a Postgres advisory lock
- * keyed on this organization and agent — the same mechanism, and the same
- * reasoning, as the vendor-agent lock `registerAgent` takes. The second run
- * waits, then reads the first run's committed claim and is refused. Exactly one
- * builds.
+ * starting together would both read "nobody holds it" and both build. And a
+ * lock held for only this check is barely better — the branch, the pins and the
+ * teardown all happen after it is let go, so a settle of a *finished* run could
+ * still be halfway through its restore while a new run mints the version that
+ * restore would route real callers onto.
+ *
+ * So the lock is not taken here. It is `owedMockCleanups` above, held from
+ * before this check until after the caller has finished building — and held by
+ * the settle path over the whole teardown too, so the two can never overlap.
+ * This function is the check-and-claim inside it, and refuses to run outside
+ * it: the fence key is derived in one place, and a caller that forgot the fence
+ * is a bug rather than a silent race.
  *
  * The claim itself is the cleanup flag written onto the run, so the winner is
  * visible to a later sweep by the same one indexed query from the instant it
@@ -1205,15 +1293,9 @@ export async function claimMockDraftFor(
 ): Promise<MockDraftClaim> {
   authorize(auth, "start_and_cancel_runs", here(auth));
   const staleSeconds = Math.max(0, input.staleBuildMilliseconds) / 1000;
-  // This one agent, of this one customer. Nothing else waits behind it.
-  const racing = `egma-mock-draft:${auth.organizationId}:${input.agentId}`;
+  requireMockDraftFence(auth, input.agentId, "claim this agent's mocked world");
 
   return db().transaction(async (tx): Promise<MockDraftClaim> => {
-    // Taken before anything is read, and let go when the transaction ends.
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${racing}::text, 0))`,
-    );
-
     const [held] = await tx
       .select({ id: run.id })
       .from(run)
@@ -1264,7 +1346,9 @@ export type OwedMockCleanup = {
 
 /**
  * Every cleanup this agent's runs still owe the account — one indexed query,
- * over the partial index on `temp_mock_agent_version_cleanup = false`.
+ * over the partial index on `temp_mock_agent_version_cleanup = false` — read
+ * **under this agent's mocked-world fence** and handed to the caller for as
+ * long as it holds it.
  *
  * The sweep's whole input, and the claim's. A run answers here from the moment
  * it claims the agent until the moment its teardown lands, which covers both
@@ -1279,13 +1363,58 @@ export type OwedMockCleanup = {
  *
  * Ordered oldest first, because the oldest litter is the litter most likely to
  * be a crash rather than a run still in flight.
+ *
+ * ## Why the read and the acting on it are one call
+ *
+ * **Reading what is owed is worth nothing unless nobody else may act between
+ * the read and the acting.** A settle that read "run one owes a restore",
+ * then waited on a Retell request while a new run claimed the agent, swept the
+ * same run, and branched its own copy, would land its restore onto that copy —
+ * a `latest` binding pointing at a mocked version, which is the exact hijack
+ * the whole design exists to prevent, and one that no per-write guard can see
+ * (the new run pinned the number to the same numeric version the old one did).
+ *
+ * So the fence is opened here, the rows are read inside it, and `whileHeld`
+ * runs before it is let go. A cleanup flag that somebody else flipped to `true`
+ * in the meantime is simply not in the list, which is what makes a duplicated
+ * settle a no-op rather than a second restore.
+ *
+ * `fence`:
+ * - `"only-when-owed"` — the ordinary landing. The list is read first without
+ *   the fence, and an agent that owes nothing answers with an empty list and no
+ *   lock at all: there is nothing to act on, so there is nothing to serialize
+ *   against, and a report landing should not open a connection to learn it.
+ *   Where something *is* owed, the fence is opened and the list re-read under
+ *   it, because the first read is only a hint.
+ * - `"take"` — for the caller that is about to *make* something. The fence is
+ *   held whether or not anything is owed, because what needs the exclusion is
+ *   the claim and the branch that follow, not the litter.
  */
-export async function owedMockCleanups(
+export async function owedMockCleanups<T>(
   auth: AuthContext,
   agentId: string,
-  options: { readonly exceptRunId?: string } = {},
-): Promise<readonly OwedMockCleanup[]> {
+  options: {
+    readonly exceptRunId?: string;
+    readonly fence: "take" | "only-when-owed";
+  },
+  whileHeld: (owed: readonly OwedMockCleanup[]) => Promise<T>,
+): Promise<T> {
   authorize(auth, "start_and_cancel_runs", here(auth));
+  if (options.fence === "only-when-owed") {
+    const hint = await owedMockCleanupRows(auth, agentId, options);
+    if (hint.length === 0) return await whileHeld([]);
+  }
+  return await withMockDraftFence(mockDraftFenceKey(auth, agentId), async () =>
+    whileHeld(await owedMockCleanupRows(auth, agentId, options)),
+  );
+}
+
+/** The indexed read itself. Only ever called with the fence decided above. */
+async function owedMockCleanupRows(
+  auth: AuthContext,
+  agentId: string,
+  options: { readonly exceptRunId?: string },
+): Promise<readonly OwedMockCleanup[]> {
   const rows = await db()
     .select({
       id: run.id,

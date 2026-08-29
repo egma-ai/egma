@@ -169,107 +169,126 @@ export async function buildRunMockedWorld(
   }
   const key = credential(apiKey);
 
-  // **This agent's one mocked world, claimed — or refused because another run
-  // holds it.**
+  // **The fence, held from before the claim until after the build.**
   //
   // Two mocked runs of one agent overlapping is a hijack rather than a queue:
   // one run's teardown restores a `latest` binding it captured, while the
   // other's freshly branched draft is what `latest` now resolves to, and real
   // callers reach a mocked agent. Delete-before-restore protects a run from its
   // own draft and cannot see another's, so the overlap itself is what is
-  // refused. `claimMockDraftFor` decides it under an advisory lock keyed on
-  // the agent, so two runs starting together serialize and exactly one builds.
+  // refused.
+  //
+  // A settle counts as one of the two. A finished run does not block a claim —
+  // its litter is this sweep's job — so without the fence a teardown of that
+  // run could still be waiting on its restore while this run branched the
+  // version the restore would then point real callers at. Nothing downstream
+  // can catch that: the late restore writes a `latest` binding onto a number
+  // that still points exactly where its note says it pinned it. So the claim,
+  // the sweep and the whole build happen inside one hold, and every settle of
+  // this agent waits for it.
   //
   // The claim writes the building marker, which is also what makes this run
   // visible to a later sweep: a run that dies between here and the build's
   // first record would otherwise leave a null cleanup flag no sweep ever sees,
   // and its simulations — unclaimable until a draft exists — would sit queued
   // forever.
-  const claim = await claimMockDraftFor(auth, {
-    runId: run.id,
-    agentId: run.agentId,
-    staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
-  });
-  if (claim.kind === "taken") {
-    return await refuseInUse(auth, run, claim.byRunId, log);
-  }
+  return await owedMockCleanups(
+    auth,
+    run.agentId,
+    { exceptRunId: run.id, fence: "take" },
+    async (outstanding): Promise<MockedWorldOutcome> => {
+      const claim = await claimMockDraftFor(auth, {
+        runId: run.id,
+        agentId: run.agentId,
+        staleBuildMilliseconds: STALE_BUILD_MILLISECONDS,
+      });
+      if (claim.kind === "taken") {
+        return await refuseInUse(auth, run, claim.byRunId, log);
+      }
 
-  // The sweep, before anything new is made. Litter from a crashed or finished
-  // run is cleared while it is still only litter — and, critically, **before
-  // this run branches**: a finished run's outstanding pin is restored while no
-  // draft of this run's exists yet, so that restore can never resolve `latest`
-  // onto something this run minted.
-  //
-  // And when the sweep could not clear it, nothing new is made at all. An
-  // unsettled world still owes a restore, and that restore retries on a later
-  // terminal report; a draft branched now is exactly what the agent's restored
-  // `latest` binding would then resolve to. Refusing here is what makes the
-  // retry safe: a restore only ever runs while no temporary version of this
-  // agent exists.
-  const swept = await settleOwedMockCleanups(auth, run.agentId, reach, log, {
-    exceptRunId: run.id,
-  });
-  if (swept.kind === "unsettled") {
-    return await refuseRun(
-      auth,
-      run,
-      "An earlier mocked run of this agent could not be fully given back to " +
-        `Retell: ${swept.reason}. Egma does not branch a new temporary ` +
-        "version while that cleanup is owed — the moment the cleanup lands, " +
-        "it would point the agent's restored routing at this run's draft. " +
-        "The cleanup retries on the earlier run's next terminal report and " +
-        "before the next mocked run; settle it (a revoked platform key is " +
-        "the usual cause), then start this run again.",
-      log,
-    );
-  }
+      // The sweep, before anything new is made. Litter from a crashed or
+      // finished run is cleared while it is still only litter — and,
+      // critically, **before this run branches**: a finished run's outstanding
+      // pin is restored while no draft of this run's exists yet, so that
+      // restore can never resolve `latest` onto something this run minted.
+      //
+      // And when the sweep could not clear it, nothing new is made at all. An
+      // unsettled world still owes a restore, and that restore retries on a
+      // later terminal report; a draft branched now is exactly what the
+      // agent's restored `latest` binding would then resolve to. Refusing here
+      // is what makes the retry safe: a restore only ever runs while no
+      // temporary version of this agent exists.
+      const swept = await settleTheseMockCleanups(
+        auth,
+        run.agentId,
+        outstanding,
+        reach,
+        log,
+      );
+      if (swept.kind === "unsettled") {
+        return await refuseRun(
+          auth,
+          run,
+          "An earlier mocked run of this agent could not be fully given back " +
+            `to Retell: ${swept.reason}. Egma does not branch a new temporary ` +
+            "version while that cleanup is owed — the moment the cleanup " +
+            "lands, it would point the agent's restored routing at this run's " +
+            "draft. The cleanup retries on the earlier run's next terminal " +
+            "report and before the next mocked run; settle it (a revoked " +
+            "platform key is the usual cause), then start this run again.",
+          log,
+        );
+      }
 
-  const built = await buildMockedWorld(
-    key,
-    {
-      agentId: platformAgentId,
-      target: { base: mockToolBase(reach.baseUrl), runId: run.id },
-      record: async (state) => {
-        await recordMockState(auth, run.id, asStoredState(state));
-      },
-    },
-    reachOf(reach),
-  ).catch((cause: unknown) => ({
-    kind: "refused" as const,
-    reason:
-      "Egma could not finish building the mocked world for this run " +
-      `(${safeExceptionType(cause)}).`,
-    state: null,
-  }));
-
-  if (built.kind === "built") {
-    // The serving version this run conducts against, written down once the
-    // build has resolved it. Every request of the run names the temporary copy
-    // beside it, and this is what the copy was branched from — so a reader
-    // asking what real traffic reaches gets an answer on the same row.
-    await recordMockState(auth, run.id, {
-      ...built.state,
-      agentVersion: built.agentVersion,
-    });
-    return { kind: "built" };
-  }
-
-  // Whatever was made before the refusal is given back at once, in the one
-  // order that is safe, and then the run is failed.
-  if (built.state !== null) {
-    await finishMockedWorld(
-      key,
-      {
-        agentId: platformAgentId,
-        state: built.state,
-        record: async (state) => {
-          await recordMockState(auth, run.id, asStoredState(state));
+      const built = await buildMockedWorld(
+        key,
+        {
+          agentId: platformAgentId,
+          target: { base: mockToolBase(reach.baseUrl), runId: run.id },
+          record: async (state) => {
+            await recordMockState(auth, run.id, asStoredState(state));
+          },
         },
-      },
-      reachOf(reach),
-    ).catch(() => undefined);
-  }
-  return await refuseRun(auth, run, built.reason, log);
+        reachOf(reach),
+      ).catch((cause: unknown) => ({
+        kind: "refused" as const,
+        reason:
+          "Egma could not finish building the mocked world for this run " +
+          `(${safeExceptionType(cause)}).`,
+        state: null,
+      }));
+
+      if (built.kind === "built") {
+        // The serving version this run conducts against, written down once the
+        // build has resolved it. Every request of the run names the temporary
+        // copy beside it, and this is what the copy was branched from — so a
+        // reader asking what real traffic reaches gets an answer on the same
+        // row.
+        await recordMockState(auth, run.id, {
+          ...built.state,
+          agentVersion: built.agentVersion,
+        });
+        return { kind: "built" };
+      }
+
+      // Whatever was made before the refusal is given back at once, in the one
+      // order that is safe, and then the run is failed.
+      if (built.state !== null) {
+        await finishMockedWorld(
+          key,
+          {
+            agentId: platformAgentId,
+            state: built.state,
+            record: async (state) => {
+              await recordMockState(auth, run.id, asStoredState(state));
+            },
+          },
+          reachOf(reach),
+        ).catch(() => undefined);
+      }
+      return await refuseRun(auth, run, built.reason, log);
+    },
+  );
 }
 
 /** What the sweep left behind: nothing owed, or a debt it could not clear. */

@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
+  addConnection,
   discoverMockTools,
   updateConnection,
 } from "@egma/platform-api/client";
 import type { DiscoverMockToolsResponse } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Sheet,
   SheetBody,
@@ -24,36 +24,50 @@ import { Refused } from "@/ui/form.tsx";
 import { Failure, Loading } from "@/ui/page-state.tsx";
 
 /**
- * Mock tools during simulations: the tick, what it would cover, and what it
- * refuses to promise.
+ * Mock tools, one switch per lane: what each lane would cover, and what none of
+ * them claims.
  *
- * **The consent is explained before it is accepted.** Ticking this box is
- * standing permission for Egma to write to the customer's Retell account at the
- * start of every run — a temporary version of their agent, deleted when the run
- * ends — and, where a telephone number follows Retell's `latest` pointer, to
- * pin that number for the length of the run and put the binding back
- * afterwards. So the panel says all of that in plain words, shows the numbers
- * it is talking about, and asks for the pin separately, before the switch will
- * go on.
+ * **The switch is per connection, because the lane is what decides whether a
+ * mocked run is a thing Egma can conduct at all.** A text lane can run mocked
+ * while the phone connection beside it reaches the customer's real backend. So
+ * this surface never says "every simulation against this agent runs in a mocked
+ * world" — it says, lane by lane, what that lane does. The phone lane says
+ * plainly that it reaches real tools and carries no switch: it is the real
+ * telephony lane by design, and it can never hold a mock.
+ *
+ * **One consent, and only for the web-call lane.** Turning mocks on for a web
+ * call is standing permission for Egma to write to the customer's Retell
+ * account at the start of every run, so it goes through one screen carrying the
+ * four promises and one button. There is **no per-number checkbox**: pinning a
+ * `latest`-riding number and putting it back is one of those four promises, so
+ * one informed yes is the whole ceremony. **The text lane shows no consent at
+ * all** — it writes nothing to the customer's account, and arrives with mocks
+ * already on.
+ *
+ * **The consent flow mints the web-call connection when the agent has none**,
+ * so the feature can never refuse a person with a step the product cannot
+ * perform. A web-call connection created any other way keeps mocks off until
+ * this screen is accepted.
  *
  * **Every tool is shown in its honest class**, never a count of "covered". The
- * three classes are the product's own words: the ones Egma answers, the ones
- * that run inside Retell where no interception reaches, and the ones Egma could
- * reach and does not yet. A person reading this has to be able to see exactly
- * how isolated a mocked run really is.
+ * three classes are the product's own words and they are read live, stored
+ * nowhere: the ones Egma answers, the ones that run inside Retell where no
+ * interception reaches, and the ones Egma could reach and does not yet. A
+ * person reading this has to be able to see exactly how isolated a mocked run
+ * really is.
  *
  * **A transfer and an SMS get a warning of their own**, because they act
  * outside the call: a real leg placed, a real message sent, even in a mocked
  * run. They are named rather than quietly left out of a coverage number.
  *
- * **A refusal is shown as a sentence, never as a disabled control.** Four
- * things stop this box going on, and each has a different next move, so the
- * panel shows which one it is and what to do about it (`DESIGN.md`: make every
- * state truthful).
+ * **A refusal is shown as a sentence, never as a disabled control.** Three
+ * things stop mocks going on, and each has a different next move, so the panel
+ * shows which one it is and what to do about it (`DESIGN.md`: make every state
+ * truthful).
  *
- * The surface is the house modal side sheet — one record read and edited in a
- * side sheet — and the only motion is the arrival of the discovery result,
- * which is a piece of the panel a person did not put there.
+ * The surface is the house modal side sheet, and the only motion is the arrival
+ * of the discovery result, which is a piece of the panel a person did not put
+ * there.
  */
 
 type Discovery = DiscoverMockToolsResponse;
@@ -84,6 +98,54 @@ const CLASSES = [
   },
 ] as const;
 
+/**
+ * The lanes this surface knows, and what each one is.
+ *
+ * `phone_number` is here on purpose: it carries no switch and it is shown
+ * anyway, because a person deciding how isolated their runs are has to see the
+ * lane that is never isolated. Leaving it out would be the same over-claim in a
+ * quieter form.
+ */
+const LANES = {
+  retell_text_mode: {
+    label: "Text",
+    /** Whether this lane's switch can be turned on at all. */
+    mockable: true,
+    /** Whether turning it on goes through the consent screen. */
+    consents: false,
+    on: "Runs over this connection are conducted with mocked tools.",
+    off: "Runs over this connection reach your real tools.",
+  },
+  retell_web_call: {
+    label: "Web call",
+    mockable: true,
+    consents: true,
+    on: "Runs over this connection are conducted with mocked tools.",
+    off: "Runs over this connection reach your real tools.",
+  },
+  phone_number: {
+    label: "Phone call",
+    mockable: false,
+    consents: false,
+    on: "",
+    off: "Runs over this connection reach your real tools. A phone call is the real telephony lane and is never mocked.",
+  },
+} as const;
+
+type LaneType = keyof typeof LANES;
+
+function laneOf(connectionType: string): LaneType | null {
+  return connectionType in LANES ? (connectionType as LaneType) : null;
+}
+
+/** The four promises, in the words the spec settled. One screen, one button. */
+export const CONSENT_PROMISES: readonly string[] = [
+  "Create a temporary version of this agent in Retell when a run starts, with every tool it can intercept pointed at Egma, and delete that temporary version when the run ends.",
+  "Never modify the version your agent serves. Egma reads it back during every run to prove it did not move.",
+  "Pin a phone number that follows Retell's latest pointer to the version it already reaches, for the length of each run, and put the binding back exactly as it was.",
+  "Never dial your published number for a mocked run. A real caller during a run reaches your real agent with your real tools.",
+];
+
 export function MockToolsSheet({
   projectId,
   agent,
@@ -102,26 +164,34 @@ export function MockToolsSheet({
 }) {
   const [read, setRead] = useState<Read>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
-  const [saving, setSaving] = useState(false);
+  /** Which connection is being written to, so only its own switch reads busy. */
+  const [saving, setSaving] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [seeded, setSeeded] = useState<readonly string[] | null>(null);
+  /**
+   * The web-call consent screen, while it is open.
+   *
+   * `"mint"` is the same screen for an agent that has no web-call connection
+   * yet: one yes both creates the lane and turns its switch on, because a
+   * person who has read the four promises has answered the only question there
+   * is. The feature can never refuse somebody with a step the product cannot
+   * perform.
+   */
+  const [consenting, setConsenting] = useState<string | "mint" | null>(null);
 
   /**
-   * The lane this switch is about: the connection a mocked run is conducted
-   * over. The switch lives on the connection because the lane is what decides
-   * whether a mocked run is a thing Egma can conduct at all.
+   * Every lane on this agent, in the order the connections are held.
    *
-   * **The per-connection surface is ticket 02's.** This sheet drives the first
-   * mockable lane so the control keeps working; the screen that shows a switch
-   * per connection, with its one consent, lands with the flows.
+   * **One switch per connection, and no `find` picking whichever comes first.**
+   * Which lane an agent's mocks are on for is a fact about that lane, so the
+   * surface shows them all and each one is its own control.
    */
-  const lane = agent.connections.find(
-    (connection) =>
-      connection.connectionType === "retell_web_call" ||
-      connection.connectionType === "retell_text_mode",
-  );
-  const on = lane?.mockToolsEnabled === true;
+  const lanes = agent.connections.flatMap((connection) => {
+    const lane = laneOf(connection.connectionType);
+    return lane === null ? [] : [{ connection, lane, of: LANES[lane] }];
+  });
+  const hasWebCall = lanes.some((one) => one.lane === "retell_web_call");
 
   const discover = useCallback(
     /**
@@ -163,30 +233,41 @@ export function MockToolsSheet({
   }, [discover, attempt]);
 
   const found = read.status === "ready" ? read.found : null;
-  const numbersToPin = (found?.numbers ?? []).filter((number) => number.pin);
-  const needsConsent = numbersToPin.length > 0;
-  // The switch cannot go on while Egma has said it cannot keep the promise.
-  // Pinning a `latest`-riding number is one of the four promises the single
-  // consent screen makes, so there is no second checkbox to answer.
-  const mayTurnOn =
-    mayAuthor && lane !== undefined && found !== null && found.refusal === null;
+  /**
+   * Whether Egma can keep the promises at all for this agent.
+   *
+   * A refusal is a fact about the account — a custom-LLM engine, two keys on
+   * two accounts, Retell not answering — so no lane's switch may go on while
+   * one stands, and the sentence says which it is.
+   */
+  const mayMock = mayAuthor && found !== null && found.refusal === null;
 
-  async function setTick(next: boolean): Promise<void> {
-    if (saving || !mayAuthor || lane === undefined) return;
-    setSaving(true);
+  /**
+   * Write one connection's switch.
+   *
+   * **Every enable of a web-call lane comes through the consent screen**, which
+   * is the only caller that passes `consented`. The text lane needs none: it
+   * writes nothing to the customer's Retell account.
+   */
+  async function setLaneSwitch(
+    connectionId: string,
+    next: boolean,
+  ): Promise<void> {
+    if (saving !== null || !mayAuthor) return;
+    setSaving(connectionId);
     setRefused(null);
     const answer = await platformAnswer(
       updateConnection(
         {
           agentId: agent.id,
-          connectionId: lane.id,
+          connectionId,
           projectId,
           mockToolsEnabled: next,
         },
         { client: platformClient },
       ),
     );
-    setSaving(false);
+    setSaving(null);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
@@ -195,7 +276,51 @@ export function MockToolsSheet({
       setRefused(answer.refusal);
       return;
     }
+    setConsenting(null);
     onChanged();
+  }
+
+  /**
+   * The one button on the consent screen: mint the lane if it is missing, then
+   * turn its switch on.
+   *
+   * The mint is what makes the old impossible refusal impossible. It carries no
+   * credential of its own — the agent's sealed platform key is what a mocked
+   * run branches with, and the API refuses the enable where that is missing.
+   */
+  async function acceptConsent(): Promise<void> {
+    if (saving !== null || !mayAuthor || consenting === null) return;
+    if (consenting !== "mint") {
+      await setLaneSwitch(consenting, true);
+      return;
+    }
+
+    setSaving("mint");
+    setRefused(null);
+    const answer = await platformAnswer(
+      addConnection(
+        {
+          agentId: agent.id,
+          projectId,
+          agentPlatform: "retell",
+          connectionType: "retell_web_call",
+          accessVariant: "retell_web_call.api_key",
+          modality: "voice",
+          config: {},
+        },
+        { client: platformClient },
+      ),
+    );
+    setSaving(null);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setRefused(answer.refusal);
+      return;
+    }
+    await setLaneSwitch(answer.value.connection.id, true);
   }
 
   async function rediscover(): Promise<void> {
@@ -222,21 +347,20 @@ export function MockToolsSheet({
         <SheetBody className="gap-6">
           <section className="flex min-w-0 flex-col gap-2">
             <p className="m-0 text-sm text-faint">{agent.name}</p>
-            <p className="m-0 text-sm">
-              <span className={on ? "text-success" : "text-faint"}>
-                {on ? "On" : "Off"}
-              </span>
-              <span className="text-faint">
-                {on
-                  ? " · every simulation against this agent runs in a mocked world"
-                  : " · simulations reach your real tools"}
-              </span>
+            {/*
+              **No agent-wide claim.** The switch is per connection, so a
+              sentence about "every simulation against this agent" would be
+              false for the phone lane every time. Each lane says what it does,
+              below, and nothing here says more than the lanes deliver.
+            */}
+            <p className="m-0 text-sm text-faint">
+              Mock tools are a switch on each connection, because each one is a
+              different way of running this agent. A phone call reaches your
+              real tools and is never mocked.
             </p>
           </section>
 
           {refused === null ? null : <Refused message={refused.message} />}
-
-          <ConsentExplanation />
 
           {read.status === "loading" ? (
             <Loading what="this agent's tools" />
@@ -248,12 +372,24 @@ export function MockToolsSheet({
             />
           ) : (
             <div className="flex min-w-0 flex-col gap-6" data-slot="mock-tools-arrival">
-              {found?.refusal === null ? null : (
-                <RefusalNote message={found?.refusal?.message ?? ""} />
+              {found?.refusal == null ? null : (
+                <RefusalNote message={found.refusal.message} />
               )}
 
+              <LanesSection
+                lanes={lanes}
+                hasWebCall={hasWebCall}
+                mayMock={mayMock}
+                saving={saving}
+                {...(why === undefined ? {} : { why })}
+                onToggle={(connectionId, next) => {
+                  void setLaneSwitch(connectionId, next);
+                }}
+                onConsent={(target) => setConsenting(target)}
+              />
+
               {found === null || found.numbers.length === 0 ? null : (
-                <NumbersSection numbers={found.numbers} on={on} />
+                <NumbersSection numbers={found.numbers} />
               )}
 
               {found === null || found.warnings.length === 0 ? null : (
@@ -265,34 +401,22 @@ export function MockToolsSheet({
               )}
             </div>
           )}
+
+          {consenting === null ? null : (
+            <ConsentScreen
+              mints={consenting === "mint"}
+              busy={saving !== null}
+              onAccept={() => {
+                void acceptConsent();
+              }}
+              onCancel={() => setConsenting(null)}
+            />
+          )}
         </SheetBody>
 
         <SheetFooter>
-          {on ? (
-            <Button
-              busy={saving}
-              disabled={!mayAuthor}
-              onClick={() => void setTick(false)}
-              size="lg"
-              type="button"
-              {...(why === undefined ? {} : { why })}
-            >
-              {saving ? "Turning off…" : "Turn off mock tools"}
-            </Button>
-          ) : (
-            <Button
-              busy={saving}
-              disabled={!mayTurnOn}
-              onClick={() => void setTick(true)}
-              size="lg"
-              type="button"
-              {...(why === undefined ? {} : { why })}
-            >
-              {saving ? "Turning on…" : "Turn on mock tools"}
-            </Button>
-          )}
           <Button
-            disabled={saving}
+            disabled={saving !== null}
             onClick={onClose}
             size="lg"
             type="button"
@@ -300,7 +424,8 @@ export function MockToolsSheet({
           >
             Close
           </Button>
-          {!on || !mayAuthor ? null : (
+          {!mayAuthor ||
+          !lanes.some((one) => one.connection.mockToolsEnabled) ? null : (
             <Button
               busy={seeding}
               className="ml-auto h-auto min-h-0 p-0 text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
@@ -318,31 +443,158 @@ export function MockToolsSheet({
   );
 }
 
+/** One lane on this agent, as the surface shows it. */
+type Lane = {
+  readonly connection: ListedAgentWithConnections["connections"][number];
+  readonly lane: LaneType;
+  readonly of: (typeof LANES)[LaneType];
+};
+
 /**
- * What ticking the box permits, said before it is ticked.
+ * Every lane, each with its own switch and its own honest sentence.
  *
- * Four sentences, and each is a promise this product keeps somewhere in code:
- * the temporary version, its deletion, the untouched serving version, and the
- * pinned-and-restored number. They are here rather than in a help line because
- * a help line says what to write in a field, and this is what Egma will do to
- * somebody's account.
+ * **The web-call switch never writes directly.** Turning it on opens the one
+ * consent screen; turning it off is a plain write, because withdrawing
+ * permission needs none. The text switch writes either way — it writes nothing
+ * to the customer's Retell account, so there is nothing to consent to. The
+ * phone lane has no switch at all.
+ *
+ * When the agent has **no** web-call connection, one row still stands here
+ * offering to create it: the consent screen mints the lane and turns it on
+ * together, so a person can never be refused with a step the product cannot
+ * perform.
  */
-function ConsentExplanation() {
+function LanesSection({
+  lanes,
+  hasWebCall,
+  mayMock,
+  saving,
+  why,
+  onToggle,
+  onConsent,
+}: {
+  readonly lanes: readonly Lane[];
+  readonly hasWebCall: boolean;
+  readonly mayMock: boolean;
+  /** The connection being written to, or `null` when nothing is. */
+  readonly saving: string | null;
+  readonly why?: string;
+  readonly onToggle: (connectionId: string, next: boolean) => void;
+  readonly onConsent: (target: string | "mint") => void;
+}) {
+  return (
+    <section
+      aria-labelledby="mock-tools-lanes-heading"
+      className="flex min-w-0 flex-col gap-3"
+    >
+      <h2 className="m-0 text-base font-medium" id="mock-tools-lanes-heading">
+        Ways of running this agent
+      </h2>
+      <ul className="m-0 flex list-none flex-col border border-border p-0">
+        {lanes.map(({ connection, lane, of }) => {
+          const on = connection.mockToolsEnabled;
+          return (
+            <li
+              className="flex min-w-0 items-start justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0"
+              key={connection.id}
+            >
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="text-sm font-medium text-foreground">
+                  {of.label}
+                </span>
+                <span className="text-sm text-faint">
+                  {on ? of.on : of.off}
+                </span>
+              </span>
+              {!of.mockable ? (
+                <span className="flex-none text-sm text-faint">Never mocked</span>
+              ) : (
+                <Button
+                  busy={saving === connection.id}
+                  data-slot={`mock-tools-lane-${lane}`}
+                  disabled={saving !== null || (!on && !mayMock)}
+                  onClick={() => {
+                    // Every enable of a web-call lane goes through the consent
+                    // screen, and nothing else can enable one.
+                    if (on || !of.consents) onToggle(connection.id, !on);
+                    else onConsent(connection.id);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant={on ? "secondary" : "default"}
+                  {...(why === undefined ? {} : { why })}
+                >
+                  {on ? "Turn off" : "Turn on"}
+                </Button>
+              )}
+            </li>
+          );
+        })}
+        {hasWebCall ? null : (
+          <li className="flex min-w-0 items-start justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0">
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="text-sm font-medium text-foreground">
+                {LANES.retell_web_call.label}
+              </span>
+              <span className="text-sm text-faint">
+                Egma can add this connection and run mocked voice calls over it.
+                Your published number is never dialled.
+              </span>
+            </span>
+            <Button
+              busy={saving === "mint"}
+              data-slot="mock-tools-lane-mint"
+              disabled={saving !== null || !mayMock}
+              onClick={() => onConsent("mint")}
+              size="sm"
+              type="button"
+              {...(why === undefined ? {} : { why })}
+            >
+              Turn on
+            </Button>
+          </li>
+        )}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * The one consent screen: four promises and one button.
+ *
+ * Each promise is one this product keeps somewhere in code — the temporary
+ * version and its deletion, the serving version proven unmoved, the
+ * pin-and-restore, the published number never dialled. They are here rather
+ * than in a help line because a help line says what to write in a field, and
+ * this is what Egma will do to somebody's Retell account.
+ *
+ * **There is no second checkbox.** Pinning a `latest`-riding number is one of
+ * the four promises, so one informed yes is the whole ceremony.
+ */
+function ConsentScreen({
+  mints,
+  busy,
+  onAccept,
+  onCancel,
+}: {
+  /** Whether accepting also creates the web-call connection. */
+  readonly mints: boolean;
+  readonly busy: boolean;
+  readonly onAccept: () => void;
+  readonly onCancel: () => void;
+}) {
   return (
     <section
       aria-labelledby="mock-tools-consent-heading"
-      className="flex min-w-0 flex-col gap-3"
+      className="flex min-w-0 flex-col gap-3 border border-border p-4"
+      data-slot="mock-tools-consent"
+      role="group"
     >
       <h2 className="m-0 text-base font-medium" id="mock-tools-consent-heading">
         What Egma will do
       </h2>
       <ul className="m-0 flex list-none flex-col border border-border p-0">
-        {[
-          "Create a temporary version of this agent in Retell when a run starts, with every tool it can intercept pointed at Egma.",
-          "Delete that temporary version when the run ends.",
-          "Never modify the version your agent serves. Egma reads it back during every run to prove it did not move.",
-          "Pin a phone number that follows Retell's latest pointer to the version it already reaches, for the length of each run, and put the binding back exactly as it was.",
-        ].map((promise) => (
+        {CONSENT_PROMISES.map((promise) => (
           <li
             className="border-t border-border px-4 py-3 text-sm text-foreground first:border-t-0"
             key={promise}
@@ -351,10 +603,33 @@ function ConsentExplanation() {
           </li>
         ))}
       </ul>
-      <p className="m-0 text-sm text-faint">
-        Your published phone number is never dialled for a mocked run. A real
-        caller during a run reaches your real agent with your real tools.
-      </p>
+      {!mints ? null : (
+        <p className="m-0 text-sm text-faint">
+          Egma will add a Retell web-call connection to this agent as part of
+          turning this on.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          busy={busy}
+          data-slot="mock-tools-consent-accept"
+          disabled={busy}
+          onClick={onAccept}
+          size="lg"
+          type="button"
+        >
+          {busy ? "Turning on…" : "Turn on mock tools"}
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={onCancel}
+          size="lg"
+          type="button"
+          variant="secondary"
+        >
+          Cancel
+        </Button>
+      </div>
     </section>
   );
 }
@@ -417,11 +692,8 @@ function WarningsSection({
  */
 function NumbersSection({
   numbers,
-  on,
 }: {
   readonly numbers: readonly DiscoveredNumber[];
-  /** Whether mock tools is already on for this lane. */
-  readonly on: boolean;
 }) {
   const toPin = numbers.filter((number) => number.pin);
   return (
@@ -464,9 +736,9 @@ function NumbersSection({
         // this says which numbers the promise is about and nothing is asked
         // twice.
         <p className="m-0 border border-border p-4 text-sm text-faint" role="note">
-          {toPin.length === 1 ? "This number is" : "These numbers are"}{" "}
-          {on ? "pinned" : "pinned"} during each mocked run and restored
-          afterwards, so a real caller mid-run always reaches the real agent.
+          {toPin.length === 1 ? "This number is" : "These numbers are"} pinned
+          during each mocked run and restored afterwards, so a real caller
+          mid-run always reaches the real agent.
         </p>
       )}
     </section>

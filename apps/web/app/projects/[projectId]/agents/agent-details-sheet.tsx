@@ -28,7 +28,12 @@ export type MonitoringCapability =
   | "Not configured"
   | "Configured via code";
 /**
- * Whether every simulation against this agent runs in a mocked world.
+ * Whether any of this agent's lanes runs its simulations with mocked tools.
+ *
+ * **Never "every simulation": the switch is per connection.** A text lane can
+ * be mocked while the phone lane beside it reaches the customer's real backend,
+ * so an agent-wide claim would be false for the phone lane every time. This
+ * word summarises the lanes; the mock-tools surface shows each one.
  *
  * `Not available` is the honest third state rather than a fourth word for off:
  * mocking is a Retell seam, and a LiveKit agent's tools already run in the
@@ -63,7 +68,8 @@ export function simulationCapabilityOf(
   const configured = agent.connections.some(
     (connection) =>
       connection.connectionType === "livekit_room" ||
-      connection.connectionType === "retell_chat_api" ||
+      connection.connectionType === "retell_text_mode" ||
+      connection.connectionType === "retell_web_call" ||
       (connection.connectionType === "phone_number" &&
         connection.agentPlatform === "retell"),
   );
