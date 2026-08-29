@@ -28,10 +28,10 @@ from pathlib import Path
 import aiohttp
 import pytest
 from aiohttp import web
-from text_mode_stub import TextModeStub
-from text_mode_stub import RunningStub as RunningTextMode
-from text_mode_stub import serving as serving_text_mode
 from retell_stub import RetellStub, RunningStub, serving
+from text_mode_stub import RunningStub as RunningTextMode
+from text_mode_stub import TextModeStub
+from text_mode_stub import serving as serving_text_mode
 
 from egma_simulator.config import DEFAULT_S3_BUCKET, DEFAULT_S3_REGION
 from egma_simulator.contract import contract_dir

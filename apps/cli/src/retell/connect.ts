@@ -436,21 +436,17 @@ function selectionFor(
       number,
     };
   }
-  // A voice agent tested in text is conducted over text mode; a chat agent
-  // over the chat API. The engine that cannot take text mode — a custom
-  // LLM — has already been refused before this is reached, so a voice agent
-  // here is one text mode can conduct.
-  const text mode = config.modality === "voice";
+  // A voice agent tested in text is conducted over text mode, which is the
+  // only text door any flow offers: Egma registers Retell voice agents, and
+  // discovery lists no other kind. The engine that cannot take text mode — a
+  // custom LLM — has already been refused before this is reached.
   return {
     reach,
     connection: {
       agentPlatform: "retell",
-      connectionType: text mode ? "retell_text_mode" : "retell_chat_api",
-      accessVariant: text mode
-        ? "retell_text_mode.api_key"
-        : "retell_chat_api.api_key",
-      // The one modality both text doors speak: a chat simulation, whether of a
-      // voice agent over text mode or a chat agent over the chat API.
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
+      // Text mode conducts a chat simulation of a voice agent.
       modality: "chat",
       config: { retellAgentId: config.agentId },
       credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),

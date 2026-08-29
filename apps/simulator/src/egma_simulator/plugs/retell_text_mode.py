@@ -88,16 +88,16 @@ lookup_caller", and would make this lane's transcripts differ from the
 voice lane's by construction — which is the one comparison the whole
 modality exists for.
 
-**The mocks are verified before any call is stamped.** That text mode
-honours the tool-mock field is a guess (below), and it is the guess that
-could cost a customer their isolation: a JSON API that does not know a
-field commonly ignores it, and then the real backend runs while the record
-says egma answered. So what the platform reports the tool being given is
-compared against what egma sent for it, and a mismatch — or a covered call
-the platform says nothing about — fails the simulation loudly rather than
-being stamped. Verifying is not recording: what lands on the record is
-still egma's own rendering, and an uncovered call still lands as the bare
-observation it is.
+**A call is stamped `mocked` when the run's snapshot covers its name**,
+and on no other basis. That Retell honours the tool-mock field is a guess
+(below), and the gate that proves it is the env-gated live text-mode chat
+e2e beside this plug — a run against a real agent, by hand, before this
+lane serves anybody. A runtime comparison of what the platform reported
+the tool being given against what egma sent was tried and removed
+(founder ruling, 2026-08-28): it made every simulation carry a check the
+live suite already answers once, and it turned a platform that reports a
+tool result in a shape egma did not predict into a failed simulation
+rather than a recorded one.
 
 Credentials are shaped ``{"apiKey": ...}`` — the shape the control plane
 seals — and are read for the ``Authorization`` header and nothing else.
@@ -318,10 +318,6 @@ class RetellTextMode:
             mock_tools if isinstance(mock_tools, MockToolSeam) else MockToolSeam()
         )
         answers = self._mock_tools.answers()
-        # What Egma sent for each name, kept so that what the platform
-        # reports giving the tool can be checked against it before any
-        # call is stamped mocked. See `_really_served`.
-        self._served = {answer.tool_name: answer.served for answer in answers}
         self._mocks = [
             {
                 "tool_name": answer.tool_name,
@@ -467,11 +463,6 @@ class RetellTextMode:
             if not (isinstance(message, dict) and message.get("role") == USER_ROLE)
         )
 
-        results = {
-            message.get("tool_call_id"): message.get("content")
-            for message in messages
-            if isinstance(message, dict) and message.get("role") == RESULT_ROLE
-        }
         said: list[str] = []
         noted: list[str] = []
         for message in messages:
@@ -491,7 +482,7 @@ class RetellTextMode:
                 if isinstance(spoken, str) and spoken.strip():
                     said.append(spoken.strip())
             elif role == INVOCATION_ROLE:
-                self._observed(message, results)
+                self._observed(message)
 
         self._resume_from(answered)
         self._variables_from(answered)
@@ -507,64 +498,24 @@ class RetellTextMode:
             platform_notes=tuple(noted),
         )
 
-    def _observed(self, message: dict, results: dict[Any, Any]) -> None:
-        """One tool call Retell reported, checked and then handed over.
+    def _observed(self, message: dict) -> None:
+        """One tool call Retell reported, handed to the seam that stamps it.
 
-        A call whose name the run's snapshot covers is **verified before
-        it is stamped**. That the platform honours a field egma sends it
-        is the one guess on this lane that could silently cost a customer
-        their isolation: a JSON API that does not know ``tool_mocks``
-        commonly ignores it, and then the real backend runs while the
-        record says egma answered. So the answer the platform reports the
-        tool being given is compared with the answer egma sent for it, and
-        a mismatch fails the simulation loudly instead of stamping it.
-
-        Verifying is not recording. What goes on the record is still
-        egma's own rendering — the seam holds the copy that says which
-        branch the answer was — and an uncovered call still lands as the
-        bare observation it is, because its return value is the customer's
-        backend's and nothing egma can vouch for.
+        A call whose name the run's snapshot covers is stamped ``mocked``
+        on that basis and on no other. What goes on the record is egma's
+        own rendering — the seam holds the copy that says which branch the
+        answer was — and an uncovered call lands as the bare observation
+        it is, because its return value is the customer's backend's and
+        nothing egma can vouch for.
         """
         name = message.get("name")
         if not isinstance(name, str) or not name.strip():
             return
         called = name.strip()
-        if called in self._served:
-            self._really_served(called, results, message.get("tool_call_id"))
         arguments = message.get("arguments")
         self._mock_tools.reported(
             called,
             arguments=arguments if isinstance(arguments, str) and arguments else None,
-        )
-
-    def _really_served(
-        self, called: str, results: dict[Any, Any], call_id: object
-    ) -> None:
-        """Refuse to stamp a covered call the platform did not really serve.
-
-        Loud, and worded for whoever has to go and look: what egma sent,
-        that Retell did not use it, and what that means for the record. It
-        names the tool and neither answer — the served one is the
-        customer's authored data and the other is their backend's, and a
-        sentence about a mistake should not go on to repeat either.
-        """
-        if call_id not in results:
-            raise PlugError(
-                f"retell reported calling {called!r} and said nothing about "
-                "what the call was given, so Egma cannot confirm its own "
-                "answer was served. A tool call Egma cannot vouch for must "
-                "not be recorded as mocked: this simulation is stopped rather "
-                "than reported as isolated when it may not have been"
-            )
-        if _same_answer(results[call_id], self._served[called]):
-            return
-        raise PlugError(
-            f"retell called {called!r} and gave it something other than the "
-            "answer Egma sent for it, so the mock tools Egma passed on the "
-            "request were not used and this agent's real implementation ran. "
-            "Nothing here is safe to report as mocked. Check that this "
-            "version of the text-mode API takes native tool mocks under the "
-            "field name Egma sends them in"
         )
 
     def _resume_from(self, answered: dict) -> None:
@@ -728,34 +679,6 @@ def _waiting(asked_for: str | None, backing_off: float) -> float:
     if wanted <= 0:
         return backing_off
     return min(max(wanted, backing_off), LONGEST_BACKOFF_SECONDS)
-
-
-def _same_answer(reported: object, served: str) -> bool:
-    """Whether the tool was really given the answer egma sent for it.
-
-    Compared as JSON values wherever both sides parse, because two
-    equivalent documents may be spelled differently — a re-serialized
-    object with spaces in it, keys in another order — and a plug that
-    called those different would fail a working simulation. Where either
-    side is not JSON, the bytes are compared as they are, which is the
-    only honest reading left.
-    """
-    mine, mine_read = _parsed(served)
-    if not isinstance(reported, str):
-        # Some platforms report a structured result rather than a string.
-        return mine_read and mine == reported
-    if reported == served:
-        return True
-    theirs, theirs_read = _parsed(reported)
-    return mine_read and theirs_read and mine == theirs
-
-
-def _parsed(document: str) -> tuple[object, bool]:
-    """One JSON document as its value, and whether it was one at all."""
-    try:
-        return json.loads(document), True
-    except ValueError:
-        return document, False
 
 
 def _preserved(message: object) -> str:

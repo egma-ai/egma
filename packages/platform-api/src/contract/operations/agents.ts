@@ -24,18 +24,6 @@ const agent = {
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
     pullProductionCalls: { type: "boolean" },
-    /**
-     * The tick: every simulation against this agent runs in a mocked world.
-     *
-     * Standing consent. Egma creates a temporary version of the agent on its
-     * platform at the start of each run, points every tool it can intercept at
-     * its own mock endpoint, deletes the version when the run ends, and — where
-     * a telephone number follows the platform's `latest` pointer — pins that
-     * number to the version it already resolves to for the length of the run
-     * and puts the binding back afterwards. It can only be on for an agent that
-     * has its platform identity and key.
-     */
-    mockToolsDuringSimulations: { type: "boolean" },
     /** Whether pull monitoring has ever been started for this agent. */
     monitoringConfigured: { type: "boolean" },
     /**
@@ -60,7 +48,6 @@ const agent = {
     "monitoringKeyPresent",
     "monitoringApiKeyHint",
     "pullProductionCalls",
-    "mockToolsDuringSimulations",
     "monitoringConfigured",
     "lastReceivedAt",
     "archived",
@@ -113,6 +100,20 @@ const connection = {
     config: { type: "object", additionalProperties: { type: "string" } },
     credentialPresent: { type: "boolean" },
     credentialsHint: nullable({ type: "string" }),
+    /**
+     * The switch: a run over this connection is conducted with Egma's mock
+     * tools in front of the agent's own.
+     *
+     * It sits on the connection because the lane is what decides whether a
+     * mocked run is a thing Egma can conduct. A `retell_text_mode` connection
+     * is created with it on — that lane carries its answers on each request and
+     * writes nothing to the customer's account. A `retell_web_call` connection
+     * turns it on through the consent screen, and only where the agent holds
+     * the platform identity and key a temporary copy needs. A `phone_number`
+     * connection can never hold true: the phone lane is the real carrier leg,
+     * with real tools, and is never dialled for a mocked run.
+     */
+    mockToolsEnabled: { type: "boolean" },
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -133,6 +134,7 @@ const connection = {
     "config",
     "credentialPresent",
     "credentialsHint",
+    "mockToolsEnabled",
     "archived",
     "archivedAt",
     "createdAt",
@@ -637,35 +639,7 @@ export const agentOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: {
-          name: { type: "string" },
-          mockToolsDuringSimulations: {
-            type: "boolean",
-            description:
-              "Turn the mocked world on or off for every simulation against " +
-              "this agent. Refused for an agent with no platform identity and " +
-              "key, because Egma builds the world by creating a temporary " +
-              "version of the agent on its platform and would have nothing to " +
-              "create one with. Absent leaves it as it is. Turning it on runs " +
-              "discovery first and is refused with its reason where the agent " +
-              "cannot be mocked; it also seeds a mock tool, with a " +
-              "deterministic default answer, for every tool Egma can " +
-              "intercept and does not already answer for.",
-          },
-          pinNumbersDuringRuns: {
-            type: "boolean",
-            description:
-              "Consent to Egma pinning a telephone number that follows the " +
-              "platform's `latest` pointer to the version it already resolves " +
-              "to, for the length of each run, and putting the binding back " +
-              "afterwards. Required only when such a number routes to this " +
-              "agent: without it, branching a temporary version would send " +
-              "real callers to it the instant it exists. Sending false, or " +
-              "leaving it out where it is needed, refuses the tick with the " +
-              "reason — a box promising isolation never quietly runs real " +
-              "tools.",
-          },
-        },
+        properties: { name: { type: "string" } },
         additionalProperties: false,
       },
     },
@@ -723,12 +697,10 @@ export const agentOperations = {
              * Whether anything about this agent stops mocking outright. False
              * carries a `refusal` naming which reason it is.
              *
-             * True is not by itself permission to turn the tick on: a number
-             * riding the platform's `latest` pointer still has to be consented
-             * to, and `numbers` below is where that question is read from. This
-             * read deliberately does not refuse for it — refusing here would
-             * hide the very numbers the question is about — and the tick itself
-             * refuses without an answer.
+             * `numbers` below carries every number a mocked run would have to
+             * pin, which is one of the four promises the single consent screen
+             * makes. There is no second per-number checkbox and so no refusal
+             * for declining one.
              */
             mockable: { type: "boolean" },
             refusal: nullable({
@@ -738,7 +710,6 @@ export const agentOperations = {
                   type: "string",
                   enum: [
                     "custom_llm_engine",
-                    "pin_consent_required",
                     "phone_only_agent",
                     "keys_disagree",
                     "platform_unavailable",
@@ -914,6 +885,17 @@ export const agentOperations = {
           environment: nullable({ type: "string" }),
           config: { type: "object", additionalProperties: true },
           credentials: { type: "object", additionalProperties: true },
+          mockToolsEnabled: {
+            type: "boolean",
+            description:
+              "Turn mock tools on or off for runs over this connection. " +
+              "Absent leaves it as it is, so renaming a connection never " +
+              "changes the world its next run meets. Turning it on for a " +
+              "retell_web_call connection is refused where the agent holds no " +
+              "platform identity and key, because Egma would have nothing to " +
+              "branch a temporary copy with; a phone_number connection can " +
+              "never hold true.",
+          },
         },
         additionalProperties: false,
       },

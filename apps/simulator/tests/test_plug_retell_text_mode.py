@@ -62,7 +62,7 @@ def failing(name: str, value: object) -> MockTool:
     return MockTool(tool_name=name, answer={"error": value}, delay_milliseconds=0)
 
 
-def text mode(
+def text_mode(
     config: dict,
     *,
     modality: str = "chat",
@@ -96,13 +96,13 @@ def test_the_registry_knows_the_text_mode_plug():
 def test_a_connection_saying_nothing_about_where_reaches_retell_itself():
     """The base URL is the plug's own optional key; absent, it is the
     platform, which is what every real connection block will mean."""
-    plug = text mode({"retellAgentId": "agent_1"})
+    plug = text_mode({"retellAgentId": "agent_1"})
     assert plug.base_url == DEFAULT_BASE_URL == "https://api.retellai.com"
 
 
 def test_the_agent_is_named_in_the_path_and_escaped_there():
     """The agent's id is somebody else's string, and it goes in a URL."""
-    plug = text mode({"retellAgentId": "agent one/two"})
+    plug = text_mode({"retellAgentId": "agent one/two"})
     assert plug.completion_path == "/agent-playground-completion/agent%20one%2Ftwo"
 
 
@@ -122,7 +122,7 @@ async def test_the_agent_opens_and_the_plug_conducts_the_whole_exchange(
             Reply(words="Booked for Thursday."),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_lakeside", "baseUrl": running.base_url},
         mock_tools=seam(),
     )
@@ -160,7 +160,7 @@ async def test_an_agent_with_nothing_to_say_first_lets_the_persona_open(
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, replies=[Reply(), Reply(words="Yes?")]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_quiet", "baseUrl": running.base_url},
         mock_tools=seam(),
     )
@@ -177,7 +177,7 @@ async def test_several_bubbles_in_one_reply_stay_one_turn(start_text_mode_stub):
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(words=["Let me look.", "Thursday works."])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -195,7 +195,7 @@ async def test_a_reply_that_carried_no_words_is_an_answer_without_words(
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(tools=[ToolTurn(name="check_calendar")])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -214,7 +214,7 @@ async def test_the_agent_ending_the_exchange_is_read_from_the_flag(
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(words="Goodbye then.", ends=True)],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -234,7 +234,7 @@ async def test_an_end_tool_ends_the_exchange_even_without_the_flag(
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(words="Bye.", tools=[ToolTurn(name="end_call")])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -251,7 +251,7 @@ async def test_an_agent_that_ended_on_its_opening_is_not_argued_with(
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, replies=[Reply(words="We are closed today.", ends=True)]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -271,7 +271,7 @@ async def test_the_walk_keeps_its_own_limits(start_text_mode_stub):
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, replies=[Reply(), Reply(words="Still here.")]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -294,7 +294,7 @@ async def test_every_request_names_the_version_the_spec_named(
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, replies=[Reply(), Reply(words="Yes.")]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
         agent_version=version,
         mock_tools=seam(),
@@ -313,7 +313,7 @@ async def test_every_request_names_the_version_the_spec_named(
 
 async def test_a_spec_carrying_no_version_asks_for_none(start_text_mode_stub):
     running = await start_text_mode_stub(api_key=SENTINEL_KEY, replies=[Reply()])
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -353,7 +353,7 @@ async def test_a_reply_updates_this_simulations_variables_without_dropping_them(
             Reply(words="Booked."),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
         dynamic_variables={"egma_simulation": "sim_01", "caller_name": ""},
         mock_tools=seam(),
@@ -383,7 +383,7 @@ async def test_a_spec_carrying_no_variables_sends_no_variable_block(
 ):
     """Absent stays absent: an empty block is a value Retell would render."""
     running = await start_text_mode_stub(api_key=SENTINEL_KEY, replies=[Reply()])
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
         dynamic_variables={},
         mock_tools=seam(),
@@ -406,7 +406,7 @@ async def test_the_resume_state_is_threaded_across_turns(start_text_mode_stub):
             Reply(words="Done."),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_flow", "baseUrl": running.base_url},
         mock_tools=seam(),
     )
@@ -429,7 +429,7 @@ async def test_a_retell_llm_threads_its_state_the_same_way(start_text_mode_stub)
         api_key=SENTINEL_KEY,
         replies=[Reply(words="Hi.", state="collect_details"), Reply(words="Done.")],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_llm", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -450,7 +450,7 @@ async def test_a_transition_the_platform_announces_lands_on_the_turn(
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(words="One moment.", node="lookup_caller")],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_flow", "baseUrl": running.base_url},
         mock_tools=seam(),
     )
@@ -480,7 +480,7 @@ async def test_a_role_the_record_does_not_know_reads_back_verbatim(
             ),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -510,7 +510,7 @@ async def test_a_platform_that_echoes_the_persona_does_not_make_it_speak_twice(
             Reply(words="Booked."),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -541,7 +541,7 @@ async def test_a_message_with_nothing_a_record_can_read_is_still_kept(
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(extra=[{"role": "beeped", "digits": "1"}])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -562,7 +562,7 @@ async def test_egmas_answers_ride_every_request_as_native_mocks(
     """One answer per tool, matched by name with the match-anything rule —
     the arguments are never read, here as everywhere."""
     running = await start_text_mode_stub(api_key=SENTINEL_KEY, replies=[Reply()])
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url},
         mock_tools=seam(
             answering("check_calendar", {"slots": []}),
@@ -591,7 +591,7 @@ async def test_egmas_answers_ride_every_request_as_native_mocks(
 
 async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):
     running = await start_text_mode_stub(api_key=SENTINEL_KEY, replies=[Reply()])
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -625,7 +625,7 @@ async def test_a_covered_call_is_marked_mocked_and_an_uncovered_one_is_not(
             ),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -670,7 +670,7 @@ async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
         replies=[Reply(), Reply(words="Sorry — I could not book that.",
                                 tools=[ToolTurn(name="book_appointment")])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -708,7 +708,7 @@ async def test_a_platform_that_ignored_the_mocks_fails_instead_of_being_stamped(
             ),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -751,7 +751,7 @@ async def test_a_covered_call_the_platform_says_nothing_about_is_not_stamped(
             ),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -792,7 +792,7 @@ async def test_an_answer_spelled_differently_by_the_platform_still_counts(
             ),
         ],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -813,7 +813,7 @@ async def test_a_declared_delay_is_not_spent_on_this_lane(start_text_mode_stub):
         api_key=SENTINEL_KEY,
         replies=[Reply(), Reply(words="Checked.", tools=[ToolTurn("check_calendar")])],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -835,7 +835,7 @@ async def test_a_simulation_reaching_no_platform_claims_no_coverage(
     running = await start_text_mode_stub(
         api_key="the-only-key-this-stub-honors", replies=[Reply()]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=answers
     )
 
@@ -857,7 +857,7 @@ async def test_a_throttle_retries_a_bounded_number_of_times_then_fails_loudly(
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, refusals=(429,) * 10, replies=[Reply()]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -880,7 +880,7 @@ async def test_a_throttle_that_lets_up_is_conducted_through(
         refusals=(429, 429),
         replies=[Reply(words="Lakeside Dental.")],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -913,7 +913,7 @@ async def test_a_throttle_that_says_how_long_to_wait_is_waited_out_that_long(
         retry_after="600",
         replies=[Reply(words="Lakeside Dental.")],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -937,7 +937,7 @@ async def test_a_retry_after_egma_cannot_use_falls_back_to_the_backoff(
         retry_after=retry_after,
         replies=[Reply(words="Lakeside Dental.")],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -949,7 +949,7 @@ async def test_a_billing_wall_fails_naming_the_billing(start_text_mode_stub):
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, refusals=(402,), replies=[Reply()]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -967,7 +967,7 @@ async def test_a_key_the_platform_refuses_fails_without_saying_the_key(
     start_text_mode_stub,
 ):
     running = await start_text_mode_stub(api_key="the-only-key-this-stub-honors")
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -988,7 +988,7 @@ async def test_a_platform_that_says_the_key_back_is_quoted_without_it(
     running = await start_text_mode_stub(
         api_key="the-only-key-this-stub-honors", echo_key_in_refusal=True
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -1012,7 +1012,7 @@ async def test_a_throttle_that_says_the_key_back_is_quoted_without_it(
         echo_key_in_refusal=True,
         replies=[Reply()],
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -1026,7 +1026,7 @@ async def test_a_throttle_that_says_the_key_back_is_quoted_without_it(
 
 
 async def test_a_platform_that_answers_nowhere_fails_without_saying_the_key():
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": "http://127.0.0.1:1"},
         mock_tools=seam(),
     )
@@ -1045,7 +1045,7 @@ async def test_a_reply_with_no_messages_is_refused_rather_than_read_as_silence(
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, answers_without_messages=True
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -1055,14 +1055,14 @@ async def test_a_reply_with_no_messages_is_refused_rather_than_read_as_silence(
 
 
 async def test_a_turn_before_the_exchange_opened_is_refused():
-    plug = text mode({"retellAgentId": "agent_1"}, mock_tools=seam())
+    plug = text_mode({"retellAgentId": "agent_1"}, mock_tools=seam())
 
     with pytest.raises(PlugError, match="before the exchange opened"):
         await plug.deliver("Hello?")
 
 
 async def test_closing_an_exchange_that_was_never_opened_is_safe():
-    plug = text mode({"retellAgentId": "agent_1"}, mock_tools=seam())
+    plug = text_mode({"retellAgentId": "agent_1"}, mock_tools=seam())
     await plug.close()
     await plug.close()
 
@@ -1076,7 +1076,7 @@ async def test_this_lane_offers_no_provider_reference_ever(start_text_mode_stub)
     running = await start_text_mode_stub(
         api_key=SENTINEL_KEY, replies=[Reply(words="Hello."), Reply(words="Yes.")]
     )
-    plug = text mode(
+    plug = text_mode(
         {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
     )
 
@@ -1106,12 +1106,12 @@ async def test_this_lane_offers_no_provider_reference_ever(start_text_mode_stub)
 )
 def test_config_the_plug_does_not_understand_is_refused(config: dict):
     with pytest.raises(PlugError):
-        text mode(config)
+        text_mode(config)
 
 
 def test_a_config_typo_is_named_in_the_refusal():
     with pytest.raises(PlugError) as refusal:
-        text mode({"retellAgentId": "agent_1", "retellAgentID": "agent_2"})
+        text_mode({"retellAgentId": "agent_1", "retellAgentID": "agent_2"})
     assert "retellAgentID" in str(refusal.value)
 
 
@@ -1144,12 +1144,12 @@ def test_a_credential_refusal_names_the_key_and_never_its_value():
 
 def test_the_plug_speaks_chat_only():
     with pytest.raises(PlugError, match="chat only"):
-        text mode({"retellAgentId": "agent_1"}, modality="voice")
+        text_mode({"retellAgentId": "agent_1"}, modality="voice")
 
 
 def test_the_plug_holds_one_access_variant():
     with pytest.raises(PlugError, match="access variant"):
-        text mode(
+        text_mode(
             {"retellAgentId": "agent_1"}, access_variant="retell_chat_api.api_key"
         )
 
@@ -1164,7 +1164,7 @@ def test_a_version_or_a_variable_the_plug_cannot_send_is_refused(
     """Read through the shared helpers, so two plugs reaching one platform
     cannot disagree about what either of them is."""
     with pytest.raises(PlugError):
-        text mode(
+        text_mode(
             {"retellAgentId": "agent_1"},
             agent_version=agent_version,
             dynamic_variables=dynamic_variables,

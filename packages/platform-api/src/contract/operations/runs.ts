@@ -64,16 +64,15 @@ export const mockToolSchema = {
 } as const;
 
 /**
- * How isolated one simulation was, in five lists answering two questions.
+ * How isolated one simulation was, in three lists: what the agent has, what
+ * Egma answered for, and what reached its real implementation.
  *
- * `discovered`, `covered` and `uncovered` say what the agent has and what Egma
- * answered for. The two beside them say *why* something was not answered for,
- * where the seam knows — and the three classes the product names are read
- * straight off this: **mocked** is `covered`, **not interceptable by
- * construction** is `notInterceptable`, and **not in this version** is
- * `notInThisVersion`. A tool in `uncovered` and in neither class is the
- * remaining case: Egma stands in front of it and nobody authored an answer, so
- * its call was refused.
+ * **Written by the LiveKit in-room seam and by nothing else.** There the agent
+ * declares its tools per conversation, so two simulations of one run can
+ * honestly differ and the stamp belongs at the simulation. The Retell lanes
+ * decide what they answer for once per run and mark each answered call on the
+ * transcript, so they leave it absent — which is the report saying nobody was
+ * ever asked, a different sentence from three empty lists.
  */
 export const mockToolCoverageSchema = {
   type: "object",
@@ -81,112 +80,48 @@ export const mockToolCoverageSchema = {
     discovered: arrayOf(stringSchema),
     covered: arrayOf(stringSchema),
     uncovered: arrayOf(stringSchema),
-    notInterceptable: arrayOf(stringSchema),
-    notInThisVersion: arrayOf(stringSchema),
   },
-  required: [
-    "discovered",
-    "covered",
-    "uncovered",
-    "notInterceptable",
-    "notInThisVersion",
-  ],
+  required: ["discovered", "covered", "uncovered"],
   additionalProperties: false,
 } as const;
 
 /**
- * The temporary world a run built on the agent's platform, as a reader sees it.
+ * The put-it-back note a mocked run leaves behind, as a reader sees it.
  *
  * It is on the run's header because it is a fact about the whole run: one
- * temporary version, one set of touched numbers, one configuration the tools
- * were read from. `bindings` is each touched number's inbound routing exactly
- * as it was read, which is what teardown puts back — so a reader can see the
- * routing Egma promised to restore, and a sweep after a crash has the same
- * bytes to restore from.
+ * temporary copy, one set of touched numbers, one engine the tools were read
+ * from. Each number's entry says where its binding pointed before Egma touched
+ * it and what Egma pinned it to — so a reader can see exactly what Egma
+ * promised to restore, and a sweep after a crash has the two values it needs to
+ * decide whether restoring is still the right thing to do.
  */
-export const mockedWorldSchema = {
+export const mockMetadataSchema = {
   type: "object",
   properties: {
-    servingVersion: integerSchema,
-    draftVersion: nullable(integerSchema),
     engine: {
       type: "object",
       properties: {
         type: stringSchema,
-        engineId: stringSchema,
+        engine_id: stringSchema,
         version: nullable(integerSchema),
       },
-      required: ["type", "engineId", "version"],
+      required: ["type", "engine_id", "version"],
       additionalProperties: false,
     },
     numbers: arrayOf({
       type: "object",
       properties: {
         number: stringSchema,
-        pinned: booleanSchema,
-        bindings: arrayOf({ type: "object", additionalProperties: true }),
+        was: {
+          oneOf: [stringSchema, integerSchema, { type: "null" }],
+        },
+        pinned_to: integerSchema,
       },
-      required: ["number", "pinned", "bindings"],
+      required: ["number", "was", "pinned_to"],
       additionalProperties: false,
     }),
-    coverage: {
-      type: "object",
-      properties: {
-        mocked: arrayOf(stringSchema),
-        notInterceptable: arrayOf(stringSchema),
-        notInThisVersion: arrayOf(stringSchema),
-      },
-      required: ["mocked", "notInterceptable", "notInThisVersion"],
-      additionalProperties: false,
-    },
   },
-  required: [
-    "servingVersion",
-    "draftVersion",
-    "engine",
-    "numbers",
-    "coverage",
-  ],
-  additionalProperties: false,
-} as const;
-
-/**
- * The world a run **read** at its start and conducts against, as a reader sees
- * it: the version it resolved once, the engine that version runs on, and the
- * three classes of that version's tools.
- *
- * Its sibling above records what Egma put onto somebody's platform so a
- * teardown can put it back. This records the opposite: on a lane whose mocked
- * answers ride each request, Egma writes nothing, and what is worth keeping is
- * only what was read — above all the version, because the platform's own
- * default is "the newest one" and a concurrent edit mints a newer one.
- */
-export const conductedWorldSchema = {
-  type: "object",
-  properties: {
-    agentVersion: integerSchema,
-    engine: {
-      type: "object",
-      properties: {
-        type: stringSchema,
-        engineId: stringSchema,
-        version: nullable(integerSchema),
-      },
-      required: ["type", "engineId", "version"],
-      additionalProperties: false,
-    },
-    coverage: {
-      type: "object",
-      properties: {
-        mocked: arrayOf(stringSchema),
-        notInterceptable: arrayOf(stringSchema),
-        notInThisVersion: arrayOf(stringSchema),
-      },
-      required: ["mocked", "notInterceptable", "notInThisVersion"],
-      additionalProperties: false,
-    },
-  },
-  required: ["agentVersion", "engine", "coverage"],
+  required: ["engine", "numbers"],
   additionalProperties: false,
 } as const;
 
@@ -256,7 +191,8 @@ const runHeaderSchema = {
     modality: modalitySchema,
     productLabel: stringSchema,
     environment: nullable(stringSchema),
-    conductedAgentVersion: nullable(integerSchema),
+    agentVersion: nullable(integerSchema),
+    mockToolsEnabled: booleanSchema,
     expectedSimulationCount: integerSchema,
     completedCount: nullable(integerSchema),
     failedCount: nullable(integerSchema),
@@ -286,7 +222,8 @@ const runHeaderSchema = {
     "modality",
     "productLabel",
     "environment",
-    "conductedAgentVersion",
+    "agentVersion",
+    "mockToolsEnabled",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -316,8 +253,9 @@ const runDetailSchema = {
   ...runHeaderSchema,
   properties: {
     ...runHeaderSchema.properties,
-    mockedWorld: nullable(mockedWorldSchema),
-    conductedWorld: nullable(conductedWorldSchema),
+    tempMockAgentVersion: nullable(integerSchema),
+    tempMockAgentVersionCleanup: nullable(booleanSchema),
+    mockMetadata: nullable(mockMetadataSchema),
     connectionSnapshot: connectionSnapshotSchema,
     agent: nullable(identitySchema),
     connection: nullable({
@@ -331,8 +269,9 @@ const runDetailSchema = {
   },
   required: [
     ...runHeaderSchema.required,
-    "mockedWorld",
-    "conductedWorld",
+    "tempMockAgentVersion",
+    "tempMockAgentVersionCleanup",
+    "mockMetadata",
     "connectionSnapshot",
     "agent",
     "connection",
@@ -359,7 +298,6 @@ const runSimulationSchema = {
     modality: modalitySchema,
     hasRecording: booleanSchema,
     mockToolCoverage: nullable(mockToolCoverageSchema),
-    conductedAgentVersion: nullable(integerSchema),
   },
   required: [
     "id",
@@ -379,7 +317,6 @@ const runSimulationSchema = {
     "modality",
     "hasRecording",
     "mockToolCoverage",
-    "conductedAgentVersion",
   ],
   additionalProperties: false,
 } as const;

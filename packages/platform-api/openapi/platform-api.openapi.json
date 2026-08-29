@@ -718,9 +718,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -768,7 +765,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -871,6 +867,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -909,6 +908,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1002,9 +1002,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -1052,7 +1049,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -1155,6 +1151,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1193,6 +1192,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1432,9 +1432,6 @@
                           "pullProductionCalls": {
                             "type": "boolean"
                           },
-                          "mockToolsDuringSimulations": {
-                            "type": "boolean"
-                          },
                           "monitoringConfigured": {
                             "type": "boolean"
                           },
@@ -1566,6 +1563,9 @@
                                     }
                                   ]
                                 },
+                                "mockToolsEnabled": {
+                                  "type": "boolean"
+                                },
                                 "archived": {
                                   "type": "boolean"
                                 },
@@ -1604,6 +1604,7 @@
                                 "config",
                                 "credentialPresent",
                                 "credentialsHint",
+                                "mockToolsEnabled",
                                 "archived",
                                 "archivedAt",
                                 "createdAt",
@@ -1623,7 +1624,6 @@
                           "monitoringKeyPresent",
                           "monitoringApiKeyHint",
                           "pullProductionCalls",
-                          "mockToolsDuringSimulations",
                           "monitoringConfigured",
                           "lastReceivedAt",
                           "archived",
@@ -1830,9 +1830,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -1880,7 +1877,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -1985,6 +1981,9 @@
                               }
                             ]
                           },
+                          "mockToolsEnabled": {
+                            "type": "boolean"
+                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -2023,6 +2022,7 @@
                           "config",
                           "credentialPresent",
                           "credentialsHint",
+                          "mockToolsEnabled",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -2145,14 +2145,6 @@
                 "properties": {
                   "name": {
                     "type": "string"
-                  },
-                  "mockToolsDuringSimulations": {
-                    "type": "boolean",
-                    "description": "Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is. Turning it on runs discovery first and is refused with its reason where the agent cannot be mocked; it also seeds a mock tool, with a deterministic default answer, for every tool Egma can intercept and does not already answer for."
-                  },
-                  "pinNumbersDuringRuns": {
-                    "type": "boolean",
-                    "description": "Consent to Egma pinning a telephone number that follows the platform's `latest` pointer to the version it already resolves to, for the length of each run, and putting the binding back afterwards. Required only when such a number routes to this agent: without it, branching a temporary version would send real callers to it the instant it exists. Sending false, or leaving it out where it is needed, refuses the tick with the reason — a box promising isolation never quietly runs real tools."
                   }
                 },
                 "additionalProperties": false
@@ -2229,9 +2221,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -2279,7 +2268,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -2635,6 +2623,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2673,6 +2664,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2853,7 +2845,6 @@
                               "type": "string",
                               "enum": [
                                 "custom_llm_engine",
-                                "pin_consent_required",
                                 "phone_only_agent",
                                 "keys_disagree",
                                 "platform_unavailable"
@@ -3220,9 +3211,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -3270,7 +3258,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -3514,9 +3501,6 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
-                        "mockToolsDuringSimulations": {
-                          "type": "boolean"
-                        },
                         "monitoringConfigured": {
                           "type": "boolean"
                         },
@@ -3564,7 +3548,6 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
-                        "mockToolsDuringSimulations",
                         "monitoringConfigured",
                         "lastReceivedAt",
                         "archived",
@@ -3820,6 +3803,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3858,6 +3844,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4005,6 +3992,10 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "mockToolsEnabled": {
+                    "type": "boolean",
+                    "description": "Turn mock tools on or off for runs over this connection. Absent leaves it as it is, so renaming a connection never changes the world its next run meets. Turning it on for a retell_web_call connection is refused where the agent holds no platform identity and key, because Egma would have nothing to branch a temporary copy with; a phone_number connection can never hold true."
                   }
                 },
                 "additionalProperties": false
@@ -4113,6 +4104,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4151,6 +4145,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4416,6 +4411,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4454,6 +4452,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -4761,6 +4760,9 @@
                             }
                           ]
                         },
+                        "mockToolsEnabled": {
+                          "type": "boolean"
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4799,6 +4801,7 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
+                        "mockToolsEnabled",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -14764,7 +14767,7 @@
                         }
                       ]
                     },
-                    "conductedAgentVersion": {
+                    "agentVersion": {
                       "anyOf": [
                         {
                           "type": "integer"
@@ -14773,6 +14776,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
                     },
                     "expectedSimulationCount": {
                       "type": "integer"
@@ -14894,7 +14900,8 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "conductedAgentVersion",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -15210,7 +15217,7 @@
                               }
                             ]
                           },
-                          "conductedAgentVersion": {
+                          "agentVersion": {
                             "anyOf": [
                               {
                                 "type": "integer"
@@ -15219,6 +15226,9 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "mockToolsEnabled": {
+                            "type": "boolean"
                           },
                           "expectedSimulationCount": {
                             "type": "integer"
@@ -15340,7 +15350,8 @@
                           "modality",
                           "productLabel",
                           "environment",
-                          "conductedAgentVersion",
+                          "agentVersion",
+                          "mockToolsEnabled",
                           "expectedSimulationCount",
                           "completedCount",
                           "failedCount",
@@ -15574,7 +15585,7 @@
                         }
                       ]
                     },
-                    "conductedAgentVersion": {
+                    "agentVersion": {
                       "anyOf": [
                         {
                           "type": "integer"
@@ -15583,6 +15594,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
                     },
                     "expectedSimulationCount": {
                       "type": "integer"
@@ -15687,31 +15701,38 @@
                         }
                       ]
                     },
-                    "mockedWorld": {
+                    "tempMockAgentVersion": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tempMockAgentVersionCleanup": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "mockMetadata": {
                       "anyOf": [
                         {
                           "type": "object",
                           "properties": {
-                            "servingVersion": {
-                              "type": "integer"
-                            },
-                            "draftVersion": {
-                              "anyOf": [
-                                {
-                                  "type": "integer"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
                             "engine": {
                               "type": "object",
                               "properties": {
                                 "type": {
                                   "type": "string"
                                 },
-                                "engineId": {
+                                "engine_id": {
                                   "type": "string"
                                 },
                                 "version": {
@@ -15727,7 +15748,7 @@
                               },
                               "required": [
                                 "type",
-                                "engineId",
+                                "engine_id",
                                 "version"
                               ],
                               "additionalProperties": false
@@ -15740,138 +15761,35 @@
                                   "number": {
                                     "type": "string"
                                   },
-                                  "pinned": {
-                                    "type": "boolean"
+                                  "was": {
+                                    "oneOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
                                   },
-                                  "bindings": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "additionalProperties": true
-                                    }
+                                  "pinned_to": {
+                                    "type": "integer"
                                   }
                                 },
                                 "required": [
                                   "number",
-                                  "pinned",
-                                  "bindings"
+                                  "was",
+                                  "pinned_to"
                                 ],
                                 "additionalProperties": false
                               }
-                            },
-                            "coverage": {
-                              "type": "object",
-                              "properties": {
-                                "mocked": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInterceptable": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInThisVersion": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "required": [
-                                "mocked",
-                                "notInterceptable",
-                                "notInThisVersion"
-                              ],
-                              "additionalProperties": false
                             }
                           },
                           "required": [
-                            "servingVersion",
-                            "draftVersion",
                             "engine",
-                            "numbers",
-                            "coverage"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "conductedWorld": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "agentVersion": {
-                              "type": "integer"
-                            },
-                            "engine": {
-                              "type": "object",
-                              "properties": {
-                                "type": {
-                                  "type": "string"
-                                },
-                                "engineId": {
-                                  "type": "string"
-                                },
-                                "version": {
-                                  "anyOf": [
-                                    {
-                                      "type": "integer"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "type",
-                                "engineId",
-                                "version"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "coverage": {
-                              "type": "object",
-                              "properties": {
-                                "mocked": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInterceptable": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                },
-                                "notInThisVersion": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
-                                }
-                              },
-                              "required": [
-                                "mocked",
-                                "notInterceptable",
-                                "notInThisVersion"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "agentVersion",
-                            "engine",
-                            "coverage"
+                            "numbers"
                           ],
                           "additionalProperties": false
                         },
@@ -16009,7 +15927,8 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "conductedAgentVersion",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -16022,8 +15941,9 @@
                     "createdAt",
                     "startedAt",
                     "finishedAt",
-                    "mockedWorld",
-                    "conductedWorld",
+                    "tempMockAgentVersion",
+                    "tempMockAgentVersionCleanup",
+                    "mockMetadata",
                     "connectionSnapshot",
                     "agent",
                     "connection"
@@ -16316,38 +16236,14 @@
                                     "items": {
                                       "type": "string"
                                     }
-                                  },
-                                  "notInterceptable": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "notInThisVersion": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string"
-                                    }
                                   }
                                 },
                                 "required": [
                                   "discovered",
                                   "covered",
-                                  "uncovered",
-                                  "notInterceptable",
-                                  "notInThisVersion"
+                                  "uncovered"
                                 ],
                                 "additionalProperties": false
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "conductedAgentVersion": {
-                            "anyOf": [
-                              {
-                                "type": "integer"
                               },
                               {
                                 "type": "null"
@@ -16372,8 +16268,7 @@
                           "endedAt",
                           "modality",
                           "hasRecording",
-                          "mockToolCoverage",
-                          "conductedAgentVersion"
+                          "mockToolCoverage"
                         ],
                         "additionalProperties": false
                       }
@@ -16861,7 +16756,7 @@
                         }
                       ]
                     },
-                    "conductedAgentVersion": {
+                    "agentVersion": {
                       "anyOf": [
                         {
                           "type": "integer"
@@ -16870,6 +16765,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "mockToolsEnabled": {
+                      "type": "boolean"
                     },
                     "expectedSimulationCount": {
                       "type": "integer"
@@ -16991,7 +16889,8 @@
                     "modality",
                     "productLabel",
                     "environment",
-                    "conductedAgentVersion",
+                    "agentVersion",
+                    "mockToolsEnabled",
                     "expectedSimulationCount",
                     "completedCount",
                     "failedCount",
@@ -17469,16 +17368,6 @@
                         }
                       ]
                     },
-                    "conductedAgentVersion": {
-                      "anyOf": [
-                        {
-                          "type": "integer"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "hasRecording": {
                       "type": "boolean"
                     },
@@ -17822,26 +17711,12 @@
                               "items": {
                                 "type": "string"
                               }
-                            },
-                            "notInterceptable": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            },
-                            "notInThisVersion": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
                             }
                           },
                           "required": [
                             "discovered",
                             "covered",
-                            "uncovered",
-                            "notInterceptable",
-                            "notInThisVersion"
+                            "uncovered"
                           ],
                           "additionalProperties": false
                         },
@@ -18101,7 +17976,6 @@
                     "startedAt",
                     "endedAt",
                     "providerReference",
-                    "conductedAgentVersion",
                     "hasRecording",
                     "measures",
                     "metrics",

@@ -188,15 +188,11 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
     name?: string;
-    mockToolsDuringSimulations?: boolean;
-    pinNumbersDuringRuns?: boolean;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'name' },
-                { in: 'body', key: 'mockToolsDuringSimulations' },
-                { in: 'body', key: 'pinNumbersDuringRuns' }
+                { in: 'body', key: 'name' }
             ] }]);
     return (options?.client ?? client).patch<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -406,6 +402,7 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
     credentials?: {
         [key: string]: unknown;
     };
+    mockToolsEnabled?: boolean;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
@@ -414,7 +411,8 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
-                { in: 'body', key: 'credentials' }
+                { in: 'body', key: 'credentials' },
+                { in: 'body', key: 'mockToolsEnabled' }
             ] }]);
     return (options?.client ?? client).patch<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {

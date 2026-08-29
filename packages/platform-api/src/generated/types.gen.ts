@@ -211,7 +211,6 @@ export type ListAgentsResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -235,6 +234,7 @@ export type ListAgentsResponses = {
                 };
                 credentialPresent: boolean;
                 credentialsHint: string | null;
+                mockToolsEnabled: boolean;
                 archived: boolean;
                 archivedAt: string | null;
                 createdAt: string;
@@ -343,7 +343,6 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -368,6 +367,7 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -389,7 +389,6 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -414,6 +413,7 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -476,7 +476,6 @@ export type GetAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -501,6 +500,7 @@ export type GetAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -514,14 +514,6 @@ export type GetAgentResponse = GetAgentResponses[keyof GetAgentResponses];
 export type UpdateAgentData = {
     body?: {
         name?: string;
-        /**
-         * Turn the mocked world on or off for every simulation against this agent. Refused for an agent with no platform identity and key, because Egma builds the world by creating a temporary version of the agent on its platform and would have nothing to create one with. Absent leaves it as it is. Turning it on runs discovery first and is refused with its reason where the agent cannot be mocked; it also seeds a mock tool, with a deterministic default answer, for every tool Egma can intercept and does not already answer for.
-         */
-        mockToolsDuringSimulations?: boolean;
-        /**
-         * Consent to Egma pinning a telephone number that follows the platform's `latest` pointer to the version it already resolves to, for the length of each run, and putting the binding back afterwards. Required only when such a number routes to this agent: without it, branching a temporary version would send real callers to it the instant it exists. Sending false, or leaving it out where it is needed, refuses the tick with the reason — a box promising isolation never quietly runs real tools.
-         */
-        pinNumbersDuringRuns?: boolean;
     };
     path: {
         agentId: string;
@@ -584,7 +576,6 @@ export type UpdateAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -697,6 +688,7 @@ export type AddConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -767,7 +759,7 @@ export type DiscoverMockToolsResponses = {
     200: {
         mockable: boolean;
         refusal: {
-            reason: 'custom_llm_engine' | 'pin_consent_required' | 'phone_only_agent' | 'keys_disagree' | 'platform_unavailable';
+            reason: 'custom_llm_engine' | 'phone_only_agent' | 'keys_disagree' | 'platform_unavailable';
             message: string;
         } | null;
         engine: 'retell-llm' | 'conversation-flow' | 'custom-llm' | null;
@@ -860,7 +852,6 @@ export type ArchiveAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -940,7 +931,6 @@ export type RestoreAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
-            mockToolsDuringSimulations: boolean;
             monitoringConfigured: boolean;
             lastReceivedAt: string | null;
             archived: boolean;
@@ -1012,6 +1002,7 @@ export type GetConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1032,6 +1023,10 @@ export type UpdateConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
+        /**
+         * Turn mock tools on or off for runs over this connection. Absent leaves it as it is, so renaming a connection never changes the world its next run meets. Turning it on for a retell_web_call connection is refused where the agent holds no platform identity and key, because Egma would have nothing to branch a temporary copy with; a phone_number connection can never hold true.
+         */
+        mockToolsEnabled?: boolean;
     };
     path: {
         agentId: string;
@@ -1102,6 +1097,7 @@ export type UpdateConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1185,6 +1181,7 @@ export type ArchiveConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1277,6 +1274,7 @@ export type RestoreConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
+            mockToolsEnabled: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -4138,7 +4136,8 @@ export type ListRunsResponses = {
             modality: 'voice' | 'chat';
             productLabel: string;
             environment: string | null;
-            conductedAgentVersion: number | null;
+            agentVersion: number | null;
+            mockToolsEnabled: boolean;
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
@@ -4241,7 +4240,8 @@ export type CreateRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
-        conductedAgentVersion: number | null;
+        agentVersion: number | null;
+        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4326,7 +4326,8 @@ export type GetRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
-        conductedAgentVersion: number | null;
+        agentVersion: number | null;
+        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4346,39 +4347,19 @@ export type GetRunResponses = {
         createdAt: string;
         startedAt: string | null;
         finishedAt: string | null;
-        mockedWorld: {
-            servingVersion: number;
-            draftVersion: number | null;
+        tempMockAgentVersion: number | null;
+        tempMockAgentVersionCleanup: boolean | null;
+        mockMetadata: {
             engine: {
                 type: string;
-                engineId: string;
+                engine_id: string;
                 version: number | null;
             };
             numbers: Array<{
                 number: string;
-                pinned: boolean;
-                bindings: Array<{
-                    [key: string]: unknown;
-                }>;
+                was: string | number | null;
+                pinned_to: number;
             }>;
-            coverage: {
-                mocked: Array<string>;
-                notInterceptable: Array<string>;
-                notInThisVersion: Array<string>;
-            };
-        } | null;
-        conductedWorld: {
-            agentVersion: number;
-            engine: {
-                type: string;
-                engineId: string;
-                version: number | null;
-            };
-            coverage: {
-                mocked: Array<string>;
-                notInterceptable: Array<string>;
-                notInThisVersion: Array<string>;
-            };
         } | null;
         connectionSnapshot: {
             agentPlatform: string | null;
@@ -4473,10 +4454,7 @@ export type ListRunSimulationsResponses = {
                 discovered: Array<string>;
                 covered: Array<string>;
                 uncovered: Array<string>;
-                notInterceptable: Array<string>;
-                notInThisVersion: Array<string>;
             } | null;
-            conductedAgentVersion: number | null;
         }>;
         nextPageToken: string | null;
     };
@@ -4616,7 +4594,8 @@ export type CancelRunResponses = {
         modality: 'voice' | 'chat';
         productLabel: string;
         environment: string | null;
-        conductedAgentVersion: number | null;
+        agentVersion: number | null;
+        mockToolsEnabled: boolean;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4740,7 +4719,6 @@ export type GetSimulationResponses = {
         startedAt: string | null;
         endedAt: string | null;
         providerReference: string | null;
-        conductedAgentVersion: number | null;
         hasRecording: boolean;
         measures: {
             durationMs?: number;
@@ -4800,8 +4778,6 @@ export type GetSimulationResponses = {
             discovered: Array<string>;
             covered: Array<string>;
             uncovered: Array<string>;
-            notInterceptable: Array<string>;
-            notInThisVersion: Array<string>;
         } | null;
         mockTools: {
             defaults: Array<({

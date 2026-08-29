@@ -36,13 +36,13 @@ from conftest import (
     measures_for,
     milliseconds_of,
     phone_spec,
-    text_mode_spec,
     retell_spec,
     scripted_spec,
     span_attribute,
     spans_for,
     status_events_for,
     terminal_event_for,
+    text_mode_spec,
     turns_for,
 )
 from text_mode_stub import Reply, ToolTurn
