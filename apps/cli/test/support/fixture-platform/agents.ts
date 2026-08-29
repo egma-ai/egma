@@ -410,6 +410,30 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     },
     simulatorAdapter: true,
   },
+  retell_web_call: {
+    // The voice call Egma places over the internet: a real Retell call, with
+    // no carrier leg and no published number dialled. The lane a mocked voice
+    // run is conducted over, once the one consent screen has been accepted.
+    modalities: ["voice"],
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "retell_web_call.api_key",
+        named: "a Retell web call connection",
+        config: { retellAgentId: nonEmptyString },
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+      },
+    ],
+    reuse: {
+      matchedKeys: ["retellAgentId"],
+      identityOf: (config) => config["retellAgentId"],
+    },
+    simulatorAdapter: true,
+  },
   phone_number: {
     modalities: ["voice"],
     topology: "egma-dials-in",
@@ -551,6 +575,13 @@ const CONNECTION_OPTIONS = [
     accessVariant: "retell_text_mode.api_key",
     modality: "chat",
     productLabel: "Retell text mode",
+  },
+  {
+    agentPlatform: "retell",
+    connectionType: "retell_web_call",
+    accessVariant: "retell_web_call.api_key",
+    modality: "voice",
+    productLabel: "Retell web call",
   },
   {
     agentPlatform: "retell",

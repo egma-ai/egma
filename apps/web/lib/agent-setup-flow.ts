@@ -22,8 +22,15 @@ export type AgentSetupPlan = {
   readonly pullWithConnection: boolean;
   /** Whether the UI shows LiveKit instructions without recording an on/off state. */
   readonly monitoringInstructions: boolean;
-  /** Retell modalities that the agent picker may show for this plan. */
-  readonly retellModalities: readonly ("chat" | "voice")[];
+  /**
+   * Whether this plan asks the one question — how should Egma test this agent.
+   *
+   * A monitoring goal does not: it needs the voice connection for production
+   * pull and nothing else, so it walks straight to the number chooser exactly
+   * as it does today. Asking it "text, web call or phone?" would be a question
+   * whose answer it cannot use.
+   */
+  readonly asksHowToTest: boolean;
 };
 
 const PLANS: Readonly<
@@ -36,7 +43,7 @@ const PLANS: Readonly<
       writesConnection: true,
       pullWithConnection: false,
       monitoringInstructions: false,
-      retellModalities: ["chat", "voice"],
+      asksHowToTest: true,
     },
     monitoring: {
       goal: "monitoring",
@@ -45,7 +52,7 @@ const PLANS: Readonly<
       writesConnection: true,
       pullWithConnection: true,
       monitoringInstructions: false,
-      retellModalities: ["chat", "voice"],
+      asksHowToTest: false,
     },
     both: {
       goal: "both",
@@ -53,10 +60,9 @@ const PLANS: Readonly<
       writesConnection: true,
       pullWithConnection: true,
       monitoringInstructions: false,
-      // Discovery must keep Chat visible. The selected agent decides the last
-      // screen: Voice can finish both jobs, while Chat can finish Simulation
-      // and must explain why Monitoring still needs a Voice agent.
-      retellModalities: ["chat", "voice"],
+      // Both needs the voice connection for production pull, so it takes the
+      // number chooser without the question, exactly as Monitoring does.
+      asksHowToTest: false,
     },
   },
   livekit: {
@@ -66,7 +72,7 @@ const PLANS: Readonly<
       writesConnection: true,
       pullWithConnection: false,
       monitoringInstructions: false,
-      retellModalities: [],
+      asksHowToTest: false,
     },
     monitoring: {
       goal: "monitoring",
@@ -74,7 +80,7 @@ const PLANS: Readonly<
       writesConnection: false,
       pullWithConnection: false,
       monitoringInstructions: true,
-      retellModalities: [],
+      asksHowToTest: false,
     },
     both: {
       goal: "both",
@@ -82,7 +88,7 @@ const PLANS: Readonly<
       writesConnection: true,
       pullWithConnection: false,
       monitoringInstructions: true,
-      retellModalities: [],
+      asksHowToTest: false,
     },
   },
 };
@@ -101,19 +107,17 @@ export type RetellConnectionCandidate =
 /**
  * Retell agents that can enter the selected plan.
  *
- * Modality comes from Retell's discovery answer. The UI never asks the person
- * to restate it. Chat remains visible for Both and Monitoring so the next
- * screen can explain that production monitoring needs a voice agent.
+ * **Voice agents only.** Egma registers Retell voice agents, so discovery
+ * answers with those and this keeps the guarantee at the surface too: a
+ * chat-native agent is never offered, because no lane reaches one and the
+ * product would have nothing to ask about it.
  */
 export function retellAgentsForPlan(
   plan: AgentSetupPlan,
   agents: readonly RetellDiscoveredAgent[] | null,
 ): readonly RetellDiscoveredAgent[] {
   if (plan.platform !== "retell" || !plan.writesConnection) return [];
-  return (
-    agents?.filter((agent) => plan.retellModalities.includes(agent.modality)) ??
-    []
-  );
+  return agents?.filter((agent) => agent.modality === "voice") ?? [];
 }
 
 /** The selected agent's connection candidates that this plan can save. */
@@ -122,9 +126,78 @@ export function retellCandidatesForPlan(
   agent: RetellDiscoveredAgent | undefined,
 ): readonly RetellConnectionCandidate[] {
   if (plan.platform !== "retell" || agent === undefined) return [];
-  return agent.connectionCandidates.filter((candidate) =>
-    plan.retellModalities.includes(candidate.modality),
-  );
+  return agent.connectionCandidates;
+}
+
+/**
+ * The three lanes, and the one question that leads.
+ *
+ * They are the same three words the CLI says, because they are the same three
+ * lanes: each one is a connection, several may be picked, and every pick lands
+ * on **one** egma agent in one pass.
+ */
+export const RETELL_LANES = ["text", "web-call", "phone"] as const;
+export type RetellLane = (typeof RETELL_LANES)[number];
+
+export const RETELL_LANE_QUESTION = "How should Egma test this agent?";
+
+/** The word on screen for each lane. */
+export const RETELL_LANE_LABELS: Readonly<Record<RetellLane, string>> = {
+  text: "Text",
+  "web-call": "Web call",
+  phone: "Phone call",
+};
+
+/** One help line each, in what the lane tests rather than what it is made of. */
+export const RETELL_LANE_HELP: Readonly<Record<RetellLane, string>> = {
+  text: "Egma talks to the agent in text. No call is placed, and a run takes seconds.",
+  "web-call": "A voice call Egma places over the internet.",
+  phone:
+    "Egma dials the real number, so a run has true telephone latency and " +
+    "reaches your real tools.",
+};
+
+/** The connection type each lane is saved as. */
+export const RETELL_LANE_CONNECTION_TYPES: Readonly<Record<RetellLane, string>> = {
+  text: "retell_text_mode",
+  "web-call": "retell_web_call",
+  phone: "phone_number",
+};
+
+/**
+ * The picked lanes, in reading order, out of whatever order they were ticked
+ * in.
+ *
+ * Two people ticking the same three boxes in different orders must write the
+ * same three connections in the same order, or one project's connection names
+ * would depend on the order somebody clicked.
+ */
+export function retellLanesInOrder(
+  picked: readonly string[],
+): readonly RetellLane[] {
+  return RETELL_LANES.filter((lane) => picked.includes(lane));
+}
+
+/**
+ * The candidate that saves one lane, out of the ones discovery answered with.
+ *
+ * The phone lane is the one that needs saying which: a voice agent can have
+ * several routed numbers, and the chooser is where the person says which one.
+ * The other two lanes carry the vendor agent id and have exactly one candidate
+ * each.
+ */
+export function retellCandidateForLane(
+  candidates: readonly RetellConnectionCandidate[],
+  lane: RetellLane,
+  phoneNumberValue = "",
+): RetellConnectionCandidate | undefined {
+  const type = RETELL_LANE_CONNECTION_TYPES[lane];
+  if (lane !== "phone") {
+    return candidates.find((one) => one.connectionType === type);
+  }
+  const phones = candidates.filter((one) => one.connectionType === type);
+  if (phoneNumberValue === "") return phones[0];
+  return phones.find((one) => retellCandidateValue(one) === phoneNumberValue);
 }
 
 /** A stable form value for one discovered candidate. */
@@ -132,7 +205,7 @@ export function retellCandidateValue(candidate: RetellConnectionCandidate): stri
   if (candidate.connectionType === "phone_number") {
     return `phone:${candidate.config.phoneNumber ?? ""}`;
   }
-  return `chat:${candidate.config.retellAgentId ?? ""}`;
+  return `${candidate.connectionType}:${candidate.config.retellAgentId ?? ""}`;
 }
 
 /** The visible desktop states in the approved setup flow. */
@@ -141,9 +214,8 @@ export type AgentSetupStep =
   | "platform"
   | "retell-key"
   | "retell-agent"
-  | "retell-modality"
+  | "retell-lanes"
   | "retell-phone"
-  | "retell-chat"
   | "livekit-modality"
   | "livekit-simulation"
   | "livekit-chat"
@@ -188,18 +260,28 @@ export function stepAfterLiveKitChat(plan: AgentSetupPlan): AgentSetupStep | nul
 /**
  * Where a chosen Retell agent leads.
  *
- * A chat agent has one door and goes straight to it. A voice agent has two —
- * chat over text mode, voice over a call — so when the goal is a
- * simulation the flow asks which before any plumbing: that is the modality
- * question, and it leads. Monitoring and Both need the voice connection for
- * production pull, so they keep going to the voice route without the question.
+ * Straight to the one question — how should Egma test this agent — because the
+ * choice a person understands comes before any plumbing. Monitoring and Both
+ * need the voice connection for production pull, so they skip the question and
+ * go to the number chooser exactly as they do today.
  */
-export function stepAfterRetellAgent(
-  modality: "chat" | "voice",
-  goal: AgentSetupGoal,
-): AgentSetupStep {
-  if (modality === "chat") return "retell-chat";
-  return goal === "simulation" ? "retell-modality" : "retell-phone";
+export function stepAfterRetellAgent(plan: AgentSetupPlan): AgentSetupStep {
+  return plan.asksHowToTest ? "retell-lanes" : "retell-phone";
+}
+
+/**
+ * Where the answer to the one question leads, or `null` when the flow can save
+ * now.
+ *
+ * **The phone-number chooser appears only when Phone call is picked.** A
+ * developer who picked only Text is never asked for a phone number: the fast
+ * lane has no needless steps, and there is nothing honest to ask about a number
+ * nothing will dial.
+ */
+export function stepAfterRetellLanes(
+  lanes: readonly RetellLane[],
+): AgentSetupStep | null {
+  return lanes.includes("phone") ? "retell-phone" : null;
 }
 
 /** The single Back graph shared by every rendering of the setup flow. */
@@ -223,14 +305,12 @@ export function previousAgentSetupStep({
       return "platform";
     case "retell-agent":
       return "retell-key";
-    case "retell-modality":
+    case "retell-lanes":
       return "retell-agent";
     case "retell-phone":
-      // A voice agent reaches the phone step through the modality question when
-      // the goal is a simulation, and straight from the agent otherwise.
-      return goal === "simulation" ? "retell-modality" : "retell-agent";
-    case "retell-chat":
-      return "retell-agent";
+      // The phone chooser is reached through the one question when the goal is
+      // a simulation, and straight from the agent for the goals that skip it.
+      return goal === "simulation" ? "retell-lanes" : "retell-agent";
     case "livekit-simulation":
       return "livekit-modality";
     case "livekit-chat":
