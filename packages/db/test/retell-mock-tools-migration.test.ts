@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -15,25 +15,23 @@ import {
 } from "./support/database.ts";
 
 /**
- * Text mode migration, run the way a real deployment meets it: over a
+ * The mock-tools migration, run the way a real deployment meets it: over a
  * database that already holds connections, runs and finished simulations.
  *
- * Two things are proved here that a fresh database cannot say anything about.
+ * **Nothing is backfilled and no trigger is disabled.** The switch arrives off
+ * for every connection there is, which is what it means, and the four run
+ * columns arrive null, which is their honest value on every run already
+ * written: none of them conducted against a named version and none of them made
+ * a temporary copy. The coverage stamp is not touched at all — it stays the
+ * three lists `main` shipped, written by the LiveKit in-room seam alone.
  *
- * **The cut is clean.** The migration widens the connection row's own
- * connection-type check and the access-variant check beside it, and adds two
- * nullable columns. Nothing else in the schema gates a connection-type value —
- * that is asserted below against the live catalog rather than assumed, because
- * a gate nobody remembered would refuse the new kind at the first write on a
- * customer's database and nowhere earlier.
- *
- * **Nothing already written moves.** Every existing connection type is still
- * admitted, every existing row still reads exactly as it did, and the two new
- * columns arrive null — which is their honest value on every run that pinned no
- * platform version, and that is every run there is.
+ * **The freeze carve-out is exact.** A finished run may still be told the two
+ * cleanup facts, because clearing a crashed run's litter is by definition
+ * something that happens after the run is over; everything else on the header
+ * stays frozen.
  */
 
-const UNDER_TEST = "0003_retell_text_mode.sql";
+const UNDER_TEST = "0003_retell_mock_tools.sql";
 
 let database: EmptyDatabase;
 let store: SingleConnection;
@@ -51,6 +49,13 @@ const testId = newId("tst");
 const testVersionId = newId("tstv");
 const runId = newId("run");
 const finishedSimulation = newId("sim");
+
+/** The coverage stamp an in-room LiveKit run wrote, in its three lists. */
+const OLD_STAMP = {
+  discovered: ["check_calendar", "send_confirmation"],
+  covered: ["check_calendar"],
+  uncovered: ["send_confirmation"],
+} as const;
 
 /** Every connection kind an older build could already have written. */
 const EXISTING_CONNECTIONS = [
@@ -181,10 +186,11 @@ async function seedExistingWork(): Promise<void> {
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
         position, modality, status, ending_reason,
-        claimed_by, claimed_at, heartbeat_at, started_at, ended_at, turn_count)
+        claimed_by, claimed_at, heartbeat_at, started_at, ended_at, turn_count,
+        mock_tool_coverage)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, 'chat',
        'completed', 'persona_concluded', 'simulator-blue-1', now(), now(),
-       now(), now(), 12)`,
+       now(), now(), 12, $11::jsonb)`,
     [
       finishedSimulation,
       runId,
@@ -196,22 +202,23 @@ async function seedExistingWork(): Promise<void> {
       personaVersionId,
       testId,
       testVersionId,
+      JSON.stringify(OLD_STAMP),
     ],
   );
 }
 
 beforeAll(async () => {
-  database = await createEmptyDatabase("retell_text_mode_migration");
+  database = await createEmptyDatabase("retell_mock_tools_migration");
 
   // Everything up to the migration under test, from a directory holding
   // nothing else. Applying the real directory afterwards finds those already
   // recorded under the same hashes and applies only what follows.
-  before = await mkdtemp(path.join(tmpdir(), "egma-before-text-mode-"));
+  before = await mkdtemp(path.join(tmpdir(), "egma-before-mock-tools-"));
   const earlier = (await readdir(MIGRATIONS_DIRECTORY))
     .filter((name) => name.endsWith(".sql") && name < UNDER_TEST)
     .sort();
   expect(earlier).toContain("0000_baseline.sql");
-  expect(earlier).toContain("0002_retell_mocked_world.sql");
+  expect(earlier).toContain("0002_retell_lanes.sql");
   for (const name of earlier) {
     await cp(path.join(MIGRATIONS_DIRECTORY, name), path.join(before, name));
   }
@@ -227,181 +234,151 @@ afterAll(async () => {
   if (before !== undefined) await rm(before, { recursive: true, force: true });
 });
 
-describe("text mode migration over a populated database", () => {
+describe("the mock-tools migration over a populated database", () => {
   it("applies over rows an older build already wrote", async () => {
     const { applied } = await runMigrations(database.url);
     expect(applied).toContain(UNDER_TEST);
   });
 
-  it("admits the new connection type and its access variant", async () => {
-    const connectionId = newId("con");
-    await store.sql(
-      `insert into connection
-         (id, organization_id, project_id, agent_id, name, connection_type,
-          access_variant, modality, topology, config)
-       values ($1, $2, $3, $4, 'Text mode', 'retell_text_mode',
-         'retell_text_mode.api_key', 'chat', 'hosted-broker',
-         '{"retellAgentId": "agent_1"}'::jsonb)`,
-      [connectionId, acme.organization, acme.project, agentId],
+  it("carries nothing across, because there is nothing to carry", async () => {
+    // Asserted against the file rather than inferred from its effect: a
+    // backfill or a disabled trigger is exactly what this migration must not
+    // have, and the earlier draft of it had both.
+    const sql = await readFile(
+      path.join(MIGRATIONS_DIRECTORY, UNDER_TEST),
+      "utf8",
     );
-    const { rows } = await store.sql<{ connection_type: string }>(
-      "select connection_type from connection where id = $1",
-      [connectionId],
-    );
-    expect(rows[0]?.connection_type).toBe("retell_text_mode");
+    expect(sql).not.toMatch(/DISABLE TRIGGER/iu);
+    expect(sql).not.toMatch(/^\s*UPDATE /imu);
   });
 
-  it("keeps every connection type an older build could have written", async () => {
-    const { rows } = await store.sql<{ connection_type: string }>(
-      "select connection_type from connection where id = any($1::text[])",
+  it("gives every connection the switch, off", async () => {
+    const { rows } = await store.sql<{
+      id: string;
+      mock_tools_enabled: boolean;
+    }>(
+      "select id, mock_tools_enabled from connection where id = any($1::text[])",
       [connectionIds],
     );
     expect(rows).toHaveLength(EXISTING_CONNECTIONS.length);
-    for (const [connectionType] of EXISTING_CONNECTIONS) {
-      expect(rows.some((row) => row.connection_type === connectionType)).toBe(
-        true,
-      );
-    }
+    for (const row of rows) expect(row.mock_tools_enabled).toBe(false);
   });
 
-  it("still refuses a connection type nothing in Egma names", async () => {
+  it("refuses the switch on a phone connection", async () => {
     const refused = await store
       .sql(
         `insert into connection
            (id, organization_id, project_id, agent_id, name, connection_type,
-            access_variant, modality, topology, config)
-         values ($1, $2, $3, $4, 'Nonsense', 'retell_telepathy',
-           'retell_text_mode.api_key', 'chat', 'hosted-broker', '{}'::jsonb)`,
+            access_variant, modality, topology, config, mock_tools_enabled)
+         values ($1, $2, $3, $4, 'Mocked phone', 'phone_number',
+           'phone_number.public_e164', 'voice', 'egma-dials-in',
+           '{"phoneNumber": "+15550100"}'::jsonb, true)`,
         [newId("con"), acme.organization, acme.project, agentId],
       )
       .then(() => undefined)
       .catch((error: unknown) => error);
-    expect(String(refused)).toMatch(/connection_type_allowed/u);
+    expect(String(refused)).toMatch(/connection_mock_tools_lanes/u);
   });
 
-  it("is a clean cut: nothing but the connection row's own check gates the value", async () => {
-    // The ticket's claim, checked against the live catalog rather than taken on
-    // trust. A second gate anywhere — a check on the evidence side, a column of
-    // its own, an enum, a domain — would refuse the new kind at the first write
-    // on a customer's database and nowhere earlier.
-    const { rows: checks } = await store.sql<{
-      on_table: string;
-      conname: string;
+  it("leaves every run already written with nothing to claim", async () => {
+    const { rows } = await store.sql<{
+      agent_version: number | null;
+      temp_mock_agent_version: number | null;
+      temp_mock_agent_version_cleanup: boolean | null;
+      mock_metadata: unknown;
     }>(
-      `select c.conrelid::regclass::text as on_table, c.conname
-         from pg_constraint c
-        where pg_get_constraintdef(c.oid) like '%retell_chat_api%'`,
-    );
-    expect(
-      checks.map((row) => `${row.on_table}.${row.conname}`).sort(),
-    ).toEqual([
-      // The access variant is a second value on the same row, not a second
-      // gate on the connection type.
-      "connection.connection_access_variant_allowed",
-      "connection.connection_type_allowed",
-    ]);
-
-    const { rows: columns } = await store.sql<{ table_name: string }>(
-      `select table_name from information_schema.columns
-        where column_name = 'connection_type'`,
-    );
-    expect(columns.map((row) => row.table_name)).toEqual(["connection"]);
-
-    const { rows: enums } = await store.sql(
-      "select 1 from pg_type t join pg_enum e on e.enumtypid = t.oid",
-    );
-    expect(enums).toHaveLength(0);
-
-    const { rows: domains } = await store.sql(
-      "select 1 from information_schema.domains where domain_schema = 'public'",
-    );
-    expect(domains).toHaveLength(0);
-
-    // Every trigger function, checked for a connection type in its body. The
-    // pattern is escaped so `_` is a literal underscore and not the
-    // single-character wildcard it is in LIKE — an unescaped one matches
-    // "Retell account" in a comment and reports a gate that is not there.
-    const { rows: triggers } = await store.sql<{ proname: string }>(
-      `select p.proname from pg_proc p
-         join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'public'
-          and (p.prosrc like '%connection\\_type%'
-            or p.prosrc like '%retell\\_%')`,
-    );
-    expect(triggers).toHaveLength(0);
-  });
-
-  it("leaves the run and simulation already written with nothing to claim", async () => {
-    const { rows: runs } = await store.sql<{ conducted_world: unknown }>(
-      "select conducted_world from run where id = $1",
+      `select agent_version, temp_mock_agent_version,
+              temp_mock_agent_version_cleanup, mock_metadata
+         from run where id = $1`,
       [runId],
     );
-    // Null means one thing: this run pinned no platform version. Every run
-    // written before this migration is one.
-    expect(runs[0]?.conducted_world).toBeNull();
-
-    const { rows: simulations } = await store.sql<{
-      conducted_agent_version: number | null;
-    }>("select conducted_agent_version from simulation where id = $1", [
-      finishedSimulation,
-    ]);
-    expect(simulations[0]?.conducted_agent_version).toBeNull();
+    expect(rows[0]).toEqual({
+      agent_version: null,
+      temp_mock_agent_version: null,
+      temp_mock_agent_version_cleanup: null,
+      mock_metadata: null,
+    });
   });
 
-  it("keeps the finished run and its simulation frozen", async () => {
-    // The new column is inside the header's freeze rather than carved out of
-    // it, unlike the mocked world beside it: nothing was written to anybody's
-    // platform, so nothing has to be put back after the run is over.
-    const refusedRun = await store
-      .sql(
-        `update run set conducted_world = '{"agentVersion": 3,
-           "engine": {"type": "conversation-flow", "engineId": "flow_1", "version": 3},
-           "coverage": {"mocked": [], "notInterceptable": [],
-           "notInThisVersion": []}}'::jsonb where id = $1`,
-        [runId],
-      )
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-    expect(String(refusedRun)).toMatch(/written once/u);
-
-    const refusedSimulation = await store
-      .sql(
-        "update simulation set conducted_agent_version = 9 where id = $1",
-        [finishedSimulation],
-      )
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-    expect(String(refusedSimulation)).toMatch(
-      /terminal simulation is written once/u,
+  it("leaves a stamped simulation's coverage exactly as it was", async () => {
+    const { rows } = await store.sql<{ mock_tool_coverage: unknown }>(
+      "select mock_tool_coverage from simulation where id = $1",
+      [finishedSimulation],
     );
+    // Three lists, as `main` ships them. The Retell lanes never write one, so
+    // nothing here widens what a LiveKit run already said.
+    expect(rows[0]?.mock_tool_coverage).toEqual(OLD_STAMP);
   });
 
-  it("refuses a version that is not one", async () => {
-    const refused = await store
-      .sql(
-        `insert into simulation
-           (id, run_id, organization_id, project_id, agent_id, connection_id,
-            persona_id, persona_version_id, test_id, test_version_id,
-            position, modality, status, conducted_agent_version)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 2, 'chat',
-           'queued', -1)`,
-        [
-          newId("sim"),
-          runId,
-          acme.organization,
-          acme.project,
-          agentId,
-          connectionIds[0],
-          personaId,
-          personaVersionId,
-          testId,
-          testVersionId,
-        ],
-      )
+  it("indexes the cleanup flag the claim searches by, partially", async () => {
+    const { rows } = await store.sql<{ indexdef: string }>(
+      "select indexdef from pg_indexes where indexname = $1",
+      ["run_mock_tools_cleanup_owed_idx"],
+    );
+    expect(rows[0]?.indexdef).toMatch(/WHERE .*temp_mock_agent_version_cleanup/u);
+  });
+
+  it("carves exactly the two cleanup facts out of a finished run's freeze", async () => {
+    // A run that crashed before its teardown leaves litter on somebody's
+    // Retell account, and clearing it happens after the run is over by
+    // definition — so the sweep has to be able to say it is done.
+    await store.sql(
+      `update run
+          set temp_mock_agent_version_cleanup = true,
+              mock_metadata = '{"engine": {"type": "conversation-flow",
+                "engine_id": "flow_1", "version": 105}, "numbers": []}'::jsonb
+        where id = $1`,
+      [runId],
+    );
+
+    // And nothing else. The header is written once.
+    const refusedName = await store
+      .sql("update run set name = 'renamed' where id = $1", [runId])
       .then(() => undefined)
       .catch((error: unknown) => error);
-    expect(String(refused)).toMatch(
-      /simulation_conducted_agent_version_is_a_version/u,
+    expect(String(refusedName)).toMatch(/written once/u);
+
+    const refusedVersion = await store
+      .sql("update run set agent_version = 7 where id = $1", [runId])
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(String(refusedVersion)).toMatch(/written once/u);
+  });
+
+  it("refuses a version that is not one, and a copy with no cleanup flag", async () => {
+    // On a fresh run rather than the finished one above, whose header is
+    // frozen by a different rule and would answer for that instead.
+    const fresh = newId("run");
+    await store.sql(
+      `insert into run
+         (id, organization_id, project_id, suite_id, agent_id, connection_id,
+          status, triggered_via, connection_snapshot, mock_tool_snapshot,
+          expected_simulation_count)
+       values ($1, $2, $3, $4, $5, $6, 'pending', 'manual', '{}'::jsonb,
+         '{"defaults": [], "overrides": {}}'::jsonb, 1)`,
+      [
+        fresh,
+        acme.organization,
+        acme.project,
+        acme.suite,
+        agentId,
+        connectionIds[0],
+      ],
+    );
+
+    const badVersion = await store
+      .sql("update run set agent_version = -1 where id = $1", [fresh])
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(String(badVersion)).toMatch(/run_agent_version_is_a_version/u);
+
+    // A branched copy always carries a cleanup flag — owed or settled.
+    const flagless = await store
+      .sql("update run set temp_mock_agent_version = 106 where id = $1", [fresh])
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    expect(String(flagless)).toMatch(
+      /run_temp_mock_agent_version_owes_cleanup/u,
     );
   });
 });
