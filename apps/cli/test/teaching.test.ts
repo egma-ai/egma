@@ -154,7 +154,9 @@ describe("the live activity, while the files land", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should Egma reach this agent?");
+      await showing(terminal, "How should Egma test this agent?");
+      terminal.write(" ");
+      await showing(terminal, "[x] Text");
       terminal.write("\r");
 
       await chooseNoExistingTests(terminal);
@@ -211,7 +213,9 @@ describe("the live activity, while the files land", () => {
 
       // Text or phone. Not this check's subject, and not skippable
       // either: egma never picks one of the two for a developer.
-      await showing(terminal, "How should Egma reach this agent?");
+      await showing(terminal, "How should Egma test this agent?");
+      terminal.write(" ");
+      await showing(terminal, "[x] Text");
       terminal.write("\r");
       await chooseNoExistingTests(terminal);
 
