@@ -65,13 +65,12 @@ describe("text mode row in the connection options", () => {
     expect(row?.usesPlatformCarrier).toBe(false);
   });
 
-  it("describes exactly the two config fields it gates", () => {
+  it("describes exactly the one config field it gates", () => {
     const row = connectionOptionMetadata().find(
       (option) => option.connectionType === KIND,
     );
     expect(row?.fields.map((field) => [field.key, field.required])).toEqual([
       ["retellAgentId", true],
-      ["baseUrl", false],
     ]);
     expect(row?.credentialFields.map((field) => field.field)).toEqual([
       "apiKey",
@@ -100,16 +99,21 @@ describe("text mode door's refusals", () => {
     });
   });
 
-  it("takes a Retell API URL beside it, stored as it was written", () => {
-    expect(
+  it("refuses a stored baseUrl, which would redirect the sealed key", () => {
+    // **Where Retell answers is not a stored config key on this door.** Egma's
+    // own control plane sends this connection's sealed Retell key to that
+    // address at run start, so a customer-writable one would aim a key the
+    // writer cannot read at a host the writer chose — a read of a write-only
+    // secret by another name, and a DNS-rebinding surface with it. A test that
+    // needs to converse with a Retell-shaped server on loopback uses the
+    // plug's own seam, exactly as `retell_chat_api` does, and nothing persists
+    // it.
+    expect(() =>
       validConfig(KIND, VARIANT, {
         retellAgentId: AGENT,
         baseUrl: "https://retell-proxy.acme.example/",
       }),
-    ).toEqual({
-      retellAgentId: AGENT,
-      baseUrl: "https://retell-proxy.acme.example/",
-    });
+    ).toThrow('a Retell text mode connection\'s config has no key "baseUrl"');
   });
 
   it("names an unknown config key, and says which of its own are optional", () => {
@@ -120,7 +124,7 @@ describe("text mode door's refusals", () => {
       }),
     ).toThrow(
       'a Retell text mode connection\'s config has no key "retellAgentID"; ' +
-        "it holds retellAgentId, baseUrl (optional)",
+        "it holds retellAgentId",
     );
   });
 
@@ -128,75 +132,6 @@ describe("text mode door's refusals", () => {
     expect(() => validConfig(KIND, VARIANT, {})).toThrow(
       "a Retell text mode connection's config needs retellAgentId",
     );
-  });
-
-  it("refuses anything that is not a public https address", () => {
-    // **This key decides where the control plane sends the connection's own
-    // Retell key**, from inside the platform, at run start. So it is held to
-    // the same rule as every other customer-written outbound address: https,
-    // a real name, and nothing that resolves in the deployment's own
-    // neighbourhood. A deployment that genuinely reaches Retell through
-    // something on its own network says so in operator configuration, where
-    // the person running the platform can see it — never in a connection row.
-    for (const baseUrl of [
-      // Not an address at all.
-      "api.retellai.com",
-      "https:api.retellai.com",
-      "https://",
-      "",
-      // Not https.
-      "http://api.retellai.com",
-      "wss://api.retellai.com",
-      "ftp://api.retellai.com",
-      // The cloud metadata services, which answer to anything inside.
-      "http://169.254.169.254/latest/meta-data/",
-      "https://169.254.169.254/latest/meta-data/",
-      "http://metadata.google.internal/computeMetadata/v1/",
-      // The platform's own neighbourhood.
-      "https://127.0.0.1:9000/admin",
-      "https://localhost:9000",
-      "https://api.localhost",
-      "https://[::1]:9000",
-      "https://10.0.0.5",
-      // Credentials smuggled into the authority.
-      "https://user:secret@api.retellai.com",
-      // Two ways to read one string.
-      "https://api.retellai.com\\@evil.example",
-    ]) {
-      expect(
-        () => validConfig(KIND, VARIANT, { retellAgentId: AGENT, baseUrl }),
-        `baseUrl ${JSON.stringify(baseUrl)}`,
-      ).toThrow(/must be a public https URL/u);
-    }
-  });
-
-  it("refuses a fragment, which would swallow the path Egma appends", () => {
-    // The specific trick this key is vulnerable to. Egma adds the completion
-    // path and the agent's id to this value; a `#` makes everything it adds a
-    // fragment, which is never sent — so the request lands wherever the value
-    // itself ended, and the writer of the value chose the whole address.
-    for (const baseUrl of [
-      "https://api.retellai.com/#",
-      "https://evil.example/collect#",
-      "https://evil.example/#/api.retellai.com",
-    ]) {
-      expect(
-        () => validConfig(KIND, VARIANT, { retellAgentId: AGENT, baseUrl }),
-        `baseUrl ${JSON.stringify(baseUrl)}`,
-      ).toThrow(/holds no "#" fragment/u);
-    }
-  });
-
-  it("still takes an ordinary public proxy, which is what the key is for", () => {
-    expect(
-      validConfig(KIND, VARIANT, {
-        retellAgentId: AGENT,
-        baseUrl: "https://retell-proxy.acme.example",
-      }),
-    ).toEqual({
-      retellAgentId: AGENT,
-      baseUrl: "https://retell-proxy.acme.example",
-    });
   });
 
   it("refuses a garbage modality as not a modality at all", () => {

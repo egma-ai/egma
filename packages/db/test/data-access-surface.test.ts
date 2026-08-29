@@ -102,6 +102,9 @@ const WORK_DISPATCHING = [
   // It answers the three gates and the answers this simulation is served, and
   // nothing else about the customer.
   "resolveMockToolCall",
+  "recordMockState",
+  "claimMockDraftFor",
+  "owedMockCleanups",
   "sweepOrphanedSimulations",
   "watchGradingWork",
   // The poller names no customer. It claims the next due pulled agent and
@@ -333,17 +336,13 @@ const CONTEXT_REQUIRING = [
   // What a run built on the agent's platform, written for the teardown that has
   // to put it back and readable by the landing that stamps a simulation's
   // coverage from it.
-  "recordMockedWorld",
   // The one mocked world an agent has at a time, claimed under that agent's own
   // advisory lock. Two mocked runs overlapping is a hijack — one run's teardown
   // restores routing onto the other's temporary version — so the second run is
   // refused here rather than queued.
-  "claimMockedWorldFor",
   // What one agent's runs still owe somebody's platform account: a temporary
   // version that was never deleted, a pinned number that was never put back.
   // The sweep's whole input, read inside the project like any other run read.
-  "outstandingMockedWorlds",
-  "simulationMockedWorld",
   "simulationStatusCountsOfRuns",
   "startRun",
   "startSimulation",
@@ -533,12 +532,12 @@ const VALUES = [
   // door that unseals a connection for that read agree on which kinds it is
   // for — never a config or a credential.
   "connectionTypeReadsPlatformAtRunStart",
+  "connectionTypeBranchesMockDraft",
+  "DRAFT_MOCK_CONNECTION_TYPES",
   "connectionTypeUsesPlatformCarrier",
   // Which connection lanes a run over them builds a mocked world for. Two
   // names and no gate: the gate itself is a condition inside the claim, where
   // nothing outside this package has a query to put it in.
-  "connectionTypeTakesMockedWorld",
-  "MOCKABLE_CONNECTION_TYPES",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
@@ -595,19 +594,13 @@ const THE_MOCKED_WORLD = [
   // second implementation of either would be a second answer about how isolated
   // a simulation was.
   "NO_MOCK_TOOL_COVERAGE",
-  "NO_TOOL_COVERAGE_CLASSES",
-  "TOOL_COVERAGE_CLASSES",
-  "coverageFromClasses",
   // The world a version-pinned run reads rather than builds: the same two
   // folds as the mocked world beside them, over the record that says which
   // version a run conducts against and what that version's tools are.
-  "conductedWorldFrom",
-  "conductedWorldRow",
   "mockToolCoverageFrom",
   "mockToolCoverageRow",
-  "mockedWorldFrom",
-  "mockedWorldRow",
-  "toolCoverageClassesFrom",
+  "mockMetadataFrom",
+  "mockMetadataRow",
 ];
 
 /**

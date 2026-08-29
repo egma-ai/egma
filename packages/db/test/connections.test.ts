@@ -104,9 +104,9 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
 }
 
 /**
- * A live text mode payload. The one Retell kind whose config carries a
- * `baseUrl` — the address Egma's own control plane sends the sealed key to at
- * run start — so it is the kind the credential-redirect rule guards.
+ * A live text-mode payload. Its config carries the agent's own identifier and
+ * nothing else: where Retell answers is the plug's own test seam, never a
+ * stored key a customer can write.
  */
 function textModeConnection(
   overrides: Partial<NewConnection> = {},
@@ -963,135 +963,6 @@ describe("updating a connection", () => {
         config: { phoneNumber: "+15551234567" },
       }),
     ).rejects.toThrow(/"phoneNumber"/);
-  });
-
-  // The credential-redirect rule: on text mode, `baseUrl` names where
-  // Egma's control plane sends the connection's sealed Retell key at run start.
-  // A sealed key is write-only — a read never gives it back — so moving that
-  // address while leaving the key in place would aim a key the editor cannot
-  // read at a host the editor chose. Changing it therefore has to carry the
-  // key to send.
-  describe("text mode's baseUrl, which redirects the sealed key", () => {
-    it("refuses a change of baseUrl that carries no credential", async () => {
-      const agentId = await agentNamed("Redirect Refused");
-      const added = await addConnection(
-        actingAsAcme(),
-        agentId,
-        textModeConnection(),
-      );
-
-      await expect(
-        updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-          config: {
-            retellAgentId: "agent_in_retell_1",
-            baseUrl: "https://member-chosen.example",
-          },
-        }),
-      ).rejects.toThrow(/include credentials\.apiKey in the same update/u);
-
-      // Nothing moved: the address is unchanged, so the sealed key still points
-      // where it always did.
-      const untouched = await getConnection(
-        actingAsAcme(),
-        agentId,
-        added?.id ?? "",
-      );
-      expect(untouched?.config).toEqual({ retellAgentId: "agent_in_retell_1" });
-    });
-
-    it("allows the same change when it carries a fresh key to send there", async () => {
-      const agentId = await agentNamed("Redirect Allowed");
-      const added = await addConnection(
-        actingAsAcme(),
-        agentId,
-        textModeConnection(),
-      );
-
-      const moved = await updateConnection(
-        actingAsAcme(),
-        agentId,
-        added?.id ?? "",
-        {
-          config: {
-            retellAgentId: "agent_in_retell_1",
-            baseUrl: "https://member-chosen.example",
-          },
-          credentials: { apiKey: "retell-secret-REDIRECTED-5678" },
-        },
-      );
-      expect(moved?.config).toEqual({
-        retellAgentId: "agent_in_retell_1",
-        baseUrl: "https://member-chosen.example",
-      });
-      // The key that now goes to that host is the one just supplied, by its
-      // own tail.
-      expect(moved?.credentialsHint).toBe("5678");
-    });
-
-    it("still lets an unrelated edit keep the sealed key, baseUrl untouched", async () => {
-      const agentId = await agentNamed("Redirect Untouched");
-      const added = await addConnection(
-        actingAsAcme(),
-        agentId,
-        textModeConnection({
-          config: {
-            retellAgentId: "agent_in_retell_1",
-            baseUrl: "https://acme-proxy.example",
-          },
-        }),
-      );
-
-      // A name change, credentials omitted: the address does not move, so the
-      // sealed key is preserved exactly as before — the unchanged behaviour.
-      const renamed = await updateConnection(
-        actingAsAcme(),
-        agentId,
-        added?.id ?? "",
-        { name: "renamed-only" },
-      );
-      expect(renamed?.name).toBe("renamed-only");
-      expect(renamed?.credentialsHint).toBe("WXYZ");
-
-      // And a config edit that leaves baseUrl at its current value, credentials
-      // omitted, is allowed too: the key is not being redirected.
-      const reconfigured = await updateConnection(
-        actingAsAcme(),
-        agentId,
-        added?.id ?? "",
-        {
-          config: {
-            retellAgentId: "agent_moved_states",
-            baseUrl: "https://acme-proxy.example",
-          },
-        },
-      );
-      expect(reconfigured?.config).toEqual({
-        retellAgentId: "agent_moved_states",
-        baseUrl: "https://acme-proxy.example",
-      });
-      expect(reconfigured?.credentialsHint).toBe("WXYZ");
-    });
-  });
-
-  it("refuses to change type or modality: that is a new connection", async () => {
-    const agentId = await agentNamed("Immutable");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    await expect(
-      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        connectionType: "phone_number",
-      } as never),
-    ).rejects.toThrow(/new connection/);
-
-    await expect(
-      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        modality: "voice",
-      } as never),
-    ).rejects.toThrow(/new connection/);
-
-    const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(untouched?.connectionType).toBe("retell_chat_api");
-    expect(untouched?.modality).toBe("chat");
   });
 });
 
