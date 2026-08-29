@@ -170,7 +170,7 @@ async def test_an_answer_that_carried_no_words_is_an_answer_without_words(
     start_retell_stub,
 ):
     """A completion can come back with tool traffic and nothing said. The
-    walk records no turn for it rather than an empty one."""
+    conversation loop records no turn for it rather than an empty one."""
     running = await start_retell_stub(api_key=SENTINEL_KEY, replies=[[]])
     plug = retell({"retellAgentId": "agent_silent", "baseUrl": running.base_url})
     await plug.open()

@@ -8,7 +8,7 @@ the same brain with speech legs between them. The brain is one component
 for every modality, forever — it never learns which of these it is in.
 
 **Who conducts is what a spec selects here, and there are two answers.**
-A chat simulation is walked a turn at a time by :mod:`egma_simulator.walk`.
+A chat simulation is looped a turn at a time by :mod:`egma_simulator.conversation`.
 A voice simulation is conducted by :mod:`egma_simulator.conductor` — a
 real Pipecat pipeline on a full-duplex transport, with the voice activity
 detector and the turn model deciding where turns fall instead of a loop.
@@ -41,13 +41,13 @@ logger = logging.getLogger(__name__)
 class Assembled:
     """One simulation's pipeline: who conducts it, and what it recorded.
 
-    Exactly one of the two is filled in. ``plug`` is what the walk drives,
+    Exactly one of the two is filled in. ``plug`` is what the conversation loop drives,
     which is a chat platform and only ever that. ``conductor`` is the
     voice conductor, which owns the plug's Pipecat transport.
     """
 
     plug: ConnectionPlug | None = None
-    """Text in, text out — the walk's whole view of a platform."""
+    """Text in, text out — the conversation loop's whole view of a platform."""
 
     conductor: VoiceConductor | None = None
     """The Pipecat pipeline conducting a full-duplex voice simulation."""

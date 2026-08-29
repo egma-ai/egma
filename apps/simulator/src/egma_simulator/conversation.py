@@ -1,16 +1,16 @@
-"""One simulation walks one exchange: persona and plug, turn by turn.
+"""One simulation holds one conversation: persona and plug, turn by turn.
 
-The walk is the plug-blind, model-blind middle: it opens the exchange
+The conversation loop is the plug-blind, model-blind middle: it opens the exchange
 through the plug, lets the persona and the agent alternate, records every
 turn as it flows, measures each answer, and names how it all ended. Four
 deliberate endings — the persona concluding, the agent ending, the turn
 limit, the duration limit — plus the cancel directive; each is reported
 distinctly, and a limit ending is never the agent failing.
 
-Two hands may stop a running walk from outside its own loop: a cancel
+Two hands may stop a running conversation from outside its own loop: a cancel
 directive honored at a heartbeat, and the duration watchdog. Both act
-through :class:`WalkControls`, and the first cause to land is the one the
-record shows — a cause arriving after the walk already ended changes
+through :class:`ConversationControls`, and the first cause to land is the one the
+record shows — a cause arriving after the conversation already ended changes
 nothing, because what happened is the record.
 """
 
@@ -43,29 +43,29 @@ answer that ended, which is exactly the case a reader of the turns alone
 would miss. An agent that speaks first has finished saying its piece the
 same way, so the opening counts as one.
 
-The last answer of a conversation is deliberately not announced: the walk
-is over, and whatever it produced belongs with the record of the whole
+The last answer of a conversation is deliberately not announced: the
+conversation is over, and whatever it produced belongs with the record of the whole
 thing rather than in a boundary of its own."""
 
-# The two causes a WalkControls can carry. Writer and reader both name
+# The two causes a ConversationControls can carry. Writer and reader both name
 # these constants, so a stop can never be misread as the other cause.
 CANCEL_DIRECTIVE = "cancel directive"
 DURATION_LIMIT = "duration limit"
 
 
-class _WalkStopped(Exception):
-    """Internal: a stop cause landed while the walk awaited something."""
+class _ConversationStopped(Exception):
+    """Internal: a stop cause landed while the loop awaited something."""
 
 
-class WalkControls:
-    """The two hands that may stop a walk, and the record of which did."""
+class ConversationControls:
+    """The two hands that may stop a conversation, and the record of which did."""
 
     def __init__(self) -> None:
         self._stopped = asyncio.Event()
         self.cause: str | None = None
 
     def request_cancel(self) -> None:
-        """A cancel directive, honored at the walk's next opportunity."""
+        """A cancel directive, honored at the loop's next opportunity."""
         self._stop_for(CANCEL_DIRECTIVE)
 
     def trip_duration_limit(self) -> None:
@@ -77,11 +77,11 @@ class WalkControls:
             self._stopped.set()
 
     async def guard(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
-        """Await one step of the walk, unless a stop cause lands first.
+        """Await one step of the conversation, unless a stop cause lands first.
 
         The step runs as its own task, raced against the stop signal; when
-        the stop wins, the step is cancelled and ``_WalkStopped`` raised so
-        the walk can name the cause. Cancellation of the walk itself — the
+        the stop wins, the step is cancelled and ``_ConversationStopped`` raised so
+        the loop can name the cause. Cancellation of the loop itself — the
         service tearing down — passes straight through.
         """
         step = asyncio.ensure_future(coroutine)
@@ -104,7 +104,7 @@ class WalkControls:
         step.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await step
-        raise _WalkStopped()
+        raise _ConversationStopped()
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ class Conducted:
     """How one simulation ended, whichever conductor ran it."""
 
     status: str
-    """``completed`` or ``canceled`` — conducting never fails by walking;
+    """``completed`` or ``canceled`` — conducting never fails by conversing;
     a fault raises instead, and the service reports the failure."""
 
     ending: str
@@ -128,7 +128,8 @@ class Conducted:
 
 # -- The endings vocabulary, written once for both conductors ----------------
 #
-# Chat is walked and voice is conducted by a Pipecat pipeline, and the two
+# Chat is looped here, turn by turn, and voice is conducted by a Pipecat
+# pipeline; the two
 # agree on nothing about how a conversation runs. They do agree on how one
 # *ends*: the same four endings, in the same words, because a reader
 # comparing the same scenario over both modalities is comparing exactly
@@ -166,12 +167,12 @@ async def conduct(
     max_duration_seconds: float,
     on_turn: OnTurn,
     on_timing: OnTiming | None,
-    controls: WalkControls,
+    controls: ConversationControls,
     name: str,
     on_tool_call: OnToolCall | None = None,
     on_answered: OnAnswered | None = None,
 ) -> Conducted:
-    """Walk one simulation through one exchange, and say how it went."""
+    """Hold one simulation's conversation, turn by turn, and say how it went."""
     loop = asyncio.get_running_loop()
     history: list[Turn] = []
 
@@ -218,7 +219,7 @@ async def conduct(
                 return ended(PERSONA_CONCLUDED)
 
             # The agent's move — not asked for when its answer could not
-            # be recorded anyway: the limit ends the walk before a phantom
+            # be recorded anyway: the limit ends the conversation before a phantom
             # exchange happens off the record.
             if budget_spent():
                 return limit_by_turns()
@@ -243,7 +244,7 @@ async def conduct(
             # with no words is still an answer, and a boundary read off
             # the transcript alone would miss exactly that one.
             await answered()
-    except _WalkStopped:
+    except _ConversationStopped:
         if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(
                 status="canceled",
@@ -260,7 +261,7 @@ async def conduct(
 
 
 async def _duration_watchdog(
-    max_duration_seconds: float, controls: WalkControls
+    max_duration_seconds: float, controls: ConversationControls
 ) -> None:
     await asyncio.sleep(max_duration_seconds)
     controls.trip_duration_limit()
@@ -268,7 +269,7 @@ async def _duration_watchdog(
 
 async def _close_quietly(plug: ConnectionPlug, name: str) -> None:
     """Tear the exchange down; a failure to close is logged, never raised —
-    it would otherwise eat the walk's own answer."""
+    it would otherwise eat the conversation's own answer."""
     try:
         await plug.close()
     except asyncio.CancelledError:

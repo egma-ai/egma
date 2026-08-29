@@ -139,11 +139,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install uv and sync the simulator
-        # The fast lane is not all TypeScript. `apps/api/test/simulator-walk.
-        # test.ts` spawns the real shipped simulator — `uv run --frozen
-        # egma-simulator`, in `apps/simulator` — and walks a run through it to a
-        # verdict. Without uv that child never starts, and the walk waits sixty
-        # seconds for a simulation nothing was ever going to conduct.
+        # The fast lane is not all TypeScript. `apps/api/test/simulator-
+        # conversation.test.ts` spawns the real shipped simulator — `uv run
+        # --frozen egma-simulator`, in `apps/simulator` — and drives a run
+        # through it to a verdict. Without uv that child never starts, and the
+        # pass waits sixty seconds for a simulation nothing was ever going to
+        # conduct.
         #
         # The sync is separate so the Python install is paid here rather than
         # inside that sixty-second window. It is the same pair of steps

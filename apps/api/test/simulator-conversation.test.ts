@@ -48,27 +48,27 @@ import { NEUTRAL_PERSON } from "./support/traces.ts";
  * simulator puts its span batches and its lifecycle documents through one
  * write-ahead log and one ordered sender, so a terminal report leaves only
  * after every span before it landed. What that buys is read back the way a
- * grader will read it: the walk is watched while it runs, and the moment the
+ * grader will read it: the pass is watched while it runs, and the moment the
  * simulation row turns terminal the conversation is already queryable in
  * ClickHouse, root span included.
  *
  * **And it runs to a grade.** The real grader service claims the work the
  * terminal landing minted, reads the conversation back out of ClickHouse the
  * way it reads a production trace, and writes one normalized score with nested
- * assertion details that cite turns. This closes the walk on the only claim
+ * assertion details that cite turns. This closes the pass on the only claim
  * that matters end to end: a team's check was answered from a conversation
  * that exists as spans and as nothing else — the row has no column left to
  * hold one, and this asserts that of the schema itself.
  *
  * The judge is scripted, and it is the one seam here that is not a real
  * deployment's. A criterion written in a team's own words is answered by a
- * model, and a walk that called one would need an account and a network and
+ * model, and a pass that called one would need an account and a network and
  * would still not answer the same way twice. Everything around it is real,
  * including the persisted grade and its frozen project policy.
  *
- * The failed walk rides the same session: a second connection whose key the
+ * The failed pass rides the same session: a second connection whose key the
  * counterpart refuses, landing `failed` with the honest reason. The canceled
- * walk is deliberately absent — the cancel directive travels on heartbeat
+ * pass is deliberately absent — the cancel directive travels on heartbeat
  * answers, and the heartbeat route ships separately — so cancellation is
  * proven at the report door's own seam instead (`reports-routes.test.ts`).
  */
@@ -102,7 +102,7 @@ const RETELL_CHAT_PREFLIGHT: typeof fetch = async (input) => {
     JSON.stringify({
       items: [
         {
-          agent_id: "agent_under_walk",
+          agent_id: "agent_under_test",
           agent_name: "Front desk",
           channel: "chat",
         },
@@ -160,7 +160,7 @@ async function waitForSignal(
  * plug speaks — create-chat, create-chat-completion, end-chat — with
  * Retell's own field names, bearer-key auth, and a scripted agent behind
  * them. Strict where the platform is: a wrong key answers 401, which is the
- * failed walk's whole way in.
+ * failed pass's whole way in.
  */
 class RetellCounterpart {
   private server: http.Server | undefined;
@@ -172,7 +172,7 @@ class RetellCounterpart {
   /** Reply cursor per chat, so two exchanges cannot eat each other's script. */
   private readonly delivered = new Map<string, number>();
   /**
-   * Hold the first agent answer so the walk can inspect a stable, live
+   * Hold the first agent answer so the pass can inspect a stable, live
    * Simulation. Earlier evidence has flushed, but the conversation cannot
    * finish until the test opens the second gate.
    */
@@ -299,7 +299,7 @@ describe("the Retell-shaped counterpart", () => {
             authorization: `Bearer ${COUNTERPART_KEY}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ agent_id: "agent_under_walk" }),
+          body: JSON.stringify({ agent_id: "agent_under_test" }),
         },
       );
       await response.body?.cancel();
@@ -328,18 +328,18 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
 const THE_PHRASE = "Wednesday afternoon";
 
 /**
- * The walk needs somewhere for evidence to become durable, because the whole of
+ * The pass needs somewhere for evidence to become durable, because the whole of
  * what it watches runs through the real door: the simulator's span batches are
  * answered on object-store durability, and its terminal report is sent behind
  * them in order. An instance with no ingestion bucket answers those batches the
  * way an unconfigured deployment does — retryably — and the simulation never
  * reaches the report that ends it.
  */
-const storage: ObjectStorage = await startObjectStorage("simulator-walk");
+const storage: ObjectStorage = await startObjectStorage("simulator-pass");
 
 if (!storage.available) {
   process.stderr.write(
-    `\nskipping the shipped-simulator walk — ${storage.why}\n\n`,
+    `\nskipping the shipped-simulator pass — ${storage.why}\n\n`,
   );
 }
 
@@ -417,7 +417,7 @@ async function signedUpKey(): Promise<{
   };
 }
 
-/** What the row itself says, read raw — the truth the walk must land. */
+/** What the row itself says, read raw — the truth the pass must land. */
 async function rowOf(simulationId: string): Promise<Record<string, unknown>> {
   const { rows } = await instance.database.sql(
     `select status, ending_reason, claimed_by, started_at, ended_at,
@@ -624,12 +624,12 @@ async function settledRun(
 }
 
 beforeAll(async () => {
-  scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-walk-"));
+  scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-pass-"));
   counterpart = new RetellCounterpart();
   await counterpart.start();
-  // The trace store gets its schema here, because this walk reads the
+  // The trace store gets its schema here, because this pass reads the
   // conversation back out of it rather than only off the row.
-  instance = await startInstance("simulator_walk", {
+  instance = await startInstance("simulator_pass", {
     web: false,
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
@@ -695,7 +695,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             connectionType: "retell_chat_api",
             accessVariant: "retell_chat_api.api_key",
             modality: "chat",
-            config: { retellAgentId: "agent_under_walk" },
+            config: { retellAgentId: "agent_under_test" },
             credentials: { apiKey: COUNTERPART_KEY },
           },
         },
@@ -711,7 +711,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
-          config: { retellAgentId: "agent_under_walk" },
+          config: { retellAgentId: "agent_under_test" },
           credentials: { apiKey: REFUSED_KEY },
         },
       });
@@ -772,7 +772,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       });
       expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
 
-      // Both runs queued before the simulator exists, so the walk starts
+      // Both runs queued before the simulator exists, so the pass starts
       // from the resting state a trigger leaves behind.
       const startRunOver = async (connection: string) => {
         const started = await call("POST", "/v1/runs", {
@@ -830,7 +830,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
 
       // The real grader, in this process and against these same two stores,
       // claiming the work each terminal landing mints. Started beside the
-      // simulator rather than after it, so the walk to a grade is one
+      // simulator rather than after it, so the pass to a grade is one
       // continuous thing and not a second act arranged afterwards.
       const judge = scriptedJudge({
         answers: {
@@ -926,7 +926,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         "completed",
       );
 
-      // The whole walk, as a person watching the run would see it settle.
+      // The whole pass, as a person watching the run would see it settle.
       const conductedRun = await settledRun(key, conducted.runId, 60_000);
       const refusedRun = await settledRun(key, refused.runId, 60_000);
 
@@ -1029,7 +1029,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       expect(refusedRun.completedCount).toBe(0);
       expect(refusedRun.failedCount).toBe(1);
 
-      // And the grade, which is what the whole walk was for. The Expected
+      // And the grade, which is what the whole pass was for. The Expected
       // behaviors grader scored this trace from the spans above.
       const grades = await gradesOn(
         auth,

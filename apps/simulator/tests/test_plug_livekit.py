@@ -45,6 +45,7 @@ from token_endpoint_stub import serving
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
+from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media import MediaBackend, MediaBackendError, VoiceMedia
 from egma_simulator.media import livekit_room as livekit_room_module
 from egma_simulator.media import room as room_media
@@ -66,7 +67,6 @@ from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import MockTool, SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
-from egma_simulator.walk import Conducted, WalkControls
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
 A_KEY = "APIlakeside0000"
@@ -684,7 +684,7 @@ async def room_walk(
     stub: RoomStub,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    controls: WalkControls | None = None,
+    controls: ConversationControls | None = None,
     built_by=livekit_spec,
     spans: list[tuple[str, str, int, int]] | None = None,
     **overrides: object,
@@ -727,7 +727,7 @@ async def room_walk(
         ),
         max_turns=spec.limits.max_turns,
         max_duration_seconds=spec.limits.max_duration_seconds,
-        controls=controls if controls is not None else WalkControls(),
+        controls=controls if controls is not None else ConversationControls(),
         name="sim:room-test",
         on_utterance=on_utterance,
         on_measured=on_measured,
@@ -1430,7 +1430,7 @@ async def test_a_real_transport_join_refusal_reaches_the_running_pipeline(
                 ),
                 max_turns=spec.limits.max_turns,
                 max_duration_seconds=spec.limits.max_duration_seconds,
-                controls=WalkControls(),
+                controls=ConversationControls(),
                 name="sim:real-room-join-refusal",
                 on_utterance=ignore,
                 on_measured=ignore,
@@ -1543,10 +1543,10 @@ async def test_the_room_is_deleted_however_the_simulation_ends(
     assert faulted.deleted == [faulted.rooms[0].name]
 
 
-class CancelsOnceUnderWay(WalkControls):
+class CancelsOnceUnderWay(ConversationControls):
     """A cancel directive that lands after the exchange has opened.
 
-    A directive really arrives on a heartbeat answer, mid-exchange; a walk
+    A directive really arrives on a heartbeat answer, mid-exchange; a conversation
     canceled before it opened would never have made a room, and would
     prove nothing about deleting one.
     """
@@ -2368,7 +2368,7 @@ async def test_a_room_egma_cannot_delete_is_left_however_the_simulation_ends(
     customer's own empty timeout on ``egma-sim-`` rooms closes it. Trying
     the delete anyway would spend a request to be refused and write a log
     line about a failure that was never one — on every path out, which is
-    what this walks.
+    what this drives.
     """
     for named, overrides, expected in [
         ("a natural end", {}, "persona_concluded"),

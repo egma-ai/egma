@@ -48,6 +48,7 @@ from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR
+from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.media.livekit_room import (
     CHAT_TOPIC,
     SPOKEN_TRACK_ATTRIBUTE,
@@ -68,7 +69,6 @@ from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import RunningSimulation
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
-from egma_simulator.walk import Conducted, WalkControls, conduct
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
 A_KEY = "APIlakeside0000"
@@ -247,13 +247,13 @@ async def chat_walk(
     stub: ChatStub,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    controls: WalkControls | None = None,
+    controls: ConversationControls | None = None,
     **overrides: object,
 ) -> tuple[Conducted, list[tuple[str, str]], list[tuple[str, str | None]], object]:
     """One chat simulation, conducted the way the service conducts it.
 
     The spec goes in at the top — through the plug registry and the
-    pipeline the service assembles — and is walked by the real walk, so
+    pipeline the service assembles — and is driven by the real conversation loop, so
     everything below the room-shaped LiveKit is every line the service
     would run. What comes back is the ending, the transcript, the tool
     calls egma answered, and the assembled pipeline, which is where the
@@ -274,7 +274,7 @@ async def chat_walk(
     assembled = assemble(
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
-    assert assembled.plug is not None, "a chat spec is walked, never conducted"
+    assert assembled.plug is not None, "a chat spec is looped, never conducted"
     conducted = await conduct(
         persona=Persona(
             authored=spec.persona,
@@ -287,7 +287,7 @@ async def chat_walk(
         on_turn=on_turn,
         on_timing=None,
         on_tool_call=on_tool_call,
-        controls=controls if controls is not None else WalkControls(),
+        controls=controls if controls is not None else ConversationControls(),
         name="sim:room-chat-test",
     )
     return conducted, turns, calls, assembled
@@ -359,7 +359,7 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
     # Every persona turn that was delivered went out on the topic a
     # LiveKit session listens to, and nothing else went anywhere. The
     # concluding goodbye is on the transcript and not on the wire, which
-    # is the walk's own rule and not this plug's: a persona that has
+    # is the conversation loop's own rule and not this plug's: a persona that has
     # concluded is not waiting for an answer.
     assert [typed.topic for typed in stub.typed] == [CHAT_TOPIC] * 2
     assert [typed.text for typed in stub.typed] == [
@@ -819,7 +819,7 @@ async def test_an_utterance_still_open_when_its_own_turn_ends_stays_on_the_recor
 
     closing = asyncio.ensure_future(closes_after_the_quiet_period())
 
-    # The record, written exactly as `walk.conduct` writes it: the opening
+    # The record, written exactly as `conversation.conduct` writes it: the opening
     # if there was one, the persona's turn, then the answer's words.
     record: list[tuple[str, str]] = []
     greeting = await opening
@@ -1173,7 +1173,7 @@ async def test_a_greeting_that_never_comes_is_still_not_a_failure(
 
     This agent announces itself listening and then waits to be spoken to,
     which is most agents. The greeting budget expires, ``open`` answers
-    with nothing, and the walk has the persona go first. Nothing about
+    with nothing, and the conversation loop has the persona go first. Nothing about
     reading the agent's state may turn that ordinary answer into a fault.
     """
     hurry(monkeypatch)
@@ -1449,7 +1449,7 @@ async def test_a_greeting_that_never_comes_lets_the_persona_open(
     """Plenty of agents wait to be spoken to, and that is not a failure.
 
     The greeting budget expires, ``open`` answers with nothing, and the
-    walk has the persona go first — which is exactly what it does for
+    conversation loop has the persona go first — which is exactly what it does for
     every other plug that opens on silence.
     """
     stub = ChatStub(replies=["Certainly, Thursday it is."])
@@ -1939,7 +1939,7 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
 ):
     """A directive really arrives on a heartbeat answer, mid-exchange."""
 
-    class CancelsOnceUnderWay(WalkControls):
+    class CancelsOnceUnderWay(ConversationControls):
         def __init__(self) -> None:
             super().__init__()
             self._steps = 0

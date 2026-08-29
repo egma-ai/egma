@@ -3,7 +3,7 @@
 A **plug** is the component behind a connection type. It alone knows how
 to open that connection, deliver the persona's turns, hear
 the agent's answers, and end the exchange. Everything else in the
-simulator is plug-blind: the persona brain, the walk, the claim loop, and
+simulator is plug-blind: the persona brain, the conversation loop, the claim loop, and
 the reporting never learn how they reached the agent. Adding a connection
 kind therefore touches exactly two things — a new module in this
 package, and one line in the registry below.
@@ -77,7 +77,7 @@ A chat plug's is three steps, for one simulation, in order, always:
    - ``text`` — what the agent said, or ``None`` for an answer that
      carried no words.
    - ``ended=True`` — the agent (or the platform) ended the exchange with
-     this answer. The walk records any final words and reports the ending
+     this answer. The conversation loop records any final words and reports the ending
      as the agent's doing. Once returned, ``deliver`` is never called
      again.
    ``deliver`` is called once per persona turn, sequentially — a plug
@@ -212,7 +212,7 @@ def failed_ending(fault: BaseException) -> str:
 
 
 class ConnectionPlug(Protocol):
-    """The seam the walk drives: text in, text out, whatever the modality.
+    """The seam the conversation loop drives: text in, text out, whatever the modality.
 
     A chat plug implements it directly; a voice plug is reached through it,
     with the speech legs assembled in between. See the module docstring for

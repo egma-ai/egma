@@ -158,7 +158,7 @@ async def test_two_golden_fixture_specs_conduct_two_visibly_different_exchanges(
     workbench, start_simulator
 ):
     """Different persona traits and scenarios, different conversations —
-    with no code change: both walks come off fixture files alone."""
+    with no code change: both conversations come off fixture files alone."""
     flustered = load_fixture_spec("chat-scripted-flustered.json")
     hurried = load_fixture_spec("chat-scripted-hurried.json")
     await workbench.offer(flustered)
@@ -274,7 +274,7 @@ async def test_every_ending_reason_is_reachable_and_reported_distinctly(
     ]
     assert len(set(reasons)) == 4
 
-    # The clipped walk really was clipped where the limit says.
+    # The clipped conversation really was clipped where the limit says.
     assert len(turns_for(records, "sim-end-turns")) == 4
 
 
@@ -1212,7 +1212,7 @@ async def test_credentials_never_appear_in_logs_or_reports(
 
     The scripted counterpart takes no credentials — a real plug does — so
     the sentinel rides the spec exactly the way a platform key will, and
-    the walk completes around it.
+    the conversation completes around it.
     """
     sentinel = "SENTINEL-do-not-log-4f9c2b7e8a1d"
     spec = scripted_spec("sim-secret-001", credentials={"apiKey": sentinel})
@@ -1373,7 +1373,7 @@ async def test_a_chat_simulation_streams_its_conversation_as_spans(
     # Streamed rather than posted at the end: every turn but the last rode
     # a flush that left while the conversation was still going, which is
     # what a reader watching this live would see. The last is the persona
-    # concluding — the words that end the walk, so they leave with the
+    # concluding — the words that end the conversation, so they leave with the
     # flush that closes the record and could not have left before it.
     root_flush = next(
         flush_of(record)

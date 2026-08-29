@@ -386,7 +386,7 @@ class SpeechFault(RuntimeError):
     and this is the persona's own mouth or ears. Either way the simulation
     is reported failed, and the reason on the record is what tells a
     reader which of the two happened. Voice only, and raised out of the
-    voice conductor: the walk has no speech legs to hear one from.
+    voice conductor: the conversation loop has no speech legs to hear one from.
     """
 
 

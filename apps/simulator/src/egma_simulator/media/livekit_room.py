@@ -1872,7 +1872,7 @@ class LiveKitChatRoomBackend(RoomLifecycle):
         """What the agent opens with, if it opens with anything.
 
         A turn with no words in it is the ordinary answer here: plenty of
-        agents wait to be spoken to, and the walk then has the persona
+        agents wait to be spoken to, and the conversation loop then has the persona
         open. The budget is separate from the quiet period because a
         greeting is a whole model round trip after a session starts, where
         a quiet period is the gap between two things already being said.
