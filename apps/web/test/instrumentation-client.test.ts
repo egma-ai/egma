@@ -68,5 +68,16 @@ describe("browser platform telemetry", () => {
     expect(request).toMatchObject({ name: "https://app.egma.ai/audio.wav" });
     expect(JSON.stringify(request)).not.toContain("secret");
     expect(JSON.stringify(request)).not.toContain("private transcript");
+
+    /*
+     * The recording player's `src` is a presigned GET whose signature is its
+     * query string, so an unstripped `src` in a snapshot is a working link to
+     * a customer's call. Everything else about an attribute is left alone.
+     */
+    const maskAttribute = config.session_recording.maskAttributeFn;
+    expect(
+      maskAttribute?.("src", "https://store.egma.ai/call.wav?X-Amz-Signature=abc"),
+    ).toBe("https://store.egma.ai/call.wav");
+    expect(maskAttribute?.("class", "recording-player")).toBe("recording-player");
   });
 });

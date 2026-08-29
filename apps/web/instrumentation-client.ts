@@ -20,7 +20,9 @@
  * on every page and the recordings were grey blocks that answered nothing. It
  * records the pages now; `lib/replay-privacy.ts` marks the one thing it must
  * not read, which is a secret on screen. Inputs stay masked whatever the page
- * says, so every password and credential field is covered without a mark.
+ * says, so every password and credential field is covered without a mark, and
+ * a URL keeps only its path wherever one is recorded — a presigned recording
+ * link is a credential and it is on the page as an `src`.
  *
  * Off for the whole product either way: request and response headers and
  * bodies, the console, cross-origin frames, canvases, and the query and
@@ -35,6 +37,19 @@ import posthog, {
 import { REPLAY_PRIVATE_SELECTOR } from "./lib/replay-privacy.ts";
 
 const RECORDED_URL_PROPERTY = /(?:url|href|referrer)$/i;
+
+/**
+ * **A URL in the page can be the credential itself.** The recording player
+ * hands an `<audio>` a presigned S3 GET, and the whole of its signature is the
+ * query string — so an unstripped `src` in a snapshot is a working link to a
+ * customer's call for as long as it lives.
+ *
+ * So the rule the events and the network capture already follow is the rule
+ * for the DOM too: the path, never the query or the fragment. It costs nothing
+ * to read: the only other `src` in the product is a static brand asset, and a
+ * page's own address is already recorded without its query.
+ */
+const RECORDED_URL_ATTRIBUTE = /^(?:href|src)$/i;
 
 function stripUrlSecrets(value: string): string {
   const separator = value.search(/[?#]/);
@@ -101,6 +116,8 @@ if (process.env.NEXT_PUBLIC_EGMA_TELEMETRY === "on" && key !== undefined && key 
        * set here is what overrides it.
        */
       maskTextSelector: REPLAY_PRIVATE_SELECTOR,
+      maskAttributeFn: (name, value) =>
+        RECORDED_URL_ATTRIBUTE.test(name) ? stripUrlSecrets(value) : value,
       recordHeaders: false,
       recordBody: false,
       recordCrossOriginIframes: false,
