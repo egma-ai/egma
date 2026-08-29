@@ -277,21 +277,46 @@ function EarlierGrades({ grades }: { readonly grades: readonly EvidenceGrade[] }
   );
 }
 
+function ExecutionFailureNotice({
+  reason,
+  executionFailure,
+}: {
+  readonly reason: string | null;
+  readonly executionFailure: string | null | undefined;
+}) {
+  return (
+    <div
+      className="border border-s-[3px] border-border border-s-failure bg-surface-soft px-5 py-3 max-[40rem]:px-4"
+      role="alert"
+    >
+      <p className="m-0 text-sm font-medium text-foreground">
+        {EXECUTION_LABEL.failed}
+      </p>
+      <p className="m-0 mt-1 text-sm wrap-anywhere text-muted-foreground">
+        {executionFailureMessage(reason, executionFailure)} This is an execution
+        problem, not a failed grade.
+      </p>
+    </div>
+  );
+}
+
 function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
+  if (evidence.status === "failed") {
+    return (
+      <ExecutionFailureNotice
+        reason={evidence.reason}
+        executionFailure={evidence.executionFailure}
+      />
+    );
+  }
   if (evidence.status !== "completed") {
-    const failed = evidence.status === "failed";
-    const message = failed
-      ? `${executionFailureMessage(evidence.reason, evidence.executionFailure)} This is an execution problem, not a failed grade.`
-      : evidence.status === "canceled"
-        ? "This simulation stopped before it finished. Any evidence recorded before it stopped remains below."
-        : "This simulation is still in progress. Results update here as evidence arrives.";
+    const message = evidence.status === "canceled"
+      ? "This simulation stopped before it finished. Any evidence recorded before it stopped remains below."
+      : "This simulation is still in progress. Results update here as evidence arrives.";
     return (
       <div
-        className={cn(
-          "border border-s-[3px] border-border bg-surface-soft px-5 py-3 max-[40rem]:px-4",
-          failed ? "border-s-failure" : "border-s-brand",
-        )}
-        role={failed ? "alert" : "status"}
+        className="border border-s-[3px] border-border border-s-brand bg-surface-soft px-5 py-3 max-[40rem]:px-4"
+        role="status"
       >
         <p className="m-0 text-sm font-medium text-foreground">
           {EXECUTION_LABEL[evidence.status]}
@@ -751,6 +776,7 @@ export function RunScenarioWorkbench({
   total,
   selectedId,
   onSelect,
+  onExecutionFailureVisible,
   more,
 }: {
   readonly projectId: string;
@@ -759,6 +785,7 @@ export function RunScenarioWorkbench({
   readonly total: number;
   readonly selectedId: string | null;
   readonly onSelect: (simulationId: string | null) => void;
+  readonly onExecutionFailureVisible: (simulationId: string) => void;
   readonly more?: MoreSimulations;
 }) {
   const [query, setQuery] = useState("");
@@ -808,16 +835,30 @@ export function RunScenarioWorkbench({
     evidenceAnswer.value.id === selected.id
       ? evidenceAnswer.value
       : null;
+  /*
+   * The numbered feed can know execution failed before the separate evidence
+   * read catches up. Keep the exact row-backed failure on screen during that
+   * wait (and during a refused evidence read), then let full evidence replace
+   * it without a contradictory stale "running" detail.
+   */
+  const selectedFailureBeforeEvidence =
+    selected !== null &&
+    selected.status === "failed" &&
+    selectedEvidence?.status !== "failed"
+      ? selected
+      : null;
+  const evidenceForDisplay =
+    selectedFailureBeforeEvidence === null ? selectedEvidence : null;
   const displayedSelected =
-    selected === null || selectedEvidence === null
+    selected === null || evidenceForDisplay === null
       ? selected
       : {
           ...selected,
-          status: selectedEvidence.status,
-          gradingState: selectedEvidence.gradingState,
-          combinedScore: selectedEvidence.combinedScore,
-          startedAt: selectedEvidence.startedAt,
-          endedAt: selectedEvidence.endedAt,
+          status: evidenceForDisplay.status,
+          gradingState: evidenceForDisplay.gradingState,
+          combinedScore: evidenceForDisplay.combinedScore,
+          startedAt: evidenceForDisplay.startedAt,
+          endedAt: evidenceForDisplay.endedAt,
         };
 
   useEffect(() => {
@@ -836,6 +877,21 @@ export function RunScenarioWorkbench({
     const timer = window.setTimeout(refreshEvidence, 2000);
     return () => window.clearTimeout(timer);
   }, [runId, selectedEvidence, refreshEvidence]);
+
+  useEffect(() => {
+    const visibleFailureId = selectedFailureBeforeEvidence?.id ?? (
+      selectedEvidence !== null &&
+      selectedEvidence.runId === runId &&
+      selectedEvidence.status === "failed"
+        ? selectedEvidence.id
+        : null
+    );
+    if (visibleFailureId !== null) {
+      // A persistent notice now contains the exact execution failure. It can
+      // replace any live toast that led the person to this simulation.
+      onExecutionFailureVisible(visibleFailureId);
+    }
+  }, [onExecutionFailureVisible, runId, selectedEvidence, selectedFailureBeforeEvidence]);
 
   return (
     <section
@@ -902,9 +958,18 @@ export function RunScenarioWorkbench({
           </header>
         )}
 
+        {selectedFailureBeforeEvidence === null ? null : (
+          <div className="px-5 pt-5 max-[40rem]:px-4 max-[40rem]:pt-4">
+            <ExecutionFailureNotice
+              reason={selectedFailureBeforeEvidence.reason}
+              executionFailure={selectedFailureBeforeEvidence.executionFailure}
+            />
+          </div>
+        )}
+
         {evidenceAnswer === null ||
         evidenceAnswer.status === "signed-out" ||
-        (evidenceAnswer.status === "ready" && selectedEvidence === null) ? (
+        (evidenceAnswer.status === "ready" && evidenceForDisplay === null) ? (
           <div className="p-5 max-[40rem]:p-4">
             <Loading what="this simulation's results" />
           </div>
@@ -912,12 +977,12 @@ export function RunScenarioWorkbench({
           <div className="p-5 max-[40rem]:p-4">
             <Failure message={evidenceAnswer.refusal.message} onRetry={reloadEvidence} />
           </div>
-        ) : selectedEvidence?.runId !== runId ? (
+        ) : evidenceForDisplay?.runId !== runId ? (
           <div className="p-5 max-[40rem]:p-4">
             <Failure message="This simulation does not belong to this run." />
           </div>
         ) : (
-          <EvidenceDetail evidence={selectedEvidence} onReload={refreshEvidence} />
+          <EvidenceDetail evidence={evidenceForDisplay} onReload={refreshEvidence} />
         )}
       </div>
     </section>

@@ -107,12 +107,16 @@ type FailureToastCandidate = {
   readonly executionFailure: RunSimulation["executionFailure"];
 };
 
+function failureToastId(runId: string, seq: number): string {
+  return `${runId}:${String(seq)}`;
+}
+
 function showFailureToast(runId: string, failure: FailureToastCandidate): void {
   const simulationName = [failure.testName, failure.personaName]
     .filter((name): name is string => name !== null)
     .join(" · ") || "Simulation";
   toast.error("Simulation execution failed", {
-    id: `${runId}:${String(failure.seq)}`,
+    id: failureToastId(runId, failure.seq),
     description:
       `${simulationName}: ${executionFailureMessage(
         failure.reason,
@@ -192,8 +196,8 @@ function RunDetailView({
   const applied = useRef(0);
   /** Last event already present when this page first observed the run. */
   const failureToastHistoryThrough = useRef<number | null>(null);
-  /** Live failures wait here until selected-vs-unselected is known. */
-  const pendingFailureToasts = useRef<FailureToastCandidate[]>([]);
+  /** Visible failure toasts that a later persistent selected message can replace. */
+  const activeFailureToasts = useRef<FailureToastCandidate[]>([]);
   const initialSelectionReady = useRef(false);
   const [selectedSimulationId, setSelectedSimulationId] = useState<string | null>(null);
   const selectedSimulationIdRef = useRef<string | null>(null);
@@ -203,6 +207,23 @@ function RunDetailView({
     selectedSimulationIdRef.current = simulationId;
     setSelectedSimulationId(simulationId);
   }, []);
+
+  const showTrackedFailureToast = useCallback((failure: FailureToastCandidate) => {
+    activeFailureToasts.current.push(failure);
+    showFailureToast(runId, failure);
+  }, [runId]);
+
+  const dismissFailureToastsForSimulation = useCallback((simulationId: string) => {
+    const kept: FailureToastCandidate[] = [];
+    for (const failure of activeFailureToasts.current) {
+      if (failure.simulationId === simulationId) {
+        toast.dismiss(failureToastId(runId, failure.seq));
+      } else {
+        kept.push(failure);
+      }
+    }
+    activeFailureToasts.current = kept;
+  }, [runId]);
 
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -221,7 +242,7 @@ function RunDetailView({
   useEffect(() => {
     applied.current = 0;
     failureToastHistoryThrough.current = null;
-    pendingFailureToasts.current = [];
+    activeFailureToasts.current = [];
     initialSelectionReady.current = false;
     selectedSimulationIdRef.current = null;
     setSelectedSimulationId(null);
@@ -230,6 +251,12 @@ function RunDetailView({
     setFinishedByFeed(false);
     setLaterSimulationPages([]);
     setMoreSimulationsRefused(null);
+    return () => {
+      for (const failure of activeFailureToasts.current) {
+        toast.dismiss(failureToastId(runId, failure.seq));
+      }
+      activeFailureToasts.current = [];
+    };
   }, [runId, projectId]);
 
   /*
@@ -273,13 +300,6 @@ function RunDetailView({
       selectSimulation(simulationPage.value.simulations[0]?.id ?? null);
     }
     initialSelectionReady.current = true;
-    const pending = pendingFailureToasts.current;
-    pendingFailureToasts.current = [];
-    for (const failure of pending) {
-      if (failure.simulationId !== selectedSimulationIdRef.current) {
-        showFailureToast(runId, failure);
-      }
-    }
   }, [runId, selectSimulation, simulationPage]);
 
   const stillMoving =
@@ -406,9 +426,12 @@ function RunDetailView({
             executionFailure: event.executionFailure,
           };
           if (!initialSelectionReady.current) {
-            pendingFailureToasts.current.push(failure);
+            // Selection can be delayed, refused, or never answer. The failure
+            // must still be visible now. Track it so the exact persistent
+            // selected message can replace the toast after it is on screen.
+            showTrackedFailureToast(failure);
           } else if (event.simulationId !== selectedSimulationIdRef.current) {
-            showFailureToast(runId, failure);
+            showTrackedFailureToast(failure);
           }
         }
       }
@@ -430,7 +453,7 @@ function RunDetailView({
 
     if (done) setFinishedByFeed(true);
     return done;
-  }, [projectId, runId, refreshLoadedSimulationPages]);
+  }, [projectId, runId, refreshLoadedSimulationPages, showTrackedFailureToast]);
 
   /**
    * The follower itself: one page, then another, while anything is moving.
@@ -759,6 +782,7 @@ function RunDetailView({
               total={read.expectedSimulationCount}
               selectedId={selectedSimulationId}
               onSelect={selectSimulation}
+              onExecutionFailureVisible={dismissFailureToastsForSimulation}
               {...(nextSimulationCursor === null
                 ? {}
                 : {
