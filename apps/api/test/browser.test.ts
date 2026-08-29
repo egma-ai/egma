@@ -2493,12 +2493,12 @@ describe("the project grader library", () => {
         .poll(() => details.innerText(), { timeout: 30_000 })
         .toContain("Turn response latency");
       expect(await details.innerText()).toContain(
-        "Maximum average response time: 3 seconds by default",
+        "Maximum response time (p90): 3 seconds by default",
       );
       await details.getByRole("button", { name: "Use in project" }).click();
       await details.getByLabel("Grades simulations").click();
       await details.getByLabel("All simulations").click();
-      await details.getByLabel("Maximum average response time").fill("2.5");
+      await details.getByLabel("Maximum response time (p90)").fill("2.5");
       await details.getByRole("button", { name: "Use in project" }).click();
 
       await page.getByText("Grader added to Active graders.").waitFor();
@@ -2517,7 +2517,7 @@ describe("the project grader library", () => {
       });
       expect(
         await activeLatencyDetails
-          .getByLabel("Maximum average response time")
+          .getByLabel("Maximum response time (p90)")
           .inputValue(),
       ).toBe("2.5");
       await activeLatencyDetails.getByRole("button", { name: "Cancel" }).click();

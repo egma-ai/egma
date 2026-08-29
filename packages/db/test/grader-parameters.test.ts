@@ -7,7 +7,7 @@ import {
 
 const contract = [{
   key: "maximum_response_time_ms",
-  label: "Maximum average response time",
+  label: "Maximum response time (p90)",
   valueType: "integer",
   defaultValue: 3_000,
   unit: "milliseconds",
