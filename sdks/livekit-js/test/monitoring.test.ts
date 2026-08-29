@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 
 import {
   ProxyTracerProvider,
+  context as otelContext,
   trace,
   type Context,
   type Span,
@@ -58,6 +59,8 @@ function unusedProviders() {
 afterEach(() => {
   resetMonitoringForTests();
   telemetry.setTracerProvider(new ProxyTracerProvider());
+  otelContext.disable();
+  trace.disable();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
@@ -173,6 +176,25 @@ describe("monitorLiveKit", () => {
         apiKey: PROJECT_KEY,
       }),
     ).toThrow(/existing OpenTelemetry tracer provider/u);
+  });
+
+  it("detects a real provider behind OpenTelemetry's global proxy", async () => {
+    trace.disable();
+    const provider = new NodeTracerProvider();
+    provider.register();
+    const globalProvider = trace.getTracerProvider();
+    telemetry.setTracerProvider(globalProvider);
+
+    expect(globalProvider).toBeInstanceOf(ProxyTracerProvider);
+    expect((globalProvider as ProxyTracerProvider).getDelegate()).toBe(provider);
+    expect(() =>
+      monitorLiveKit(asJobContext(context()), {
+        endpoint: "https://api.egma.ai",
+        apiKey: PROJECT_KEY,
+      }),
+    ).toThrow(/existing OpenTelemetry tracer provider/u);
+
+    await provider.shutdown();
   });
 
   it("requires a worker restart when process settings change", () => {

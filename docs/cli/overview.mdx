@@ -54,11 +54,12 @@ Running `npx @egma/cli` with no arguments opens the full interactive wizard. It 
 
     On **LiveKit**, your own coding agent adds the monitoring call for your
     worker language: `monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)`
-    in JavaScript. You watch the edit happen. Egma then mints a project API
-    key, writes the two environment lines the SDK reads into `.env` without a
-    separate approval screen when Git already ignores that file, and prints
-    them for wherever the worker really runs. Nothing waits: a LiveKit worker
-    pushes its own evidence, so conversations appear once real traffic starts.
+    in JavaScript. The JavaScript path needs `@egma/livekit` to be available on
+    npm. You watch the edit happen. Egma then mints a project API key, writes
+    the two environment lines the SDK reads into `.env` without a separate
+    approval screen when Git already ignores that file, and prints them for
+    wherever the worker really runs. Nothing waits: a LiveKit worker pushes its
+    own evidence, so conversations appear once real traffic starts.
 
     A start Egma cannot make is explained in plain words — what happened and what to do — and the walk exits with a nonzero code.
   </Step>

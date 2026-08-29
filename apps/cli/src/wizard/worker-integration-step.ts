@@ -30,11 +30,15 @@ const DISPATCH_NAME_FACT = "dispatch-name";
 
 const NODE_LIVEKIT = /@livekit\/agents/iu;
 
-export function supportsLiveKitSdk(
+function isNodeLiveKitWorker(facts?: Facts): boolean {
+  return NODE_LIVEKIT.test(facts?.get("framework") ?? "");
+}
+
+export function supportsLiveKitIntegrationMode(
   facts: Facts,
   mode: WorkerIntegrationMode = "testing",
 ): boolean {
-  return mode === "monitoring" || !NODE_LIVEKIT.test(facts.get("framework") ?? "");
+  return mode === "monitoring" || !isNodeLiveKitWorker(facts);
 }
 
 function contextBlock(facts: Facts): readonly string[] {
@@ -72,7 +76,7 @@ function workerIntegrationTask(
   facts: Facts,
   mode: WorkerIntegrationMode,
 ): string {
-  const nodeWorker = NODE_LIVEKIT.test(facts.get("framework") ?? "");
+  const nodeWorker = isNodeLiveKitWorker(facts);
   const workerExample = nodeWorker ? "src/agent.ts" : "src/agent.py";
   const manifestExample = nodeWorker ? "package.json" : "pyproject.toml";
   const dependency = nodeWorker
@@ -210,7 +214,7 @@ export function workerEntryInstructions(
   mode: WorkerIntegrationMode,
   facts?: Facts,
 ): readonly string[] {
-  const nodeWorker = NODE_LIVEKIT.test(facts?.get("framework") ?? "");
+  const nodeWorker = isNodeLiveKitWorker(facts);
   if (nodeWorker && mode === "monitoring") {
     return [
       "The coding agent did not report a completed LiveKit worker integration.",
@@ -294,7 +298,7 @@ export async function workerIntegrationStep(
 ): Promise<WorkerIntegration> {
   const { ui, drivenAgent, signal, log } = options;
 
-  if (!supportsLiveKitSdk(options.facts, options.mode)) {
+  if (!supportsLiveKitIntegrationMode(options.facts, options.mode)) {
     ui.pushStatus(
       "The Egma JavaScript SDK monitors production calls but does not yet isolate simulation tools, so this Node worker was left unchanged.",
     );

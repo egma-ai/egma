@@ -39,7 +39,7 @@ import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReport } from "./stop.ts";
 import { GenerationTally } from "./test-generation.ts";
-import { supportsLiveKitSdk } from "./worker-integration-step.ts";
+import { supportsLiveKitIntegrationMode } from "./worker-integration-step.ts";
 
 /** What this step knows before it dispatches anything. */
 export type MockAuthoringContext = {
@@ -209,7 +209,7 @@ export async function mockAuthoringStep(
 
   // The JavaScript SDK does not yet provide session-isolated mock tools. The
   // integration task already said that once, so this step stays silent.
-  if (!supportsLiveKitSdk(options.context.facts)) {
+  if (!supportsLiveKitIntegrationMode(options.context.facts)) {
     return { halted: null };
   }
 

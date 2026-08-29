@@ -21,6 +21,7 @@ import { telemetry, type JobContext } from "@livekit/agents";
 const TRACE_PATH = "/v1/traces";
 const SIMULATION_ROOM_PREFIX = "egma-sim-";
 const PROJECT_KEY_PATTERN = /^egma_sk_[A-Za-z0-9_-]{43}$/u;
+const UNCONFIGURED_TRACER_PROVIDER = new ProxyTracerProvider().getDelegate();
 
 type MonitoringState = {
   readonly endpoint: string;
@@ -197,12 +198,22 @@ function refuseExistingProvider(
   liveKitProvider: TracerProvider,
   globalProvider: TracerProvider,
 ): void {
-  const liveKitIsProxy = liveKitProvider instanceof ProxyTracerProvider;
-  const globalIsProxy = globalProvider instanceof ProxyTracerProvider;
-  if (liveKitIsProxy && globalIsProxy) return;
+  if (
+    isUnconfiguredProxyProvider(liveKitProvider) &&
+    isUnconfiguredProxyProvider(globalProvider)
+  ) {
+    return;
+  }
 
   throw new Error(
     "LiveKit monitoring found an existing OpenTelemetry tracer provider that it cannot safely extend. Call monitorLiveKit before custom tracing setup so Egma and LiveKit Cloud can share one provider.",
+  );
+}
+
+function isUnconfiguredProxyProvider(provider: TracerProvider): boolean {
+  return (
+    provider instanceof ProxyTracerProvider &&
+    provider.getDelegate() === UNCONFIGURED_TRACER_PROVIDER
   );
 }
 

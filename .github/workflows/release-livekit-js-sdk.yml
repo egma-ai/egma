@@ -7,7 +7,8 @@ name: Release LiveKit JavaScript SDK
 #
 # npm must trust this repository, workflow, and @egma/livekit package. GitHub
 # then supplies one short-lived OIDC credential. No long-lived npm token is
-# stored in this repository.
+# stored in this repository. An @egma npm owner must bootstrap the first
+# package version before npm can attach trusted-publisher settings to it.
 
 on:
   push:
