@@ -140,7 +140,7 @@
       padding: var(--space-1);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
-      background: var(--surface);
+      background: var(--raised);
       box-shadow: var(--shadow-menu);
       color: var(--foreground);
     }

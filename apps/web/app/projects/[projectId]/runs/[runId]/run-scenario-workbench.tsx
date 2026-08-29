@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  STACKED_HEAD_TYPE,
   Table,
   TableBody,
   TableCell,
@@ -122,10 +123,17 @@ type GraderRow = {
   readonly history: readonly EvidenceGrade[];
 };
 
+/*
+ * A narrow results row prints each column's name beside its value, because
+ * the header row above is read out and not drawn. The printed name is that
+ * header, so it wears the header's own rank — `STACKED_HEAD_TYPE`, the same
+ * one every stacked list uses.
+ */
 const STACKED_BEHAVIOR_CELL = cn(
   "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-start",
   "stacked:justify-between stacked:gap-4 stacked:border-0 stacked:p-0",
-  "stacked:before:flex-none stacked:before:text-sm stacked:before:text-faint",
+  "stacked:before:flex-none stacked:before:text-sm",
+  STACKED_HEAD_TYPE,
   "stacked:before:content-[attr(data-label)]",
 );
 

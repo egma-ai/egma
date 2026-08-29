@@ -299,7 +299,14 @@ describe("the grouped sidebar", () => {
     // current row's Ember Wash: the hover colours are scoped off the active
     // row rather than fighting it on specificity.
     expect(agents.className).not.toContain("motion-reduce:transition-none");
+    // The plate is paper and not the quiet grey, because the bar under it is
+    // `--chrome` — one value with `--surface-soft` in light theme, so the grey
+    // plate would be drawn in the colour it stands on. A row on the chrome
+    // lifts towards the work surface.
     expect(agents.className).toContain(
+      "pointer-hover:data-[active=false]:bg-surface",
+    );
+    expect(agents.className).not.toContain(
       "pointer-hover:data-[active=false]:bg-surface-soft",
     );
   });

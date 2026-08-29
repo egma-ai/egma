@@ -116,9 +116,16 @@ const NAV_ITEM = [
  * disappearing under the pointer. Naming the two sets apart is the fix that
  * needs no rule to outrank another — a row is either current or it is not, and
  * only one of these two lists ever reaches it.
+ *
+ * **The plate is paper, because the rail under it is chrome.** It was
+ * `--surface-soft`, which is the chrome's own value in light theme — the
+ * hover would have been drawn in exactly the colour it stands on. A row on the
+ * chrome lifts towards the work surface instead. It is the sidebar row's rule
+ * and the sidebar row's value, which is the point: these two lists of links
+ * are one thing to a person moving between them.
  */
 const NAV_ITEM_QUIET = [
-  "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
+  "pointer-hover:bg-surface pointer-hover:text-foreground",
 ];
 
 const NAV_ITEM_CURRENT = [
@@ -207,14 +214,24 @@ export function SettingsNav({
       className={cn(
         /*
          * **A rail, and a rail is a panel.** The scene board draws the settings
-         * navigation as a bordered Pure Paper card beside the page (`2AO-0`)
-         * rather than as a column hanging off a divider, which is what this
-         * was: a hairline on the right and nothing else made the links read as
-         * part of the page's own left margin. The card says they are a place
-         * you are in. No corner and no shadow — a rail does not float.
+         * navigation as a bordered card beside the page (`2AO-0`) rather than
+         * as a column hanging off a divider, which is what this was: a hairline
+         * on the right and nothing else made the links read as part of the
+         * page's own left margin. The card says they are a place you are in.
+         * No corner and no shadow — a rail does not float.
+         *
+         * **The card is chrome, and the board's Pure Paper is why it had to
+         * move.** `--background` is Pure Paper now, so a paper rail on a paper
+         * page is a card with nothing but its hairline left to say it is one.
+         * The fill it takes instead is the fill the sidebar takes, and it is
+         * the honest one twice over: this is navigation, drawn beside the work
+         * rather than inside it, and a person crossing from the bar on the left
+         * to the rail in the middle of Settings meets one material for both.
+         * (Developer decision, 2026-08-28, Paper page `09 — Gray chrome
+         * variations`, V1b.)
          */
         "flex flex-col items-stretch gap-2",
-        "rounded-card border border-border bg-surface p-2",
+        "rounded-card border border-border bg-chrome p-2",
         /*
          * Narrow, the same card stops being a column beside the page and
          * becomes a card above it — two scopes side by side, still labelled,
