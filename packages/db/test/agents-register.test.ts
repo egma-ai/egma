@@ -52,7 +52,7 @@ function registration(overrides: {
   readonly retellAgentId?: string;
   readonly apiKey?: string;
   /** Which Retell vendor-id door this registration takes, chat API by default. */
-  readonly lane?: "retell_chat_api" | "retell_playground" | "retell_web_call";
+  readonly lane?: "retell_chat_api" | "retell_text_mode" | "retell_web_call";
 }): NewAgent {
   const lane = overrides.lane ?? "retell_chat_api";
   return {
@@ -154,18 +154,18 @@ describe("two identical registrations arriving together", () => {
     expect(rows[0]?.count).toBe("1");
   });
 
-  it("settle to one for the playground lane too, since it carries the reuse key", async () => {
-    // The playground shares the reuse key the chat API carries — the vendor
+  it("settle to one for the text-mode lane too, since it carries the reuse key", async () => {
+    // Text mode shares the reuse key the chat API carries — the vendor
     // agent id — so the same advisory lock and committed read behind it settle
-    // a racing playground registration to one agent, not a twin.
+    // a racing text mode registration to one agent, not a twin.
     const racing = await Promise.all(
       Array.from({ length: 4 }, () =>
         registerAgent(
           actingIn(acme.project),
           registration({
-            name: "Racing playground",
-            lane: "retell_playground",
-            retellAgentId: "agent_playground_race",
+            name: "Racing text mode",
+            lane: "retell_text_mode",
+            retellAgentId: "agent_text_mode_race",
           }),
         ),
       ),
@@ -177,10 +177,10 @@ describe("two identical registrations arriving together", () => {
     expect(results.filter((one) => one === "created")).toHaveLength(1);
     expect(results.filter((one) => one === "reused")).toHaveLength(3);
 
-    // One agent, and the one connection is the playground.
+    // One agent, and the one connection is text mode.
     const { rows } = await database.sql<{ count: string }>(
       "select count(*) as count from agent where project_id = $1 and name = $2",
-      [acme.project, "Racing playground"],
+      [acme.project, "Racing text mode"],
     );
     expect(rows[0]?.count).toBe("1");
     const connections = await listConnections(
@@ -189,14 +189,14 @@ describe("two identical registrations arriving together", () => {
     );
     expect(connections).toBeDefined();
     expect((connections ?? []).map((one) => one.connectionType)).toEqual([
-      "retell_playground",
+      "retell_text_mode",
     ]);
   });
 });
 
 describe("the same Retell agent through two doors of its reuse family", () => {
   /**
-   * One Retell agent's playground (chat) and its web call (voice) both key on
+   * One Retell agent's text mode (chat) and its web call (voice) both key on
    * the vendor agent id, so registering the second lands on the first's Egma
    * agent — a connection added, never a twin — whichever order they arrive in.
    * This is the whole of one-agent-two-connections on the **web's fresh connect
@@ -206,8 +206,8 @@ describe("the same Retell agent through two doors of its reuse family", () => {
   async function twoDoors(
     label: string,
     vendor: string,
-    firstLane: "retell_playground" | "retell_web_call",
-    secondLane: "retell_playground" | "retell_web_call",
+    firstLane: "retell_text_mode" | "retell_web_call",
+    secondLane: "retell_text_mode" | "retell_web_call",
   ): Promise<void> {
     const modalityOf = (lane: string) =>
       lane === "retell_web_call" ? ("voice" as const) : ("chat" as const);
@@ -250,17 +250,17 @@ describe("the same Retell agent through two doors of its reuse family", () => {
     expect(rows[0]?.count).toBe("1");
   }
 
-  it("attaches the web call after the playground, on one agent", async () => {
-    await twoDoors("Two doors A", "vendor_two_doors_a", "retell_playground", "retell_web_call");
+  it("attaches the web call after text mode, on one agent", async () => {
+    await twoDoors("Two doors A", "vendor_two_doors_a", "retell_text_mode", "retell_web_call");
   });
 
-  it("attaches the playground after the web call, on one agent", async () => {
-    await twoDoors("Two doors B", "vendor_two_doors_b", "retell_web_call", "retell_playground");
+  it("attaches text mode after the web call, on one agent", async () => {
+    await twoDoors("Two doors B", "vendor_two_doors_b", "retell_web_call", "retell_text_mode");
   });
 
   it("settles a race across two doors of one agent to a single agent", async () => {
     // The lock is on the vendor agent under its reuse key, not on the door, so
-    // a playground and a web call for one agent racing on different doors still
+    // text mode and a web call for one agent racing on different doors still
     // wait behind one lock and settle to one agent — one created, one added.
     const vendor = "vendor_two_doors_race";
     const racing = await Promise.all([
@@ -268,7 +268,7 @@ describe("the same Retell agent through two doors of its reuse family", () => {
         actingIn(acme.project),
         registration({
           name: "Two doors race",
-          lane: "retell_playground",
+          lane: "retell_text_mode",
           modality: "chat",
           retellAgentId: vendor,
         }),

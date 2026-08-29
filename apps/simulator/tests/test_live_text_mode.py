@@ -1,11 +1,11 @@
 """One real chat simulation of a real Retell voice agent — opt-in.
 
-Everything else on this lane converses with a playground-shaped stub, which
+Everything else on this lane converses with a text-mode-shaped stub, which
 proves the plug speaks the documented protocol and nothing at all about the
 platform behind it. This file is the other half, and the founder's one live
 proof: a genuine chat simulation against a real Retell **voice** agent, over
 the agent-playground-completion API, with a mocked tool answer and a node or
-state transition on the record — and no audio anywhere, because the playground
+state transition on the record — and no audio anywhere, because text mode
 synthesizes nothing and hears nothing.
 
 It is written here and **run by the developer**, never by an agent and never
@@ -18,7 +18,7 @@ never failing, never waiting on anybody, and never reaching a network.
     TEST_RETELL_API_KEY=key_... \\
     TEST_RETELL_AGENT_ID=agent_... \\
     TEST_MODEL_API_KEY=sk-... \\
-    uv run pytest tests/test_live_playground.py -v -s
+    uv run pytest tests/test_live_text_mode.py -v -s
 
 ## What it needs, and why each
 
@@ -43,7 +43,7 @@ are printed to stdout — which is what the `-s` above is for. Watch it work.
 ## What only a live run can say
 
 The exchange really was text — the record carries no audio and no provider
-reference, because the playground stores nothing on Retell's side. The version
+reference, because text mode stores nothing on Retell's side. The version
 egma resolved was named on every request. Egma's mock answers reached the real
 agent, marked `mocked` on the record with the tool that served them. And the
 platform's own node or state transitions rode back beside the turns, verbatim,
@@ -87,14 +87,14 @@ MISSING = sorted(name for name, value in REQUIRED.items() if not value)
 pytestmark = pytest.mark.skipif(
     bool(MISSING),
     reason=(
-        "no live Retell playground environment: set "
+        "no live Retell text mode environment: set "
         + ", ".join(MISSING)
         + " to conduct one real chat simulation of a real Retell voice agent, "
         "with a mocked tool answer and a transition on the record"
     ),
 )
 
-SIMULATION = "sim-playground-live-001"
+SIMULATION = "sim-text-mode-live-001"
 
 DEFAULT_SCENARIO = (
     "You are calling to move a booked appointment. Ask what times are free "
@@ -201,15 +201,15 @@ async def _mockable_tools() -> tuple[list[str], object]:
 
 
 def _live_spec(mock_tools: list[dict], version: object) -> dict:
-    """A playground spec against real Retell: no baseUrl, so the plug reaches
+    """A text-mode spec against real Retell: no baseUrl, so the plug reaches
     Retell itself, and the persona's own funded brain."""
     spec = a_spec(
         SIMULATION,
         modality="chat",
         connection={
             "agent_platform": "retell",
-            "connection_type": "retell_playground",
-            "access_variant": "retell_playground.api_key",
+            "connection_type": "retell_text_mode",
+            "access_variant": "retell_text_mode.api_key",
             # No baseUrl: the plug reaches Retell's own address.
             "config": {"retellAgentId": AGENT_ID},
             "credentials": {"apiKey": API_KEY},
@@ -230,7 +230,7 @@ def _live_spec(mock_tools: list[dict], version: object) -> dict:
 def _bank(records: list[dict]) -> Path:
     """Write the whole record read to a git-ignored file, and answer its path."""
     PROOF_DIR.mkdir(exist_ok=True)
-    path = PROOF_DIR / f"playground-{int(time.time())}.json"
+    path = PROOF_DIR / f"text-mode-{int(time.time())}.json"
     path.write_text(json.dumps(records, indent=2), encoding="utf-8")
     return path
 
@@ -322,10 +322,10 @@ async def test_a_real_retell_voice_agent_is_conducted_in_text(
     facts = terminal["facts"]
 
     # No audio and no provider reference: the two facts that say this really was
-    # a text exchange the playground kept nothing of.
+    # a text exchange text mode kept nothing of.
     assert facts["audio"] is None, "a chat simulation carried audio"
     assert facts["provider_reference"] is None, (
-        "the playground answered a provider reference it is not supposed to keep"
+        "text mode answered a provider reference it is not supposed to keep"
     )
 
     # The coverage stamp is present with its three classes: the run read the

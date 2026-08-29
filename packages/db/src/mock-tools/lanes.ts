@@ -1,60 +1,59 @@
 /**
- * Which lanes a mocked world is built for, and the one gate that keeps a
- * mocked run honest.
+ * Which lanes branch a temporary version, and the one gate that keeps a mocked
+ * run honest.
  *
  * ## The lanes
  *
- * A mocked world is built for the connections Egma **opens itself** — the web
- * call and the chat session — because both are created against a named agent
- * version, which is what makes a temporary version reachable at all.
+ * A **temporary copy** of the customer's agent is branched for one lane only:
+ * `retell_web_call`. A web call is a conversation Egma creates against a named
+ * agent version, so a temporary version is reachable at all — and the customer's
+ * published number is never dialled for one.
  *
- * The `phone_number` connection is deliberately not one of them, and that is
- * the whole of the phone lane's job: it is the real carrier leg, the real
- * 8 kHz band, and the real tools. A mocked run never dials it, so a real caller
- * ringing mid-run reaches the real agent. Mocking the inbound-call lane is a
- * different mechanism — a standing consented webhook router — and it is out of
- * scope by name, not by omission.
+ * `retell_text_mode` is mocked too and branches nothing: its answers ride each
+ * request, so there is no draft to sweep, no binding to restore, and nothing to
+ * wait for. `phone_number` is deliberately not mockable at all, and that is the
+ * whole of the phone lane's job: the real carrier leg, the real 8 kHz band, and
+ * the real tools.
  *
  * ## The gate
  *
- * `simulationAwaitsItsMockedWorld` is the condition that makes "a run that
- * cannot build its world fails before a single simulation" true rather than
- * merely intended. A run whose agent carries the tick and whose connection is
- * one of the lanes above is **not claimable** until its record holds a
- * temporary version. Nothing races it: the run row and its queued simulations
- * are written in one transaction, so the gate is closed from the instant the
- * simulations exist — before the builder has sent its first request, and for
- * however long the build takes.
+ * `runIsReadyToConduct` is the condition that makes "a run that cannot build
+ * its world fails before a single simulation" true rather than merely intended.
+ * A run whose **connection snapshot** says mock tools are on, over a lane that
+ * branches a copy, is not claimable until its record names a temporary version.
+ * Nothing races it: the run row and its queued simulations are written in one
+ * transaction, so the gate is closed from the instant the simulations exist.
  *
- * The same condition closes again at teardown, when the record's temporary
- * version goes back to null. That costs nothing: teardown runs only after every
- * simulation is terminal, so there is no queued row left for it to hold.
+ * **The snapshot, never the connection row.** A connection's switch may be
+ * unticked while a run is going, and a run keeps the world it started with —
+ * so the fact the gate reads is the one frozen onto the run at its start.
  */
 
 import { sql, type Column, type SQL } from "drizzle-orm";
 
-import { agent, type ConnectionType } from "../schema/agents.ts";
+import type { ConnectionType } from "../schema/agents.ts";
 import { run } from "../schema/runs.ts";
 
 /**
- * The connection types a run over which builds a mocked world.
+ * The connection types a mocked run over which branches a temporary copy of
+ * the customer's agent.
  *
- * Both are conversations Egma creates against a named version. Everything else
- * — the phone number above all — runs exactly as it did before mock tools
- * existed on this platform.
+ * One entry, and the list stays a list because the reasoning is per lane: a
+ * lane joins it when Egma opens the conversation against a named version and
+ * cannot carry its answers on the request itself.
  */
-export const MOCKABLE_CONNECTION_TYPES = [
+export const DRAFT_MOCK_CONNECTION_TYPES = [
   "retell_web_call",
-  "retell_chat_api",
 ] as const satisfies readonly ConnectionType[];
 
-export type MockableConnectionType = (typeof MOCKABLE_CONNECTION_TYPES)[number];
+export type DraftMockConnectionType =
+  (typeof DRAFT_MOCK_CONNECTION_TYPES)[number];
 
-/** Whether a run over this connection builds a mocked world when ticked. */
-export function connectionTypeTakesMockedWorld(
+/** Whether a mocked run over this connection branches a temporary copy. */
+export function connectionTypeBranchesMockDraft(
   connectionType: string,
-): connectionType is MockableConnectionType {
-  return (MOCKABLE_CONNECTION_TYPES as readonly string[]).includes(
+): connectionType is DraftMockConnectionType {
+  return (DRAFT_MOCK_CONNECTION_TYPES as readonly string[]).includes(
     connectionType,
   );
 }
@@ -63,17 +62,16 @@ export function connectionTypeTakesMockedWorld(
  * A simulation whose run is ready to be conducted — which for most runs is
  * every simulation, always.
  *
- * Read off three facts that are all true the moment the run row is written: the
- * agent's tick, the run's own recorded connection type, and whether the run's
- * mocked world names a temporary version. So the gate never has a window: a
+ * Read off two facts that are both true the moment the run row is written: the
+ * switch and the connection type frozen onto the run's own snapshot, and
+ * whether the run names a temporary version. So the gate never has a window: a
  * simulator polling the queue one millisecond after the run was created finds
- * nothing to claim, and keeps finding nothing until the draft exists.
+ * nothing to claim, and keeps finding nothing until the copy exists.
  *
  * Written as one condition rather than as a Boolean column so that no writer
- * anywhere can forget to set it, and so that the flag and the world cannot
+ * anywhere can forget to set it, and so that the flag and the record cannot
  * disagree. Written as a subquery rather than as a join so that it adds a
- * condition to the claim and changes nothing else about it — the claim still
- * locks simulation rows and only simulation rows.
+ * condition to the claim and changes nothing else about it.
  *
  * @param runIdColumn the claiming query's own reference to `simulation.run_id`.
  */
@@ -81,16 +79,12 @@ export function runIsReadyToConduct(runIdColumn: SQL | Column): SQL {
   return sql`not exists (
     select 1
     from ${run}
-    join ${agent} on ${agent.id} = ${run.agentId}
     where ${run.id} = ${runIdColumn}
-      and ${agent.mockToolsDuringSimulations} = true
+      and ${run.connectionSnapshot}->>'mockToolsEnabled' = 'true'
       and ${run.connectionSnapshot}->>'connectionType' in (${sql.join(
-        MOCKABLE_CONNECTION_TYPES.map((type) => sql`${type}`),
+        DRAFT_MOCK_CONNECTION_TYPES.map((type) => sql`${type}`),
         sql`, `,
       )})
-      and (
-        ${run.mockedWorld} is null
-        or ${run.mockedWorld}->>'draftVersion' is null
-      )
+      and ${run.tempMockAgentVersion} is null
   )`;
 }

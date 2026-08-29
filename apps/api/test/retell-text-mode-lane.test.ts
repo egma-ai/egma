@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
-import { readPlaygroundWorld } from "../src/providers/retell-playground.ts";
+import { readTextModeWorld } from "../src/providers/retell-text-mode.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
@@ -23,7 +23,7 @@ import {
 } from "./support/traces.ts";
 
 /**
- * The playground lane's control-plane half, against a Retell that only exists
+ * The text-mode lane's control-plane half, against a Retell that only exists
  * in this file.
  *
  * Nothing here reaches a network. What is asserted is what a developer
@@ -43,10 +43,10 @@ const SENTINEL_KEY = "retell-secret-SENTINEL-8QW3ZX7K2N";
 const PLATFORM_AGENT = "agent_in_retell_1";
 const SERVING_VERSION = 106;
 
-const PLAYGROUND = {
+const TEXT_MODE = {
   agentPlatform: "retell",
-  connectionType: "retell_playground",
-  accessVariant: "retell_playground.api_key",
+  connectionType: "retell_text_mode",
+  accessVariant: "retell_text_mode.api_key",
   modality: "chat",
   config: { retellAgentId: PLATFORM_AGENT },
   credentials: { apiKey: SENTINEL_KEY },
@@ -61,7 +61,7 @@ const RETELL_CHAT = {
   credentials: { apiKey: SENTINEL_KEY },
 } as const;
 
-/** The voice door beside the playground: a web call against the same agent. */
+/** The voice door beside text mode: a web call against the same agent. */
 const WEB_CALL = {
   agentPlatform: "retell",
   connectionType: "retell_web_call",
@@ -170,7 +170,7 @@ function retell(plan: RetellPlan = {}): {
 /** A customer with a suite, a persona and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
-  connection: typeof PLAYGROUND | typeof RETELL_CHAT,
+  connection: typeof TEXT_MODE | typeof RETELL_CHAT,
   plan: RetellPlan = {},
   /** A trace store, for the one test that lands a terminal report. */
   traceStore = false,
@@ -230,11 +230,11 @@ async function aCustomerReadyToRun(
   };
 }
 
-describe("a Retell playground connection, through the API", () => {
+describe("a Retell text mode connection, through the API", () => {
   it("is registered, reads back as chat, and is offered in the options", async () => {
     const { key, connectionId } = await aCustomerReadyToRun(
-      "playground_registered",
-      PLAYGROUND,
+      "text_mode_registered",
+      TEXT_MODE,
     );
 
     const read = await ask(api.app, "GET", "/v1/connection-options", key);
@@ -246,8 +246,8 @@ describe("a Retell playground connection, through the API", () => {
         modality: string;
         simulatorAdapter: boolean;
       }[]
-    ).find((one) => one.connectionType === "retell_playground");
-    expect(offered?.productLabel).toBe("Retell playground");
+    ).find((one) => one.connectionType === "retell_text_mode");
+    expect(offered?.productLabel).toBe("Retell text mode");
     expect(offered?.modality).toBe("chat");
     // The plug ships, so the catalog a form is drawn from says a run over
     // this kind is one Egma can actually conduct.
@@ -263,8 +263,8 @@ describe("a Retell playground connection, through the API", () => {
          from connection where id = $1`,
       [connectionId],
     );
-    expect(rows[0]?.connection_type).toBe("retell_playground");
-    expect(rows[0]?.access_variant).toBe("retell_playground.api_key");
+    expect(rows[0]?.connection_type).toBe("retell_text_mode");
+    expect(rows[0]?.access_variant).toBe("retell_text_mode.api_key");
     expect(rows[0]?.modality).toBe("chat");
     // Sealed: a read gives the last four characters and never the key.
     expect(rows[0]?.credentials_hint).toBe(SENTINEL_KEY.slice(-4));
@@ -272,14 +272,14 @@ describe("a Retell playground connection, through the API", () => {
 
   it("refuses a garbage modality and an unknown config key by name", async () => {
     const { fetchImpl } = retell();
-    api = await createApi("playground_refusals", { retellFetch: fetchImpl });
+    api = await createApi("text_mode_refusals", { retellFetch: fetchImpl });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
     const nonsense = await ask(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",
       name: "Front desk",
-      connection: { ...PLAYGROUND, modality: "telepathy" },
+      connection: { ...TEXT_MODE, modality: "telepathy" },
     });
     expect(nonsense.statusCode).toBeGreaterThanOrEqual(400);
     expect(String(nonsense.body.message)).toMatch(/telepathy/u);
@@ -288,7 +288,7 @@ describe("a Retell playground connection, through the API", () => {
       agentPlatform: "retell",
       name: "Front desk two",
       connection: {
-        ...PLAYGROUND,
+        ...TEXT_MODE,
         config: { retellAgentId: PLATFORM_AGENT, retellAgentID: "typo" },
       },
     });
@@ -298,7 +298,7 @@ describe("a Retell playground connection, through the API", () => {
   });
 });
 
-describe("registering a playground connection against a named Retell agent", () => {
+describe("registering a text-mode connection against a named Retell agent", () => {
   /** The registration a connect flow makes: the agent named, the key pasted. */
   async function register(
     label: string,
@@ -311,12 +311,12 @@ describe("registering a playground connection against a named Retell agent", () 
     return ask(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",
       name: "Front desk",
-      connection: { ...PLAYGROUND, platformAgentId: PLATFORM_AGENT },
+      connection: { ...TEXT_MODE, platformAgentId: PLATFORM_AGENT },
     });
   }
 
   it("confirms a voice agent and keeps the key on the connection", async () => {
-    const registered = await register("playground_confirm_voice", {
+    const registered = await register("text_mode_confirm_voice", {
       channel: "voice",
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -325,8 +325,8 @@ describe("registering a playground connection against a named Retell agent", () 
       productLabel: string;
       credentialsHint: string;
     };
-    expect(connection.connectionType).toBe("retell_playground");
-    expect(connection.productLabel).toBe("Retell playground");
+    expect(connection.connectionType).toBe("retell_text_mode");
+    expect(connection.productLabel).toBe("Retell text mode");
     // Every exchange this connection conducts needs the key, so it keeps one.
     expect(connection.credentialsHint).toBe(SENTINEL_KEY.slice(-4));
   });
@@ -336,7 +336,7 @@ describe("registering a playground connection against a named Retell agent", () 
     // read — and it is read on the creation path as well as at run start, so
     // a developer whose agent this lane cannot reach hears about it while they
     // are registering rather than when a suite refuses to start.
-    const refused = await register("playground_confirm_custom_llm", {
+    const refused = await register("text_mode_confirm_custom_llm", {
       channel: "voice",
       engine: { type: "custom-llm", llm_websocket_url: "wss://acme.example/llm" },
     });
@@ -348,7 +348,7 @@ describe("registering a playground connection against a named Retell agent", () 
   });
 
   it("refuses a chat agent, which has its own door", async () => {
-    const refused = await register("playground_confirm_chat_agent", {
+    const refused = await register("text_mode_confirm_chat_agent", {
       channel: "chat",
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
@@ -361,20 +361,20 @@ describe("one Retell agent through both a text and a voice door, on the web's fr
    * The web connect flow registers a fresh agent by POSTing a plain
    * registration — it has no name-clash fallback of its own, unlike the CLI. So
    * the server is what has to land the other modality on the first door's agent.
-   * Both the playground (chat) and the web call (voice) key on the vendor agent
+   * Both text mode (chat) and the web call (voice) key on the vendor agent
    * id, so it does: a connection added, never a twin, in either order.
    */
   async function bothDoors(
     label: string,
-    firstDoor: typeof PLAYGROUND | typeof WEB_CALL,
-    secondDoor: typeof PLAYGROUND | typeof WEB_CALL,
+    firstDoor: typeof TEXT_MODE | typeof WEB_CALL,
+    secondDoor: typeof TEXT_MODE | typeof WEB_CALL,
   ): Promise<void> {
     const { fetchImpl } = retell({ channel: "voice" });
     api = await createApi(label, { retellFetch: fetchImpl });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const post = (door: typeof PLAYGROUND | typeof WEB_CALL) =>
+    const post = (door: typeof TEXT_MODE | typeof WEB_CALL) =>
       ask(api.app, "POST", "/v1/agents", key, {
         agentPlatform: "retell",
         name: "Front desk",
@@ -401,19 +401,19 @@ describe("one Retell agent through both a text and a voice door, on the web's fr
     expect(JSON.stringify(second.body)).not.toContain(SENTINEL_KEY);
   }
 
-  it("attaches the web call after the playground, on one egma agent", async () => {
-    await bothDoors("web_playground_then_webcall", PLAYGROUND, WEB_CALL);
+  it("attaches the web call after text mode, on one egma agent", async () => {
+    await bothDoors("web_text_mode_then_webcall", TEXT_MODE, WEB_CALL);
   });
 
-  it("attaches the playground after the web call, on one egma agent", async () => {
-    await bothDoors("web_webcall_then_playground", WEB_CALL, PLAYGROUND);
+  it("attaches text mode after the web call, on one egma agent", async () => {
+    await bothDoors("web_webcall_then_text_mode", WEB_CALL, TEXT_MODE);
   });
 });
 
 describe("the run-start read", () => {
   it("resolves the serving version and classes that version's tools", async () => {
     const { fetchImpl, asked } = retell();
-    const read = await readPlaygroundWorld(
+    const read = await readTextModeWorld(
       { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
       fetchImpl,
     );
@@ -448,7 +448,7 @@ describe("the run-start read", () => {
     const { fetchImpl } = retell({
       engine: { type: "custom-llm", llm_websocket_url: "wss://acme.example/llm" },
     });
-    const read = await readPlaygroundWorld(
+    const read = await readTextModeWorld(
       { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
       fetchImpl,
     );
@@ -468,7 +468,7 @@ describe("the run-start read", () => {
       { engineStatus: 503 },
     ] as const) {
       const { fetchImpl } = retell(plan);
-      const read = await readPlaygroundWorld(
+      const read = await readTextModeWorld(
         { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
         fetchImpl,
       );
@@ -487,7 +487,7 @@ describe("the run-start read", () => {
       [{ engineStatus: 404 }, /would not give up that version's tools/u],
     ] as const) {
       const { fetchImpl } = retell(plan);
-      const read = await readPlaygroundWorld(
+      const read = await readTextModeWorld(
         { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
         fetchImpl,
       );
@@ -498,11 +498,11 @@ describe("the run-start read", () => {
   });
 });
 
-describe("a run over a Retell playground connection", () => {
+describe("a run over a Retell text mode connection", () => {
   it("reads the world before anything is written, and fails the run when it cannot", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "playground_run_unread",
-      PLAYGROUND,
+      "text_mode_run_unread",
+      TEXT_MODE,
       { engineStatus: 503 },
     );
 
@@ -530,8 +530,8 @@ describe("a run over a Retell playground connection", () => {
 
   it("fails the run loudly when the agent's brain is a custom LLM", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "playground_run_custom_llm",
-      PLAYGROUND,
+      "text_mode_run_custom_llm",
+      TEXT_MODE,
       { engine: { type: "custom-llm", llm_websocket_url: "wss://acme.example/llm" } },
     );
 
@@ -553,8 +553,8 @@ describe("a run over a Retell playground connection", () => {
 
   it("stamps the version it resolved, on the run and on every conversation", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "playground_run_stamp",
-      PLAYGROUND,
+      "text_mode_run_stamp",
+      TEXT_MODE,
     );
 
     const started = await ask(api.app, "POST", "/v1/runs", key, {
@@ -636,8 +636,8 @@ describe("the sentinel Retell key", () => {
     for (const plan of [{}, { agentStatus: 401 }, { engineStatus: 503 }]) {
       const { key, agentId, connectionId, suiteId, logs, asked } =
         await aCustomerReadyToRun(
-          `playground_sentinel_${Object.keys(plan)[0] ?? "happy"}`,
-          PLAYGROUND,
+          `text_mode_sentinel_${Object.keys(plan)[0] ?? "happy"}`,
+          TEXT_MODE,
           plan,
         );
 
@@ -675,7 +675,7 @@ describe("the sentinel Retell key", () => {
 describe("the version a run resolved, on the record", () => {
   it("lands on the run and on every conversation of it", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_stamp_grain", RETELL_CHAT);
+      await aCustomerReadyToRun("text_mode_stamp_grain", RETELL_CHAT);
 
     const started = await startRun(contextFor(ada, "member"), {
       suiteId,
@@ -724,8 +724,8 @@ describe("the version a run resolved, on the record", () => {
     // to — a refusal, rather than a run conducted against a world nobody
     // looked at, carrying a coverage stamp nobody checked.
     const { ada, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "playground_unread_world_refused",
-      PLAYGROUND,
+      "text_mode_unread_world_refused",
+      TEXT_MODE,
     );
 
     await expect(
@@ -745,7 +745,7 @@ describe("the version a run resolved, on the record", () => {
 
   it("is absent on a run that pinned none", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_stamp_absent", RETELL_CHAT);
+      await aCustomerReadyToRun("text_mode_stamp_absent", RETELL_CHAT);
 
     const started = await startRun(contextFor(ada, "member"), {
       suiteId,
@@ -768,7 +768,7 @@ describe("the version a run resolved, on the record", () => {
     // read the reach's stamp, land an edit, then start the run with the stamp
     // the world was read at.
     const { ada, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_connection_raced", PLAYGROUND);
+      await aCustomerReadyToRun("text_mode_connection_raced", TEXT_MODE);
     const who = contextFor(ada, "member");
 
     const reach = await resolveRunStartReach(who, agentId, connectionId);
@@ -813,7 +813,7 @@ describe("the version a run resolved, on the record", () => {
     // clock cannot tell from no edit at all. The fingerprint is over the
     // config and the sealed key, so it catches it regardless.
     const { ada, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_connection_same_ms", PLAYGROUND);
+      await aCustomerReadyToRun("text_mode_connection_same_ms", TEXT_MODE);
     const who = contextFor(ada, "member");
 
     const [before] = (
@@ -860,7 +860,7 @@ describe("the version a run resolved, on the record", () => {
     // equals the connection under the lock, so the world and the target agree
     // and the run is written.
     const { ada, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_connection_still", PLAYGROUND);
+      await aCustomerReadyToRun("text_mode_connection_still", TEXT_MODE);
     const who = contextFor(ada, "member");
 
     const reach = await resolveRunStartReach(who, agentId, connectionId);
@@ -883,7 +883,7 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
   it("is built from the version Egma read, and tolerates a plug with no provider reference", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun(
-        "playground_stamp_coverage",
+        "text_mode_stamp_coverage",
         RETELL_CHAT,
         {},
         true,
@@ -938,7 +938,7 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
     ).toBe(200);
 
     // The plug reports no stamp of its own and **no provider reference**: the
-    // playground stores nothing on Retell's side, so there is no id to hold the
+    // text mode stores nothing on Retell's side, so there is no id to hold the
     // exchange by, and everything downstream has to take that as an answer
     // rather than as a missing field.
     const landed = await post([
@@ -982,8 +982,8 @@ describe("the coverage stamp a version-pinned run puts on its record", () => {
 describe("the work order a version-pinned run hands over", () => {
   it("carries the version, this simulation's variables, and only the answers it may serve", async () => {
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "playground_claim",
-      PLAYGROUND,
+      "text_mode_claim",
+      TEXT_MODE,
     );
 
     // One answer per class of tool the agent has. Only the first is a name
@@ -1026,8 +1026,8 @@ describe("the work order a version-pinned run hands over", () => {
     // The connection block the plug reads, exactly as it expects it.
     expect(spec.connection).toEqual({
       agent_platform: "retell",
-      connection_type: "retell_playground",
-      access_variant: "retell_playground.api_key",
+      connection_type: "retell_text_mode",
+      access_variant: "retell_text_mode.api_key",
       config: { retellAgentId: PLATFORM_AGENT },
       credentials: { apiKey: SENTINEL_KEY },
     });
@@ -1067,7 +1067,7 @@ describe("the work order a version-pinned run hands over", () => {
 
   it("serves what the run resolved, unfiltered, on a lane that pinned nothing", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("playground_claim_unpinned", RETELL_CHAT);
+      await aCustomerReadyToRun("text_mode_claim_unpinned", RETELL_CHAT);
 
     const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
       tool: "transfer_to_front_desk",

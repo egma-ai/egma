@@ -44,14 +44,14 @@ touching the others:
   the call itself — against a named version of the agent, with this
   simulation's variables attached — and Retell answers with a way into a
   LiveKit room, so the plug creates and the room media joins.
-  `retell_playground` reaches the same Retell *voice* agent in **text**:
+  `retell_text_mode` reaches the same Retell *voice* agent in **text**:
   it speaks Retell's agent-playground completion API, which keeps nothing
   between requests, so every request carries the whole history, the
   version by name, this simulation's variables, egma's own answers as
   native mocks, and where the engine had got to. It is the one plug that
   puts egma in the agent's tool path without standing between the two —
   the platform serves egma's answers itself — and the one lane with no
-  provider reference to offer, because the playground stores nothing. To
+  provider reference to offer, because text mode stores nothing. To
   write the next, read the `plugs/__init__.py` docstring; it is the
   entire brief.
 - **The media backends** (`media/`) — how a voice exchange's audio
@@ -390,7 +390,7 @@ protocol needs no account, no key and no network — failure paths included,
 where a refused key and an endpoint nobody answers each end the simulation
 `failed` with an honest reason and no leaked secret.
 
-The `retell_playground` plug converses with `tests/playground_stub.py`: a
+The `retell_text_mode` plug converses with `tests/text_mode_stub.py`: a
 real local HTTP server shaped like the completion API, which matches and
 serves the mocks each request carries the way the platform does — so a
 plug that forgot to send them would see real answers come back, and the
@@ -400,7 +400,7 @@ was really given Egma's own answer.
 Every wire field name that Retell's documentation was not in reach for is
 marked a guess in the plug's docstring. Correcting one after a live run
 means editing **three** places, listed here so none is missed: the plug,
-the stub, and `tests/test_plug_retell_playground.py`, which names several
+the stub, and `tests/test_plug_retell_text_mode.py`, which names several
 of the fields in its assertions. The stub deliberately does not import
 the plug's constants — a counterpart that took its wire from the thing it
 is testing would agree with a mistake instead of catching it.
@@ -526,7 +526,7 @@ src/egma_simulator/
                   an exchange in the agent's own room,
                   retell_web_call.py creates a Retell web call and
                   conducts it in the room that call opens, and
-                  retell_playground.py conducts a Retell voice agent in
+                  retell_text_mode.py conducts a Retell voice agent in
                   text, with no call and no audio anywhere.
   media/          The media-backend seam: how a voice exchange's Pipecat
                   transport is created. Its __init__ docstring is the

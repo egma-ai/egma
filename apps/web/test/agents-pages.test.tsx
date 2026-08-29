@@ -253,11 +253,11 @@ const TYPES = {
     {
       agentPlatform: "retell",
       agentPlatformLabel: "Retell",
-      connectionType: "retell_playground",
-      accessVariant: "retell_playground.api_key",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
       accessVariantLabel: "Retell API key",
       modality: "chat",
-      productLabel: "Retell playground",
+      productLabel: "Retell text mode",
       topology: "hosted-broker",
       simulatorAdapter: true,
       fields: [
@@ -1692,8 +1692,8 @@ describe("goal-first agent setup", () => {
     });
   });
 
-  /** A voice agent as discovery now describes one, playground door and all. */
-  const voiceWithPlayground = {
+  /** A voice agent as discovery now describes one, text mode door and all. */
+  const voiceWithTextMode = {
     agents: [
       {
         platformAgentId: "agent_voice_1",
@@ -1702,10 +1702,10 @@ describe("goal-first agent setup", () => {
         connectionCandidates: [
           {
             agentPlatform: "retell",
-            connectionType: "retell_playground",
-            accessVariant: "retell_playground.api_key",
+            connectionType: "retell_text_mode",
+            accessVariant: "retell_text_mode.api_key",
             modality: "chat",
-            productLabel: "Retell playground",
+            productLabel: "Retell text mode",
             config: { retellAgentId: "agent_voice_1" },
           },
           {
@@ -1729,9 +1729,9 @@ describe("goal-first agent setup", () => {
     ],
   };
 
-  it("leads a Simulation voice agent with the modality question, and chat mints the playground", async () => {
+  it("leads a Simulation voice agent with the modality question, and chat mints text mode", async () => {
     sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: voiceWithPlayground },
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
         {
@@ -1739,7 +1739,7 @@ describe("goal-first agent setup", () => {
           body: {
             result: "created",
             agent: { ...AGENT, name: "Front desk", platformAgentId: "agent_voice_1" },
-            connection: { ...CONNECTION, connectionType: "retell_playground" },
+            connection: { ...CONNECTION, connectionType: "retell_text_mode" },
           },
         },
         { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
@@ -1770,15 +1770,15 @@ describe("goal-first agent setup", () => {
     const registration = sent.find(
       (call) => call.url === "/v1/agents?projectId=prj_1",
     );
-    // Choosing text mints the playground with the same key, against the voice
+    // Choosing text mints text mode with the same key, against the voice
     // agent it conducts in text.
     expect(registration?.body).toEqual({
       name: "Front desk",
       agentPlatform: "retell",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_playground",
-        accessVariant: "retell_playground.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_voice_1" },
         platformAgentId: "agent_voice_1",
@@ -1789,7 +1789,7 @@ describe("goal-first agent setup", () => {
 
   it("takes a Simulation voice agent to the phone picker when voice is chosen", async () => {
     sheetAnswers({
-      "/v1/agents:discover": { status: 200, body: voiceWithPlayground },
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
         {

@@ -121,7 +121,7 @@ export async function platformApiRoutes(
     carrierRoute: options.carrierRoute,
     // The one Retell seam the run start needs, for both lanes that reach the
     // platform at creation: the draft lane's mocked-world build (the tick), and
-    // the playground lane's version-pinning run-start read. Same test seam the
+    // the text-mode lane's version-pinning run-start read. Same test seam the
     // two provider groups above take.
     ...(options.retellFetch === undefined
       ? {}

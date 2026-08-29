@@ -1,5 +1,5 @@
 {
-  "id": "eea5ecf8-f017-4fcb-a5a4-6ccb0212d110",
+  "id": "761e3f99-9aaf-40a2-9dcb-c3da42ff1e15",
   "prevId": "1eef6403-b42a-47f7-a1c9-4d7a44eb8d28",
   "version": "7",
   "dialect": "postgresql",
@@ -1761,13 +1761,6 @@
           "notNull": true,
           "default": false
         },
-        "mock_tools_during_simulations": {
-          "name": "mock_tools_during_simulations",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "archived_at": {
           "name": "archived_at",
           "type": "timestamp with time zone",
@@ -1944,10 +1937,6 @@
         "agent_pull_needs_binding": {
           "name": "agent_pull_needs_binding",
           "value": "\"agent\".\"pull_production_calls\" = false or (\"agent\".\"agent_platform\" is not null and \"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
-        },
-        "agent_mock_tools_need_platform_key": {
-          "name": "agent_mock_tools_need_platform_key",
-          "value": "\"agent\".\"mock_tools_during_simulations\" = false or (\"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -2191,11 +2180,11 @@
         },
         "connection_type_allowed": {
           "name": "connection_type_allowed",
-          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'retell_web_call', 'phone_number', 'livekit_room')"
+          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'retell_text_mode', 'retell_web_call', 'phone_number', 'livekit_room')"
         },
         "connection_access_variant_allowed": {
           "name": "connection_access_variant_allowed",
-          "value": "\"connection\".\"access_variant\" in ('retell_chat_api.api_key', 'retell_web_call.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint')"
+          "value": "\"connection\".\"access_variant\" in ('retell_chat_api.api_key', 'retell_text_mode.api_key', 'retell_web_call.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint')"
         },
         "connection_modality_allowed": {
           "name": "connection_modality_allowed",
@@ -4027,12 +4016,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "mocked_world": {
-          "name": "mocked_world",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
         },
         "expected_simulation_count": {
           "name": "expected_simulation_count",

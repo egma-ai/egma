@@ -9,7 +9,7 @@ import {
 } from "@egma/retell";
 
 /**
- * What a run over a Retell playground connection reads before it starts.
+ * What a run over a Retell text mode connection reads before it starts.
  *
  * Two reads and no writes, in this order and for these reasons:
  *
@@ -101,7 +101,7 @@ function unavailable(what: string): PlatformWorldRead {
  * sentence below is written from Egma's own words rather than from Retell's
  * answer body.
  */
-export async function readPlaygroundWorld(
+export async function readTextModeWorld(
   input: {
     readonly apiKey: string;
     readonly agentId: string;
@@ -116,7 +116,7 @@ export async function readPlaygroundWorld(
     return {
       kind: "refused",
       message:
-        "This Retell playground connection names no agent, so there is " +
+        "This Retell text mode connection names no agent, so there is " +
         "nothing to conduct against. Register the connection again with the " +
         "agent's own identifier from Retell.",
     };

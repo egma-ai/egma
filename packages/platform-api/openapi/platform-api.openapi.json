@@ -118,7 +118,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
-                                    "retell_playground",
+                                    "retell_text_mode",
                                     "retell_web_call",
                                     "phone_number"
                                   ]
@@ -127,7 +127,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
-                                    "retell_playground.api_key",
+                                    "retell_text_mode.api_key",
                                     "retell_web_call.api_key",
                                     "phone_number.public_e164"
                                   ]
@@ -300,7 +300,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
-                              "retell_playground",
+                              "retell_text_mode",
                               "retell_web_call",
                               "phone_number",
                               "livekit_room"
@@ -310,7 +310,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
-                              "retell_playground.api_key",
+                              "retell_text_mode.api_key",
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
@@ -555,7 +555,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api",
-                          "retell_playground",
+                          "retell_text_mode",
                           "retell_web_call",
                           "phone_number",
                           "livekit_room"
@@ -565,7 +565,7 @@
                         "type": "string",
                         "enum": [
                           "retell_chat_api.api_key",
-                          "retell_playground.api_key",
+                          "retell_text_mode.api_key",
                           "retell_web_call.api_key",
                           "phone_number.public_e164",
                           "livekit_room.project_credentials",
@@ -807,7 +807,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -817,7 +817,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -1091,7 +1091,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -1101,7 +1101,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -1502,7 +1502,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
-                                    "retell_playground",
+                                    "retell_text_mode",
                                     "retell_web_call",
                                     "phone_number",
                                     "livekit_room"
@@ -1512,7 +1512,7 @@
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api.api_key",
-                                    "retell_playground.api_key",
+                                    "retell_text_mode.api_key",
                                     "retell_web_call.api_key",
                                     "phone_number.public_e164",
                                     "livekit_room.project_credentials",
@@ -1921,7 +1921,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
-                              "retell_playground",
+                              "retell_text_mode",
                               "retell_web_call",
                               "phone_number",
                               "livekit_room"
@@ -1931,7 +1931,7 @@
                             "type": "string",
                             "enum": [
                               "retell_chat_api.api_key",
-                              "retell_playground.api_key",
+                              "retell_text_mode.api_key",
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
@@ -2453,7 +2453,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api",
-                      "retell_playground",
+                      "retell_text_mode",
                       "retell_web_call",
                       "phone_number",
                       "livekit_room"
@@ -2463,7 +2463,7 @@
                     "type": "string",
                     "enum": [
                       "retell_chat_api.api_key",
-                      "retell_playground.api_key",
+                      "retell_text_mode.api_key",
                       "retell_web_call.api_key",
                       "phone_number.public_e164",
                       "livekit_room.project_credentials",
@@ -2571,7 +2571,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -2581,7 +2581,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -3756,7 +3756,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -3766,7 +3766,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -4049,7 +4049,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -4059,7 +4059,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -4352,7 +4352,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -4362,7 +4362,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
@@ -4697,7 +4697,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
-                            "retell_playground",
+                            "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
                             "livekit_room"
@@ -4707,7 +4707,7 @@
                           "type": "string",
                           "enum": [
                             "retell_chat_api.api_key",
-                            "retell_playground.api_key",
+                            "retell_text_mode.api_key",
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",

@@ -67,7 +67,7 @@ nine keyword arguments:
   the agent's tool path** has any use for it, and there are two ways to be
   in it. A plug can *stand* in the path — the room does: it offers the
   exchange to whoever is in the room with it and says so. Or it can *hand
-  the answers over* to a platform that serves them itself — the playground
+  the answers over* to a platform that serves them itself — text mode
   does: they ride every request, and the platform matches them by name. In
   both cases the saying-so is what puts a coverage stamp on the record, and
   every tool call the plug learns of goes to the seam, which is the only
@@ -434,7 +434,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
-    from .retell_playground import RetellPlayground
+    from .retell_text_mode import RetellTextMode
     from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
 
@@ -443,7 +443,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,
-        "retell_playground": RetellPlayground,
+        "retell_text_mode": RetellTextMode,
         "retell_web_call": RetellWebCall,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

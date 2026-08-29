@@ -165,7 +165,7 @@ describe("discovering simulation agents", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("returns normalized playground, web-call, chat and phone candidates, never provider data or the key", async () => {
+  it("returns normalized text mode, web-call, chat and phone candidates, never provider data or the key", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
@@ -236,16 +236,16 @@ describe("discovering simulation agents", () => {
           name: "Front desk",
           modality: "voice",
           connectionCandidates: [
-            // The playground first: the chat door a voice agent otherwise has
+            // Text mode first: the chat door a voice agent otherwise has
             // none of. It is offered for every voice agent — whether its engine
-            // is one the playground can reach is answered when the connection is
+            // is one text mode can reach is answered when the connection is
             // confirmed, not from a listing.
             {
               agentPlatform: "retell",
-              connectionType: "retell_playground",
-              accessVariant: "retell_playground.api_key",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
               modality: "chat",
-              productLabel: "Retell playground",
+              productLabel: "Retell text mode",
               config: { retellAgentId: "agent_voice_1" },
             },
             // The web call is offered whether or not the agent has a number:
@@ -289,14 +289,14 @@ describe("discovering simulation agents", () => {
           name: "Not routed",
           modality: "voice",
           // A voice agent nobody has routed a number to is still reachable:
-          // over the playground in text, and over a web call Egma opens.
+          // over text mode in text, and over a web call Egma opens.
           connectionCandidates: [
             {
               agentPlatform: "retell",
-              connectionType: "retell_playground",
-              accessVariant: "retell_playground.api_key",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
               modality: "chat",
-              productLabel: "Retell playground",
+              productLabel: "Retell text mode",
               config: { retellAgentId: "agent_voice_without_number" },
             },
             {
@@ -1345,7 +1345,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type Egma knows; expected one of retell_chat_api, retell_playground, retell_web_call, phone_number, livekit_room',
+        '"vapi" is not a connection type Egma knows; expected one of retell_chat_api, retell_text_mode, retell_web_call, phone_number, livekit_room',
     });
     expect(await agentRowCount()).toBe(0);
   });

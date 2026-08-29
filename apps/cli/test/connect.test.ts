@@ -21,7 +21,7 @@ import {
   KEY_ASK_LINE,
   CUSTODY_LINE,
   NO_AGENTS_LINE,
-  PLAYGROUND_REFUSES_CUSTOM_LLM,
+  TEXT_MODE_REFUSES_CUSTOM_LLM,
 } from "../src/retell/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
@@ -346,9 +346,9 @@ describe("one agent, and several", () => {
     expect(connected?.config.prompt).toBeNull();
   });
 
-  it("makes a text connection a playground one for a Retell voice agent", async () => {
+  it("makes a text connection text mode one for a Retell voice agent", async () => {
     // agent_0002 is a voice agent on a Retell LLM, so text is a chat simulation
-    // over the playground rather than the phone. The refusal that used to stand
+    // over text mode rather than the phone. The refusal that used to stand
     // here retired with this lane.
     retell = await startFakeRetell(THREE_AGENTS);
 
@@ -357,20 +357,20 @@ describe("one agent, and several", () => {
     expect(connected?.reach).toBe("text");
     expect(connected?.config.modality).toBe("voice");
     const [connection] = platform.registered.connections;
-    expect(connection?.connectionType).toBe("retell_playground");
-    expect(connection?.accessVariant).toBe("retell_playground.api_key");
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
     // A chat simulation of a voice agent: the connection speaks chat, and it
     // names the voice agent it conducts against.
     expect(connection?.modality).toBe("chat");
     expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
-    expect(connection?.productLabel).toBe("Retell playground");
-    // The key conducts every playground exchange, so it is sealed on the
+    expect(connection?.productLabel).toBe("Retell text mode");
+    // The key conducts every text-mode exchange, so it is sealed on the
     // connection exactly as the chat API's is.
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
   });
 
   it("refuses text for a voice agent whose engine is a custom LLM, at the door", async () => {
-    // The playground reaches an agent's words and tools through Retell, and a
+    // Text mode reaches an agent's words and tools through Retell, and a
     // custom LLM keeps both on the customer's own socket. So the choice is
     // refused with its reason, before anything is written, and phone is named
     // as the door that does reach it.
@@ -381,16 +381,16 @@ describe("one agent, and several", () => {
     expect(refused.connected).toBeNull();
     expect(refused.report).toEqual({
       kind: "failed",
-      reason: PLAYGROUND_REFUSES_CUSTOM_LLM,
+      reason: TEXT_MODE_REFUSES_CUSTOM_LLM,
     });
-    expect(PLAYGROUND_REFUSES_CUSTOM_LLM).toContain("custom LLM");
-    expect(PLAYGROUND_REFUSES_CUSTOM_LLM).toContain("--reach phone");
+    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("custom LLM");
+    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("--reach phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });
 
   it("still conducts a custom-LLM voice agent over the phone, which reaches it", async () => {
-    // The refusal is the playground's alone: a phone connection dials the
+    // The refusal is text mode's alone: a phone connection dials the
     // agent the way its callers do, whatever engine answers behind the line.
     retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
 
@@ -626,13 +626,13 @@ describe("one agent, two connections", () => {
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
     expect(text.connected?.registered.agent.id).toBe(phone.connected?.registered.agent.id);
 
-    // The phone was written first; the playground was added to the same agent.
+    // The phone was written first; text mode was added to the same agent.
     expect(phone.connected?.registration).toEqual({ agent: "created", connection: "created" });
     expect(text.connected?.registration).toEqual({ agent: "reused", connection: "created" });
     expect(text.connected?.registered.result).toBe("connection_added");
 
     const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
-    expect(kinds).toEqual(["phone_number", "retell_playground"]);
+    expect(kinds).toEqual(["phone_number", "retell_text_mode"]);
   });
 
   it("attaches phone after text to the one agent, never a twin", async () => {
@@ -647,18 +647,18 @@ describe("one agent, two connections", () => {
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
     expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
 
-    // The playground was written first; the phone was added to the same agent.
+    // Text mode was written first; the phone was added to the same agent.
     expect(text.connected?.registration).toEqual({ agent: "created", connection: "created" });
     expect(phone.connected?.registration).toEqual({ agent: "reused", connection: "created" });
     expect(phone.connected?.registered.result).toBe("connection_added");
 
     const kinds = platform.registered.connections.map((one) => one.connectionType).sort();
-    expect(kinds).toEqual(["phone_number", "retell_playground"]);
+    expect(kinds).toEqual(["phone_number", "retell_text_mode"]);
   });
 
-  it("reuses the playground connection when the same modality is registered twice", async () => {
+  it("reuses the text-mode connection when the same modality is registered twice", async () => {
     // Registering text twice is one connection, rotated: the within-type reuse
-    // rule the platform already keeps, now for the playground too.
+    // rule the platform already keeps, now for text mode too.
     retell = await startFakeRetell({ ...ONE_VOICE_AGENT, keys: [KEY, OTHER_KEY] });
 
     const first = await run({ keys: [KEY], reach: "text" });
@@ -667,7 +667,7 @@ describe("one agent, two connections", () => {
     expect(first.connected?.registered.result).toBe("created");
     expect(second.connected?.registered.result).toBe("reused");
     expect(platform.registered.connections).toHaveLength(1);
-    expect(platform.registered.connections[0]?.connectionType).toBe("retell_playground");
+    expect(platform.registered.connections[0]?.connectionType).toBe("retell_text_mode");
     // The key it was just given replaces the old one whole.
     expect(platform.registered.connections[0]?.credentialsHint).toBe(OTHER_KEY.slice(-4));
   });

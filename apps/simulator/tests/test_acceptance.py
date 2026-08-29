@@ -36,7 +36,7 @@ from conftest import (
     measures_for,
     milliseconds_of,
     phone_spec,
-    playground_spec,
+    text_mode_spec,
     retell_spec,
     scripted_spec,
     span_attribute,
@@ -45,7 +45,7 @@ from conftest import (
     terminal_event_for,
     turns_for,
 )
-from playground_stub import Reply, ToolTurn
+from text_mode_stub import Reply, ToolTurn
 
 from egma_simulator.model import GOODBYE
 from egma_simulator.recording import channels_of
@@ -748,20 +748,20 @@ async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
 
 
 async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
-    workbench, start_simulator, start_playground_stub
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The chat door for a Retell **voice** agent, black-box.
 
-    A spec carrying a playground connection block goes in, and what comes
+    A spec carrying a text-mode connection block goes in, and what comes
     back is a record with everything this lane promises on it: the turns,
     the transition the platform announced, one tool call marked ``mocked``
     because the run's snapshot covered its name and one carrying no stamp
     at all because it ran for real, a coverage stamp saying which was
-    which, no audio, and no provider reference — because the playground
+    which, no audio, and no provider reference — because text mode
     keeps no record of its own and an id only egma has seen is not a join.
     """
-    sentinel = "SENTINEL-playground-key-0d4f8b3e6a12"
-    running = await start_playground_stub(
+    sentinel = "SENTINEL-text-mode-key-0d4f8b3e6a12"
+    running = await start_text_mode_stub(
         api_key=sentinel,
         replies=[
             Reply(words="Lakeside Dental, how can I help?", node="greet"),
@@ -782,13 +782,13 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
             ),
         ],
     )
-    spec = playground_spec(
-        "sim-playground-001",
+    spec = text_mode_spec(
+        "sim-text-mode-001",
         base_url=running.base_url,
         api_key=sentinel,
         agent_id="agent_lakeside_voice",
         agent_version=106,
-        dynamic_variables={"egma_simulation": "sim-playground-001"},
+        dynamic_variables={"egma_simulation": "sim-text-mode-001"},
         scenario="I need to move my Tuesday cleaning to Thursday.",
         mock_tools=[
             {
@@ -801,12 +801,12 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     await workbench.offer(spec)
     simulator = start_simulator(workbench, log_level="DEBUG")
 
-    records = await workbench.wait_for(has_terminal("sim-playground-001"))
+    records = await workbench.wait_for(has_terminal("sim-text-mode-001"))
 
     # The transcript is what was said and only that — which is what makes
     # this record comparable with a voice record of the same scenario, and
     # what keeps the persona from answering a node transition.
-    assert turns_for(records, "sim-playground-001") == [
+    assert turns_for(records, "sim-text-mode-001") == [
         ("agent", "Lakeside Dental, how can I help?"),
         ("human", "I need to move my Tuesday cleaning to Thursday."),
         ("agent", "Thursday at half past two, then."),
@@ -816,7 +816,7 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # happened in: a node transition arrives in a role the record does not
     # know, and the rule for those is that they are preserved verbatim as
     # agent-side content rather than lost or spoken.
-    spans = [record["span"] for record in spans_for(records, "sim-playground-001")]
+    spans = [record["span"] for record in spans_for(records, "sim-text-mode-001")]
     agent_turns = [span for span in spans if span["name"] == "agent_turn"]
     assert [
         span_attribute(span, "egma.turn.platform_notes") for span in agent_turns
@@ -826,7 +826,7 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
         span_attribute(span, "egma.turn.platform_notes") for span in human_turns
     ] == [None]
 
-    terminal = terminal_event_for(records, "sim-playground-001")
+    terminal = terminal_event_for(records, "sim-text-mode-001")
     assert terminal["status"] == "completed"
     assert terminal["facts"]["ending"] == "agent_ended"
     # No audio exists anywhere on this lane, and the record says so.
@@ -871,8 +871,8 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
-async def test_a_playground_agent_that_ends_on_its_greeting_reads_back_that_way(
-    workbench, start_simulator, start_playground_stub
+async def test_a_text_mode_agent_that_ends_on_its_greeting_reads_back_that_way(
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The agent closing the exchange with its own opening line.
 
@@ -882,15 +882,15 @@ async def test_a_playground_agent_that_ends_on_its_greeting_reads_back_that_way(
     ending is the agent's own doing rather than whichever limit would have
     tripped later.
     """
-    sentinel = "SENTINEL-playground-key-closed-4a8d"
-    running = await start_playground_stub(
+    sentinel = "SENTINEL-text-mode-key-closed-4a8d"
+    running = await start_text_mode_stub(
         api_key=sentinel,
         replies=[
             Reply(words="We are closed today. Please call back tomorrow.", ends=True)
         ],
     )
-    spec = playground_spec(
-        "sim-playground-closed",
+    spec = text_mode_spec(
+        "sim-text-mode-closed",
         base_url=running.base_url,
         api_key=sentinel,
         scenario="I need to move my Tuesday cleaning to Thursday.",
@@ -898,12 +898,12 @@ async def test_a_playground_agent_that_ends_on_its_greeting_reads_back_that_way(
     await workbench.offer(spec)
     simulator = start_simulator(workbench, log_level="DEBUG")
 
-    records = await workbench.wait_for(has_terminal("sim-playground-closed"))
+    records = await workbench.wait_for(has_terminal("sim-text-mode-closed"))
 
-    assert turns_for(records, "sim-playground-closed") == [
+    assert turns_for(records, "sim-text-mode-closed") == [
         ("agent", "We are closed today. Please call back tomorrow."),
     ]
-    terminal = terminal_event_for(records, "sim-playground-closed")
+    terminal = terminal_event_for(records, "sim-text-mode-closed")
     assert terminal["status"] == "completed"
     assert terminal["facts"]["ending"] == "agent_ended"
     assert terminal["facts"]["turn_count"] == 1
@@ -915,8 +915,8 @@ async def test_a_playground_agent_that_ends_on_its_greeting_reads_back_that_way(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
-async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
-    workbench, start_simulator, start_playground_stub
+async def test_a_text_mode_exchange_the_agent_never_ends_hits_the_turn_limit(
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The limits keep their job on this lane, unchanged.
 
@@ -926,13 +926,13 @@ async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
     still made, because Egma's answers were in the platform's hands from
     the first request whether or not the agent ever called a tool.
     """
-    sentinel = "SENTINEL-playground-key-limits-2f9b"
-    running = await start_playground_stub(
+    sentinel = "SENTINEL-text-mode-key-limits-2f9b"
+    running = await start_text_mode_stub(
         api_key=sentinel,
         replies=[Reply(words="Lakeside Dental."), Reply(words="Go on.")],
     )
-    spec = playground_spec(
-        "sim-playground-limit",
+    spec = text_mode_spec(
+        "sim-text-mode-limit",
         base_url=running.base_url,
         api_key=sentinel,
         max_turns=3,
@@ -948,9 +948,9 @@ async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
     await workbench.offer(spec)
     simulator = start_simulator(workbench, log_level="DEBUG")
 
-    records = await workbench.wait_for(has_terminal("sim-playground-limit"))
+    records = await workbench.wait_for(has_terminal("sim-text-mode-limit"))
 
-    terminal = terminal_event_for(records, "sim-playground-limit")
+    terminal = terminal_event_for(records, "sim-text-mode-limit")
     assert terminal["status"] == "completed"
     assert terminal["facts"]["ending"] == "limit_reached"
     assert "turn limit" in terminal["reason"], terminal["reason"]
@@ -966,8 +966,8 @@ async def test_a_playground_exchange_the_agent_never_ends_hits_the_turn_limit(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
-async def test_a_playground_billing_wall_fails_loudly_and_says_nothing(
-    workbench, start_simulator, start_playground_stub
+async def test_a_text_mode_billing_wall_fails_loudly_and_says_nothing(
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The failing conduct, with the key the platform really accepted.
 
@@ -978,29 +978,29 @@ async def test_a_playground_billing_wall_fails_loudly_and_says_nothing(
     agent under test — and the key appears in none of the three places it
     could surface.
     """
-    sentinel = "SENTINEL-playground-key-billing-7c1a"
-    running = await start_playground_stub(
+    sentinel = "SENTINEL-text-mode-key-billing-7c1a"
+    running = await start_text_mode_stub(
         api_key=sentinel, refusals=(402,), echo_key_in_refusal=True
     )
-    spec = playground_spec(
-        "sim-playground-billing", base_url=running.base_url, api_key=sentinel
+    spec = text_mode_spec(
+        "sim-text-mode-billing", base_url=running.base_url, api_key=sentinel
     )
     await workbench.offer(spec)
     simulator = start_simulator(workbench, log_level="DEBUG")
 
-    records = await workbench.wait_for(has_terminal("sim-playground-billing"))
+    records = await workbench.wait_for(has_terminal("sim-text-mode-billing"))
 
-    assert status_events_for(records, "sim-playground-billing") == [
+    assert status_events_for(records, "sim-text-mode-billing") == [
         "running",
         "failed",
     ]
-    terminal = terminal_event_for(records, "sim-playground-billing")
+    terminal = terminal_event_for(records, "sim-text-mode-billing")
     assert terminal["facts"]["ending"] == "error"
     assert terminal["facts"]["turn_count"] == 0
     assert "402" in terminal["reason"], terminal["reason"]
     assert "billing" in terminal["reason"], terminal["reason"]
     # Nothing was conducted: no exchange happened off the record.
-    assert turns_for(records, "sim-playground-billing") == []
+    assert turns_for(records, "sim-text-mode-billing") == []
     # And Egma never stood in this agent's tool path, so it claims nothing
     # about its tools.
     assert terminal["facts"].get("mock_tool_coverage") is None

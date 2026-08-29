@@ -189,7 +189,7 @@ export function stepAfterLiveKitChat(plan: AgentSetupPlan): AgentSetupStep | nul
  * Where a chosen Retell agent leads.
  *
  * A chat agent has one door and goes straight to it. A voice agent has two —
- * chat over the playground, voice over a call — so when the goal is a
+ * chat over text mode, voice over a call — so when the goal is a
  * simulation the flow asks which before any plumbing: that is the modality
  * question, and it leads. Monitoring and Both need the voice connection for
  * production pull, so they keep going to the voice route without the question.

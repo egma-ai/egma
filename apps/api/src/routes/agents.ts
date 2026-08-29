@@ -799,12 +799,12 @@ async function confirmRetellAgent(
 
   const candidate = (() => {
     if (
-      wanted.connectionType === "retell_playground" &&
-      wanted.accessVariant === "retell_playground.api_key" &&
+      wanted.connectionType === "retell_text_mode" &&
+      wanted.accessVariant === "retell_text_mode.api_key" &&
       wanted.modality === "chat"
     ) {
       return {
-        connectionType: "retell_playground" as const,
+        connectionType: "retell_text_mode" as const,
         config: { retellAgentId: choice.platformAgentId },
       };
     }
@@ -847,7 +847,7 @@ async function confirmRetellAgent(
   })();
   if (candidate === undefined) {
     return invalid(
-      "a Retell connection is the chat API, the playground, a web call, or a " +
+      "a Retell connection is the chat API, text mode, a web call, or a " +
         "phone number, and a phone connection carries the number Egma dials in " +
         "config.phoneNumber",
     );
@@ -890,10 +890,10 @@ async function confirmRetellAgent(
       config: checked.candidate.config,
       // The kinds that conduct with a key of their own keep a copy on the
       // connection: every exchange they conduct needs it — the chat API, the
-      // playground, and the web call Egma opens itself. A phone connection
+      // text mode, and the web call Egma opens itself. A phone connection
       // dials with the deployment's carrier and holds none.
       ...(checked.candidate.connectionType === "retell_chat_api" ||
-      checked.candidate.connectionType === "retell_playground" ||
+      checked.candidate.connectionType === "retell_text_mode" ||
       checked.candidate.connectionType === "retell_web_call"
         ? { credentials: { apiKey } }
         : {}),

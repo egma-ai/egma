@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -178,46 +179,48 @@ export const run = pgTable(
      */
     mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
     /**
-     * The temporary world this run built on the agent's platform, or null when
-     * it built none — which is what most runs are.
+     * The serving version this run conducted against, resolved once at its
+     * start and named on every request from then on.
      *
-     * **Written for the teardown and for the sweep, not for the reader.** It
-     * holds the version the run branched from, the temporary version it minted,
-     * the engine that version runs on, and **every touched number's inbound
-     * bindings exactly as they were read** — so teardown puts a binding back
-     * rather than rebuilding one out of the two fields egma happened to look
-     * at, and a later sweep can finish what a crashed run left: delete the
-     * stray version, then restore the pin it recorded here.
+     * Retell's own default is "the newest version", and the newest version is
+     * exactly the one a concurrent edit has just made — so a suite that leaned
+     * on the default could be testing two different agents halfway through.
      *
-     * It also carries the three-class coverage stamp of the configuration the
-     * temporary version was built from, which is what lets a simulation say how
-     * isolated it really was without asking the platform again mid-run.
-     *
-     * Nullable, and null means one thing only: this run built no mocked world.
-     * An unmocked run and a mocked run whose world is still being built are
-     * told apart by the run's own status, not by a second empty shape here.
+     * Set on every text-mode and web-call run, mocked or not. Null on a phone
+     * run, where Egma names no version at all, and null on every lane whose
+     * platform has no versions to name.
      */
-    mockedWorld: jsonb("mocked_world"),
+    agentVersion: integer("agent_version"),
     /**
-     * The world this run **read** at its start and conducts against: the
-     * serving agent version it resolved once, the engine that version runs on,
-     * and the three-class coverage stamp of that version's tools.
+     * The temporary copy this run branched, where it branched one.
      *
-     * **The opposite record to `mocked_world` beside it.** That one exists so a
-     * teardown can put back what egma changed on somebody's platform. This one
-     * exists because egma changed nothing: on a lane where the mocked answers
-     * ride each request, there is no draft to sweep and no binding to restore,
-     * and the only thing worth remembering is what was read.
-     *
-     * It is therefore inside the header's freeze rather than carved out of it.
-     * The version is settled before the first simulation is claimed, and every
-     * request from then on names it — because the platform's own default is
-     * "the newest version", and the newest version is exactly the one a
-     * concurrent edit has just made.
-     *
-     * Nullable, and null means one thing: this run pinned no platform version.
+     * Null means no copy was made, which is what an unmocked run and every
+     * text-mode run are: text mode carries its answers on each request, so it
+     * writes nothing to the customer's account at all.
      */
-    conductedWorld: jsonb("conducted_world"),
+    tempMockAgentVersion: integer("temp_mock_agent_version"),
+    /**
+     * Whether the account has been put back: null when no copy was made, false
+     * while a cleanup is owed, true once the account is as it was found.
+     *
+     * **A real column rather than a key inside `mock_metadata` beside it**,
+     * because the claim searches by it. Before a run branches anything, one
+     * indexed query asks whether this agent has a run whose cleanup is still
+     * owed; that cleanup is finished first, inside the claim, or the new run is
+     * refused rather than branched.
+     */
+    tempMockAgentVersionCleanup: boolean("temp_mock_agent_version_cleanup"),
+    /**
+     * The put-it-back note, and nothing else: the serving engine capture the
+     * verify step compares against, and each touched number's binding verbatim.
+     *
+     * A number's entry is `{ number, was, pinned_to }` — where the binding
+     * pointed before Egma touched it, and the numeric version Egma pinned it
+     * to. A restore reads where the number points **now** and writes only where
+     * it still points at `pinned_to`, so a late retry of a failed teardown can
+     * never move a binding the customer has since changed.
+     */
+    mockMetadata: jsonb("mock_metadata"),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
@@ -316,6 +319,31 @@ export const run = pgTable(
     // when it arrives; the id-ordered pair above already serves every list.
     index("run_agent_id_idx").on(table.agentId),
     index("run_suite_id_idx").on(table.suiteId),
+    // A version is a whole number of versions, on both of the version columns.
+    check(
+      "run_agent_version_is_a_version",
+      sql`${table.agentVersion} is null or ${table.agentVersion} >= 0`,
+    ),
+    check(
+      "run_temp_mock_agent_version_is_a_version",
+      sql`${table.tempMockAgentVersion} is null
+        or ${table.tempMockAgentVersion} >= 0`,
+    ),
+    // A copy that was branched always carries a cleanup flag — owed or
+    // settled. The other direction is deliberately open: the flag is written
+    // the moment the run claims the account, which is before there is anything
+    // to clean up.
+    check(
+      "run_temp_mock_agent_version_owes_cleanup",
+      sql`${table.tempMockAgentVersion} is null
+        or ${table.tempMockAgentVersionCleanup} is not null`,
+    ),
+    // The claim's own query, and the only read the cleanup flag is for: which
+    // runs of this agent still owe the account a cleanup. Partial, because the
+    // answer is almost always none.
+    index("run_mock_tools_cleanup_owed_idx")
+      .on(table.organizationId, table.agentId)
+      .where(sql`${table.tempMockAgentVersionCleanup} = false`),
   ],
 );
 
@@ -426,25 +454,6 @@ export const simulation = pgTable(
      * came back.
      */
     mockToolCoverage: jsonb("mock_tool_coverage"),
-    /**
-     * Which version of the agent this one conversation was conducted against,
-     * as the platform numbers its versions.
-     *
-     * **Evidence pins at the evidence grain.** The run's header already holds
-     * the version it resolved, and that is not enough: a result is read at the
-     * simulation, a grader's reads start there, and a reader asking "what did
-     * this conversation actually test" must not have to fetch a second row to
-     * find out. Copied from the run's own resolved value in the same
-     * transaction that writes the row, so the two cannot disagree.
-     *
-     * Written at creation rather than at landing, unlike the terminal facts
-     * above it: the version is decided before anything is conducted, and a
-     * conversation that failed still says which version it failed against.
-     *
-     * Null means the lane pinned no version — every connection whose platform
-     * has no versions to name, and every row written before this column.
-     */
-    conductedAgentVersion: integer("conducted_agent_version"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -545,14 +554,6 @@ export const simulation = pgTable(
     check(
       "simulation_mock_tool_coverage_only_when_ended",
       sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
-    ),
-    // A version is a whole number of versions. No "only when ended" guard
-    // beside it, deliberately: unlike every terminal fact above, this one is
-    // known before the conversation starts and is written with the row.
-    check(
-      "simulation_conducted_agent_version_is_a_version",
-      sql`${table.conductedAgentVersion} is null
-        or ${table.conductedAgentVersion} >= 0`,
     ),
     // A chat has no audio, so its row refuses a recording.
     check(

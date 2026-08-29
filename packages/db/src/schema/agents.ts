@@ -53,7 +53,7 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 /** The direct paths Egma's simulator can select to reach an agent. */
 export const CONNECTION_TYPES = [
   "retell_chat_api",
-  "retell_playground",
+  "retell_text_mode",
   "retell_web_call",
   "phone_number",
   "livekit_room",
@@ -63,7 +63,7 @@ export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",
-  "retell_playground.api_key",
+  "retell_text_mode.api_key",
   "retell_web_call.api_key",
   "phone_number.public_e164",
   "livekit_room.project_credentials",
@@ -143,26 +143,6 @@ export const agent = pgTable(
       .notNull()
       .default(false),
     /**
-     * The tick: every simulation against this agent runs in a mocked world.
-     *
-     * **Standing consent, and that is why it is stored here rather than on a
-     * connection.** Ticking it says egma may create a temporary version of the
-     * agent at the start of each run, point its tools at egma, delete it at the
-     * end, and — where a number follows `latest` — pin that number to the
-     * version it already resolves to for the length of the run and put the
-     * binding back afterwards. Those are acts against the agent's platform
-     * record, which is where platform identity and the sealed platform key
-     * already live (ADR-0015); a connection could not consent to them.
-     *
-     * Off by default, and constrained: it can only be on when there is a
-     * platform agent to branch and a sealed key to branch it with. A tick with
-     * nothing behind it would be a box promising isolation that no run could
-     * keep.
-     */
-    mockToolsDuringSimulations: boolean("mock_tools_during_simulations")
-      .notNull()
-      .default(false),
-    /**
      * When this agent stopped being available for new work, or null while it
      * is. Archive rather than delete: past runs name it and stay readable, and
      * the whole of what Archive does is stop it entering anything new.
@@ -193,15 +173,6 @@ export const agent = pgTable(
     check(
       "agent_pull_needs_binding",
       sql`${table.pullProductionCalls} = false or (${table.agentPlatform} is not null and ${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
-    ),
-    // The same promise the pull switch is held to, for the same reason: the
-    // tick can only be on when there is a platform agent to branch a version
-    // of and a sealed key to branch it with. A ticked agent egma could not
-    // build a world for would be a run that failed at the start, or worse, one
-    // that quietly reached the real tools.
-    check(
-      "agent_mock_tools_need_platform_key",
-      sql`${table.mockToolsDuringSimulations} = false or (${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
     ),
     // The pairing, not each column on its own: an agent cannot name one
     // organization and another organization's project.
@@ -275,6 +246,26 @@ export const connection = pgTable(
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
+    /**
+     * The switch: a run over this connection is conducted with Egma's mock
+     * tools in front of the agent's own.
+     *
+     * **On the connection rather than on the agent**, because the lane is what
+     * decides whether a mocked run is a thing Egma can conduct at all. A text
+     * exchange and a web call are conversations Egma creates against a named
+     * agent version, so a temporary version is reachable; a phone call is the
+     * real carrier leg to the customer's published number, and Egma never
+     * dials it for a mocked run. One switch above all three would govern one of
+     * them and quietly misdescribe the other two.
+     *
+     * Off by default and checked: only a `retell_text_mode` or
+     * `retell_web_call` connection may hold true. A text connection is created
+     * with it on — that lane carries its answers on each request and writes
+     * nothing to the customer's account — and a web-call connection turns it on
+     * only through the consent screen, where the platform identity and the
+     * sealed key it needs are checked at write time.
+     */
+    mockToolsEnabled: boolean("mock_tools_enabled").notNull().default(false),
     /** When this connection stopped being reachable for new work, or null. */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -296,6 +287,14 @@ export const connection = pgTable(
     check(
       "connection_credentials_hint_agrees",
       sql`(${table.credentials} is null) = (${table.credentialsHint} is null)`,
+    ),
+    // The switch can only be on where a mocked run is a conversation Egma
+    // creates itself. A ticked phone connection would be a box promising
+    // isolation that no run over it could keep.
+    check(
+      "connection_mock_tools_lanes",
+      sql`${table.mockToolsEnabled} = false
+        or ${table.connectionType} in ('retell_text_mode', 'retell_web_call')`,
     ),
     foreignKey({
       name: "connection_project_organization_fk",

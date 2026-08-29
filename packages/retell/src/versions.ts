@@ -95,10 +95,10 @@ export type WroteEngineTools = { readonly kind: "written" } | RetellFailure;
 export type VersionReference = number | string;
 
 /**
- * Why the playground cannot reach a custom-LLM agent, in Retell's own absence.
+ * Why text mode cannot reach a custom-LLM agent, in Retell's own absence.
  *
  * Exported to the package because two flows now say it — the run-start read
- * that refuses a run over a playground connection whose engine turned out to
+ * that refuses a run over a text-mode connection whose engine turned out to
  * be a custom LLM, and the connect flows that refuse the same engine at the
  * door, at the moment they read it. One sentence in one place, so the two
  * cannot drift into two ideas of why the same agent is out of reach.

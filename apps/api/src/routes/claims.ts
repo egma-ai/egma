@@ -248,7 +248,7 @@ async function modelsBlock(
  *
  * - **the draft lane** hands the DRAFT version Egma branched, so the
  *   conversation reaches the mocked tools on the temporary version;
- * - **the playground lane** hands the RESOLVED serving version the run read
+ * - **the text-mode lane** hands the RESOLVED serving version the run read
  *   once at start, so every simulation of the run tests the one version a real
  *   caller reaches.
  *
@@ -558,7 +558,7 @@ async function assembledSpec(
 
   // The version this simulation is placed against and the variables it carries,
   // for whichever lane named a version — the draft lane's temporary version or
-  // the playground lane's resolved serving version, in one code path.
+  // the text-mode lane's resolved serving version, in one code path.
   const versionSpec = runVersionSpecOf(run, claim.id);
 
   const spec = {
@@ -586,11 +586,11 @@ async function assembledSpec(
     models,
     scenario: { instructions: testVersion.scenario },
     // The same walls the chat lane has always had, by modality and by nothing
-    // else. A playground exchange is a chat, so it gets the chat numbers.
+    // else. A text-mode exchange is a chat, so it gets the chat numbers.
     limits: SIMULATION_LIMITS[claim.modality],
     // `agent_version` and `dynamic_variables` are handed by `versionSpec` above,
     // one path for both lanes — the draft lane's temporary version and the
-    // playground lane's resolved serving version alike. They are not written a
+    // text-mode lane's resolved serving version alike. They are not written a
     // second time here.
     //
     // Left out entirely where the run mocks nothing, which is what most

@@ -1,5 +1,5 @@
 /**
- * The playground: one text exchange with a Retell **voice** agent, with no
+ * Text mode: one text exchange with a Retell **voice** agent, with no
  * call, no audio and nothing stored on Retell's side.
  *
  * Retell's own dashboard tests a voice agent in text through this API, and it
@@ -15,14 +15,14 @@
  * created — so a suite that leaned on the default could change what it is
  * testing between one simulation and the next.
  *
- * **Nothing here writes.** A playground request carries its mocked answers with
+ * **Nothing here writes.** A text-mode request carries its mocked answers with
  * it, so this lane creates no draft, pins nothing, and has nothing to sweep.
  *
  * ## The wire names live in one place, deliberately
  *
  * `WIRE` below is the whole of what this module claims about Retell's field
  * names, and **every one of them is the simulator plug's**
- * (`egma_simulator.plugs.retell_playground`). That plug is the code that
+ * (`egma_simulator.plugs.retell_text_mode`). That plug is the code that
  * actually conducts against Retell, so two modules in this repository
  * describing one third-party API differently would be a defect waiting for a
  * live run to expose: whichever of them the developer's run corrected, the
@@ -94,7 +94,7 @@ export const WIRE = {
  * something the agent did, and dropping it would leave a record claiming the
  * agent was silent when it was not.
  */
-export type PlaygroundMessage = {
+export type TextModeMessage = {
   readonly role: string;
   /** What was said, or `""` for a message that carried no words. */
   readonly content: string;
@@ -107,7 +107,7 @@ export type PlaygroundMessage = {
 };
 
 /** One turn of history, as a request carries it. */
-export type PlaygroundTurn = {
+export type TextModeTurn = {
   readonly role: string;
   readonly content: string;
 };
@@ -124,7 +124,7 @@ export type PlaygroundTurn = {
  * serving it and says which branch happened in its own words. One shape all
  * the way here means nothing in between re-tags it.
  */
-export type PlaygroundMockTool = {
+export type TextModeMockTool = {
   readonly toolName: string;
   readonly answer:
     | { readonly answer: unknown }
@@ -139,21 +139,21 @@ export type PlaygroundMockTool = {
  * mean is Retell's business, and egma's job is to hand back exactly what it was
  * given.
  */
-export type PlaygroundResume = {
+export type TextModeResume = {
   readonly nodeId: string;
   readonly componentId: string;
   readonly stateName: string;
 };
 
 /** A resume state naming nothing at all, which is how an exchange opens. */
-export const NO_RESUME: PlaygroundResume = {
+export const NO_RESUME: TextModeResume = {
   nodeId: "",
   componentId: "",
   stateName: "",
 };
 
 /** One exchange, whole: what egma sends and what it sends it about. */
-export type PlaygroundExchange = {
+export type TextModeExchange = {
   readonly agentId: string;
   /**
    * The version to conduct against. Required, and always sent — see the note
@@ -161,32 +161,32 @@ export type PlaygroundExchange = {
    */
   readonly agentVersion: number;
   /** The whole history so far. Empty opens the exchange. */
-  readonly messages: readonly PlaygroundTurn[];
+  readonly messages: readonly TextModeTurn[];
   /** The variables this simulation is conducted with, rendered by Retell. */
   readonly dynamicVariables?: Readonly<Record<string, string>> | undefined;
   /** The answers this exchange carries. Absent where the run has none. */
-  readonly mockTools?: readonly PlaygroundMockTool[] | undefined;
+  readonly mockTools?: readonly TextModeMockTool[] | undefined;
   /** Where the agent was left. Absent, or `NO_RESUME`, opens the exchange. */
-  readonly resume?: PlaygroundResume | undefined;
+  readonly resume?: TextModeResume | undefined;
 };
 
 /** What one exchange came back with. */
-export type PlaygroundReply = {
+export type TextModeReply = {
   /** The agent's new messages, in the order Retell reported them. */
-  readonly messages: readonly PlaygroundMessage[];
+  readonly messages: readonly TextModeMessage[];
   /** The variables as they now stand, to carry into the next request. */
   readonly dynamicVariables: Readonly<Record<string, string>>;
   /** Where the agent now is, to carry into the next request. */
-  readonly resume: PlaygroundResume;
+  readonly resume: TextModeResume;
   /** Whether the agent ended the exchange with this answer. */
   readonly agentEnded: boolean;
 };
 
-export type PlaygroundExchanged =
-  | { readonly kind: "exchanged"; readonly reply: PlaygroundReply }
+export type TextModeExchanged =
+  | { readonly kind: "exchanged"; readonly reply: TextModeReply }
   | RetellFailure;
 
-function messageFrom(row: unknown): PlaygroundMessage | null {
+function messageFrom(row: unknown): TextModeMessage | null {
   if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
   const held = row as Record<string, unknown>;
   const role = plain(held["role"]);
@@ -218,7 +218,7 @@ function variablesIn(value: unknown): Record<string, string> {
   return held;
 }
 
-function resumeIn(document: Readonly<Record<string, unknown>>): PlaygroundResume {
+function resumeIn(document: Readonly<Record<string, unknown>>): TextModeResume {
   return {
     nodeId: plain(document[WIRE.nodeId]),
     componentId: plain(document[WIRE.componentId]),
@@ -230,7 +230,7 @@ function resumeIn(document: Readonly<Record<string, unknown>>): PlaygroundResume
  * One answer as the wire carries it: untagged, JSON-encoded, with a flag for
  * which branch it is.
  */
-function mockOnTheWire(mock: PlaygroundMockTool): Record<string, unknown> {
+function mockOnTheWire(mock: TextModeMockTool): Record<string, unknown> {
   const fails = "error" in mock.answer;
   const held = fails ? mock.answer.error : mock.answer.answer;
   return {
@@ -248,7 +248,7 @@ function mockOnTheWire(mock: PlaygroundMockTool): Record<string, unknown> {
 }
 
 /** The body of one exchange, with nothing in it egma was not given. */
-function bodyOf(exchange: PlaygroundExchange): Record<string, unknown> {
+function bodyOf(exchange: TextModeExchange): Record<string, unknown> {
   const body: Record<string, unknown> = {
     // Always. Never conditional, never omitted, never `latest`.
     [WIRE.agentVersion]: exchange.agentVersion,
@@ -278,18 +278,18 @@ function bodyOf(exchange: PlaygroundExchange): Record<string, unknown> {
 }
 
 /**
- * One playground exchange: the history out, the agent's new messages back.
+ * One text-mode exchange: the history out, the agent's new messages back.
  *
  * The one verb this lane adds, and it neither opens nor closes anything —
  * there is nothing on Retell's side to open or close. A simulation is a
  * sequence of these, each carrying forward the variables and the resume state
  * the last one answered with.
  */
-export async function exchangeInPlayground(
+export async function exchangeInTextMode(
   key: RetellCredential,
-  exchange: PlaygroundExchange,
+  exchange: TextModeExchange,
   reach: RetellReach = {},
-): Promise<PlaygroundExchanged> {
+): Promise<TextModeExchanged> {
   let answer;
   try {
     answer = await ask(key, reach, {
@@ -309,11 +309,11 @@ export async function exchangeInPlayground(
   if (!Array.isArray(rows)) {
     return {
       kind: "refused",
-      reason: "Retell answered a playground exchange without a message list.",
+      reason: "Retell answered a text-mode exchange without a message list.",
     };
   }
 
-  const messages: PlaygroundMessage[] = [];
+  const messages: TextModeMessage[] = [];
   for (const row of rows) {
     const message = messageFrom(row);
     if (message !== null) messages.push(message);

@@ -81,43 +81,31 @@ export {
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
 /**
- * The coverage stamp's vocabulary and its serialization, and the record of the
- * temporary world a run built. Both are pure: they read and write no store.
+ * The coverage stamp's serialization and the put-it-back note a mocked run
+ * leaves behind. Both are pure: they read and write no store.
  */
 export {
-  coverageFromClasses,
   mockToolCoverageFrom,
   mockToolCoverageRow,
   NO_MOCK_TOOL_COVERAGE,
-  NO_TOOL_COVERAGE_CLASSES,
-  toolCoverageClassesFrom,
-  TOOL_COVERAGE_CLASSES,
-  type ToolCoverageClass,
-  type ToolCoverageClasses,
 } from "./mock-tools/coverage.ts";
 export {
-  mockedWorldFrom,
-  mockedWorldRow,
-  type MockedWorld,
-  type MockedWorldEngine,
-  type MockedWorldNumber,
-} from "./mock-tools/world.ts";
+  mockMetadataFrom,
+  mockMetadataRow,
+  type MockEngineNote,
+  type MockMetadata,
+  type MockNumberNote,
+} from "./mock-tools/record.ts";
 /**
- * Which connection lanes a mocked world is built for. The gate beside them is
- * not exported: it is a condition inside the claim, and nothing outside this
- * package has a query to put it in.
+ * Which connection lanes branch a temporary copy when they are mocked. The
+ * gate beside them is not exported: it is a condition inside the claim, and
+ * nothing outside this package has a query to put it in.
  */
 export {
-  connectionTypeTakesMockedWorld,
-  MOCKABLE_CONNECTION_TYPES,
-  type MockableConnectionType,
+  connectionTypeBranchesMockDraft,
+  DRAFT_MOCK_CONNECTION_TYPES,
+  type DraftMockConnectionType,
 } from "./mock-tools/lanes.ts";
-export {
-  conductedWorldFrom,
-  conductedWorldRow,
-  type ConductedEngine,
-  type ConductedWorld,
-} from "./mock-tools/conducted.ts";
 /** Pure grader policy parsing and validation; no store is read or written. */
 export {
   validatePassThreshold,

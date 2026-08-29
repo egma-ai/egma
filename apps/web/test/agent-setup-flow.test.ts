@@ -60,7 +60,7 @@ const UNROUTED_VOICE = {
   connectionCandidates: [],
 };
 
-/** A voice agent as discovery now describes one: the playground chat door, the
+/** A voice agent as discovery now describes one: text mode chat door, the
  * web call, and one routed number — the choice the modality question spans. */
 const VOICE_WITH_ROUTES: RetellDiscoveredAgent = {
   platformAgentId: "voice_3",
@@ -69,10 +69,10 @@ const VOICE_WITH_ROUTES: RetellDiscoveredAgent = {
   connectionCandidates: [
     {
       agentPlatform: "retell" as const,
-      connectionType: "retell_playground" as const,
-      accessVariant: "retell_playground.api_key" as const,
+      connectionType: "retell_text_mode" as const,
+      accessVariant: "retell_text_mode.api_key" as const,
       modality: "chat" as const,
-      productLabel: "Retell playground",
+      productLabel: "Retell text mode",
       config: { retellAgentId: "voice_3" },
     },
     {
@@ -157,9 +157,9 @@ describe("the goal-first agent setup plan", () => {
     const routes = retellCandidatesForPlan(simulation, VOICE_WITH_ROUTES);
 
     // Every route the plan can save is present: the plan admits both modalities,
-    // so the playground rides through beside the two voice ways.
+    // so text mode rides through beside the two voice ways.
     expect(routes.map((one) => one.connectionType)).toEqual([
-      "retell_playground",
+      "retell_text_mode",
       "retell_web_call",
       "phone_number",
     ]);
@@ -167,7 +167,7 @@ describe("the goal-first agent setup plan", () => {
     // is exactly the split the modality step and the phone step read.
     const chatRoute = routes.find((one) => one.modality === "chat");
     const voiceRoutes = routes.filter((one) => one.modality === "voice");
-    expect(chatRoute?.connectionType).toBe("retell_playground");
+    expect(chatRoute?.connectionType).toBe("retell_text_mode");
     expect(voiceRoutes.map((one) => one.connectionType)).toEqual([
       "retell_web_call",
       "phone_number",

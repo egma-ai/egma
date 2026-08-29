@@ -58,20 +58,13 @@ import {
   mockToolCoverageFrom,
   mockToolCoverageRow,
   type MockToolCoverage,
-  type ToolCoverageClasses,
 } from "../mock-tools/coverage.ts";
 import {
-  MOCKED_WORLD_BUILDING,
-  mockedWorldFrom,
-  mockedWorldRow,
-  type MockedWorld,
-} from "../mock-tools/world.ts";
+  mockMetadataFrom,
+  mockMetadataRow,
+  type MockMetadata,
+} from "../mock-tools/record.ts";
 import { runIsReadyToConduct } from "../mock-tools/lanes.ts";
-import {
-  conductedWorldFrom,
-  conductedWorldRow,
-  type ConductedWorld,
-} from "../mock-tools/conducted.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import {
@@ -113,24 +106,24 @@ export type NewRun = {
   readonly name?: string | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
   /**
-   * The world this run will conduct against, already read from the agent's
-   * platform, for the lanes that pin a version.
+   * The serving version this run will conduct against, already resolved from
+   * the agent's platform, for the lanes that name a version.
    *
    * **Read outside this call and handed in, deliberately.** Resolving a version
-   * and reading its tools are two requests to somebody else's API, and this
-   * function's whole body is one database transaction holding a lock on a test
-   * suite. A provider that answers slowly would hold that lock for as long as
-   * it took. So the caller reads first and fails the run out loud when the read
-   * fails — never a silent conduct against an unread world — and what arrives
-   * here is a settled fact to write down.
+   * is a request to somebody else's API, and this function's whole body is one
+   * database transaction holding a lock on a test suite. A provider that
+   * answers slowly would hold that lock for as long as it took. So the caller
+   * reads first and fails the run out loud when the read fails — never a silent
+   * conduct against an unread version — and what arrives here is a settled fact
+   * to write down.
    *
-   * Absent on every other lane, where nothing pins a version.
+   * Absent on every other lane, where nothing names a version.
    */
-  readonly conductedWorld?: ConductedWorld | undefined;
+  readonly agentVersion?: number | undefined;
   /**
-   * A fingerprint of the connection the world above was read from.
+   * A fingerprint of the connection the version above was read from.
    *
-   * Travels with `conductedWorld` and only with it: the world was read from a
+   * Travels with `agentVersion` and only with it: the version was read from a
    * target before this transaction opened, and this is how the transaction
    * proves the target has not moved since. Under the lock `startRun` already
    * holds on the connection, the fingerprint taken now must equal this one, or
@@ -148,6 +141,16 @@ export type ConnectionSnapshot = {
   readonly topology: Topology;
   readonly environment: string | null;
   readonly config: unknown;
+  /**
+   * Whether this run is mocked, frozen from the connection's own switch at the
+   * moment it started.
+   *
+   * **The run reads this and never the connection row.** A switch unticked
+   * mid-run does not change the world a run is already in, and a run started
+   * before the switch existed is honestly unmocked — so the fact the claim
+   * gate, the report and the endpoint all read is the one stamped here.
+   */
+  readonly mockToolsEnabled: boolean;
 };
 
 export type Run = {
@@ -163,10 +166,14 @@ export type Run = {
   readonly triggeredVia: RunTrigger;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: ConnectionSnapshot;
-  /** The temporary platform world this run built, or null when it built none. */
-  readonly mockedWorld: MockedWorld | null;
-  /** The version and tools this run read at its start, or null for no pin. */
-  readonly conductedWorld: ConductedWorld | null;
+  /** The serving version this run conducted against, or null for no pin. */
+  readonly agentVersion: number | null;
+  /** The temporary copy this run branched, or null when it branched none. */
+  readonly tempMockAgentVersion: number | null;
+  /** Null = no copy was made; false = cleanup owed; true = account put back. */
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  /** The put-it-back note, or null when nothing was put onto the account. */
+  readonly mockMetadata: MockMetadata | null;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -178,7 +185,7 @@ export type Run = {
 
 export type StartedRun = Run;
 
-export type { MockToolCoverage, MockedWorld, ConductedWorld };
+export type { MockToolCoverage, MockMetadata };
 
 export type Simulation = {
   readonly id: string;
@@ -204,8 +211,6 @@ export type Simulation = {
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly mockToolCoverage: MockToolCoverage | null;
-  /** The agent version this conversation was conducted against, or null. */
-  readonly conductedAgentVersion: number | null;
   readonly createdAt: Date;
 };
 
@@ -245,8 +250,10 @@ const RUN_COLUMNS = {
   triggeredVia: run.triggeredVia,
   triggeredBy: run.triggeredBy,
   connectionSnapshot: run.connectionSnapshot,
-  mockedWorld: run.mockedWorld,
-  conductedWorld: run.conductedWorld,
+  agentVersion: run.agentVersion,
+  tempMockAgentVersion: run.tempMockAgentVersion,
+  tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
+  mockMetadata: run.mockMetadata,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -280,7 +287,6 @@ const SIMULATION_COLUMNS = {
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
-  conductedAgentVersion: simulation.conductedAgentVersion,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -295,8 +301,10 @@ type RunRow = {
   readonly triggeredVia: string;
   readonly triggeredBy: string | null;
   readonly connectionSnapshot: unknown;
-  readonly mockedWorld: unknown;
-  readonly conductedWorld: unknown;
+  readonly agentVersion: number | null;
+  readonly tempMockAgentVersion: number | null;
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  readonly mockMetadata: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -367,6 +375,7 @@ function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSna
     topology: row.topology as Topology,
     environment: row.environment as string | null,
     config: row.config,
+    mockToolsEnabled: row.mockToolsEnabled === true,
   };
 }
 
@@ -424,14 +433,8 @@ function runFromRow(
   suiteName: string,
   suiteDeleted: boolean,
 ): Run {
-  const {
-    status,
-    triggeredVia,
-    connectionSnapshot,
-    mockedWorld,
-    conductedWorld,
-    ...rest
-  } = row;
+  const { status, triggeredVia, connectionSnapshot, mockMetadata, ...rest } =
+    row;
   return {
     ...rest,
     suiteName,
@@ -439,13 +442,9 @@ function runFromRow(
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
-    mockedWorld: mockedWorldFrom(
-      mockedWorld,
-      () => new Error(`run ${row.id} holds a malformed mocked world`),
-    ),
-    conductedWorld: conductedWorldFrom(
-      conductedWorld,
-      () => new Error(`run ${row.id} holds a malformed conducted world`),
+    mockMetadata: mockMetadataFrom(
+      mockMetadata,
+      () => new Error(`run ${row.id} holds a malformed mock-tool note`),
     ),
   };
 }
@@ -673,6 +672,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
+          mockToolsEnabled: connection.mockToolsEnabled,
           credentials: connection.credentials,
         })
         .from(connection)
@@ -702,7 +702,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         // bug in the caller, not a run to write, and a run written without it
         // would conduct against a world nobody looked at and stamp a claim
         // nobody checked.
-        if (input.conductedWorld === undefined) {
+        if (input.agentVersion === undefined) {
           throw new Error(
             `a run over a ${reached.connectionType} connection is conducted ` +
               `against a named version, so it cannot be started without the ` +
@@ -794,14 +794,19 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           topology: reached.topology,
           environment: reached.environment,
           config: reached.config,
+          // The switch, frozen with the rest of the connection. Every later
+          // reader — the claim gate, the report, the endpoint — asks the run
+          // rather than the connection, so unticking mid-run changes nothing
+          // about a run already going.
+          mockToolsEnabled: reached.mockToolsEnabled,
         },
         mockToolSnapshot,
         // Read before this transaction opened; written down here so that every
         // request this run makes names the same version, and a concurrent edit
         // on the account cannot move what the suite is testing halfway through.
-        ...(input.conductedWorld === undefined
+        ...(input.agentVersion === undefined
           ? {}
-          : { conductedWorld: conductedWorldRow(input.conductedWorld) }),
+          : { agentVersion: input.agentVersion }),
         expectedSimulationCount,
         createdAt: at,
       }).returning(RUN_COLUMNS);
@@ -863,10 +868,6 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
               position: simulationCount + index + 1,
               modality: reached.modality,
               status: "queued" as const,
-              // The run's own resolved version, copied onto each conversation
-              // so a simulation read alone answers what it conducted.
-              conductedAgentVersion:
-                input.conductedWorld?.agentVersion ?? null,
               createdAt: at,
             })));
             simulationCount += pins.length;
@@ -1080,104 +1081,120 @@ export async function getRun(auth: AuthContext, id: string): Promise<Run | undef
 }
 
 /**
- * Write down the temporary world this run built on the agent's platform.
+ * Write down what this run has put onto the agent's platform, and what it owes
+ * the account.
  *
  * Called several times across one run, and deliberately: once when the numbers
- * have been read and before anything is branched, again when the branch lands,
- * and once more when teardown has put everything back. Each call replaces the
- * record whole, because a half-written world is worse than a stale one — the
- * teardown reads what is here and acts on it.
+ * have been read and before anything is changed, again when the copy lands, and
+ * once more as each part of the teardown lands. Each call replaces the record
+ * whole, because a half-written note is worse than a stale one — the teardown
+ * reads what is here and acts on it.
  *
  * **It is the one thing a finished run may still be told.** A run's header
- * freezes when its counts land, and this column is carved out of that freeze:
- * the record is bookkeeping about somebody's Retell account, not about this
- * run's numbers, and a crashed run's litter is cleared after the run is over by
- * definition. The migration's guard permits a change to this column alone.
+ * freezes when its counts land, and two of these columns are carved out of that
+ * freeze: the cleanup flag and the note are bookkeeping about somebody's Retell
+ * account, not about this run's numbers, and a crashed run's litter is cleared
+ * after the run is over by definition. The migration's guard permits a change
+ * to those two columns and to nothing else.
  */
-export async function recordMockedWorld(
+export type MockRunState = {
+  /** The temporary copy that exists right now, or null when none does. */
+  readonly tempMockAgentVersion: number | null;
+  /** Null = no copy was made; false = cleanup owed; true = account put back. */
+  readonly tempMockAgentVersionCleanup: boolean | null;
+  readonly mockMetadata: MockMetadata | null;
+};
+
+export async function recordMockState(
   auth: AuthContext,
   runId: string,
-  world: MockedWorld | null,
+  state: MockRunState,
 ): Promise<Run | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
   const [updated] = await db()
     .update(run)
-    .set({ mockedWorld: world === null ? null : mockedWorldRow(world) })
+    .set({
+      tempMockAgentVersion: state.tempMockAgentVersion,
+      tempMockAgentVersionCleanup: state.tempMockAgentVersionCleanup,
+      mockMetadata:
+        state.mockMetadata === null ? null : mockMetadataRow(state.mockMetadata),
+    })
     .where(theRun(auth, runId))
     .returning({ id: run.id });
   if (updated === undefined) return undefined;
   return getRun(auth, runId);
 }
 
-export type MockedWorldClaim =
+export type MockDraftClaim =
   | { readonly kind: "claimed" }
-  /** Another run of this agent holds the one mocked world. */
+  /** Another run of this agent holds the one temporary copy. */
   | { readonly kind: "taken"; readonly byRunId: string };
 
 /**
- * Claim this agent's **one** mocked world for this run, or say who holds it.
+ * Claim this agent's **one** temporary copy for this run, or say who holds it.
  *
  * ## Why one at a time
  *
  * Two mocked runs of one agent overlapping is not a slow path — it is a hijack.
  * Run one pins a number riding `latest` to numeric version V and records the
- * verbatim `latest` binding it must put back. Run two then starts, reads that
- * number as *numeric* — a safe verdict, no pin needed — and branches its own
- * draft. Run one finishes and restores `latest`, exactly as it promised. But
- * run two's draft still exists and, being the most recently minted version, is
- * what `latest` now resolves to: every real caller reaches a mocked agent.
+ * binding it must put back. Run two then starts, reads that number as *numeric*
+ * — a safe verdict, no pin needed — and branches its own copy. Run one finishes
+ * and restores `latest`, exactly as it promised. But run two's copy still
+ * exists and, being the most recently minted version, is what `latest` now
+ * resolves to: every real caller reaches a mocked agent.
  *
- * Delete-before-restore protects a run from **its own** draft and cannot see
+ * Delete-before-restore protects a run from **its own** copy and cannot see
  * another run's. So the overlap itself is what is refused, and this is the one
  * place that decides it.
  *
  * ## What blocks, and what does not
  *
- * A run of this agent blocks while it holds a mocked world **and has not
- * finished and is not stale**: still building (the marker), built (a draft), or
- * torn down but for a pin still outstanding.
+ * A run of this agent blocks while its cleanup flag stands `false` **and it has
+ * not finished and is not stale**: still claiming, branched, or torn down but
+ * for a pin still outstanding.
  *
  * A **finished** run never blocks, whatever it left behind — its litter is the
  * sweep's job, and the caller sweeps before it branches, so a finished run's
- * pin is restored before this run mints anything. When the sweep cannot
- * restore it, the caller refuses to branch at all rather than mint the draft
- * a later retry of that restore would route real callers to. A **stale** run — pending,
- * still holding no draft, and older than the build window — never blocks
- * either: its process died mid-build and it is swept, not waited for. The
- * caller owns that window and passes it, so the sweep and this check cannot
- * disagree about which runs are alive.
+ * pin is restored before this run mints anything. When the sweep cannot restore
+ * it, the caller refuses to branch at all rather than mint the copy a later
+ * retry of that restore would route real callers to. A **stale** run — pending,
+ * still holding no copy, and older than the build window — never blocks either:
+ * its process died mid-build and it is swept, not waited for. The caller owns
+ * that window and passes it, so the sweep and this check cannot disagree about
+ * which runs are alive.
  *
  * ## The lock
  *
  * A check without a lock is a time-of-check-to-time-of-use race: two runs
  * starting together would both read "nobody holds it" and both build. So the
  * whole check-and-claim is one transaction behind a Postgres advisory lock
- * keyed on this agent — the same mechanism, and the same reasoning, as the
- * vendor-agent lock `registerAgent` takes. The second run waits, then reads the
- * first run's committed claim and is refused. Exactly one builds.
+ * keyed on this organization and agent — the same mechanism, and the same
+ * reasoning, as the vendor-agent lock `registerAgent` takes. The second run
+ * waits, then reads the first run's committed claim and is refused. Exactly one
+ * builds.
  *
- * The claim itself is the building marker written onto the run, so the winner
- * is visible to a later sweep from the instant it wins — including if the
- * process building it dies immediately after.
+ * The claim itself is the cleanup flag written onto the run, so the winner is
+ * visible to a later sweep by the same one indexed query from the instant it
+ * wins — including if the process building it dies immediately after.
  */
-export async function claimMockedWorldFor(
+export async function claimMockDraftFor(
   auth: AuthContext,
   input: {
     readonly runId: string;
     readonly agentId: string;
     /**
-     * How long a run may sit pending with no draft before it counts as a build
+     * How long a run may sit pending with no copy before it counts as a build
      * that died. The caller's own sweep window, passed in so the two agree.
      */
     readonly staleBuildMilliseconds: number;
   },
-): Promise<MockedWorldClaim> {
+): Promise<MockDraftClaim> {
   authorize(auth, "start_and_cancel_runs", here(auth));
   const staleSeconds = Math.max(0, input.staleBuildMilliseconds) / 1000;
   // This one agent, of this one customer. Nothing else waits behind it.
-  const racing = `egma-mocked-world:${auth.organizationId}:${input.agentId}`;
+  const racing = `egma-mock-draft:${auth.organizationId}:${input.agentId}`;
 
-  return db().transaction(async (tx): Promise<MockedWorldClaim> => {
+  return db().transaction(async (tx): Promise<MockDraftClaim> => {
     // Taken before anything is read, and let go when the transaction ends.
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${racing}::text, 0))`,
@@ -1193,13 +1210,13 @@ export async function claimMockedWorldFor(
           and(
             eq(run.agentId, input.agentId),
             sql`${run.id} <> ${input.runId}`,
-            isNotNull(run.mockedWorld),
+            eq(run.tempMockAgentVersionCleanup, false),
             // A finished run never blocks: its litter is the sweep's.
             isNull(run.finishedAt),
-            // Nor does a build that died — pending, no draft, past the window.
+            // Nor does a build that died — pending, no copy, past the window.
             sql`not (
               ${run.status} = 'pending'
-              and ${run.mockedWorld}->>'draftVersion' is null
+              and ${run.tempMockAgentVersion} is null
               and ${run.createdAt} < now() - make_interval(secs => ${staleSeconds})
             )`,
           ),
@@ -1212,16 +1229,19 @@ export async function claimMockedWorldFor(
 
     await tx
       .update(run)
-      .set({ mockedWorld: mockedWorldRow(MOCKED_WORLD_BUILDING) })
+      .set({ tempMockAgentVersionCleanup: false })
       .where(theRun(auth, input.runId));
     return { kind: "claimed" };
   });
 }
 
 /** One run's outstanding obligation to somebody's Retell account. */
-export type OutstandingMockedWorld = {
+export type OwedMockCleanup = {
   readonly runId: string;
-  readonly world: MockedWorld;
+  /** The temporary copy still to be deleted, or null once it is gone. */
+  readonly tempMockAgentVersion: number | null;
+  /** The put-it-back note, or null where the run never wrote one. */
+  readonly metadata: MockMetadata | null;
   readonly status: RunStatus;
   readonly createdAt: Date;
   /** Null while the run could still be conducting something. */
@@ -1229,38 +1249,34 @@ export type OutstandingMockedWorld = {
 };
 
 /**
- * Every world this agent's runs still owe the account, and every run of its
- * that might be stuck mid-build.
+ * Every cleanup this agent's runs still owe the account — one indexed query,
+ * over the partial index on `temp_mock_agent_version_cleanup = false`.
  *
- * The sweep's whole input, and it answers two questions at once:
+ * The sweep's whole input, and the claim's. A run answers here from the moment
+ * it claims the agent until the moment its teardown lands, which covers both
+ * questions at once: a copy that must be deleted or a pin that must be put
+ * back, and a run that might have lost the process that was building its world.
+ * The caller decides whether it is truly stuck (its clock is past the build
+ * window and it still holds no copy) or just waiting for a free simulator.
  *
- * - **A world that owes the account** — one naming a temporary version that has
- *   not been deleted, or a number whose binding has not been put back. Teardown
- *   clears each as it lands, so a run that finished cleanly answers nothing on
- *   this count.
- * - **A run still pending** — which owes nothing yet but might have lost the
- *   process that was building its world. Its simulations are unclaimable until
- *   a draft exists, so a run whose build died would sit queued forever; the
- *   sweep needs to see it to cancel it. The caller decides whether it is truly
- *   stuck (its clock is past the build window and it still has no draft) or just
- *   waiting for a free simulator.
- *
- * A run that both finished and settled its world — the ordinary end — matches
- * neither, so the common case is not re-read on every landing.
+ * A run that finished and settled its account — the ordinary end — carries
+ * `true` and matches nothing here, so the common case is not re-read on every
+ * landing.
  *
  * Ordered oldest first, because the oldest litter is the litter most likely to
  * be a crash rather than a run still in flight.
  */
-export async function outstandingMockedWorlds(
+export async function owedMockCleanups(
   auth: AuthContext,
   agentId: string,
   options: { readonly exceptRunId?: string } = {},
-): Promise<readonly OutstandingMockedWorld[]> {
+): Promise<readonly OwedMockCleanup[]> {
   authorize(auth, "start_and_cancel_runs", here(auth));
   const rows = await db()
     .select({
       id: run.id,
-      mockedWorld: run.mockedWorld,
+      tempMockAgentVersion: run.tempMockAgentVersion,
+      mockMetadata: run.mockMetadata,
       status: run.status,
       createdAt: run.createdAt,
       finishedAt: run.finishedAt,
@@ -1272,40 +1288,26 @@ export async function outstandingMockedWorlds(
         run,
         and(
           eq(run.agentId, agentId),
-          isNotNull(run.mockedWorld),
+          eq(run.tempMockAgentVersionCleanup, false),
           options.exceptRunId === undefined
             ? undefined
             : sql`${run.id} <> ${options.exceptRunId}`,
-          sql`(
-            ${run.mockedWorld}->>'draftVersion' is not null
-            or exists (
-              select 1
-              from jsonb_array_elements(${run.mockedWorld}->'numbers') as one
-              where one->>'pinned' = 'true'
-            )
-            or ${run.status} = 'pending'
-          )`,
         ),
       ),
     )
     .orderBy(asc(run.id));
 
-  const outstanding: OutstandingMockedWorld[] = [];
-  for (const row of rows) {
-    const world = mockedWorldFrom(
-      row.mockedWorld,
-      () => new Error(`run ${row.id} holds a malformed mocked world`),
-    );
-    if (world === null) continue;
-    outstanding.push({
-      runId: row.id,
-      world,
-      status: row.status as RunStatus,
-      createdAt: row.createdAt,
-      finishedAt: row.finishedAt,
-    });
-  }
-  return outstanding;
+  return rows.map((row) => ({
+    runId: row.id,
+    tempMockAgentVersion: row.tempMockAgentVersion,
+    metadata: mockMetadataFrom(
+      row.mockMetadata,
+      () => new Error(`run ${row.id} holds a malformed mock-tool note`),
+    ),
+    status: row.status as RunStatus,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
+  }));
 }
 
 export type SimulationExecutionEvidence = {
@@ -2169,81 +2171,6 @@ function openedApiKey(envelope: string): string | null {
     return null;
   }
   return null;
-}
-
-/**
- * The mocked world one simulation ran in, and which of its tools egma had an
- * answer for.
- *
- * One query, under the context the row's own standing produced — the report
- * door already holds it, so this read is scoped rather than exempt.
- *
- * `answeredFor` is the run's frozen world resolved for **this** simulation's
- * pinned test version, so a per-test override that answers for a tool the
- * project does not is counted, and the shared resolution is the one everything
- * else uses.
- */
-export type SimulationMockedWorld = {
-  readonly world: MockedWorld | null;
-  /**
-   * The three classes this run knows about its agent's tools, from whichever
-   * world it has — or null when it has neither and nobody ever asked.
-   *
-   * **Decided here rather than at the reader, because the two lanes must not be
-   * able to disagree.** A run that built a temporary world read its tools from
-   * the configuration it branched; a run that pins a version read them from
-   * that version. Both reads happen before any conversation, both produce the
-   * same three lists, and a stamp is a stamp whichever of them filled it.
-   */
-  readonly classes: ToolCoverageClasses | null;
-  readonly answeredFor: readonly string[];
-};
-
-export async function simulationMockedWorld(
-  auth: AuthContext,
-  simulationId: string,
-): Promise<SimulationMockedWorld | undefined> {
-  authorize(auth, "read", here(auth));
-  const [row] = await db()
-    .select({
-      mockedWorld: run.mockedWorld,
-      conductedWorld: run.conductedWorld,
-      mockToolSnapshot: run.mockToolSnapshot,
-      runId: run.id,
-      testVersionId: simulation.testVersionId,
-    })
-    .from(simulation)
-    .innerJoin(run, eq(simulation.runId, run.id))
-    .where(within(auth, simulation, eq(simulation.id, simulationId)))
-    .limit(1);
-
-  if (row === undefined) return undefined;
-
-  const world = mockedWorldFrom(
-    row.mockedWorld,
-    () => new Error(`run ${row.runId} holds a malformed mocked world`),
-  );
-  const conducted = conductedWorldFrom(
-    row.conductedWorld,
-    () => new Error(`run ${row.runId} holds a malformed conducted world`),
-  );
-  const frozen = mockToolSnapshotFromRow(row.mockToolSnapshot, row.runId);
-  // The same merge the endpoint serves from, so the stamp's `covered` list and
-  // the answers actually served can never disagree — including for a tool only
-  // this test version answers for.
-  const answers = await answersFor(
-    auth,
-    frozen,
-    row.testVersionId,
-    simulationId,
-  );
-  return {
-    world,
-    // A run never has both: one built a temporary world on the platform, the
-    // other wrote nothing and carries its answers on each request.
-    classes: world?.coverage ?? conducted?.coverage ?? null,
-    answeredFor: answers.map((resolved) => resolved.toolName),
-  };
 }
 
 /**

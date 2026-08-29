@@ -27,7 +27,6 @@ import {
 import { monitoringState } from "../schema/production.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
-  credentialRedirectingConfigKey,
   credentialRuleOf,
   descriptorOf,
   platformOfConnectionType,
@@ -38,6 +37,7 @@ import {
   validModality,
   accessVariantById,
 } from "./connection-registry.ts";
+import { connectionTypeBranchesMockDraft } from "../mock-tools/lanes.ts";
 import type { AuthContext } from "./context.ts";
 import {
   AgentWriteRefusedError,
@@ -93,6 +93,17 @@ export type NewConnection = {
   readonly config: Readonly<Record<string, unknown>>;
   /** Required or refused per access variant; sealed before it touches the row. */
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * Whether runs over this connection are conducted with mock tools in front
+   * of the agent's own.
+   *
+   * Absent takes the lane's own default: **on** for `retell_text_mode`, which
+   * carries its answers on each request and writes nothing to the customer's
+   * account, and **off** everywhere else. A web-call connection is turned on
+   * only through the consent flow, and only where the agent holds the platform
+   * identity and sealed key a temporary copy needs.
+   */
+  readonly mockToolsEnabled?: boolean | undefined;
 };
 
 export type Connection = {
@@ -116,6 +127,8 @@ export type Connection = {
   readonly config: Readonly<Record<string, string>>;
   /** The last characters of the sealed secret, or null where none belongs. */
   readonly credentialsHint: string | null;
+  /** Whether runs over this connection are conducted with mock tools. */
+  readonly mockToolsEnabled: boolean;
   /** When it stopped being reachable for new work, or null while it is. */
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -134,6 +147,13 @@ export type ConnectionChanges = {
   readonly environment?: string | null | undefined;
   readonly config?: Readonly<Record<string, unknown>> | undefined;
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * The mock-tools switch. Absent means keep — a rename must never turn
+   * mocking on or off as a side effect. Turning it on for a web-call
+   * connection is checked here against the agent's platform identity and
+   * sealed key, because a temporary copy cannot be branched without both.
+   */
+  readonly mockToolsEnabled?: boolean | undefined;
 };
 
 /** What a connection Archive answers: the row, and the work it stopped. */
@@ -186,12 +206,6 @@ export type Agent = {
   readonly monitoringApiKeyHint: string | null;
   /** The declared pull switch. Off until somebody turns it on. */
   readonly pullProductionCalls: boolean;
-  /**
-   * The tick: every simulation against this agent runs in a mocked world. Off
-   * until somebody turns it on, and it cannot be on without a platform agent
-   * and a sealed platform key.
-   */
-  readonly mockToolsDuringSimulations: boolean;
   /** Whether pull monitoring has ever been started for this agent. */
   readonly monitoringConfigured: boolean;
   /**
@@ -224,11 +238,6 @@ export type CreatedAgent = Agent & {
  */
 export type AgentChanges = {
   readonly name?: string | undefined;
-  /**
-   * The mock-tools tick. Absent means keep — a rename must never turn a mocked
-   * world on or off as a side effect.
-   */
-  readonly mockToolsDuringSimulations?: boolean | undefined;
 };
 
 /**
@@ -275,7 +284,6 @@ type AgentRow = {
   readonly retellModality: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
-  readonly mockToolsDuringSimulations: boolean;
   readonly monitoringConfigured: boolean;
   readonly lastReceivedAt: Date | null;
   readonly archivedAt: Date | null;
@@ -368,7 +376,6 @@ const COLUMNS = {
   retellModality: RETELL_MODALITY,
   monitoringApiKeyHint: agent.monitoringApiKeyHint,
   pullProductionCalls: agent.pullProductionCalls,
-  mockToolsDuringSimulations: agent.mockToolsDuringSimulations,
   monitoringConfigured: MONITORING_CONFIGURED,
   lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,
@@ -389,6 +396,7 @@ const CONNECTION_COLUMNS = {
   environment: connection.environment,
   config: connection.config,
   credentialsHint: connection.credentialsHint,
+  mockToolsEnabled: connection.mockToolsEnabled,
   archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
   updatedAt: connection.updatedAt,
@@ -492,6 +500,8 @@ async function visibleAgent(
       id: string;
       projectId: string;
       agentPlatform: AgentPlatform;
+      platformAgentId: string | null;
+      monitoringApiKeyHint: string | null;
       archivedAt: Date | null;
     }
   | undefined
@@ -504,6 +514,11 @@ async function visibleAgent(
       // here when its own type does not pin one, so the read that proves the
       // agent is visible is the read that answers it.
       agentPlatform: agent.agentPlatform,
+      // What turning the web-call switch on is checked against: there must be
+      // a platform agent to branch a temporary copy of, and a sealed key to
+      // branch it with.
+      platformAgentId: agent.platformAgentId,
+      monitoringApiKeyHint: agent.monitoringApiKeyHint,
       archivedAt: agent.archivedAt,
     })
     .from(agent)
@@ -567,6 +582,7 @@ type ConnectionRow = {
   readonly environment: string | null;
   readonly config: unknown;
   readonly credentialsHint: string | null;
+  readonly mockToolsEnabled: boolean;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -635,6 +651,7 @@ type AdmittedConnection = {
   readonly config: Record<string, string>;
   readonly credentials: string | null;
   readonly credentialsHint: string | null;
+  readonly mockToolsEnabled: boolean;
 };
 
 /**
@@ -688,6 +705,11 @@ function admitConnection(input: NewConnection): AdmittedConnection {
     config,
     credentials: sealed === null ? null : sealCredentials(sealed.sealed),
     credentialsHint: sealed === null ? null : sealed.hint,
+    // On by default for the text door and off everywhere else. The text lane
+    // writes nothing to the customer's account, so the fast safe lane is safe
+    // by default; every other lane says yes explicitly.
+    mockToolsEnabled:
+      input.mockToolsEnabled ?? input.connectionType === "retell_text_mode",
   };
 }
 
@@ -812,12 +834,19 @@ async function insertConnection(
      * answers is the one the next read answers.
      */
     readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string | null;
+    readonly monitoringApiKeyHint: string | null;
   },
   admitted: AdmittedConnection,
 ): Promise<Connection> {
   // Before the write, and here rather than at the door, because this is the
   // first point that knows which agent the connection lands under.
   const agentPlatform = representedPlatform(admitted, home.agentPlatform);
+  refuseUnbranchableMocks(
+    admitted.connectionType,
+    admitted.mockToolsEnabled,
+    home,
+  );
   const name =
     admitted.name ??
     (await freeDefaultName(on, home.id, admitted.connectionType));
@@ -838,6 +867,7 @@ async function insertConnection(
       config: admitted.config,
       credentials: admitted.credentials,
       credentialsHint: admitted.credentialsHint,
+      mockToolsEnabled: admitted.mockToolsEnabled,
       createdBy: auth.userId,
     })
     .returning(CONNECTION_COLUMNS)
@@ -956,7 +986,13 @@ export async function createAgent(
     const wired = await insertConnection(
       tx,
       auth,
-      { id: written.id, projectId, agentPlatform: written.agentPlatform },
+      {
+        id: written.id,
+        projectId,
+        agentPlatform: written.agentPlatform,
+        platformAgentId: written.platformAgentId,
+        monitoringApiKeyHint: written.monitoringApiKeyHint,
+      },
       inline,
     );
     const standing = await readAgentWithin(tx, auth, written.id);
@@ -1013,7 +1049,7 @@ export type Registration = {
  *
  * **The reuse family is the types whose rules name the same identity
  * namespace**, and today that is exactly Retell's three vendor-id lanes — the
- * chat API, the playground, and the web call, all naming one `retellAgentId`.
+ * chat API, text mode, and the web call, all naming one `retellAgentId`.
  * A LiveKit worker's rule names a namespace of its own, so its family is
  * itself alone. A phone number carries no rule and is in no family at all: a
  * number is where Egma dials, not who answers, and two agents may share one.
@@ -1060,7 +1096,13 @@ export async function registerAgent(
     const wired = await insertConnection(
       tx,
       auth,
-      { id: written.id, projectId, agentPlatform: written.agentPlatform },
+      {
+        id: written.id,
+        projectId,
+        agentPlatform: written.agentPlatform,
+        platformAgentId: written.platformAgentId,
+        monitoringApiKeyHint: written.monitoringApiKeyHint,
+      },
       inline,
     );
     const standing = await readAgentWithin(tx, auth, written.id);
@@ -1143,7 +1185,7 @@ export async function registerAgent(
     // The exact same door — same connection type, access variant and modality
     // — is a re-registration of this connection, and it rotates the key. A
     // door that only shares the vendor agent is a different lane on that agent
-    // and must not be rotated onto: a playground and a chat API are both chat,
+    // and must not be rotated onto: text mode and a chat API are both chat,
     // and one is not the other; a chat dispatch and a voice dispatch of one
     // LiveKit worker each keep a credential of their own.
     const sameDoor = living.find(
@@ -1188,7 +1230,13 @@ export async function registerAgent(
       const wired = await insertConnection(
         tx,
         auth,
-        { id: home.id, projectId, agentPlatform: home.agentPlatform },
+        {
+          id: home.id,
+          projectId,
+          agentPlatform: home.agentPlatform,
+          platformAgentId: home.platformAgentId,
+          monitoringApiKeyHint: home.monitoringApiKeyHint,
+        },
         inline,
       );
       const standing = await readAgentWithin(tx, auth, home.id);
@@ -1396,24 +1444,16 @@ export async function updateAgent(
     changes.name === undefined
       ? undefined
       : validName(changes.name, "an agent");
-  const tick = changes.mockToolsDuringSimulations;
 
-  if (name === undefined && tick === undefined) {
-    return getAgent(auth, id);
-  }
+  if (name === undefined) return getAgent(auth, id);
 
   const [updated] = await db()
     .update(agent)
-    .set({
-      ...(name === undefined ? {} : { name }),
-      ...(tick === undefined ? {} : { mockToolsDuringSimulations: tick }),
-      updatedAt: new Date(),
-    })
+    .set({ name, updatedAt: new Date() })
     .where(theAgent(auth, id))
     .returning(COLUMNS)
     .catch((error: unknown) => {
-      refuseUntickableAgent(error);
-      if (name !== undefined) refusingHeldAgentName(name)(error);
+      refusingHeldAgentName(name)(error);
       throw error;
     });
 
@@ -1422,31 +1462,45 @@ export async function updateAgent(
 }
 
 /**
- * What somebody is told when they tick the box on an agent that has no
- * platform key.
+ * What somebody is told when they turn the web-call switch on and the agent
+ * has nothing to branch a temporary copy with.
  *
- * The database refuses it, and the sentence has to say what to do about it
- * rather than name a constraint: mocking works by egma creating a temporary
- * version of the agent on the platform, and there is nothing to create it with
- * until the agent's platform identity and key are set.
+ * **Checked here at write time rather than by a cross-table constraint.** A
+ * CHECK cannot join, and the two facts it would have to reach live on the
+ * agent: the platform's own identity for it, and the sealed platform key. So
+ * the rule is a property of the write, and the sentence says what to do about
+ * it rather than naming a constraint — mocking a web call works by Egma
+ * creating a temporary version of the agent on the platform, and there is
+ * nothing to create it with until both are set.
  *
- * **It returns when the error is not its own**, and that is the whole contract
- * of a recogniser sitting in a chain of them: an edit can break two rules, so
- * each recogniser answers for the one it knows and leaves the rest alone. One
- * that rethrew instead would be the last word on every failure, and the
- * recognisers after it — the duplicate-name refusal among them — would never
- * run.
+ * The text lane is deliberately exempt: it carries its answers on each request
+ * and branches nothing, so it needs neither.
  */
-function refuseUntickableAgent(error: unknown): void {
-  if (lostToConstraint(error, "agent_mock_tools_need_platform_key")) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      "mock tools during simulations needs this agent's platform identity " +
-        "and key: Egma builds the mocked world by creating a temporary " +
-        "version of the agent on its own platform, and it has nothing to " +
-        "create one with. Connect the agent to its platform first.",
-    );
+function refuseUnbranchableMocks(
+  connectionType: ConnectionType,
+  mockToolsEnabled: boolean,
+  home: {
+    readonly platformAgentId: string | null;
+    /**
+     * The key's own hint, which the schema keeps null exactly when the sealed
+     * key is null — so presence is read without unsealing anything.
+     */
+    readonly monitoringApiKeyHint: string | null;
+  },
+): void {
+  if (!mockToolsEnabled) return;
+  if (!connectionTypeBranchesMockDraft(connectionType)) return;
+  if (home.platformAgentId !== null && home.monitoringApiKeyHint !== null) {
+    return;
   }
+  throw new AgentWriteRefusedError(
+    "not_admitted",
+    "Mock tools on a Retell web-call connection work by Egma creating a " +
+      "temporary version of the agent on Retell for the length of each run, " +
+      "and this agent holds no platform identity and key to create one with. " +
+      "Connect the agent to Retell with its agent id and an API key, then " +
+      "turn mock tools on.",
+  );
 }
 
 /**
@@ -1871,6 +1925,7 @@ export async function updateConnection(
       connectionType: connection.connectionType,
       accessVariant: connection.accessVariant,
       config: connection.config,
+      mockToolsEnabled: connection.mockToolsEnabled,
       archivedAt: connection.archivedAt,
     })
     .from(connection)
@@ -1883,37 +1938,18 @@ export async function updateConnection(
   const connectionType = current.connectionType as ConnectionType;
   const accessVariant = current.accessVariant as AccessVariant;
 
+  // Turning the switch on is checked against the agent, at write time. A run
+  // already going keeps the world it started with either way: the fact every
+  // reader consults is the one frozen onto that run's own snapshot.
+  const mockToolsEnabled = changes.mockToolsEnabled;
+  if (mockToolsEnabled !== undefined) {
+    refuseUnbranchableMocks(connectionType, mockToolsEnabled, home);
+  }
+
   const config =
     changes.config === undefined
       ? undefined
       : validConfig(connectionType, accessVariant, changes.config);
-
-  // **You may redirect the sealed key only if you also supply a key to send.**
-  //
-  // On a kind whose run start sends the connection's secret to an address the
-  // config names, moving that address is moving the key. An edit that omits the
-  // credential leaves the sealed one in place — and a sealed key is write-only,
-  // so this would aim the key the member cannot read at a host the member
-  // chose. Changing the address therefore demands the credential to send with
-  // it. Leaving the address as it was keeps preserving the sealed key exactly
-  // as before, and pointing the address back at its provider's default (an
-  // empty value) is not a redirect and needs nothing — the key goes home.
-  const redirectKey = credentialRedirectingConfigKey(connectionType);
-  if (redirectKey !== undefined && config !== undefined) {
-    const before = (current.config as Record<string, unknown> | null)?.[
-      redirectKey
-    ];
-    const after = config[redirectKey];
-    const redirected = after !== undefined && after !== before;
-    if (redirected && changes.credentials === undefined) {
-      throw new AgentWriteRefusedError(
-        "not_admitted",
-        `changing a ${connectionType} connection's ${redirectKey} moves where ` +
-          `Egma sends its sealed key, so the change must carry the key to send ` +
-          `there: include credentials.apiKey in the same update.`,
-      );
-    }
-  }
 
   // The stored access variant owns the credential rule. An edit can replace
   // the credential, but cannot turn this connection into another variant.
@@ -1940,6 +1976,7 @@ export async function updateConnection(
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
           }),
+      ...(mockToolsEnabled === undefined ? {} : { mockToolsEnabled }),
       updatedAt: new Date(),
     })
     .where(

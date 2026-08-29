@@ -1,4 +1,4 @@
-"""Retell playground: a Retell **voice** agent, conducted in text.
+"""Retell text mode: a Retell **voice** agent, conducted in text.
 
 The fourth plug that reaches an agent where it lives, and the one that
 gives a Retell voice agent a chat door at all. It speaks Retell's
@@ -32,7 +32,7 @@ Its config keys, like every plug's, are its own:
 - ``retellAgentId`` (string, required) — the voice agent conducted, exactly
   as the control plane stores it.
 - ``baseUrl`` (string, optional) — where the API answers, defaulting to
-  Retell itself. What lets a test converse with a playground-shaped server
+  Retell itself. What lets a test converse with a text-mode-shaped server
   on loopback, and a proxy stand in front of the platform for a deployment
   that needs one.
 
@@ -67,7 +67,7 @@ lands on the record as the real one it was. A plug that guessed instead
 would be the one place a coverage stamp could start claiming isolation
 nobody had.
 
-**No provider reference exists, and the record says so.** The playground
+**No provider reference exists, and the record says so.** Text mode
 stores nothing: there is no chat, no call and no id for either side to
 look this exchange up by. The report carries ``null`` rather than a
 synthetic id egma invented, because an id nobody else holds is not a join.
@@ -88,7 +88,7 @@ lookup_caller", and would make this lane's transcripts differ from the
 voice lane's by construction — which is the one comparison the whole
 modality exists for.
 
-**The mocks are verified before any call is stamped.** That the playground
+**The mocks are verified before any call is stamped.** That text mode
 honours the tool-mock field is a guess (below), and it is the guess that
 could cost a customer their isolation: a JSON API that does not know a
 field commonly ignores it, and then the real backend runs while the record
@@ -113,7 +113,7 @@ Every name below marked **(guess)** was designed from the effort's
 description of this API rather than read off a request that really
 happened, because no agent may probe the live platform. One live run by
 the developer corrects any of them, and the stub in
-``tests/playground_stub.py`` is wrong in exactly the same places — so a
+``tests/text_mode_stub.py`` is wrong in exactly the same places — so a
 correction is one edit here and one there, with the whole suite still
 proving the behaviour.
 
@@ -233,7 +233,7 @@ growing a fifth must not cost a simulation part of its transcript."""
 _KNOWN_KEYS = {"retellAgentId", "baseUrl"}
 
 
-class RetellPlayground:
+class RetellTextMode:
     """One Retell voice agent, conducted in text, per instance."""
 
     def __init__(
@@ -249,57 +249,57 @@ class RetellPlayground:
         mock_tools: object = None,
         media: object = None,
     ) -> None:
-        # The playground stores nothing, so there is no record on Retell's
+        # Text mode stores nothing, so there is no record on Retell's
         # side for this plug to tell which simulation it is. And no audio
         # exists on this lane at all, so the deployment's carrier is
         # nothing to it either.
         del simulation_id, media
 
-        if access_variant != "retell_playground.api_key":
+        if access_variant != "retell_text_mode.api_key":
             raise PlugError(
-                "the retell playground adapter does not support access variant "
+                "the retell text-mode adapter does not support access variant "
                 f"{access_variant!r}"
             )
 
         if modality != "chat":
             raise PlugError(
-                f"the retell playground plug speaks chat only; a {modality!r} "
+                f"the retell text-mode plug speaks chat only; a {modality!r} "
                 "simulation over retell needs the plug carrying the speech legs"
             )
 
         unknown = set(config) - _KNOWN_KEYS
         if unknown:
             raise PlugError(
-                f"the retell playground plug does not know config key(s) "
+                f"the retell text-mode plug does not know config key(s) "
                 f"{sorted(unknown)}; it knows {sorted(_KNOWN_KEYS)}"
             )
 
         agent_id = config.get("retellAgentId")
         if not isinstance(agent_id, str) or not agent_id.strip():
             raise PlugError(
-                "retell playground config: retellAgentId must be a non-empty string"
+                "retell text mode config: retellAgentId must be a non-empty string"
             )
 
         base_url = config.get("baseUrl", DEFAULT_BASE_URL)
         if not isinstance(base_url, str) or not base_url.strip():
             raise PlugError(
-                "retell playground config: baseUrl must be a non-empty string"
+                "retell text mode config: baseUrl must be a non-empty string"
             )
 
         if not isinstance(credentials, dict):
             raise PlugError(
-                "a retell playground connection needs credentials shaped {apiKey}"
+                "a retell text-mode connection needs credentials shaped {apiKey}"
             )
         stray = set(credentials) - CREDENTIAL_KEYS
         if stray:
             raise PlugError(
-                f"retell playground credentials hold no key(s) {sorted(stray)}; "
+                f"retell text mode credentials hold no key(s) {sorted(stray)}; "
                 "they are shaped {apiKey}"
             )
         api_key = credentials.get("apiKey")
         if not isinstance(api_key, str) or not api_key.strip():
             raise PlugError(
-                "retell playground credentials: apiKey must be a non-empty string"
+                "retell text mode credentials: apiKey must be a non-empty string"
             )
 
         self._agent_id = agent_id.strip()
@@ -355,7 +355,7 @@ class RetellPlayground:
     def provider_reference(self) -> str | None:
         """Nothing, always — and that is the honest answer here.
 
-        The playground keeps no record of its own: no chat is opened, no
+        Text mode keeps no record of its own: no chat is opened, no
         call is created, and Retell hands back no id for either side to
         look this exchange up by. A reference exists to join egma's record
         to the platform's telemetry, and there is no telemetry to join to,
@@ -383,7 +383,7 @@ class RetellPlayground:
     async def deliver(self, text: str) -> AgentReply:
         if self._session is None:
             raise PlugError(
-                "a turn reached the retell playground plug before the exchange "
+                "a turn reached the retell text-mode plug before the exchange "
                 "opened"
             )
         if self._ended:
@@ -402,7 +402,7 @@ class RetellPlayground:
         """Let go of the connection. Safe from every state.
 
         There is nothing to tear down: no chat was opened, no call was
-        created, and the playground stored nothing that could be left
+        created, and text mode stored nothing that could be left
         behind. Closing is closing the socket.
         """
         session, self._session = self._session, None
@@ -454,7 +454,7 @@ class RetellPlayground:
         messages = answered.get("messages")
         if not isinstance(messages, list):
             raise PlugError(
-                "retell answered a playground completion with no messages list"
+                "retell answered a text-mode completion with no messages list"
             )
         # Everything the platform said, verbatim — except its echo of the
         # persona's own turn, which egma wrote into the history before
@@ -563,7 +563,7 @@ class RetellPlayground:
             "answer Egma sent for it, so the mock tools Egma passed on the "
             "request were not used and this agent's real implementation ran. "
             "Nothing here is safe to report as mocked. Check that this "
-            "version of the playground API takes native tool mocks under the "
+            "version of the text-mode API takes native tool mocks under the "
             "field name Egma sends them in"
         )
 
@@ -624,7 +624,7 @@ class RetellPlayground:
         """
         session = self._session
         if session is None:
-            raise PlugError("the retell playground plug was used outside its lifecycle")
+            raise PlugError("the retell text-mode plug was used outside its lifecycle")
 
         url = f"{self._base_url}{self.completion_path}"
         attempts = 0

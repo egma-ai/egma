@@ -1,6 +1,6 @@
-"""CI's Retell playground: a local HTTP server shaped like the completion API.
+"""CI's Retell text mode: a local HTTP server shaped like the completion API.
 
-The one endpoint the playground plug speaks — Retell's agent-playground
+The one endpoint the text-mode plug speaks — Retell's agent-text-mode
 completion — answering with Retell's own field names, status codes and
 bearer-key auth, from a script. Real HTTP on a loopback port, because a
 plug's whole job is speaking a platform's wire protocol and a mock of that
@@ -30,7 +30,7 @@ is refused 401, a request naming no agent is refused 422, and the scripted
 account. Those are what the plug's failure paths are tested against.
 
 **Every field name here is a guess where Retell's documentation was not in
-reach**, marked in :mod:`egma_simulator.plugs.retell_playground` where the
+reach**, marked in :mod:`egma_simulator.plugs.retell_text_mode` where the
 plug names the same field. The two are wrong together or right together,
 which is the point: one live run against the real platform corrects both.
 """
@@ -110,7 +110,7 @@ class Reply:
 
 
 @dataclass
-class PlaygroundStub:
+class TextModeStub:
     """One scripted Retell account: an agent, a key, and what it does."""
 
     api_key: str = "stub-key-not-a-real-secret"
@@ -326,11 +326,11 @@ class RunningStub:
     """A stub on a loopback port, and the base URL a spec points at."""
 
     base_url: str
-    stub: PlaygroundStub
+    stub: TextModeStub
 
 
 @asynccontextmanager
-async def serving(stub: PlaygroundStub) -> AsyncIterator[RunningStub]:
+async def serving(stub: TextModeStub) -> AsyncIterator[RunningStub]:
     """Serve one stub on an ephemeral loopback port for the test's life."""
     runner = web.AppRunner(stub.build_app())
     await runner.setup()

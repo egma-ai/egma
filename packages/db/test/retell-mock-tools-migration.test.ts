@@ -15,7 +15,7 @@ import {
 } from "./support/database.ts";
 
 /**
- * The playground migration, run the way a real deployment meets it: over a
+ * Text mode migration, run the way a real deployment meets it: over a
  * database that already holds connections, runs and finished simulations.
  *
  * Two things are proved here that a fresh database cannot say anything about.
@@ -33,7 +33,7 @@ import {
  * platform version, and that is every run there is.
  */
 
-const UNDER_TEST = "0003_retell_playground.sql";
+const UNDER_TEST = "0003_retell_text_mode.sql";
 
 let database: EmptyDatabase;
 let store: SingleConnection;
@@ -201,12 +201,12 @@ async function seedExistingWork(): Promise<void> {
 }
 
 beforeAll(async () => {
-  database = await createEmptyDatabase("retell_playground_migration");
+  database = await createEmptyDatabase("retell_text_mode_migration");
 
   // Everything up to the migration under test, from a directory holding
   // nothing else. Applying the real directory afterwards finds those already
   // recorded under the same hashes and applies only what follows.
-  before = await mkdtemp(path.join(tmpdir(), "egma-before-playground-"));
+  before = await mkdtemp(path.join(tmpdir(), "egma-before-text-mode-"));
   const earlier = (await readdir(MIGRATIONS_DIRECTORY))
     .filter((name) => name.endsWith(".sql") && name < UNDER_TEST)
     .sort();
@@ -227,7 +227,7 @@ afterAll(async () => {
   if (before !== undefined) await rm(before, { recursive: true, force: true });
 });
 
-describe("the playground migration over a populated database", () => {
+describe("text mode migration over a populated database", () => {
   it("applies over rows an older build already wrote", async () => {
     const { applied } = await runMigrations(database.url);
     expect(applied).toContain(UNDER_TEST);
@@ -239,8 +239,8 @@ describe("the playground migration over a populated database", () => {
       `insert into connection
          (id, organization_id, project_id, agent_id, name, connection_type,
           access_variant, modality, topology, config)
-       values ($1, $2, $3, $4, 'Playground', 'retell_playground',
-         'retell_playground.api_key', 'chat', 'hosted-broker',
+       values ($1, $2, $3, $4, 'Text mode', 'retell_text_mode',
+         'retell_text_mode.api_key', 'chat', 'hosted-broker',
          '{"retellAgentId": "agent_1"}'::jsonb)`,
       [connectionId, acme.organization, acme.project, agentId],
     );
@@ -248,7 +248,7 @@ describe("the playground migration over a populated database", () => {
       "select connection_type from connection where id = $1",
       [connectionId],
     );
-    expect(rows[0]?.connection_type).toBe("retell_playground");
+    expect(rows[0]?.connection_type).toBe("retell_text_mode");
   });
 
   it("keeps every connection type an older build could have written", async () => {
@@ -271,7 +271,7 @@ describe("the playground migration over a populated database", () => {
            (id, organization_id, project_id, agent_id, name, connection_type,
             access_variant, modality, topology, config)
          values ($1, $2, $3, $4, 'Nonsense', 'retell_telepathy',
-           'retell_playground.api_key', 'chat', 'hosted-broker', '{}'::jsonb)`,
+           'retell_text_mode.api_key', 'chat', 'hosted-broker', '{}'::jsonb)`,
         [newId("con"), acme.organization, acme.project, agentId],
       )
       .then(() => undefined)

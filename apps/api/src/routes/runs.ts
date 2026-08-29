@@ -62,9 +62,9 @@ import {
 import { buildRunMockedWorld } from "../mocked-world.ts";
 import { phoneReadiness, phoneSetupRequiredMessage } from "../phone-readiness.ts";
 import {
-  readPlaygroundWorld,
+  readTextModeWorld,
   type PlatformWorldRead,
-} from "../providers/retell-playground.ts";
+} from "../providers/retell-text-mode.ts";
 
 /**
  * How one connection type reads the agent's platform before its run starts.
@@ -81,8 +81,8 @@ type RunStartReader = (
 ) => Promise<PlatformWorldRead>;
 
 const RUN_START_READERS: Readonly<Record<string, RunStartReader>> = {
-  retell_playground: (reach, fetchImpl) =>
-    readPlaygroundWorld(
+  retell_text_mode: (reach, fetchImpl) =>
+    readTextModeWorld(
       {
         apiKey: reach.apiKey,
         agentId: reach.config["retellAgentId"] ?? "",
@@ -102,7 +102,7 @@ export type RunRoutesOptions = {
   /**
    * Test seam for the Retell reads and writes a run start makes, on the two
    * lanes that reach the platform: the draft lane's mocked-world build, and the
-   * playground lane's version-pinning run-start read. The real one is `fetch`,
+   * text-mode lane's version-pinning run-start read. The real one is `fetch`,
    * and a run that neither mocks nor pins a version reaches no platform here.
    */
   readonly retellFetch?: typeof fetch | undefined;
@@ -510,7 +510,7 @@ export async function runRoutes(
       // most one of them. They are dispatched by connection type and never both
       // run for one run.
       //
-      // **The playground lane reads its world before the run row exists.** A
+      // **The text-mode lane reads its world before the run row exists.** A
       // resolve or a tool read that failed after the row was written would leave
       // a queued run nobody can conduct honestly; refused here, nothing was
       // started and the sentence says so. A run admitted without this read would
@@ -570,7 +570,7 @@ export async function runRoutes(
       // version's tool URLs carry this run's identifier, and nothing races it: a
       // mocked run's simulations are unclaimable until the record names a
       // temporary version, from the instant they are written. This is a no-op
-      // for a playground run — not a mockable draft lane — and for an unticked
+      // for a text-mode run — not a mockable draft lane — and for an unticked
       // agent; only a run over a mockable draft lane whose agent carries the
       // tick reaches Retell here. A world that cannot be built cancels the run
       // and is answered as itself, never as a run that started.

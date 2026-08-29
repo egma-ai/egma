@@ -179,7 +179,7 @@ You need a LiveKit server, an OpenAI API key and a way to talk to the agent.
    credentials — development mode resolves end-of-turn detection to the hosted
    model.
 
-5. **Hold the exchange.** Join the room and talk: LiveKit's agents playground
+5. **Hold the exchange.** Join the room and talk: LiveKit's agents text mode
    works if you have a microphone. (The framework's `console` mode is not a way
    to join — it runs the agent terminal-only with no server or room, which
    captures no room telemetry.) Without a microphone,

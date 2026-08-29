@@ -186,7 +186,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   >(null);
   const [retellAgentId, setRetellAgentId] = useState("");
   const [retellRoute, setRetellRoute] = useState("");
-  // How the developer wants to test a voice agent: chat over the playground, or
+  // How the developer wants to test a voice agent: chat over text mode, or
   // voice down a call. The modality question the flow leads with for a voice
   // agent whose goal is a simulation.
   const [testModality, setTestModality] = useState<"" | "chat" | "voice">("");
@@ -720,7 +720,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-modality":
         if (testModality === "") return;
         if (testModality === "chat") {
-          // Chat over the playground: minted from the one chat route a voice
+          // Chat over text mode: minted from the one chat route a voice
           // agent carries, the same finish the chat-agent path uses.
           await finishRetellChat();
         } else {
@@ -798,7 +798,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       step === "livekit-modality" ||
       step === "livekit-simulation" ||
       step === "retell-phone" ||
-      // The modality step can mint the playground connection on Continue, and
+      // The modality step can mint the text-mode connection on Continue, and
       // that needs the option catalog to name the row it writes.
       step === "retell-modality" ||
       (step === "retell-chat" && goal !== "monitoring");
@@ -988,7 +988,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               <ChoiceCard
                 value="chat"
                 title="Chat"
-                description="Egma tests the agent in text over Retell's playground. No call is placed and nothing is dialled, so a whole suite runs in seconds."
+                description="Egma tests the agent in text over Retell's text mode. No call is placed and nothing is dialled, so a whole suite runs in seconds."
               />
               <ChoiceCard
                 value="voice"

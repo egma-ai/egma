@@ -389,7 +389,7 @@ describe("the choice between text and phone", () => {
       "Phone — Egma dials one of the agent's numbers",
       "Egma creates this connection only after you confirm it.",
     );
-    // A voice agent supports both ways: chat over the playground and voice down
+    // A voice agent supports both ways: chat over text mode and voice down
     // a line. Text is the row the cursor rests on first because it dials
     // nothing; the developer moves to phone and confirms it before Egma dials.
     expect(offered).toContain("\u203a Chat");

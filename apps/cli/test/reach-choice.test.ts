@@ -288,10 +288,10 @@ describe("choosing the phone", () => {
 });
 
 describe("choosing text", () => {
-  it("creates one Retell playground connection for a Retell voice agent", async () => {
-    // A voice agent tested in text is conducted over the playground. The
+  it("creates one Retell text mode connection for a Retell voice agent", async () => {
+    // A voice agent tested in text is conducted over text mode. The
     // refusal that used to stand here retired with this lane, the agent being
-    // on a Retell LLM the playground can reach.
+    // on a Retell LLM text mode can reach.
     retell = await startFakeRetell(ACCOUNT);
 
     const { report, connected } = await run({ reach: "text" });
@@ -303,8 +303,8 @@ describe("choosing text", () => {
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionType).toBe("retell_playground");
-    expect(connection?.accessVariant).toBe("retell_playground.api_key");
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
     // A chat simulation of a voice agent: the connection speaks chat and names
     // the voice agent it conducts against.
     expect(connection?.modality).toBe("chat");
@@ -346,7 +346,7 @@ describe("choosing text", () => {
 
 describe("choosing neither", () => {
   it("offers both text and phone for a Retell voice agent", async () => {
-    // The modality question leads for a voice agent: chat over the playground,
+    // The modality question leads for a voice agent: chat over text mode,
     // or voice down a line. Both are offered, and neither is chosen here.
     retell = await startFakeRetell(ACCOUNT);
 

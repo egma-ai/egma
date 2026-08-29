@@ -33,7 +33,7 @@ export * from "./tools.ts";
 export * from "./mock-draft.ts";
 export * from "./discovery.ts";
 export * from "./mocked-world.ts";
-export * from "./playground.ts";
+export * from "./text-mode.ts";
 
 /** How many agents one listing request asks for. */
 const PAGE_SIZE = 1000;

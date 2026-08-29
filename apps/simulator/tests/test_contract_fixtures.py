@@ -260,10 +260,10 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
     assert spec.dynamic_variables["caller_name"] == ""
 
 
-def test_the_playground_lane_reads_back_with_and_without_the_optional_fields():
+def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
     """The chat lane for a Retell *voice* agent, both ways round.
 
-    A real playground run always names the version it conducts — the run
+    A real text-mode run always names the version it conducts — the run
     resolves it once so a concurrent edit cannot move the agent under test
     mid-suite — and it is the lane whose mock tools ride the request, so
     the fixture that carries everything carries all three. The plain one is
@@ -276,11 +276,11 @@ def test_the_playground_lane_reads_back_with_and_without_the_optional_fields():
     a plug rather than as a contract change.
     """
     carried = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell-playground.json"
+        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell-text-mode.json"
     )
     spec = SimulationSpec.from_document(carried)
-    assert spec.connection_type == "retell_playground"
-    assert spec.access_variant == "retell_playground.api_key"
+    assert spec.connection_type == "retell_text_mode"
+    assert spec.access_variant == "retell_text_mode.api_key"
     assert spec.modality == "chat"
     assert spec.agent_version == 106
     assert spec.dynamic_variables["egma_simulation"] == carried["simulation_id"]
@@ -296,12 +296,12 @@ def test_the_playground_lane_reads_back_with_and_without_the_optional_fields():
         / "fixtures"
         / "spec"
         / "valid"
-        / "chat-retell-playground-plain.json"
+        / "chat-retell-text-mode-plain.json"
     )
     assert "agent_version" not in plain
     assert "dynamic_variables" not in plain
     spec = SimulationSpec.from_document(plain)
-    assert spec.connection_type == "retell_playground"
+    assert spec.connection_type == "retell_text_mode"
     assert spec.agent_version is None
     assert spec.dynamic_variables == {}
     assert spec.mock_tools == ()

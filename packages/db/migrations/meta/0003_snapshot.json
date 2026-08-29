@@ -1,6 +1,6 @@
 {
-  "id": "4822ab9e-52cf-4ce9-8d50-b8ba9732660e",
-  "prevId": "eea5ecf8-f017-4fcb-a5a4-6ccb0212d110",
+  "id": "a66bcdef-90e8-4c4c-9cf7-f19057ebdae0",
+  "prevId": "761e3f99-9aaf-40a2-9dcb-c3da42ff1e15",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1761,13 +1761,6 @@
           "notNull": true,
           "default": false
         },
-        "mock_tools_during_simulations": {
-          "name": "mock_tools_during_simulations",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "archived_at": {
           "name": "archived_at",
           "type": "timestamp with time zone",
@@ -1944,10 +1937,6 @@
         "agent_pull_needs_binding": {
           "name": "agent_pull_needs_binding",
           "value": "\"agent\".\"pull_production_calls\" = false or (\"agent\".\"agent_platform\" is not null and \"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
-        },
-        "agent_mock_tools_need_platform_key": {
-          "name": "agent_mock_tools_need_platform_key",
-          "value": "\"agent\".\"mock_tools_during_simulations\" = false or (\"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -2033,6 +2022,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "mock_tools_enabled": {
+          "name": "mock_tools_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "archived_at": {
           "name": "archived_at",
@@ -2191,11 +2187,11 @@
         },
         "connection_type_allowed": {
           "name": "connection_type_allowed",
-          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'retell_playground', 'retell_web_call', 'phone_number', 'livekit_room')"
+          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'retell_text_mode', 'retell_web_call', 'phone_number', 'livekit_room')"
         },
         "connection_access_variant_allowed": {
           "name": "connection_access_variant_allowed",
-          "value": "\"connection\".\"access_variant\" in ('retell_chat_api.api_key', 'retell_playground.api_key', 'retell_web_call.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint')"
+          "value": "\"connection\".\"access_variant\" in ('retell_chat_api.api_key', 'retell_text_mode.api_key', 'retell_web_call.api_key', 'phone_number.public_e164', 'livekit_room.project_credentials', 'livekit_room.customer_token_endpoint')"
         },
         "connection_modality_allowed": {
           "name": "connection_modality_allowed",
@@ -2208,6 +2204,10 @@
         "connection_credentials_hint_agrees": {
           "name": "connection_credentials_hint_agrees",
           "value": "(\"connection\".\"credentials\" is null) = (\"connection\".\"credentials_hint\" is null)"
+        },
+        "connection_mock_tools_lanes": {
+          "name": "connection_mock_tools_lanes",
+          "value": "\"connection\".\"mock_tools_enabled\" = false\n        or \"connection\".\"connection_type\" in ('retell_text_mode', 'retell_web_call')"
         }
       },
       "isRLSEnabled": false
@@ -4028,14 +4028,26 @@
           "primaryKey": false,
           "notNull": true
         },
-        "mocked_world": {
-          "name": "mocked_world",
-          "type": "jsonb",
+        "agent_version": {
+          "name": "agent_version",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "conducted_world": {
-          "name": "conducted_world",
+        "temp_mock_agent_version": {
+          "name": "temp_mock_agent_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "temp_mock_agent_version_cleanup": {
+          "name": "temp_mock_agent_version_cleanup",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mock_metadata": {
+          "name": "mock_metadata",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -4159,6 +4171,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "run_mock_tools_cleanup_owed_idx": {
+          "name": "run_mock_tools_cleanup_owed_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"run\".\"temp_mock_agent_version_cleanup\" = false",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4300,6 +4334,18 @@
         "run_started_when_left_pending": {
           "name": "run_started_when_left_pending",
           "value": "case\n        when \"run\".\"status\" = 'pending' then \"run\".\"started_at\" is null\n        when \"run\".\"status\" in ('running', 'completed') then \"run\".\"started_at\" is not null\n        else true\n      end"
+        },
+        "run_agent_version_is_a_version": {
+          "name": "run_agent_version_is_a_version",
+          "value": "\"run\".\"agent_version\" is null or \"run\".\"agent_version\" >= 0"
+        },
+        "run_temp_mock_agent_version_is_a_version": {
+          "name": "run_temp_mock_agent_version_is_a_version",
+          "value": "\"run\".\"temp_mock_agent_version\" is null\n        or \"run\".\"temp_mock_agent_version\" >= 0"
+        },
+        "run_temp_mock_agent_version_owes_cleanup": {
+          "name": "run_temp_mock_agent_version_owes_cleanup",
+          "value": "\"run\".\"temp_mock_agent_version\" is null\n        or \"run\".\"temp_mock_agent_version_cleanup\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -4609,12 +4655,6 @@
         "mock_tool_coverage": {
           "name": "mock_tool_coverage",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "conducted_agent_version": {
-          "name": "conducted_agent_version",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -4963,10 +5003,6 @@
         "simulation_mock_tool_coverage_only_when_ended": {
           "name": "simulation_mock_tool_coverage_only_when_ended",
           "value": "\"simulation\".\"ended_at\" is not null or \"simulation\".\"mock_tool_coverage\" is null"
-        },
-        "simulation_conducted_agent_version_is_a_version": {
-          "name": "simulation_conducted_agent_version_is_a_version",
-          "value": "\"simulation\".\"conducted_agent_version\" is null\n        or \"simulation\".\"conducted_agent_version\" >= 0"
         },
         "simulation_audio_facts_are_voice_facts": {
           "name": "simulation_audio_facts_are_voice_facts",

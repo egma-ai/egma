@@ -104,18 +104,18 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
 }
 
 /**
- * A live playground payload. The one Retell kind whose config carries a
+ * A live text mode payload. The one Retell kind whose config carries a
  * `baseUrl` — the address Egma's own control plane sends the sealed key to at
  * run start — so it is the kind the credential-redirect rule guards.
  */
-function playgroundConnection(
+function textModeConnection(
   overrides: Partial<NewConnection> = {},
 ): NewConnection {
   return {
-    name: `playground-${newId("con").slice(-8)}`,
+    name: `text mode-${newId("con").slice(-8)}`,
     agentPlatform: "retell",
-    connectionType: "retell_playground",
-    accessVariant: "retell_playground.api_key",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -965,19 +965,19 @@ describe("updating a connection", () => {
     ).rejects.toThrow(/"phoneNumber"/);
   });
 
-  // The credential-redirect rule: on the playground, `baseUrl` names where
+  // The credential-redirect rule: on text mode, `baseUrl` names where
   // Egma's control plane sends the connection's sealed Retell key at run start.
   // A sealed key is write-only — a read never gives it back — so moving that
   // address while leaving the key in place would aim a key the editor cannot
   // read at a host the editor chose. Changing it therefore has to carry the
   // key to send.
-  describe("the playground's baseUrl, which redirects the sealed key", () => {
+  describe("text mode's baseUrl, which redirects the sealed key", () => {
     it("refuses a change of baseUrl that carries no credential", async () => {
       const agentId = await agentNamed("Redirect Refused");
       const added = await addConnection(
         actingAsAcme(),
         agentId,
-        playgroundConnection(),
+        textModeConnection(),
       );
 
       await expect(
@@ -1004,7 +1004,7 @@ describe("updating a connection", () => {
       const added = await addConnection(
         actingAsAcme(),
         agentId,
-        playgroundConnection(),
+        textModeConnection(),
       );
 
       const moved = await updateConnection(
@@ -1033,7 +1033,7 @@ describe("updating a connection", () => {
       const added = await addConnection(
         actingAsAcme(),
         agentId,
-        playgroundConnection({
+        textModeConnection({
           config: {
             retellAgentId: "agent_in_retell_1",
             baseUrl: "https://acme-proxy.example",

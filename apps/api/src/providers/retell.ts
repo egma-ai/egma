@@ -8,7 +8,7 @@ import {
   type RetellCredential,
 } from "@egma/retell";
 
-import { readPlaygroundWorld } from "./retell-playground.ts";
+import { readTextModeWorld } from "./retell-text-mode.ts";
 
 /**
  * The small, read-only Retell account seam used by provider setup.
@@ -21,8 +21,8 @@ import { readPlaygroundWorld } from "./retell-playground.ts";
 export type RetellConnectionCandidate =
   | {
       readonly agentPlatform: "retell";
-      readonly connectionType: "retell_playground";
-      readonly accessVariant: "retell_playground.api_key";
+      readonly connectionType: "retell_text_mode";
+      readonly accessVariant: "retell_text_mode.api_key";
       readonly modality: "chat";
       readonly productLabel: string;
       readonly config: { readonly retellAgentId: string };
@@ -76,7 +76,7 @@ export type RetellCandidateConfirmation =
 
 type RetellCandidateToConfirm =
   | {
-      readonly connectionType: "retell_playground";
+      readonly connectionType: "retell_text_mode";
       readonly config: { readonly retellAgentId: string };
     }
   | {
@@ -159,18 +159,18 @@ function webCallCandidate(platformAgentId: string): RetellConnectionCandidate {
   };
 }
 
-function playgroundCandidate(
+function textModeCandidate(
   platformAgentId: string,
 ): RetellConnectionCandidate {
   return {
     agentPlatform: "retell",
-    connectionType: "retell_playground",
-    accessVariant: "retell_playground.api_key",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
     modality: "chat",
     productLabel: productLabelOf(
       "retell",
-      "retell_playground",
-      "retell_playground.api_key",
+      "retell_text_mode",
+      "retell_text_mode.api_key",
       "chat",
     ),
     config: { retellAgentId: platformAgentId },
@@ -226,11 +226,11 @@ export async function discoverRetellAgents(
           ? [chatCandidate(agent.id)]
           : [
               // The chat door a voice agent otherwise has none of: the
-              // playground conducts a chat simulation of it in text. Offered
+              // text mode conducts a chat simulation of it in text. Offered
               // for every voice agent, because whether its engine is one the
-              // playground can reach is a question answered when the connection
+              // text mode can reach is a question answered when the connection
               // is confirmed, not one discovery can answer from a listing.
-              playgroundCandidate(agent.id),
+              textModeCandidate(agent.id),
               // The web call: it needs nothing of the customer's to be routed,
               // it is what a mocked run is conducted over, and it is the one
               // voice lane every voice agent has.
@@ -291,7 +291,7 @@ export async function confirmRetellCandidate(
     };
   }
 
-  if (candidate.connectionType === "retell_playground") {
+  if (candidate.connectionType === "retell_text_mode") {
     if (
       candidate.config.retellAgentId !== platformAgentId ||
       agent.modality !== "voice"
@@ -299,7 +299,7 @@ export async function confirmRetellCandidate(
       return {
         kind: "rejected",
         message:
-          "The Retell playground tests a Retell **voice** agent in text. That " +
+          "The Retell text mode tests a Retell **voice** agent in text. That " +
           "agent is not one; a Retell chat agent is reached through the Chat " +
           "API instead.",
       };
@@ -312,7 +312,7 @@ export async function confirmRetellCandidate(
     // told it at the first run is a suite that will not start for a reason
     // nobody expected. The run start asks the same question again through the
     // same read, so the two refusals are one sentence in one place.
-    const world = await readPlaygroundWorld(
+    const world = await readTextModeWorld(
       {
         apiKey,
         agentId: platformAgentId,
@@ -326,7 +326,7 @@ export async function confirmRetellCandidate(
     if (world.kind !== "world") {
       return { kind: "unavailable", message: world.message };
     }
-    return { kind: "ready", candidate: playgroundCandidate(platformAgentId) };
+    return { kind: "ready", candidate: textModeCandidate(platformAgentId) };
   }
 
   if (candidate.connectionType === "retell_chat_api") {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  exchangeInPlayground,
+  exchangeInTextMode,
   NO_RESUME,
   WIRE,
   type RetellCredential,
 } from "../src/index.ts";
 
 /**
- * The playground verb, against a Retell that only exists in this file.
+ * Text mode verb, against a Retell that only exists in this file.
  *
  * Nothing here reaches a network. What is proved is what a developer would
  * otherwise have to trust a live account for: the request Retell would have
@@ -62,7 +62,7 @@ const REACH = (fetchImpl: typeof fetch) => ({
   fetchImpl,
 });
 
-describe("one playground exchange", () => {
+describe("one text-mode exchange", () => {
   it("sends the history and reads the agent's new messages back", async () => {
     const { fetchImpl, seen } = retell([
       () =>
@@ -81,7 +81,7 @@ describe("one playground exchange", () => {
         }),
     ]);
 
-    const answered = await exchangeInPlayground(
+    const answered = await exchangeInTextMode(
       key,
       {
         agentId: AGENT,
@@ -136,7 +136,7 @@ describe("one playground exchange", () => {
         { role: "user", content: "Thursday please" },
       ],
     ]) {
-      await exchangeInPlayground(
+      await exchangeInTextMode(
         key,
         { agentId: AGENT, agentVersion: 106, messages },
         REACH(fetchImpl),
@@ -160,7 +160,7 @@ describe("one playground exchange", () => {
         }),
     ]);
 
-    const opened = await exchangeInPlayground(
+    const opened = await exchangeInTextMode(
       key,
       { agentId: AGENT, agentVersion: 3, messages: [], resume: NO_RESUME },
       REACH(fetchImpl),
@@ -195,7 +195,7 @@ describe("one playground exchange", () => {
       () => json({ [WIRE.messages]: [], [WIRE.agentEnded]: true }),
     ]);
 
-    const first = await exchangeInPlayground(
+    const first = await exchangeInTextMode(
       key,
       {
         agentId: AGENT,
@@ -217,7 +217,7 @@ describe("one playground exchange", () => {
       stateName: "collecting",
     });
 
-    const second = await exchangeInPlayground(
+    const second = await exchangeInTextMode(
       key,
       {
         agentId: AGENT,
@@ -261,7 +261,7 @@ describe("one playground exchange", () => {
         }),
     ]);
 
-    await exchangeInPlayground(
+    await exchangeInTextMode(
       key,
       {
         agentId: AGENT,
@@ -304,7 +304,7 @@ describe("one playground exchange", () => {
   it("says nothing about mocks or variables when it has none", async () => {
     const { fetchImpl, seen } = retell([() => json({ [WIRE.messages]: [] })]);
 
-    await exchangeInPlayground(
+    await exchangeInTextMode(
       key,
       {
         agentId: AGENT,
@@ -342,7 +342,7 @@ describe("one playground exchange", () => {
 
     const sent = { egma_simulation: "sim_1", caller_name: "Eleanor" };
     for (const expected of ["Thursday", "Friday"]) {
-      const answered = await exchangeInPlayground(
+      const answered = await exchangeInTextMode(
         key,
         {
           agentId: AGENT,
@@ -374,7 +374,7 @@ describe("one playground exchange", () => {
         }),
     ]);
 
-    const answered = await exchangeInPlayground(
+    const answered = await exchangeInTextMode(
       key,
       { agentId: AGENT, agentVersion: 9, messages: [] },
       REACH(fetchImpl),
@@ -393,7 +393,7 @@ describe("one playground exchange", () => {
       [500, "refused"],
     ] as const) {
       const { fetchImpl } = retell([() => json({ message: KEY }, status)]);
-      const answered = await exchangeInPlayground(
+      const answered = await exchangeInTextMode(
         key,
         { agentId: AGENT, agentVersion: 1, messages: [] },
         REACH(fetchImpl),
@@ -407,14 +407,14 @@ describe("one playground exchange", () => {
 
   it("refuses an answer that carries no messages at all", async () => {
     const { fetchImpl } = retell([() => json({ ok: true })]);
-    const answered = await exchangeInPlayground(
+    const answered = await exchangeInTextMode(
       key,
       { agentId: AGENT, agentVersion: 1, messages: [] },
       REACH(fetchImpl),
     );
     expect(answered).toEqual({
       kind: "refused",
-      reason: "Retell answered a playground exchange without a message list.",
+      reason: "Retell answered a text-mode exchange without a message list.",
     });
   });
 });

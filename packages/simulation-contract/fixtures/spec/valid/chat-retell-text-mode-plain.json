@@ -1,11 +1,11 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
+  "simulation_id": "sim_01K5T4RB9F0C2XKQNZ7MVD4HTA",
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
-    "connection_type": "retell_playground",
-    "access_variant": "retell_playground.api_key",
+    "connection_type": "retell_text_mode",
+    "access_variant": "retell_text_mode.api_key",
     "config": {
       "retellAgentId": "agent_b0e2e9cb267c47e7e7026cd8e8"
     },
@@ -13,19 +13,13 @@
       "apiKey": "fixture-not-a-real-secret-0000000000000000"
     }
   },
-  "agent_version": 106,
-  "dynamic_variables": {
-    "egma_simulation": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
-    "is_existing": "true",
-    "caller_name": ""
-  },
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68, typing carefully. Polite, thorough, repeats details back to be sure she has them right.",
     "language": "en-US"
   },
   "scenario": {
-    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the exchange ends."
+    "instructions": "You want to know whether the practice is open on Saturday mornings. Conclude once you have been told."
   },
   "limits": {
     "max_duration_seconds": 600,
@@ -50,17 +44,5 @@
       "voice_id": "measured-alto-3",
       "speed": 0.95
     }
-  },
-  "mock_tools": [
-    {
-      "tool_name": "get_availability",
-      "answer": { "answer": { "slots": ["2026-09-03T14:30:00Z"] } },
-      "delay_milliseconds": 250
-    },
-    {
-      "tool_name": "book_appointment",
-      "answer": { "error": "the booking service is unavailable" },
-      "delay_milliseconds": 0
-    }
-  ]
+  }
 }

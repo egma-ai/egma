@@ -61,7 +61,7 @@ const VOICE_AGENT: FakeRetellScript = {
   agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
 };
 
-/** A voice agent whose brain is a custom LLM, out of the playground's reach. */
+/** A voice agent whose brain is a custom LLM, out of text mode's reach. */
 const CUSTOM_LLM_VOICE_AGENT: FakeRetellScript = {
   keys: [KEY],
   agents: [
@@ -422,7 +422,7 @@ describe("which connection egma creates", () => {
   it("refuses an explicit reach the Retell agent does not support before writing", async () => {
     // A chat agent has no phone line to dial, so phone is the wrong door. The
     // voice-over-text refusal that used to sit here retired: text now mints a
-    // playground for a voice agent, so the remaining mismatch is a chat agent
+    // text mode for a voice agent, so the remaining mismatch is a chat agent
     // asked for by phone.
     retell = await startFakeRetell(ONE_AGENT);
 
@@ -558,7 +558,7 @@ describe("which connection egma creates", () => {
 
 describe("the whole walk, headless", () => {
   it("prints the compatible Retell reach and stops before writing on a custom-LLM mismatch", async () => {
-    // The playground reaches a voice agent's words and tools through Retell, and
+    // Text mode reaches a voice agent's words and tools through Retell, and
     // a custom LLM keeps both on its own socket. So text is offered — every
     // voice agent has it — but the engine is refused at the door, with phone
     // named as the way that does reach it.

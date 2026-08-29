@@ -28,9 +28,9 @@ from pathlib import Path
 import aiohttp
 import pytest
 from aiohttp import web
-from playground_stub import PlaygroundStub
-from playground_stub import RunningStub as RunningPlayground
-from playground_stub import serving as serving_playground
+from text_mode_stub import TextModeStub
+from text_mode_stub import RunningStub as RunningTextMode
+from text_mode_stub import serving as serving_text_mode
 from retell_stub import RetellStub, RunningStub, serving
 
 from egma_simulator.config import DEFAULT_S3_BUCKET, DEFAULT_S3_REGION
@@ -546,36 +546,36 @@ async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningSt
 
 
 @pytest.fixture
-async def start_playground_stub() -> (
-    AsyncIterator[Callable[..., Awaitable[RunningPlayground]]]
+async def start_text_mode_stub() -> (
+    AsyncIterator[Callable[..., Awaitable[RunningTextMode]]]
 ):
-    """Start playground-shaped stubs on loopback; each stops with the test.
+    """Start text-mode-shaped stubs on loopback; each stops with the test.
 
-    The keyword arguments are :class:`PlaygroundStub`'s script — the key it
+    The keyword arguments are :class:`TextModeStub`'s script — the key it
     honors, the exchanges it plays, the statuses it refuses the leading
     requests with.
     """
     async with contextlib.AsyncExitStack() as stack:
 
-        async def start(**script: object) -> RunningPlayground:
+        async def start(**script: object) -> RunningTextMode:
             return await stack.enter_async_context(
-                serving_playground(PlaygroundStub(**script))
+                serving_text_mode(TextModeStub(**script))
             )
 
         yield start
 
 
 @pytest.fixture
-def quick_playground_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Collapse the playground's rate-limit backoff to milliseconds.
+def quick_text_mode_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse text mode's rate-limit backoff to milliseconds.
 
     Only the waiting is shortened. How many times a throttled request is
     tried again, and what happens when they run out, are exactly the
     production ones.
     """
-    from egma_simulator.plugs import retell_playground
+    from egma_simulator.plugs import retell_text_mode
 
-    monkeypatch.setattr(retell_playground, "FIRST_BACKOFF_SECONDS", 0.001)
+    monkeypatch.setattr(retell_text_mode, "FIRST_BACKOFF_SECONDS", 0.001)
 
 
 @pytest.fixture
@@ -809,7 +809,7 @@ def retell_spec(
     )
 
 
-def playground_spec(
+def text_mode_spec(
     simulation_id: str,
     *,
     base_url: str,
@@ -823,12 +823,12 @@ def playground_spec(
     dynamic_variables: dict[str, str] | None = None,
     mock_tools: list[dict] | None = None,
 ) -> dict:
-    """One spec against a Retell playground connection, pointed wherever asked.
+    """One spec against a Retell text mode connection, pointed wherever asked.
 
     The connection block is exactly what the control plane stores for a
-    ``retell_playground`` connection — the voice agent's id in the config,
+    ``retell_text_mode`` connection — the voice agent's id in the config,
     the key in the credentials — plus the base URL, which is what lets the
-    exchange land on a playground-shaped stub instead of the platform
+    exchange land on a text-mode-shaped stub instead of the platform
     itself. The version and the run's resolved answers ride the spec the
     way a real run over this lane carries them: the version because it is
     resolved once and named on every request, the answers because this is
@@ -838,8 +838,8 @@ def playground_spec(
         simulation_id,
         connection={
             "agent_platform": "retell",
-            "connection_type": "retell_playground",
-            "access_variant": "retell_playground.api_key",
+            "connection_type": "retell_text_mode",
+            "access_variant": "retell_text_mode.api_key",
             "config": {"retellAgentId": agent_id, "baseUrl": base_url},
             "credentials": {"apiKey": api_key},
         },

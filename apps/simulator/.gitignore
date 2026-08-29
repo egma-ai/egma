@@ -4,5 +4,5 @@ __pycache__/
 .ruff_cache/
 # The default write-ahead-log location when run from this directory.
 .egma-simulator/
-# Proof artifacts the live playground suite banks when a developer runs it.
+# Proof artifacts the live text-mode suite banks when a developer runs it.
 tests/.live-proof/
