@@ -53,7 +53,7 @@ async function recordingPolicy(): Promise<PostHogConfig> {
  *
  * The first policy masked the entire product and the recordings were worthless
  * for it, so what these tests defend now runs in both directions — the pages
- * are recorded, *and* production traces and secrets are not.
+ * are recorded, *and* a secret on one is not.
  */
 describe("browser platform telemetry", () => {
   it("keeps the whole product recordable and the page's own words readable", async () => {
@@ -91,23 +91,23 @@ describe("browser platform telemetry", () => {
       "recording-player",
     );
 
-    // A private region: what carries words goes, what draws the page stays.
+    // A marked region: what carries words goes, what draws the page stays.
     expect(maskAttribute?.("title", "Run this test", closed)).toBe("");
-    expect(maskAttribute?.("aria-label", "+1 415 555 0134", closed)).toBe("");
-    expect(maskAttribute?.("src", "https://app.egma.ai/audio.wav", closed)).toBe("");
+    expect(maskAttribute?.("aria-label", "egma_sk_the_only_time", closed)).toBe("");
+    expect(maskAttribute?.("value", "egma_sk_the_only_time", closed)).toBe("");
     expect(maskAttribute?.("data-slot", "page-body", closed)).toBe("page-body");
     expect(maskAttribute?.("class", "recording-player", closed)).toBe(
       "recording-player",
     );
   });
 
-  it("records what somebody types, except a secret or a production trace", async () => {
+  it("records what somebody types, except where a secret is typed", async () => {
     const config = await recordingPolicy();
     const maskInput = config.session_recording.maskInputFn;
 
     const { open, closed } = twoRegions(`<input type="text" />`);
     expect(maskInput?.("Refund flow", open)).toBe("Refund flow");
-    expect(maskInput?.("+1 415 555 0134", closed)).toBe("*".repeat(15));
+    expect(maskInput?.("Bearer a-real-token", closed)).toBe("*".repeat(19));
 
     /*
      * A password field while somebody is holding the reveal control down. Its

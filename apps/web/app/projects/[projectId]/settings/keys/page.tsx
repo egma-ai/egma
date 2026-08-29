@@ -161,10 +161,11 @@ function ApiKeyReceipt({
            * rather than clipped (`7D6-0`). A key that ran off the edge of its
            * line would be a key somebody copied half of.
            *
-           * **And the one place in the product where session replay would
-           * otherwise record a live credential.** The key is on screen as text,
-           * once, for as long as somebody takes to copy it, so the element that
-           * holds it carries the mark `lib/replay-privacy.ts` defines.
+           * **And the place the whole session-replay policy exists for.** A
+           * replay records the rest of these pages; this is a live credential
+           * on screen as text, once, for as long as somebody takes to copy it,
+           * so the element holding it carries the mark
+           * `lib/replay-privacy.ts` defines.
            */}
           <code
             {...REPLAY_PRIVATE}

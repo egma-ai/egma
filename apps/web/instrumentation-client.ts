@@ -20,9 +20,9 @@
  * masked all of it — every word, every field, and every attribute that could
  * carry a word — and what came back was grey blocks in the shape of a product,
  * with nothing in them to look at. So replay records the pages, and
- * `lib/replay-privacy.ts` names the two exceptions and marks them: production
- * traces, which belong to somebody who never opened these pages, and a secret
- * on screen. All three masking hooks below read that one mark.
+ * `lib/replay-privacy.ts` names the one exception and marks it: a secret drawn
+ * where a person can read it. All three masking hooks below read that one mark,
+ * and the password rule below is the one thing they do not need it for.
  *
  * What no mark can turn back on, because it is off for the whole product:
  * request and response headers and bodies, the console, cross-origin frames,

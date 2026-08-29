@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
 import { asListInstant } from "../lib/instants.ts";
 import type { Me } from "../lib/me.ts";
-import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { LIST, QUIET, TRACE_COLUMNS } from "../lib/transcript-copy.ts";
 import type { Facts, Grade, Listed } from "../lib/transcripts.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
@@ -427,23 +426,6 @@ describe("what the Monitoring list asks egma for", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Traces" }),
     ).toBeDefined();
-  });
-
-  /**
-   * **The one page in the product session replay may not read.** Every row on
-   * it is a customer's end user talking to a customer's agent, which is not
-   * egma's to watch back later — so the page carries the mark
-   * `lib/replay-privacy.ts` defines, and it is on `<main>` so the rows, the
-   * reading sheet and whatever is added here next are all inside it.
-   */
-  it("keeps its own page out of a session replay", async () => {
-    stub({ rows: [ONE_ROW] });
-    const { container } = render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { level: 1, name: LIST.title });
-    expect(
-      container.querySelector("main")?.hasAttribute(REPLAY_PRIVATE_ATTRIBUTE),
-    ).toBe(true);
   });
 });
 

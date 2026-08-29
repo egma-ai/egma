@@ -54,10 +54,6 @@ import {
   type SectionId,
 } from "../lib/navigation.ts";
 import { projectIdIn } from "../lib/project-context.ts";
-import {
-  REPLAY_PRIVATE,
-  showsProductionTraces,
-} from "../lib/replay-privacy.ts";
 import { canAuthor, VIEW_ONLY, type Role } from "../lib/roles.ts";
 import { Dialog } from "./dialog.tsx";
 import { DraftNavigationProvider } from "./draft-navigation.tsx";
@@ -925,25 +921,8 @@ export function ProductPage({
   readonly desktopViewport?: boolean;
   readonly children: ReactNode;
 }) {
-  /*
-   * **Session replay stops at this element on the Traces screens.** What is on
-   * them is a customer's end user talking to a customer's agent, which is the
-   * one thing in these pages that is nobody's to watch here — and `<main>` is
-   * where the whole of a page is, sheets included, so one mark covers the list,
-   * a transcript, the panel over either, and whatever is added under Traces
-   * next. `lib/replay-privacy.ts` holds the rest of the policy.
-   *
-   * Read from the address rather than passed in by the page, for the reason
-   * `lib/navigation.ts` gives about the navigation: a page that has to remember
-   * what it is showing can forget, and a forgotten mark here is a recording of
-   * somebody else's conversation.
-   */
-  const pathname = usePathname() ?? "";
-  const traces = showsProductionTraces(pathname);
-
   return (
     <main
-      {...(traces ? REPLAY_PRIVATE : {})}
       className={cn(
         "flex w-full min-w-0 flex-col",
         "[--page-content-max:var(--page-max)]",
