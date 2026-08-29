@@ -48,7 +48,6 @@ const ACCOUNT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_quillfeather_order_line",
-      channel: "chat",
       agent_name: "order-line",
       response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
     },
@@ -107,7 +106,7 @@ afterEach(async () => {
 /** The walk, with whatever the developer would have answered written down. */
 async function walkWith(options: {
   readonly script: string;
-  readonly answers?: Partial<Record<"retell-key" | "reach", string>>;
+  readonly answers?: Partial<Record<"retell-key" | "lanes", string>>;
 }) {
   // Text unless a check says otherwise: every branch here is about a way the
   // walk can fail before or after the choice, not about the choice itself.

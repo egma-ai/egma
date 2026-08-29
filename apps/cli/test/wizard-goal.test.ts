@@ -39,7 +39,6 @@ const ONE_AGENT: FakeRetellScript = {
   agents: [
     {
       agent_id: "agent_0001",
-      channel: "chat",
       agent_name: "order-line",
       response_engine: { type: "retell-llm", llm_id: "llm_0001" },
     },

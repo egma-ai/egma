@@ -37,8 +37,7 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
         {
           agent_id: "synthetic-first-onboarding-agent",
           agent_name: "First receptionist",
-          channel: "chat",
-          response_engine: { type: "retell-llm", llm_id: "synthetic-first-llm" },
+              response_engine: { type: "retell-llm", llm_id: "synthetic-first-llm" },
         },
       ],
       llms: [
@@ -84,7 +83,7 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
     const env = workspace.env({
       EGMA_RETELL_URL: retell.url,
       EGMA_RETELL_API_KEY: PROVIDER_KEY,
-      EGMA_REACH: "text",
+      EGMA_LANES: "text",
     });
 
     const grading = gradeEveryRun(platform);

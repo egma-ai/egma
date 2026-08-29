@@ -368,18 +368,20 @@ describe("the refusals the enable-time read carries", () => {
     expect(found.numbers.some((one) => one.pin)).toBe(true);
   });
 
-  it("names an agent whose only connection is a phone number", async () => {
+  it("reads the account for an agent whose only connection is a phone number", async () => {
+    // The refusal that used to stand here told a person to add a connection no
+    // flow could create. The consent flow mints the web-call connection itself
+    // now, so this agent is one the flow can give a mockable lane to — and the
+    // read answers what that lane would cover rather than refusing it.
     const { key, agentId } = await anAgent(
       "mock_tools_phone_only",
       { numbers: numbered(RIDES_TAG) },
       { ...PHONE },
     );
     const found = await discovered(key, agentId);
-    expect(found.mockable).toBe(false);
-    expect(found.refusal?.reason).toBe("phone_only_agent");
-    expect(found.refusal?.message).toContain("never dialled");
-    expect(found.refusal?.message).toContain("real carrier leg");
-    expect(found.refusal?.message).toContain("web-call connection");
+    expect(found.mockable).toBe(true);
+    expect(found.refusal).toBeNull();
+    expect(found.tools.length).toBeGreaterThan(0);
   });
 
   it("names two keys that see two different Retell agents", async () => {

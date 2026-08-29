@@ -759,7 +759,7 @@ export type DiscoverMockToolsResponses = {
     200: {
         mockable: boolean;
         refusal: {
-            reason: 'custom_llm_engine' | 'phone_only_agent' | 'keys_disagree' | 'platform_unavailable';
+            reason: 'custom_llm_engine' | 'keys_disagree' | 'platform_unavailable';
             message: string;
         } | null;
         engine: 'retell-llm' | 'conversation-flow' | 'custom-llm' | null;

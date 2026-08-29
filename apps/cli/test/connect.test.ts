@@ -43,7 +43,6 @@ const ONE_CHAT_AGENT: FakeRetellScript = {
     {
       agent_id: "agent_0001",
       agent_name: "order-line",
-      channel: "chat",
       response_engine: { type: "retell-llm", llm_id: "llm_0001", version: 3 },
       extra: { language: "en-GB", webhook_url: null },
     },
@@ -103,7 +102,7 @@ const THREE_AGENTS: FakeRetellScript = {
   agents: [
     { agent_id: "agent_0001", agent_name: "order-line", response_engine: { type: "retell-llm", llm_id: "llm_0001" } },
     { agent_id: "agent_0002", agent_name: "after-hours", response_engine: { type: "retell-llm", llm_id: "llm_0002" } },
-    { agent_id: "agent_0003", agent_name: "chat-desk", channel: "chat", response_engine: { type: "custom-llm", llm_websocket_url: "wss://example.invalid/llm" } },
+    { agent_id: "agent_0003", agent_name: "chat-desk", response_engine: { type: "custom-llm", llm_websocket_url: "wss://example.invalid/llm" } },
   ],
   llms: [
     { llm_id: "llm_0001", general_prompt: PROMPT },
@@ -138,7 +137,7 @@ type RunOptions = {
    * the phone: every check written before there was a choice is about the
    * connection egma made then, and text is that connection.
    */
-  readonly reach?: string | null;
+  readonly lanes?: string | null;
   /** Which number they pick, when Retell routes the agent more than one. */
   readonly number?: string | null;
   /** Where the coding agent said the repository keeps its prompt. */
@@ -154,14 +153,14 @@ type RunOptions = {
 class ScriptedUI extends HeadlessUI {
   private readonly keys: (string | null)[];
   private readonly agent: string | null;
-  private readonly reach: string | null;
+  private readonly lanes: string | null;
   private readonly number: string | null;
 
   constructor(options: RunOptions) {
     super();
     this.keys = [...options.keys];
     this.agent = options.agent ?? null;
-    this.reach = options.reach === undefined ? "text" : options.reach;
+    this.lanes = options.lanes === undefined ? "text" : options.lanes;
     this.number = options.number ?? null;
   }
 
@@ -169,7 +168,7 @@ class ScriptedUI extends HeadlessUI {
     this.record.asked.push(ask);
     if (ask === "retell-key") return Promise.resolve(this.keys.shift() ?? null);
     if (ask === "retell-agent") return Promise.resolve(this.agent);
-    if (ask === "reach") return Promise.resolve(this.reach);
+    if (ask === "lanes") return Promise.resolve(this.lanes);
     if (ask === "phone-number") return Promise.resolve(this.number);
     return Promise.resolve(null);
   }
@@ -376,7 +375,7 @@ describe("one agent, and several", () => {
     // as the door that does reach it.
     retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
 
-    const refused = await run({ keys: [KEY], reach: "text" });
+    const refused = await run({ keys: [KEY], lanes: "text" });
 
     expect(refused.connected).toBeNull();
     expect(refused.report).toEqual({
@@ -384,7 +383,7 @@ describe("one agent, and several", () => {
       reason: TEXT_MODE_REFUSES_CUSTOM_LLM,
     });
     expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("custom LLM");
-    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("--reach phone");
+    expect(TEXT_MODE_REFUSES_CUSTOM_LLM).toContain("--lanes phone");
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
   });
@@ -394,7 +393,7 @@ describe("one agent, and several", () => {
     // agent the way its callers do, whatever engine answers behind the line.
     retell = await startFakeRetell(ONE_VOICE_CUSTOM_LLM_AGENT);
 
-    const { connected, report } = await run({ keys: [KEY], reach: "phone" });
+    const { connected, report } = await run({ keys: [KEY], lanes: "phone" });
 
     expect(report.kind).toBe("connected");
     expect(connected?.reach).toBe("phone");
@@ -430,7 +429,7 @@ describe("what lands on the platform", () => {
     const provider = await startFakeRetell(ONE_VOICE_AGENT);
     retell = provider;
 
-    const { connected } = await run({ keys: [KEY], reach: "phone" });
+    const { connected } = await run({ keys: [KEY], lanes: "phone" });
 
     // Both halves were really read, each at its own address.
     const asked = provider.requests.map((one) => one.path);
@@ -616,8 +615,8 @@ describe("one agent, two connections", () => {
   it("attaches text after phone to the one agent, never a twin", async () => {
     retell = await startFakeRetell(ONE_VOICE_AGENT);
 
-    const phone = await run({ keys: [KEY], reach: "phone" });
-    const text = await run({ keys: [KEY], reach: "text" });
+    const phone = await run({ keys: [KEY], lanes: "phone" });
+    const text = await run({ keys: [KEY], lanes: "text" });
 
     expect(phone.connected?.reach).toBe("phone");
     expect(text.connected?.reach).toBe("text");
@@ -638,8 +637,8 @@ describe("one agent, two connections", () => {
   it("attaches phone after text to the one agent, never a twin", async () => {
     retell = await startFakeRetell(ONE_VOICE_AGENT);
 
-    const text = await run({ keys: [KEY], reach: "text" });
-    const phone = await run({ keys: [KEY], reach: "phone" });
+    const text = await run({ keys: [KEY], lanes: "text" });
+    const phone = await run({ keys: [KEY], lanes: "phone" });
 
     expect(text.connected?.reach).toBe("text");
     expect(phone.connected?.reach).toBe("phone");
@@ -661,8 +660,8 @@ describe("one agent, two connections", () => {
     // rule the platform already keeps, now for text mode too.
     retell = await startFakeRetell({ ...ONE_VOICE_AGENT, keys: [KEY, OTHER_KEY] });
 
-    const first = await run({ keys: [KEY], reach: "text" });
-    const second = await run({ keys: [OTHER_KEY], reach: "text" });
+    const first = await run({ keys: [KEY], lanes: "text" });
+    const second = await run({ keys: [OTHER_KEY], lanes: "text" });
 
     expect(first.connected?.registered.result).toBe("created");
     expect(second.connected?.registered.result).toBe("reused");

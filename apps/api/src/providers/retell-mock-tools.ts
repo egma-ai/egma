@@ -14,8 +14,7 @@ import {
 } from "@egma/retell";
 
 /**
- * What ticking the mock-tools box would find, and the five reasons it is
- * refused.
+ * What enabling mock tools would find, and the three reasons it is refused.
  *
  * The refusals are here, together, on purpose. Each one is a different fact
  * about the customer's account, and each has a different next move — so
@@ -28,31 +27,32 @@ import {
  * four promises the single consent screen carries, so there is no second
  * per-number checkbox to decline and no refusal to raise for declining it.
  *
- * The four:
+ * **Having no web-call lane yet is not one of them either.** It used to be:
+ * the tick refused an agent whose only connection is a phone number and told
+ * the person to add a connection no flow could create. The consent flow mints
+ * that connection itself now, so the dead end cannot exist and the refusal that
+ * named it is gone with it.
+ *
+ * The three:
  *
  * 1. **A custom-LLM engine.** The brain and the tools live on the customer's
  *    own socket server; Retell stores no tool configuration this seam could
  *    swap. Not a permanent no — it is structurally a LiveKit-shaped problem,
  *    and it belongs to the Egma SDK's in-process seam when that grows a Retell
  *    adapter.
- * 2. **An agent whose only connection is a phone number.** The phone lane is
- *    the real-telephony lane by design: real carrier, real band, real tools. A
- *    mocked run is a call Egma places itself, and this agent has no lane to
- *    place one over.
- * 3. **Keys that disagree.** The agent's platform key builds the world and a
+ * 2. **Keys that disagree.** The agent's platform key builds the world and a
  *    connection's own key opens the calls. If the two resolve different
  *    accounts or different platform agents, one account would build the draft
  *    while another tried to call it — a failure that would otherwise surface
  *    only after the world was built.
- * 4. **The platform would not answer.** Not a fact about the agent but about
+ * 3. **The platform would not answer.** Not a fact about the agent but about
  *    the moment: Retell was unreachable while Egma read the account. Nothing is
- *    changed, and the person is told to try again — a fair fifth, kept apart
- *    from the four because its next move is "wait", not "reconfigure".
+ *    changed, and the person is told to try again — kept apart from the other
+ *    two because its next move is "wait", not "reconfigure".
  */
 
 export const MOCK_TOOLS_REFUSALS = [
   "custom_llm_engine",
-  "phone_only_agent",
   "keys_disagree",
   "platform_unavailable",
 ] as const;
@@ -100,15 +100,6 @@ const CUSTOM_LLM =
   "Tools that run inside your own process are what the Egma SDK's in-process " +
   "seam is for, and a Retell adapter for it is where this agent belongs.";
 
-const PHONE_ONLY =
-  "this agent's only connection is a phone number, and a mocked run is never " +
-  "dialled: Egma places a web call or a chat against a temporary version it " +
-  "creates, so your published number never rings for a test and a real caller " +
-  "mid-run always reaches your real agent with your real tools. The phone " +
-  "connection keeps the job only it can do — the real carrier leg, the real " +
-  "line, real tools — and stays unmocked by design. Add a Retell web-call " +
-  "connection to this agent to run mocked simulations.";
-
 function keysDisagree(named: string, held: string): string {
   return (
     `this agent's platform identity is Retell agent ${held}, and a connection ` +
@@ -144,19 +135,20 @@ function refused(
  * Read the account and answer the whole question, refusals included.
  *
  * The order is chosen so that a person is told the most useful thing first: the
- * two refusals Egma can answer without touching Retell come before the reads,
- * and the pin question comes after the numbers because it is *about* them.
+ * refusal Egma can answer without touching Retell comes before the reads, and
+ * the numbers come after them because the bindings are what they are about.
  */
 export async function discoverMockTools(
   input: MockToolsDiscoveryInput,
 ): Promise<MockToolsDiscovery> {
-  // Refusal one of the four, answered from what Egma already holds. The lane list is the
-  // registry's own, read through @egma/db, so a third mockable lane added there
-  // is a lane the tick offers rather than refuses — the two cannot drift.
+  // The lanes a mocked run could be conducted over, read through @egma/db so
+  // the registry's own list and this one cannot drift. **An empty list is not a
+  // refusal**: the consent flow mints the web-call connection when the agent has
+  // none, so an agent reached only by phone today is an agent the flow can give
+  // a mockable lane to, and this read answers what that lane would cover.
   const lanes = input.lanes.filter((lane) =>
     connectionTypeBranchesMockDraft(lane.connectionType),
   );
-  if (lanes.length === 0) return refused("phone_only_agent", PHONE_ONLY);
 
   // The keys-disagree refusal, the half that costs nothing: a connection naming a different
   // platform agent from the one the tick is on. The other half — two keys on

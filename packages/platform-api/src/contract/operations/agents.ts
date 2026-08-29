@@ -710,7 +710,6 @@ export const agentOperations = {
                   type: "string",
                   enum: [
                     "custom_llm_engine",
-                    "phone_only_agent",
                     "keys_disagree",
                     "platform_unavailable",
                   ],
