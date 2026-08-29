@@ -159,10 +159,10 @@ beforeAll(async () => {
   await setup.sql(
     `insert into grader_definition_version
        (definition_id, version, type, prompt, parameter_contract,
-        output_contract, modalities, judge_model)
+        modalities, judge_model)
      values ($1, 1, 'code', null,
              '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":7,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
-             '{}'::jsonb, '["chat", "voice"]'::jsonb, null)`,
+             '["chat", "voice"]'::jsonb, null)`,
     [definitionId],
   );
   await setup.sql("commit");
@@ -242,6 +242,48 @@ describe("one frozen production job", () => {
       kind: "terminal",
       outcome: "complete",
     });
+  });
+
+  /*
+   * A job frozen before the output contract was dropped still carries the key
+   * inside its own `entries` JSON, because a frozen entry is a copy and not a
+   * pointer. The reader names the fields it wants, so the extra key is read
+   * past rather than refused, and in-flight work keeps grading.
+   */
+  it("claims and grades a job frozen with the legacy output contract", async () => {
+    const traceId = "1414141414141414141414141414eeee";
+    await request(traceId);
+    await database.sql(
+      `update grading_job
+          set entries = jsonb_set(
+                entries,
+                '{0,definition,outputContract}',
+                '{"score":{"type":"number | null","minimum":0,"maximum":1}}'::jsonb,
+                true)
+        where project_id = $1 and trace_id = $2`,
+      [projectId, traceId],
+    );
+
+    const claim = await claimTrace(traceId, "grader-legacy-frozen-entry");
+    expect(entryOf(claim)).toMatchObject({
+      projectGraderId,
+      graderDefinitionId: definitionId,
+      graderDefinitionVersion: 1,
+      graderPassThreshold: 0.7,
+      definition: { definitionVersion: 1, type: "code" },
+    });
+    // The legacy key really is in the claimed snapshot: this proves the shape
+    // under test is the old one, and that nothing strips or refuses it.
+    expect(entryOf(claim).definition).toHaveProperty("outputContract");
+
+    await appendOne(claim, 1, 1_777_000_004_000_000n);
+    await expect(
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy),
+    ).resolves.toEqual({ id: claim.id });
+    await expect(readTraceGrades(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({
+        current: [{ score: 1, graderPassThreshold: 0.7, result: "passed" }],
+      });
   });
 
   it("keeps the reclaimed worker's grade current when completion times tie", async () => {
@@ -676,10 +718,10 @@ describe("regrading uses frozen history", () => {
     await database.sql(
       `insert into grader_definition_version
          (definition_id, version, type, prompt, parameter_contract,
-          output_contract, modalities, judge_model)
+          modalities, judge_model)
        values ($1, 2, 'code', null,
                '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":2,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
-               '{}'::jsonb, '["chat", "voice"]'::jsonb, null)`,
+               '["chat", "voice"]'::jsonb, null)`,
       [definitionId],
     );
     await database.sql(

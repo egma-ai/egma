@@ -8,43 +8,6 @@ import type { GraderParameter } from "./parameters.ts";
 
 export type { GraderParameter } from "./parameters.ts";
 
-/** A definition-owned description of the structured details it can return. */
-export type GraderOutputContract = Readonly<Record<string, unknown>>;
-
-export const NORMALIZED_GRADE_OUTPUT_CONTRACT: GraderOutputContract = {
-  score: {
-    type: "number | null",
-    minimum: 0,
-    maximum: 1,
-    means:
-      "the normalized score produced by the grader; null when the grader errored",
-  },
-  details: {
-    type: "object",
-    properties: {
-      rationale: {
-        type: "string",
-        means: "a short explanation of the score",
-      },
-      error: {
-        type: "string",
-        means: "why the grader could not produce a score",
-      },
-      assertions: {
-        type: "array",
-        means: "optional supporting results for graders that check several assertions",
-        items: {
-          key: { type: "string" },
-          score: { type: "number", minimum: 0, maximum: 1 },
-          rationale: { type: "string" },
-          citedSpanIds: { type: "string[]" },
-          error: { type: "string" },
-        },
-      },
-    },
-  },
-};
-
 const EXPECTED_BEHAVIORS_PROMPT = [
   "You grade one expected behavior against one recorded simulation.",
   "Decide only the expected behavior you are given.",
@@ -63,7 +26,6 @@ export type PredefinedGraderDefinition = {
   readonly scopeEditable: boolean;
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
-  readonly outputContract: GraderOutputContract | null;
   readonly modalities: readonly GraderModality[];
   readonly judgeModel: GraderJudgeModel | null;
   readonly createdAt: Date;
@@ -102,7 +64,6 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
     scopeEditable: false,
     prompt: EXPECTED_BEHAVIORS_PROMPT,
     parameterContract: [],
-    outputContract: NORMALIZED_GRADE_OUTPUT_CONTRACT,
     modalities: ["chat", "voice"],
     judgeModel: RECOMMENDED_GRADER_MODEL,
     createdAt: SHIPPED,
@@ -126,7 +87,6 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
         maximum: null,
       },
     ],
-    outputContract: NORMALIZED_GRADE_OUTPUT_CONTRACT,
     modalities: ["chat", "voice"],
     judgeModel: null,
     createdAt: RESPONSE_LATENCY_SHIPPED,

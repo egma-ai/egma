@@ -5,7 +5,6 @@ import { db, type Queryable } from "../client.ts";
 import { validateGraderParameterValues } from "../grader-library/parameters.ts";
 import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
 import {
-  planGroupsFor,
   productionSampleSelected,
   type ExecutableProjectGrader,
   type PlanGroup,
@@ -80,7 +79,6 @@ const CANDIDATE_COLUMNS = {
   type: graderDefinitionVersion.type,
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
-  outputContract: graderDefinitionVersion.outputContract,
   modalities: graderDefinitionVersion.modalities,
   judgeModel: graderDefinitionVersion.judgeModel,
 } as const;

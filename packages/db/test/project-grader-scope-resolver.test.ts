@@ -24,7 +24,6 @@ function candidate(
       type: "llm_as_judge",
       prompt: "Grade it",
       parameterContract: [],
-      outputContract: {},
       modalities,
       judgeModel: { provider: "openai", model: "gpt-5" },
     },

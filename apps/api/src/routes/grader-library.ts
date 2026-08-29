@@ -10,7 +10,6 @@ import {
   useGraderInProject,
   type GraderDefinitionSnapshot,
   type GraderLibraryEntry,
-  type GraderModality,
   type ProjectGrader,
   type ProjectGraderScope,
 } from "@egma/db";
@@ -37,7 +36,9 @@ import { given, text } from "../http/reading.ts";
  *
  * Egma definitions are installed from the backend catalog. No route here can
  * author one. A customer can use a visible definition, or create one custom
- * LLM definition whose type, model and output contract are fixed by the server.
+ * LLM definition: the body draws the judge's boundary in three parts, and the
+ * server compiles them into the one immutable prompt and fixes the type, the
+ * model and the compatible modalities.
  */
 
 export type GraderLibraryRoutesOptions = {
@@ -54,7 +55,6 @@ type Query = {
 type Body = Record<string, unknown>;
 
 const PAGE_SIZE = 100;
-const MODALITIES = ["chat", "voice"] as const;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -187,23 +187,6 @@ function pageAfter(
 
 function noSuchDefinition(id: string): string {
   return `There is no grader definition ${id} available in this organization.`;
-}
-
-function modalitiesFrom(value: unknown): readonly GraderModality[] | string {
-  if (!Array.isArray(value) || value.length === 0) {
-    return "modalities must contain chat, voice, or both";
-  }
-  if (
-    new Set(value).size !== value.length ||
-    value.some(
-      (one) =>
-        typeof one !== "string" ||
-        !(MODALITIES as readonly string[]).includes(one),
-    )
-  ) {
-    return "modalities must contain chat, voice, or both, with no repeats";
-  }
-  return value as readonly GraderModality[];
 }
 
 export async function graderLibraryRoutes(
@@ -343,7 +326,8 @@ export async function graderLibraryRoutes(
           "name",
           "description",
           "gradingInstructions",
-          "modalities",
+          "passesWhen",
+          "failsWhen",
           "scope",
           "passThreshold",
         ],
@@ -359,12 +343,22 @@ export async function graderLibraryRoutes(
       ) {
         return invalid(reply, "description must be text or null");
       }
+      /*
+       * The three parts of the judge's boundary. Each is refused blank here
+       * rather than compiled into a sentence with a hole in it.
+       */
       const gradingInstructions = given(text(body.gradingInstructions));
       if (gradingInstructions === undefined) {
         return invalid(reply, "gradingInstructions is required");
       }
-      const modalities = modalitiesFrom(body.modalities);
-      if (typeof modalities === "string") return invalid(reply, modalities);
+      const passesWhen = given(text(body.passesWhen));
+      if (passesWhen === undefined) {
+        return invalid(reply, "passesWhen is required");
+      }
+      const failsWhen = given(text(body.failsWhen));
+      if (failsWhen === undefined) {
+        return invalid(reply, "failsWhen is required");
+      }
       if (!("scope" in body)) return invalid(reply, "scope is required");
       if (typeof body.passThreshold !== "number") {
         return invalid(reply, "passThreshold must be a number from 0 through 1");
@@ -375,7 +369,8 @@ export async function graderLibraryRoutes(
         description:
           body.description === null ? null : given(text(body.description)) ?? null,
         gradingInstructions,
-        modalities,
+        passesWhen,
+        failsWhen,
         scope: scopeForDb(body.scope),
         passThreshold: body.passThreshold,
       });

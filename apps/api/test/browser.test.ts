@@ -2531,9 +2531,23 @@ describe("the project grader library", () => {
       const custom = page.getByRole("dialog", { name: "Create custom grader" });
       await custom.waitFor();
       await custom.getByLabel("Name").fill(BROWSER_CUSTOM_GRADER);
+      /*
+       * The three parts of the judge's boundary. The server compiles them into
+       * the one immutable prompt, so the sheet sends the parts and nothing
+       * else, and Create stays disabled while any of them is empty.
+       */
+      expect(
+        await custom.getByRole("button", { name: "Create grader" }).isDisabled(),
+      ).toBe(true);
       await custom
         .getByLabel("Grading instructions")
-        .fill("The agent stays polite and resolves the request.");
+        .fill("the agent stayed polite and resolved the request");
+      await custom
+        .getByLabel("Passes when")
+        .fill("the agent resolves the request without losing patience");
+      await custom
+        .getByLabel("Fails when")
+        .fill("the agent is short with the caller or leaves the request open");
       await custom.getByRole("button", { name: "Create grader" }).click();
 
       await page.getByText("Custom grader created and added to Active graders.")

@@ -10,7 +10,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -26,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { Refusal } from "../../../../lib/api.ts";
 import {
+  ALL_SIMULATIONS_SCOPE,
   EMPTY_GRADER_SCOPE,
   graderDefinitionDisplayName,
   graderEvidenceLabel,
@@ -47,13 +47,15 @@ import {
 } from "../../../../lib/platform-client.ts";
 import { Field, Refused } from "../../../../ui/form.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
-import { Empty, Loading } from "../../../../ui/page-state.tsx";
+import { Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
 import { ScopeFields } from "./scope-fields.tsx";
 
 /**
- * The words this surface repeats, written once.
+ * The words this surface says, written once — the ones it repeats across its
+ * three sheets, and the ones it says exactly once and keeps here beside the
+ * reason it says them.
  *
  * The pass threshold is asked for in three places — using a library grader,
  * editing an active one, creating a custom one — and a sentence that drifted
@@ -63,9 +65,28 @@ const COPY = {
   passThreshold: "Pass threshold*",
   passThresholdHint:
     "From 0 to 1. A simulation passes this grader at or above this score.",
-  gradingInstructionsHint:
-    "Describe what the agent must do. The grader returns a score between 0 and 1.",
   reads: "The evidence this grader needs from a simulation.",
+  /**
+   * The three sentences the create sheet says, and nothing it cannot keep.
+   *
+   * `framing` sends a rule that belongs to one test to the surface that owns
+   * it, because a project-wide grader shaped around one test grades every
+   * other conversation against a question they were never asked.
+   *
+   * `evidence` is what the judge can actually see. Written before the boxes,
+   * because an instruction the evidence cannot answer is the one way this form
+   * fails, and the author cannot know that after the fact.
+   *
+   * `productionCost` is the bill beside the coverage. A custom grader here is
+   * always an LLM judge, so one sampled transcript is one judge call.
+   */
+  framing:
+    "This grader judges every conversation in its scope. For something one " +
+    "test must do, write an expected behavior on that test instead.",
+  evidence:
+    "The judge reads the transcript, the outcome, the tool calls, and the " +
+    "metrics of one conversation.",
+  productionCost: "Each sampled transcript costs one judge call.",
 } as const;
 
 /**
@@ -173,6 +194,19 @@ function Fact({
         {children}
       </dd>
     </>
+  );
+}
+
+/**
+ * One quiet line of framing in a sheet's body.
+ *
+ * It is not a field's help line and not a section's lead: it is a sentence the
+ * whole form is read under, so it sits in the body's own column at the body's
+ * own step, muted, with nothing to open.
+ */
+function SheetLead({ children }: { readonly children: ReactNode }) {
+  return (
+    <p className="m-0 text-sm leading-(--line-normal) text-faint">{children}</p>
   );
 }
 
@@ -963,92 +997,22 @@ function EditGraderForm({
 }
 
 /**
- * Which kind of grader is being written, as the two segments of one control.
+ * Writing one custom grader, as the boundary a binary judge needs.
  *
- * **It is a radio group, not two buttons**, and the recipe is the one the
- * connect sheet already draws: one of these is true and the other is not, the
- * arrow keys move between them, and only the chosen one is a tab stop.
+ * **The sheet asks for a boundary rather than for a paragraph**, because that
+ * is what the judge already is: it answers met or not met against one
+ * criterion, and code maps that answer to exactly 1 or 0. Three required
+ * texts — what to decide, what passes, what fails — and the server compiles
+ * them into the one immutable prompt. Nothing here composes that prompt: two
+ * clients writing the template would eventually write two different judges.
  *
- * **The chosen segment carries a two-pixel Ember line on its top edge**, over a
- * plain fill, plus weight 500 so the state is not colour alone (`DESIGN.md`,
- * developer decision 2026-08-24).
+ * What is not asked for is as deliberate as what is. There is no mechanism
+ * toggle, because create is LLM-judge only and a predefined code grader
+ * arrives through Use in the library. There are no modality checkboxes,
+ * because the judge's evidence is text and both modalities are stored: a
+ * voice-only stamp would silently leave later chat simulations ungraded. The
+ * pass threshold stays exactly as it was.
  */
-function MechanismChoice({
-  value,
-  disabled,
-  onChange,
-}: {
-  readonly value: GraderType;
-  readonly disabled: boolean;
-  readonly onChange: (next: GraderType) => void;
-}) {
-  const segments: readonly { readonly value: GraderType; readonly label: string }[] =
-    [
-      { value: "llm_as_judge", label: "LLM judge" },
-      { value: "code", label: "Code" },
-    ];
-
-  function step(by: number): void {
-    const here = segments.findIndex((one) => one.value === value);
-    const next = segments[(here + by + segments.length) % segments.length];
-    if (next !== undefined) onChange(next.value);
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="m-0 text-sm text-faint" id="custom-grader-mechanism-label">
-        Mechanism
-      </p>
-      <div
-        aria-labelledby="custom-grader-mechanism-label"
-        className="flex w-fit border border-border"
-        role="radiogroup"
-      >
-        {segments.map((segment, index) => (
-          <button
-            aria-checked={segment.value === value}
-            className={cn(
-              "relative flex min-h-(--control-md) cursor-pointer items-center justify-center px-6",
-              "border-0 bg-transparent text-sm",
-              "transition-colors duration-(--duration-hover) ease-out",
-              "disabled:cursor-not-allowed disabled:opacity-55",
-              index > 0 && "border-l border-border",
-              /*
-               * The line is painted by the segment rather than mounted as an
-               * element, so choosing the other one moves one edge.
-               */
-              "before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:content-['']",
-              "before:origin-left before:bg-brand before:transition-[opacity,transform]",
-              "before:duration-(--duration-hover) before:ease-out",
-              "motion-reduce:before:transition-none",
-              segment.value === value
-                ? "font-medium text-foreground before:scale-x-100 before:opacity-100"
-                : "text-muted-foreground before:scale-x-0 before:opacity-0 pointer-hover:text-foreground",
-            )}
-            disabled={disabled}
-            key={segment.value}
-            onClick={() => onChange(segment.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-                event.preventDefault();
-                step(1);
-              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-                event.preventDefault();
-                step(-1);
-              }
-            }}
-            role="radio"
-            tabIndex={segment.value === value ? 0 : -1}
-            type="button"
-          >
-            {segment.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function CreateCustomGraderSheet({
   projectId,
   open,
@@ -1060,22 +1024,17 @@ export function CreateCustomGraderSheet({
   readonly onClose: () => void;
   readonly onCreated: () => void;
 }) {
-  /**
-   * Which kind of grader this sheet is writing.
-   *
-   * Only the LLM judge can be written today, and the other segment says so
-   * rather than being missing: a person who came here to write a code grader is
-   * told when it arrives instead of being left to wonder whether Egma has one.
-   */
-  const [mechanism, setMechanism] = useState<GraderType>("llm_as_judge");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [modalities, setModalities] = useState<readonly GraderModality[]>([
-    "chat",
-    "voice",
-  ]);
-  const [scope, setScope] = useState<ProjectGraderScope>(EMPTY_GRADER_SCOPE);
+  const [passesWhen, setPassesWhen] = useState("");
+  const [failsWhen, setFailsWhen] = useState("");
+  /*
+   * Grading every simulation from the start. A grader created with nothing
+   * selected grades nothing, and says so nowhere; the author leaves believing
+   * the work is done.
+   */
+  const [scope, setScope] = useState<ProjectGraderScope>(ALL_SIMULATIONS_SCOPE);
   const [scopeRevision, setScopeRevision] = useState(0);
   const [scopeValid, setScopeValid] = useState(true);
   const [threshold, setThreshold] = useState("1");
@@ -1083,12 +1042,12 @@ export function CreateCustomGraderSheet({
   const [refused, setRefused] = useState<Refusal | null>(null);
   useEffect(() => {
     if (!open) return;
-    setMechanism("llm_as_judge");
     setName("");
     setDescription("");
     setInstructions("");
-    setModalities(["chat", "voice"]);
-    setScope(EMPTY_GRADER_SCOPE);
+    setPassesWhen("");
+    setFailsWhen("");
+    setScope(ALL_SIMULATIONS_SCOPE);
     setScopeRevision((current) => current + 1);
     setScopeValid(true);
     setThreshold("1");
@@ -1098,30 +1057,19 @@ export function CreateCustomGraderSheet({
   const valid =
     name.trim() !== "" &&
     instructions.trim() !== "" &&
-    modalities.length > 0 &&
+    passesWhen.trim() !== "" &&
+    failsWhen.trim() !== "" &&
     scopeValid &&
     filledThreshold !== null;
   const changed =
     name !== "" ||
     description !== "" ||
     instructions !== "" ||
-    modalities.length !== 2 ||
-    !modalities.includes("chat") ||
-    !modalities.includes("voice") ||
-    scope.simulations.length > 0 ||
-    scope.production !== null ||
+    passesWhen !== "" ||
+    failsWhen !== "" ||
+    JSON.stringify(scope) !== JSON.stringify(ALL_SIMULATIONS_SCOPE) ||
     threshold !== "1";
   useUnsavedChanges(changed && !saving, saving);
-
-  function toggleModality(modality: GraderModality, checked: boolean): void {
-    setModalities((current) =>
-      checked
-        ? current.includes(modality)
-          ? current
-          : [...current, modality]
-        : current.filter((one) => one !== modality),
-    );
-  }
 
   async function create(): Promise<void> {
     if (!valid || saving || filledThreshold === null) return;
@@ -1134,7 +1082,8 @@ export function CreateCustomGraderSheet({
           name: name.trim(),
           description: description.trim() === "" ? null : description.trim(),
           gradingInstructions: instructions.trim(),
-          modalities: [...modalities],
+          passesWhen: passesWhen.trim(),
+          failsWhen: failsWhen.trim(),
           scope: {
             simulations: [...scope.simulations],
             production: scope.production,
@@ -1173,132 +1122,106 @@ export function CreateCustomGraderSheet({
           }}
         >
           <SheetBody>
-            {/*
-             * **The choice is the first thing in the body**, because it decides
-             * what the rest of the body is. Nothing typed is thrown away by
-             * changing it: every value below lives in this component, so the
-             * other segment and back leaves the form exactly as it was.
-             */}
-            <MechanismChoice
-              value={mechanism}
-              disabled={saving}
-              onChange={setMechanism}
-            />
-            {mechanism === "code" ? (
-              <Empty
-                title="Code graders are coming soon"
-                lead="Write pass rules in code and run them on every simulation. Custom code graders arrive in a later release."
+            {refused === null ? null : <Refused message={refused.message} />}
+            <SheetLead>{COPY.framing}</SheetLead>
+            <Field label="Name*" htmlFor="custom-grader-name">
+              <Input
+                id="custom-grader-name"
+                value={name}
+                disabled={saving}
+                aria-required="true"
+                autoComplete="off"
+                onChange={(event) => setName(event.target.value)}
               />
-            ) : (
-              <>
-                {refused === null ? null : <Refused message={refused.message} />}
-                <Field label="Name*" htmlFor="custom-grader-name">
-                  <Input
-                    id="custom-grader-name"
-                    value={name}
-                    disabled={saving}
-                    aria-required="true"
-                    autoComplete="off"
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </Field>
-                {/*
-                 * One line, at the height of the name above it. A description
-                 * is the phrase a person reads beside this grader in a list,
-                 * and a seven-line box invited a paragraph that no list can
-                 * show.
-                 */}
-                <Field
-                  label="Description [optional]"
-                  htmlFor="custom-grader-description"
-                  hint="Explain what quality this grader checks."
-                >
-                  <Input
-                    id="custom-grader-description"
-                    value={description}
-                    disabled={saving}
-                    autoComplete="off"
-                    onChange={(event) => setDescription(event.target.value)}
-                  />
-                </Field>
-                <Field
-                  label="Grading instructions*"
-                  htmlFor="custom-grader-instructions"
-                  hint={COPY.gradingInstructionsHint}
-                >
-                  <Textarea
-                    id="custom-grader-instructions"
-                    value={instructions}
-                    disabled={saving}
-                    aria-required="true"
-                    rows={7}
-                    onChange={(event) => setInstructions(event.target.value)}
-                  />
-                </Field>
-                {/*
-                 * A group rather than a field: at least one of these two has
-                 * to be chosen, and neither checkbox is required on its own.
-                 * `aria-required` is not a supported state on a group, so the
-                 * star's promise is kept where assistive technology reads it —
-                 * the described line below, and `aria-invalid` while nothing
-                 * is chosen.
-                 */}
-                <fieldset
-                  aria-describedby="custom-grader-modalities-help"
-                  aria-invalid={modalities.length === 0 ? true : undefined}
-                  className="m-0 flex flex-col gap-3 border-0 p-0"
-                >
-                  <legend className="mb-1 text-sm font-medium text-foreground">
-                    Compatible modalities*
-                  </legend>
-                  {(["chat", "voice"] as const).map((modality) => (
-                    <label
-                      className="flex min-h-(--control-md) items-center gap-3 text-sm text-foreground"
-                      key={modality}
-                    >
-                      <Checkbox
-                        checked={modalities.includes(modality)}
-                        disabled={saving}
-                        onChange={(event) =>
-                          toggleModality(modality, event.target.checked)
-                        }
-                      />
-                      {graderModalityLabel(modality)}
-                    </label>
-                  ))}
-                  <p
-                    className="m-0 text-sm text-faint"
-                    id="custom-grader-modalities-help"
-                  >
-                    Choose at least one.
-                  </p>
-                </fieldset>
-                <Section title="Scope">
-                  <ScopeFields
-                    key={scopeRevision}
-                    projectId={projectId}
-                    scope={scope}
-                    disabled={saving}
-                    onChange={setScope}
-                    onValidityChange={setScopeValid}
-                  />
-                </Section>
-                <div className="border-t border-border pt-5">
-                  <PassThresholdField
-                    value={threshold}
-                    disabled={saving}
-                    onChange={setThreshold}
-                  />
-                </div>
-              </>
-            )}
+            </Field>
+            {/*
+             * One line, at the height of the name above it. A description is
+             * the phrase a person reads beside this grader in a list, and a
+             * seven-line box invited a paragraph that no list can show.
+             */}
+            <Field
+              label="Description [optional]"
+              htmlFor="custom-grader-description"
+              hint="Explain what quality this grader checks."
+            >
+              <Input
+                id="custom-grader-description"
+                value={description}
+                disabled={saving}
+                autoComplete="off"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </Field>
+            {/*
+             * What the judge can see, said once above the three boxes and not
+             * repeated on each of them. Plain text: there is nothing to open,
+             * because a real transcript beside the editor is its own effort.
+             */}
+            <SheetLead>{COPY.evidence}</SheetLead>
+            <Field
+              label="Grading instructions*"
+              htmlFor="custom-grader-instructions"
+            >
+              <Textarea
+                id="custom-grader-instructions"
+                value={instructions}
+                disabled={saving}
+                aria-required="true"
+                rows={4}
+                onChange={(event) => setInstructions(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Passes when*"
+              htmlFor="custom-grader-passes-when"
+              annotation="scores · 1"
+            >
+              <Textarea
+                id="custom-grader-passes-when"
+                value={passesWhen}
+                disabled={saving}
+                aria-required="true"
+                rows={3}
+                onChange={(event) => setPassesWhen(event.target.value)}
+              />
+            </Field>
+            <Field
+              label="Fails when*"
+              htmlFor="custom-grader-fails-when"
+              annotation="scores · 0"
+            >
+              <Textarea
+                id="custom-grader-fails-when"
+                value={failsWhen}
+                disabled={saving}
+                aria-required="true"
+                rows={3}
+                onChange={(event) => setFailsWhen(event.target.value)}
+              />
+            </Field>
+            <div className="border-t border-border pt-5">
+              <PassThresholdField
+                value={threshold}
+                disabled={saving}
+                onChange={setThreshold}
+              />
+            </div>
+            <Section title="Scope">
+              <ScopeFields
+                key={scopeRevision}
+                projectId={projectId}
+                scope={scope}
+                disabled={saving}
+                productionNote={COPY.productionCost}
+                onChange={setScope}
+                onValidityChange={setScopeValid}
+              />
+            </Section>
           </SheetBody>
           <SheetFooter>
-            {mechanism === "code" ? null : (
-              <Button type="submit" size="lg" busy={saving} disabled={!valid}>
-                {saving ? "Creating…" : "Create grader"}
-              </Button>
-            )}
+            <Button type="submit" size="lg" busy={saving} disabled={!valid}>
+              {saving ? "Creating…" : "Create grader"}
+            </Button>
             <SheetClose asChild>
               <Button
                 type="button"

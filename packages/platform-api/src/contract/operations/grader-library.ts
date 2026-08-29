@@ -9,7 +9,6 @@ import {
 } from "../schemas.ts";
 import {
   graderLibraryEntrySchema,
-  graderModalitiesSchema,
   projectGraderPolicyInputProperties,
   projectGraderSchema,
 } from "./grader-shapes.ts";
@@ -122,7 +121,10 @@ export const graderLibraryOperations = {
     summary: "Create and use a custom LLM grader",
     description:
       "Creates one organization-owned LLM judge and its current-project policy. " +
-      "The server fixes its type, model, output contract, and empty settings contract.",
+      "The judge is binary, so the body draws its boundary in three parts: what " +
+      "to decide, what answers met, and what answers not_met. The server " +
+      "compiles them into the definition version's one immutable prompt and " +
+      "fixes its type, model, compatible modalities, and empty settings contract.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -133,14 +135,16 @@ export const graderLibraryOperations = {
           name: stringSchema,
           description: nullable(stringSchema),
           gradingInstructions: stringSchema,
-          modalities: graderModalitiesSchema,
+          passesWhen: stringSchema,
+          failsWhen: stringSchema,
           scope: projectGraderPolicyInputProperties.scope,
           passThreshold: projectGraderPolicyInputProperties.passThreshold,
         },
         required: [
           "name",
           "gradingInstructions",
-          "modalities",
+          "passesWhen",
+          "failsWhen",
           "scope",
           "passThreshold",
         ],

@@ -1702,7 +1702,8 @@ export type CreateCustomGraderData = {
         name: string;
         description?: string | null;
         gradingInstructions: string;
-        modalities: Array<'chat' | 'voice'>;
+        passesWhen: string;
+        failsWhen: string;
         scope: {
             simulations: Array<{
                 kind: 'all';

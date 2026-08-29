@@ -740,7 +740,7 @@ describe("the project Graders surface", () => {
     });
   });
 
-  it("creates an LLM judge from the chosen segment, under the starred label grammar", async () => {
+  it("creates one judge from the boundary the sheet asks the author to draw", async () => {
     const customDefinition: GraderLibraryEntry = {
       ...LATENCY_DEFINITION,
       id: "grl_custom",
@@ -748,7 +748,7 @@ describe("the project Graders surface", () => {
       description: null,
       owner: "organization",
       type: "llm_as_judge",
-      gradingInstructions: "The agent stays polite and resolves the request.",
+      gradingInstructions: "Decide whether: the agent resolved the request.",
       requiredEvidence: ["transcript"],
       settingDefinitions: [],
       activeProjectGraderId: "grd_custom",
@@ -761,7 +761,7 @@ describe("the project Graders surface", () => {
       owner: "organization",
       scopeEditable: true,
       removable: true,
-      scope: { simulations: [], production: null },
+      scope: { simulations: [{ kind: "all" }], production: null },
     };
     const { asked } = apiAnswers({
       ...standardAnswers(),
@@ -779,58 +779,127 @@ describe("the project Graders surface", () => {
         "Create a grader for this organization and use it in this project.",
       ),
     ).toBeTruthy();
-    /* The LLM judge is the segment a person lands on. */
+
+    /* One line sends a rule that belongs to one test to the right surface. */
     expect(
-      within(sheet)
-        .getByRole("radio", { name: "LLM judge" })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
+      within(sheet).getByText(
+        "This grader judges every conversation in its scope. For something " +
+          "one test must do, write an expected behavior on that test instead.",
+      ),
+    ).toBeTruthy();
+    /* And one line says what the judge can actually see. */
+    expect(
+      within(sheet).getByText(
+        "The judge reads the transcript, the outcome, the tool calls, and " +
+          "the metrics of one conversation.",
+      ),
+    ).toBeTruthy();
 
     /* Every mandatory label ends in a star, and says so to a screen reader. */
     for (const starred of [
       "Name*",
       "Grading instructions*",
+      "Passes when*",
+      "Fails when*",
       "Pass threshold*",
     ]) {
       const field = within(sheet).getByLabelText(starred);
       expect(field.getAttribute("aria-required"), starred).toBe("true");
     }
+
     /*
-     * `aria-required` is not a supported state on a group, so the modalities
-     * star keeps its promise through the described line instead.
+     * The score mapping is an annotation beside each label, not part of it:
+     * the label still reads in plain words, and the control is described by
+     * the annotation so the mapping reaches a screen reader too.
      */
-    const modalitiesGroup = within(sheet).getByRole("group", {
-      name: "Compatible modalities*",
-    });
-    expect(modalitiesGroup.getAttribute("aria-required")).toBeNull();
-    const helpId = modalitiesGroup.getAttribute("aria-describedby");
-    expect(helpId).toBeTruthy();
-    expect(document.getElementById(helpId ?? "")?.textContent).toBe(
-      "Choose at least one.",
-    );
+    expect(within(sheet).getByText("scores · 1")).toBeTruthy();
+    expect(within(sheet).getByText("scores · 0")).toBeTruthy();
+    for (const [label, annotation] of [
+      ["Passes when*", "scores · 1"],
+      ["Fails when*", "scores · 0"],
+    ] as const) {
+      const field = within(sheet).getByLabelText(label);
+      const describedBy = field.getAttribute("aria-describedby") ?? "";
+      expect(
+        describedBy
+          .split(" ")
+          .map((id) => document.getElementById(id)?.textContent),
+        label,
+      ).toContain(annotation);
+    }
 
     /* A description is one line, at the height of the name above it. */
     const description = within(sheet).getByLabelText("Description [optional]");
     expect(description.tagName).toBe("INPUT");
 
+    /* The judge answers met or not met. It never returns a fraction. */
     expect(
-      within(sheet).getByText(
+      within(sheet).queryByText(
         "Describe what the agent must do. The grader returns a score between 0 and 1.",
       ),
-    ).toBeTruthy();
+    ).toBeNull();
     expect(
       within(sheet).getByText(
         "From 0 to 1. A simulation passes this grader at or above this score.",
       ),
     ).toBeTruthy();
 
+    /*
+     * And the order, which is the sheet's argument rather than a layout
+     * detail: the framing line before anything is asked for, the evidence
+     * sentence above the three boxes it governs, and the boundary drawn
+     * before the threshold and the scope that apply it. Presence alone would
+     * let a later edit shuffle these and stay green.
+     */
+    const pinned = [
+      [
+        "framing line",
+        within(sheet).getByText(
+          "This grader judges every conversation in its scope. For something " +
+            "one test must do, write an expected behavior on that test instead.",
+        ),
+      ],
+      ["Name*", within(sheet).getByLabelText("Name*")],
+      [
+        "Description [optional]",
+        within(sheet).getByLabelText("Description [optional]"),
+      ],
+      [
+        "evidence sentence",
+        within(sheet).getByText(
+          "The judge reads the transcript, the outcome, the tool calls, and " +
+            "the metrics of one conversation.",
+        ),
+      ],
+      [
+        "Grading instructions*",
+        within(sheet).getByLabelText("Grading instructions*"),
+      ],
+      ["Passes when*", within(sheet).getByLabelText("Passes when*")],
+      ["Fails when*", within(sheet).getByLabelText("Fails when*")],
+      ["Pass threshold*", within(sheet).getByLabelText("Pass threshold*")],
+      ["Scope", within(sheet).getByText("Scope")],
+    ] as const;
+    const rendered = [...pinned].sort(([, one], [, next]) => {
+      const follows =
+        one.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING;
+      return follows === 0 ? 1 : -1;
+    });
+    expect(rendered.map(([step]) => step)).toEqual(
+      pinned.map(([step]) => step),
+    );
+
     fireEvent.change(within(sheet).getByLabelText("Name*"), {
       target: { value: "Polite resolution" },
     });
     fireEvent.change(within(sheet).getByLabelText("Grading instructions*"), {
-      target: {
-        value: "The agent stays polite and resolves the request.",
-      },
+      target: { value: "the agent resolved the request" },
+    });
+    fireEvent.change(within(sheet).getByLabelText("Passes when*"), {
+      target: { value: "the agent confirms the request is done" },
+    });
+    fireEvent.change(within(sheet).getByLabelText("Fails when*"), {
+      target: { value: "the agent leaves the request open" },
     });
     fireEvent.click(within(sheet).getByRole("button", { name: "Create grader" }));
 
@@ -841,14 +910,78 @@ describe("the project Graders surface", () => {
         body: {
           name: "Polite resolution",
           description: null,
-          gradingInstructions:
-            "The agent stays polite and resolves the request.",
-          modalities: ["chat", "voice"],
-          scope: { simulations: [], production: null },
+          gradingInstructions: "the agent resolved the request",
+          passesWhen: "the agent confirms the request is done",
+          failsWhen: "the agent leaves the request open",
+          scope: { simulations: [{ kind: "all" }], production: null },
           passThreshold: 1,
         },
       });
     });
+  });
+
+  it("offers no mechanism and no modality choice, and keeps the pass threshold", async () => {
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create custom grader" }),
+    );
+
+    const sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    /* Create is LLM-judge only; predefined code graders arrive through Use. */
+    expect(within(sheet).queryByRole("radio", { name: "LLM judge" })).toBeNull();
+    expect(within(sheet).queryByRole("radio", { name: "Code" })).toBeNull();
+    expect(within(sheet).queryByText("Mechanism")).toBeNull();
+    /* A text-only judge is never asked which modalities it can grade. */
+    expect(
+      within(sheet).queryByRole("group", { name: "Compatible modalities*" }),
+    ).toBeNull();
+    expect(within(sheet).queryByLabelText("Chat")).toBeNull();
+    expect(within(sheet).queryByLabelText("Voice")).toBeNull();
+    /* The pass threshold stays exactly as it was, at its default of 1. */
+    expect(
+      (within(sheet).getByLabelText("Pass threshold*") as HTMLInputElement)
+        .value,
+    ).toBe("1");
+  });
+
+  it("grades every simulation from the start and prices production only when asked", async () => {
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create custom grader" }),
+    );
+
+    const sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    /* A grader created here grades something without a second visit. */
+    expect(
+      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(
+      within(sheet)
+        .getByRole("radio", { name: "All simulations" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+
+    const production = within(sheet).getByLabelText(
+      "Grades production",
+    ) as HTMLInputElement;
+    expect(production.checked).toBe(false);
+    expect(within(sheet).queryByLabelText("Production sample")).toBeNull();
+    expect(
+      within(sheet).queryByText("Each sampled transcript costs one judge call."),
+    ).toBeNull();
+
+    fireEvent.click(production);
+    expect(within(sheet).getByLabelText("Production sample")).toBeTruthy();
+    expect(
+      within(sheet).getByText("Each sampled transcript costs one judge call."),
+    ).toBeTruthy();
   });
 
   it("resets unsaved custom-grader scope before the sheet reopens", async () => {
@@ -863,11 +996,10 @@ describe("the project Graders surface", () => {
       name: "Create custom grader",
     });
     fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
-    fireEvent.click(within(sheet).getByLabelText("All simulations"));
     expect(
       (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
         .checked,
-    ).toBe(true);
+    ).toBe(false);
     fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
       expect(
@@ -881,9 +1013,13 @@ describe("the project Graders surface", () => {
       expect(
         (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
           .checked,
-      ).toBe(false);
+      ).toBe(true);
     });
-    expect(within(sheet).queryByLabelText("All simulations")).toBeNull();
+    expect(
+      within(sheet)
+        .getByRole("radio", { name: "All simulations" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
   });
 
   it("restores an active grader's saved scope when its sheet reopens", async () => {
@@ -1228,45 +1364,6 @@ describe("the project Graders surface", () => {
     ).toBeTruthy();
     expect(
       within(sheet).getByLabelText("Maximum response time (p90)"),
-    ).toBeTruthy();
-  });
-
-  it("holds a typed LLM judge while the Code segment says what is coming", async () => {
-    apiAnswers(standardAnswers());
-    render(<GradersPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create custom grader" }),
-    );
-
-    const sheet = await screen.findByRole("dialog", {
-      name: "Create custom grader",
-    });
-    fireEvent.change(within(sheet).getByLabelText("Name*"), {
-      target: { value: "Polite resolution" },
-    });
-
-    fireEvent.click(within(sheet).getByRole("radio", { name: "Code" }));
-    expect(
-      within(sheet).getByText("Code graders are coming soon"),
-    ).toBeTruthy();
-    expect(
-      within(sheet).getByText(
-        "Write pass rules in code and run them on every simulation. Custom code graders arrive in a later release.",
-      ),
-    ).toBeTruthy();
-    /* Nothing to create in this state, so nothing offers to. */
-    expect(
-      within(sheet).queryByRole("button", { name: "Create grader" }),
-    ).toBeNull();
-    expect(within(sheet).getByRole("button", { name: "Cancel" })).toBeTruthy();
-    expect(within(sheet).queryByLabelText("Name*")).toBeNull();
-
-    fireEvent.click(within(sheet).getByRole("radio", { name: "LLM judge" }));
-    expect(
-      (within(sheet).getByLabelText("Name*") as HTMLInputElement).value,
-    ).toBe("Polite resolution");
-    expect(
-      within(sheet).getByRole("button", { name: "Create grader" }),
     ).toBeTruthy();
   });
 });

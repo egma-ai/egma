@@ -365,7 +365,6 @@ export {
   GRADER_DEFINITION_CATALOG,
   MAXIMUM_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
-  type GraderOutputContract,
   type GraderParameter,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";

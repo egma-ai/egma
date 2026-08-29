@@ -29,6 +29,13 @@
       "when": 1787961288915,
       "tag": "0003_retell_mock_tools",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787988393813,
+      "tag": "0004_drop_grader_output_contract",
+      "breakpoints": true
     }
   ]
 }
