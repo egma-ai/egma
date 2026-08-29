@@ -234,6 +234,9 @@ const CONTEXT_REQUIRING = [
   "listPersonaVersions",
   "listProjectGraders",
   "listProjects",
+  // The server-side event boundary captured with one run detail. A browser
+  // uses it to tell page history from a failure that landed after it opened.
+  "latestRunEventSequence",
   // Everything that has changed about one run since a point, in the order it
   // changed. The read a follower resumes from after a crash, and the reason
   // the events are a record rather than a rendering of the mutable rows.

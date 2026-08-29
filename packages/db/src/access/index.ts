@@ -399,6 +399,7 @@ export {
   failSimulation,
   failSimulationDispatch,
   getRun,
+  latestRunEventSequence,
   getSimulation,
   getSimulationExecutionEvidence,
   getSimulationTestVersion,

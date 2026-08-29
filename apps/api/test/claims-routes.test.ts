@@ -1050,6 +1050,9 @@ describe("a simulation the platform cannot hand over", () => {
     const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("dispatch_failed");
+    expect(row?.executionFailure).toBe(
+      "Egma could not dispatch this simulation: its connection is gone or its credentials would not unseal",
+    );
     expect(row?.endedAt).toBeInstanceOf(Date);
 
     const again = await claim(api.config.simulatorServiceToken, {
@@ -1110,6 +1113,10 @@ describe("a simulation the platform cannot hand over", () => {
     );
     expect(row?.status).toBe("failed");
     expect(row?.endingReason).toBe("dispatch_failed");
+    expect(row?.executionFailure).toBe(
+      "Egma could not dispatch this simulation: an internal error prevented Egma from building its simulation spec",
+    );
+    expect(row?.executionFailure).not.toContain("not-an-envelope-at-all");
   });
 });
 

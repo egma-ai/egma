@@ -1,0 +1,3 @@
+ALTER TABLE "simulation" ADD COLUMN "execution_failure" text;--> statement-breakpoint
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_execution_failure_agrees" CHECK ("simulation"."execution_failure" is null or "simulation"."status" = 'failed');--> statement-breakpoint
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_execution_failure_not_blank" CHECK ("simulation"."execution_failure" is null or btrim("simulation"."execution_failure") <> '');

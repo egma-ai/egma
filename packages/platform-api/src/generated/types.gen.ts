@@ -4348,6 +4348,7 @@ export type GetRunResponses = {
         createdAt: string;
         startedAt: string | null;
         finishedAt: string | null;
+        eventThrough: number;
         tempMockAgentVersion: number | null;
         tempMockAgentVersionCleanup: boolean | null;
         mockMetadata: {
@@ -4447,6 +4448,7 @@ export type ListRunSimulationsResponses = {
             gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
             combinedScore: number | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            executionFailure: string | null;
             startedAt: string | null;
             endedAt: string | null;
             modality: 'voice' | 'chat';
@@ -4523,8 +4525,10 @@ export type ListRunEventsResponses = {
             personaName: string | null;
             status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            executionFailure: string | null;
         }>;
         next: number;
+        caughtUp: boolean;
         done: boolean;
     };
 };
@@ -4715,6 +4719,7 @@ export type GetSimulationResponses = {
         }>;
         combinedScore: number | null;
         reason: string | null;
+        executionFailure: string | null;
         modality: 'voice' | 'chat';
         createdAt: string;
         startedAt: string | null;

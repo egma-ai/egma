@@ -17,6 +17,7 @@ import {
 } from "../../../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
+import { executionFailureMessage } from "../../../../../../../lib/runs.ts";
 import {
   REGRADE_IS_NOT_A_REPLAY,
   regradeRefusalMessage,
@@ -323,7 +324,9 @@ function EvidenceView({
 
         {read.status !== "failed" ? null : (
           <Problem>
-            <span className="block">Egma could not conduct this simulation.</span>
+            <span className="block">
+              {executionFailureMessage(read.reason, read.executionFailure)}
+            </span>
             <span className="mt-1 block">
               This is an execution problem, not a failed grade, and it says
               nothing about the agent.

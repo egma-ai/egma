@@ -506,7 +506,11 @@ describe("the dispatch-failure landing", () => {
     const feed = await listRunEvents(actingAsAcme(), runId, { after: 0 });
     expect(feed?.events.at(-2)?.status).toBe("failed");
     expect(feed?.events.at(-2)?.reason).toBe("dispatch_failed");
+    expect(feed?.events.at(-2)?.executionFailure).toBe(
+      "Egma could not dispatch this simulation to a simulator.",
+    );
     expect(feed?.events.at(-1)?.status).toBe("completed");
+    expect(feed?.events.at(-1)?.executionFailure).toBeNull();
   });
 
   it("fails one conversation, never the batch's run: the counts stay truthful around it", async () => {

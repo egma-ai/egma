@@ -90,7 +90,8 @@
         "reason": {
           "description": "Why it failed, as prose for a person reading the record. Never null here: a failure with no reason is a record nobody can act on.",
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "facts": { "$ref": "#/$defs/failed_facts" }
       }
