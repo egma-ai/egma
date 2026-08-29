@@ -54,7 +54,7 @@ import { afterAll, describe, expect, it } from "vitest";
  * - **Funded model keys** on that deployment, and a simulator running against
  *   it. The simulations are real voice conversations: they spend speech
  *   synthesis, transcription and LLM tokens.
- * - **A ticked agent** — `mockToolsDuringSimulations` on, with pin consent
+ * - **A mocked lane** — `mockToolsEnabled` on the web-call connection
  *   given — and a `retell_web_call` connection on it. The suite refuses to
  *   turn the tick on for you: consent is the developer's to give.
  *
@@ -429,14 +429,10 @@ live("a mocked suite against the live agent", () => {
 
     // ── 4. Mid-run: the draft exists, and production does not know about it. ──
     const header = await egma("GET", `/v1/runs/${runId}`);
-    const world = header.body["mockedWorld"] as {
-      servingVersion: number;
-      draftVersion: number | null;
-      coverage: Record<string, string[]>;
-    };
-    expect(world.servingVersion).toBe(servingVersion);
-    expect(world.draftVersion).not.toBeNull();
-    const draftVersion = world.draftVersion ?? 0;
+    expect(header.body["agentVersion"]).toBe(servingVersion);
+    expect(header.body["tempMockAgentVersionCleanup"]).toBe(false);
+    const draftVersion = header.body["tempMockAgentVersion"] as number;
+    expect(draftVersion).not.toBeNull();
     // Branched from the exact version the agent serves.
     expect(draftVersion).toBeGreaterThan(servingVersion);
 
@@ -464,13 +460,19 @@ live("a mocked suite against the live agent", () => {
         `${named("EGMA_LIVE_API_URL").replace(/\/+$/u, "")}/mock-tools/${runId}/`,
       );
       expect(tool.verbatim["headers"]).toEqual({});
+      // Query params go the same way: a static one is a backend constant, and
+      // secrets travel in them.
+      expect(tool.verbatim["query_params"]).toEqual({});
     }
 
-    // The three-class stamp, checked against Retell's own answer rather than
-    // against Egma's record of it.
+    // Every tool Egma stood in front of, checked against Retell's own answer:
+    // the three classes are computed live and stored nowhere, so the proof is
+    // the draft's own configuration above rather than a record of it.
     const truth = { mocked: [] as string[], notInterceptable: [] as string[], notInThisVersion: [] as string[] };
     for (const tool of declared) truth[coverageClassOf(tool)].push(tool.name);
-    expect(world.coverage).toEqual(truth);
+    expect(truth.mocked.length + truth.notInterceptable.length).toBeGreaterThan(
+      0,
+    );
 
     // The serving version, mid-run: byte-identical to the capture.
     const during = await readEngineConfiguration(key, engine);

@@ -90,7 +90,11 @@ export function mockToolsCapabilityOf(
   agent: ListedAgentWithConnections,
 ): MockToolsCapability {
   if (providerOf(agent) !== "retell") return "Not available";
-  return agent.mockToolsDuringSimulations ? "On" : "Off";
+  // The switch is per connection now, so the agent's summary word is "any of
+  // its lanes has it on".
+  return agent.connections.some((connection) => connection.mockToolsEnabled)
+    ? "On"
+    : "Off";
 }
 
 function stateClass(

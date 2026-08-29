@@ -178,11 +178,11 @@ describe("egma connect", () => {
     expect(said.agent_name).toBe("order-line");
     expect(said.agent_id).toMatch(/^agt_/u);
     expect(said.connection_id).toMatch(/^con_/u);
-    expect(said.connection_name).toBe("retell_chat_api-1");
+    expect(said.connection_name).toBe("retell_text_mode-1");
     expect(said.agent_platform).toBe("retell");
-    expect(said.connection_type).toBe("retell_chat_api");
-    expect(said.access_variant).toBe("retell_chat_api.api_key");
-    expect(said.product_label).toBe("Retell chat");
+    expect(said.connection_type).toBe("retell_text_mode");
+    expect(said.access_variant).toBe("retell_text_mode.api_key");
+    expect(said.product_label).toBe("Retell text mode");
     expect(said.connection_modality).toBe("chat");
     expect(said.reach).toBe("text");
     expect(said.phone_number).toBe("none");
@@ -237,7 +237,7 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).agent_registration).toBe("reused");
     expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
-      "note: This voice agent was already registered as order-line, and retell_chat_api-1 was " +
+      "note: This voice agent was already registered as order-line, and retell_text_mode-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
@@ -670,7 +670,7 @@ describe("the whole walk, headless", () => {
     // The drift the coding agent's answer made checkable, said once.
     expect(result.stdout).toContain(DRIFT_LINE);
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections[0]?.name).toBe("retell_chat_api-1");
+    expect(platform.registered.connections[0]?.name).toBe("retell_text_mode-1");
 
     // And the walk did not stop at connecting: the test the coding agent wrote
     // is a file in the repository and a version on egma.

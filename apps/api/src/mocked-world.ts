@@ -182,7 +182,7 @@ export async function buildRunMockedWorld(
   //
   // The claim writes the building marker, which is also what makes this run
   // visible to a later sweep: a run that dies between here and the build's
-  // first record would otherwise leave a null `mockedWorld` no sweep ever sees,
+  // first record would otherwise leave a null cleanup flag no sweep ever sees,
   // and its simulations — unclaimable until a draft exists — would sit queued
   // forever.
   const claim = await claimMockDraftFor(auth, {
@@ -306,11 +306,11 @@ export async function settleOwedMockCleanups(
   } catch (cause) {
     log.error(
       platformEvent(
-        "egma.mocked_world.sweep_failed",
+        "egma.mock_tools.sweep_failed",
         "the outstanding mocked worlds of an agent could not be read",
         {
           "egma.agent_id": agentId,
-          "error.type": "mocked_world_sweep_failed",
+          "error.type": "mock_tools_sweep_failed",
           "exception.type": safeExceptionType(cause),
         },
       ),
@@ -404,12 +404,12 @@ export async function settleOwedMockCleanups(
     if (settled.unfinished.length > 0) {
       log.error(
         platformEvent(
-          "egma.mocked_world.not_settled",
+          "egma.mock_tools.not_settled",
           "a run's mocked world could not be given back in full",
           {
             "egma.agent_id": agentId,
             "egma.run_id": held.runId,
-            "error.type": "mocked_world_not_settled",
+            "error.type": "mock_tools_not_settled",
           },
         ),
         settled.unfinished.join("; "),
@@ -446,7 +446,7 @@ async function refuseRun(
 ): Promise<MockedWorldOutcome> {
   log.error(
     platformEvent(
-      "egma.mocked_world.build_failed",
+      "egma.mock_tools.build_failed",
       "a run over a mockable connection could not build its mocked world",
       {
         "egma.run_id": run.id,
@@ -486,7 +486,7 @@ async function refuseInUse(
     `run ${byRunId} to finish, then start this one again.`;
   log.error(
     platformEvent(
-      "egma.mocked_world.agent_in_use",
+      "egma.mock_tools.agent_in_use",
       "a mocked run was refused because another run holds the agent's mocked world",
       {
         "egma.run_id": run.id,

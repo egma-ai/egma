@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { discoverMockTools, updateAgent } from "@egma/platform-api/client";
+import {
+  discoverMockTools,
+  updateConnection,
+} from "@egma/platform-api/client";
 import type { DiscoverMockToolsResponse } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
@@ -99,13 +102,26 @@ export function MockToolsSheet({
 }) {
   const [read, setRead] = useState<Read>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
-  const [pinConsent, setPinConsent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [seeded, setSeeded] = useState<readonly string[] | null>(null);
 
-  const on = agent.mockToolsDuringSimulations;
+  /**
+   * The lane this switch is about: the connection a mocked run is conducted
+   * over. The switch lives on the connection because the lane is what decides
+   * whether a mocked run is a thing Egma can conduct at all.
+   *
+   * **The per-connection surface is ticket 02's.** This sheet drives the first
+   * mockable lane so the control keeps working; the screen that shows a switch
+   * per connection, with its one consent, lands with the flows.
+   */
+  const lane = agent.connections.find(
+    (connection) =>
+      connection.connectionType === "retell_web_call" ||
+      connection.connectionType === "retell_text_mode",
+  );
+  const on = lane?.mockToolsEnabled === true;
 
   const discover = useCallback(
     /**
@@ -149,25 +165,23 @@ export function MockToolsSheet({
   const found = read.status === "ready" ? read.found : null;
   const numbersToPin = (found?.numbers ?? []).filter((number) => number.pin);
   const needsConsent = numbersToPin.length > 0;
-  // The switch cannot go on while Egma has said it cannot keep the promise, and
-  // cannot go on without the pin answer where the pin is needed.
+  // The switch cannot go on while Egma has said it cannot keep the promise.
+  // Pinning a `latest`-riding number is one of the four promises the single
+  // consent screen makes, so there is no second checkbox to answer.
   const mayTurnOn =
-    mayAuthor &&
-    found !== null &&
-    found.refusal === null &&
-    (!needsConsent || pinConsent);
+    mayAuthor && lane !== undefined && found !== null && found.refusal === null;
 
   async function setTick(next: boolean): Promise<void> {
-    if (saving || !mayAuthor) return;
+    if (saving || !mayAuthor || lane === undefined) return;
     setSaving(true);
     setRefused(null);
     const answer = await platformAnswer(
-      updateAgent(
+      updateConnection(
         {
           agentId: agent.id,
+          connectionId: lane.id,
           projectId,
-          mockToolsDuringSimulations: next,
-          ...(next && needsConsent ? { pinNumbersDuringRuns: true } : {}),
+          mockToolsEnabled: next,
         },
         { client: platformClient },
       ),
@@ -239,13 +253,7 @@ export function MockToolsSheet({
               )}
 
               {found === null || found.numbers.length === 0 ? null : (
-                <NumbersSection
-                  numbers={found.numbers}
-                  on={on}
-                  consented={pinConsent}
-                  mayConsent={mayAuthor}
-                  onConsent={setPinConsent}
-                />
+                <NumbersSection numbers={found.numbers} on={on} />
               )}
 
               {found === null || found.warnings.length === 0 ? null : (
@@ -410,17 +418,10 @@ function WarningsSection({
 function NumbersSection({
   numbers,
   on,
-  consented,
-  mayConsent,
-  onConsent,
 }: {
   readonly numbers: readonly DiscoveredNumber[];
-  /** Whether mock tools is already on for this agent — standing consent given. */
+  /** Whether mock tools is already on for this lane. */
   readonly on: boolean;
-  /** This session's own answer to the pin question. Never the tick's state. */
-  readonly consented: boolean;
-  readonly mayConsent: boolean;
-  readonly onConsent: (next: boolean) => void;
 }) {
   const toPin = numbers.filter((number) => number.pin);
   return (
@@ -457,35 +458,16 @@ function NumbersSection({
           </li>
         ))}
       </ul>
-      {toPin.length === 0 ? null : on ? (
-        // Already on, so the tick's standing consent already covers the pin —
-        // stated as the fact it is, never a pre-checked box the person is shown
-        // as having agreed to when they may never have been asked this session.
+      {toPin.length === 0 ? null : (
+        // **No second checkbox.** Pinning a `latest`-riding number and putting
+        // it back is one of the four promises the one consent screen makes, so
+        // this says which numbers the promise is about and nothing is asked
+        // twice.
         <p className="m-0 border border-border p-4 text-sm text-faint" role="note">
-          Mock tools is on, so {toPin.length === 1 ? "this number is" : "these numbers are"}{" "}
-          pinned during each run and restored afterwards under that standing
-          consent.
+          {toPin.length === 1 ? "This number is" : "These numbers are"}{" "}
+          {on ? "pinned" : "pinned"} during each mocked run and restored
+          afterwards, so a real caller mid-run always reaches the real agent.
         </p>
-      ) : (
-        // Off, and this is the question that has to be answered to turn it on.
-        // The box reflects only this session's own toggle.
-        <label className="flex items-start gap-3 border border-border p-4">
-          <Checkbox
-            checked={consented}
-            disabled={!mayConsent}
-            onChange={(event) => onConsent(event.target.checked)}
-          />
-          <span className="flex min-w-0 flex-col gap-1 text-sm">
-            <span className="text-foreground">
-              Pin {toPin.length === 1 ? "this number" : "these numbers"} during
-              runs, and restore {toPin.length === 1 ? "it" : "them"} afterwards
-            </span>
-            <span className="text-faint">
-              Without this, a real caller would reach the temporary version the
-              moment it exists — so the box stays off instead.
-            </span>
-          </span>
-        </label>
       )}
     </section>
   );

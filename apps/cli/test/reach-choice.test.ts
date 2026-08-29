@@ -313,7 +313,7 @@ describe("choosing text", () => {
     expect(platform.registered.sealed).toEqual([KEY]);
   });
 
-  it("creates one Retell chat connection for the selected chat agent", async () => {
+  it("creates one Retell text-mode connection for the selected agent", async () => {
     retell = await startFakeRetell(CHAT_ACCOUNT);
 
     const { connected } = await run({ reach: "text" });
@@ -324,8 +324,10 @@ describe("choosing text", () => {
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionType).toBe("retell_chat_api");
-    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
+    // Text mode, and never the chat-native door: Egma registers Retell voice
+    // agents, and no flow offers `retell_chat_api`.
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
     expect(connection?.modality).toBe("chat");
     // The selected chat agent's own identity is the connection target.
     expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });

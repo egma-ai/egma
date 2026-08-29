@@ -233,7 +233,7 @@ describe("the key, and the two failures worth a second try", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
   });
 
@@ -284,7 +284,7 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
   });
 
@@ -302,7 +302,7 @@ describe("one agent, and several", () => {
     expect(report).toEqual({
       kind: "connected",
       agentName: "chat-desk",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
 
     const [connection] = platform.registered.connections;
@@ -496,8 +496,8 @@ describe("what lands on the platform", () => {
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001" },
           credentials: { apiKey: KEY },
@@ -529,12 +529,12 @@ describe("what lands on the platform", () => {
     expect(agent?.name).toBe("order-line");
     expect(agent?.id).toMatch(/^agt_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(connection?.name).toBe("retell_chat_api-1");
+    expect(connection?.name).toBe("retell_text_mode-1");
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionType).toBe("retell_chat_api");
-    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
+    expect(connection?.connectionType).toBe("retell_text_mode");
+    expect(connection?.accessVariant).toBe("retell_text_mode.api_key");
     expect(connection?.modality).toBe("chat");
-    expect(connection?.productLabel).toBe("Retell chat");
+    expect(connection?.productLabel).toBe("Retell text mode");
     expect(connection?.topology).toBe("hosted-broker");
     expect(connection?.agentId).toBe(agent?.id);
   });
@@ -571,7 +571,7 @@ describe("what lands on the platform", () => {
     expect(second.report).toEqual({
       kind: "connected",
       agentName: "order-line",
-      connectionName: "retell_chat_api-1",
+      connectionName: "retell_text_mode-1",
     });
     expect(second.connected?.registered.result).toBe("reused");
     expect(first.connected?.registered.result).toBe("created");
@@ -590,7 +590,7 @@ describe("what lands on the platform", () => {
 
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
-      "This voice agent was already registered as order-line, and retell_chat_api-1 was " +
+      "This voice agent was already registered as order-line, and retell_text_mode-1 was " +
         "already the way Egma reaches it. Nothing new was registered.",
     );
     // And each half is reported on its own, because a retry cares about both.
@@ -830,8 +830,8 @@ describe("the platform's own rules, held by the fixture", () => {
         agentPlatform: "retell",
         connection: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
           credentials: { apiKey: KEY },
@@ -882,8 +882,8 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0002" },
         credentials: { apiKey: OTHER_KEY },
@@ -892,17 +892,17 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(second.status).toBe(201);
     expect(((await second.json()) as { connection: { name: string } }).connection.name).toBe(
-      "retell_chat_api-2",
+      "retell_text_mode-2",
     );
 
     const clash = await fetch(`${platform.url}/v1/agents/${agentId}/connections`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        name: "retell_chat_api-1",
+        name: "retell_text_mode-1",
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0003" },
         credentials: { apiKey: OTHER_KEY },

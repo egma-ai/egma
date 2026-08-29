@@ -74,9 +74,10 @@ const WEB_CALL = {
   archivedAt: null,
   createdAt: MOMENT,
   updatedAt: MOMENT,
+  mockToolsEnabled: false,
 };
 
-function agentRow(mockToolsDuringSimulations: boolean) {
+function agentRow(mockToolsEnabled: boolean) {
   return {
     id: "agt_retell",
     projectId: "prj_1",
@@ -88,13 +89,12 @@ function agentRow(mockToolsDuringSimulations: boolean) {
     monitoringApiKeyHint: "WXYZ",
     monitoringConfigured: false,
     pullProductionCalls: false,
-    mockToolsDuringSimulations,
     lastReceivedAt: null,
     archived: false,
     archivedAt: null,
     createdAt: MOMENT,
     updatedAt: MOMENT,
-    connections: [WEB_CALL],
+    connections: [{ ...WEB_CALL, mockToolsEnabled }],
   };
 }
 
@@ -178,8 +178,8 @@ function answerWith(options: {
         return answer(options.discovered);
       }
       if (request.path === "/v1/agents/agt_retell" && method === "PATCH") {
-        const asked = body as { mockToolsDuringSimulations?: boolean };
-        ticked = asked.mockToolsDuringSimulations ?? ticked;
+        const asked = body as { mockToolsEnabled?: boolean };
+        ticked = asked.mockToolsEnabled ?? ticked;
         return answer({ agent: agentRow(ticked) });
       }
       throw new Error(`nothing stubbed for ${method} ${request.path}`);
@@ -259,103 +259,8 @@ describe("the mock-tools panel", () => {
     ).toBeDefined();
   });
 
-  it("will not turn on without the pin answer, and sends it when given", async () => {
-    answerWith({
-      ticked: false,
-      discovered: discovery({
-        numbers: [
-          {
-            number: "+12567332874",
-            label: "After hours",
-            verdicts: ["hijackable"],
-            pin: true,
-          },
-        ],
-      }),
-    });
-    render(<AgentsPage />);
-    await openMockTools();
 
-    // The number the question is about, and what it is bound to.
-    expect(screen.getByText("+12567332874")).toBeDefined();
-    expect(screen.getByText(/Follows Retell's latest pointer/u)).toBeDefined();
-    expect(screen.getByText("Needs a pin")).toBeDefined();
 
-    const turnOn = screen.getByRole("button", { name: "Turn on mock tools" });
-    // Unanswered, so the box stays off rather than quietly running real tools.
-    expect(turnOn.getAttribute("disabled")).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Turn on mock tools" }).getAttribute("disabled"),
-      ).toBeNull();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Turn on mock tools" }));
-    await waitFor(() => {
-      const written = seen.find(
-        (one) => one.method === "PATCH" && one.path === "/v1/agents/agt_retell",
-      );
-      // The consent travels with the tick, in the same request: a switch that
-      // went on and then asked would be a switch that was briefly a promise
-      // nobody had agreed to.
-      expect(written?.body, JSON.stringify(seen)).toEqual({
-        mockToolsDuringSimulations: true,
-        pinNumbersDuringRuns: true,
-      });
-    });
-  });
-
-  it("shows an unchecked box for an off agent, never one that reads as agreed", async () => {
-    answerWith({
-      ticked: false,
-      discovered: discovery({
-        numbers: [
-          {
-            number: "+12567332874",
-            label: "After hours",
-            verdicts: ["hijackable"],
-            pin: true,
-          },
-        ],
-      }),
-    });
-    render(<AgentsPage />);
-    await openMockTools();
-
-    // Off, so the box reflects only this session's answer: nobody has toggled
-    // it, so it is unchecked. A pre-checked box would claim an agreement the
-    // person never gave.
-    const box = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(box.checked).toBe(false);
-  });
-
-  it("states the standing consent for an on agent, without a pre-checked box", async () => {
-    answerWith({
-      ticked: true,
-      discovered: discovery({
-        numbers: [
-          {
-            number: "+12567332874",
-            label: "After hours",
-            verdicts: ["hijackable"],
-            pin: true,
-          },
-        ],
-      }),
-    });
-    render(<AgentsPage />);
-    await openMockTools();
-
-    // Already on: the pin is covered by the tick's standing consent, and that
-    // is stated as a fact rather than shown as a checkbox the person is
-    // depicted as having ticked.
-    expect(screen.queryByRole("checkbox")).toBeNull();
-    expect(
-      screen.getByText(/pinned during each run and restored afterwards under that standing consent/u),
-    ).toBeDefined();
-  });
 
   it("shows the reason the box cannot go on, rather than a control that does nothing", async () => {
     answerWith({
