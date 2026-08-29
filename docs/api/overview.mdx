@@ -172,9 +172,10 @@ POST /v1/traces
 ```
 
 This endpoint is the direct OTLP path for an agent process that already emits
-OpenTelemetry spans. For LiveKit, use the Egma Python SDK's
-`monitor_livekit(ctx)` helper to create or safely reuse the tracer provider and
-add the exporter. Retell Monitoring uses API polling instead of this endpoint.
+OpenTelemetry spans. For LiveKit, use `monitor_livekit(ctx)` from the Python SDK
+or `monitorLiveKit(ctx)` from the JavaScript SDK to configure the tracer
+provider and add the exporter. Retell Monitoring uses API polling instead of
+this endpoint.
 
 <CardGroup cols={2}>
   <Card title="Protobuf encoding" icon="binary">

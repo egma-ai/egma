@@ -2,6 +2,13 @@
 
 import Link from "next/link";
 
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+
 import { CopyBlock } from "./copy-block.tsx";
 
 // Pinned, because the floor is what makes the guard hold. `monitor_livekit`
@@ -10,18 +17,64 @@ import { CopyBlock } from "./copy-block.tsx";
 // release that looks in dispatch metadata instead, where Egma writes
 // nothing at all — so on every one of the three LiveKit dispatch paths a
 // simulation's spans arrive here as a production conversation.
-const INSTALL = "pip install 'egma>=0.2.0'";
-const HOOK = `from egma import monitor_livekit
+const PYTHON_INSTALL = "pip install 'egma>=0.2.0'";
+const PYTHON_HOOK = `from egma import monitor_livekit
 
 async def entrypoint(ctx):
     monitor_livekit(ctx)
     session = AgentSession(...)
     await session.start(...)`;
+const JAVASCRIPT_INSTALL = "npm install @egma/livekit";
+const JAVASCRIPT_HOOK = `import { monitorLiveKit } from "@egma/livekit";
+
+export async function entrypoint(ctx: JobContext) {
+  monitorLiveKit(ctx);
+  const session = new voice.AgentSession(...);
+  await session.start(...);
+}`;
 const EGMA_URL_PLACEHOLDER = "<your-public-egma-url>";
 const API_KEY_PLACEHOLDER = "<your-project-api-key>";
 
 function environmentValues(egmaUrl: string): string {
   return `EGMA_URL=${egmaUrl}\nEGMA_API_KEY=${API_KEY_PLACEHOLDER}`;
+}
+
+type WorkerLanguage = "python" | "javascript";
+
+function WorkerSteps({ language }: { readonly language: WorkerLanguage }) {
+  const steps = [
+    {
+      title: "Install the Egma SDK",
+      value:
+        language === "python" ? PYTHON_INSTALL : JAVASCRIPT_INSTALL,
+    },
+    {
+      title: "Add the hook before AgentSession.start",
+      value: language === "python" ? PYTHON_HOOK : JAVASCRIPT_HOOK,
+    },
+    {
+      title: "Set the environment values",
+      value: environmentValues(EGMA_URL_PLACEHOLDER),
+    },
+  ] as const;
+
+  return (
+    <ol className="m-0 flex list-none flex-col gap-5 p-0">
+      {steps.map((step, index) => (
+        <li className="flex gap-3" key={step.title}>
+          <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
+            {index + 1}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
+              {step.title}
+            </p>
+            <CopyBlock value={step.value} />
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 /**
@@ -36,15 +89,6 @@ export function LiveKitMonitoringInstructions({
 }: {
   readonly projectId: string;
 }) {
-  const steps = [
-    { title: "Install the Egma SDK", value: INSTALL },
-    { title: "Add the hook before AgentSession.start", value: HOOK },
-    {
-      title: "Set the environment values",
-      value: environmentValues(EGMA_URL_PLACEHOLDER),
-    },
-  ] as const;
-
   return (
     <section className="flex flex-col gap-5" aria-labelledby="livekit-monitoring-title">
       <div className="flex flex-col gap-2">
@@ -58,21 +102,18 @@ export function LiveKitMonitoringInstructions({
         </h3>
       </div>
 
-      <ol className="m-0 flex list-none flex-col gap-5 p-0">
-        {steps.map((step, index) => (
-          <li className="flex gap-3" key={step.title}>
-            <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
-              {index + 1}
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
-                {step.title}
-              </p>
-              <CopyBlock value={step.value} />
-            </div>
-          </li>
-        ))}
-      </ol>
+      <Tabs defaultValue="python">
+        <TabsList aria-label="Worker language" variant="line">
+          <TabsTrigger value="python">Python</TabsTrigger>
+          <TabsTrigger value="javascript">JavaScript</TabsTrigger>
+        </TabsList>
+        <TabsContent className="pt-3" value="python">
+          <WorkerSteps language="python" />
+        </TabsContent>
+        <TabsContent className="pt-3" value="javascript">
+          <WorkerSteps language="javascript" />
+        </TabsContent>
+      </Tabs>
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         Create a project key in{" "}
         <Link

@@ -125,6 +125,60 @@ const WORKER_MONITORED = WORKER_BEFORE.replace(
   "from egma import monitor_livekit\nfrom livekit import agents",
 );
 
+/** A JavaScript worker before and after the monitoring-only SDK entry. */
+const NODE_WORKER_BEFORE = [
+  'import { type JobContext, voice } from "@livekit/agents";',
+  "",
+  "export async function entrypoint(ctx: JobContext) {",
+  "  const session = new voice.AgentSession({",
+  '    stt: "deepgram/nova-3:en",',
+  '    llm: "openai/gpt-4.1-mini",',
+  '    tts: "cartesia/sonic-3",',
+  "  });",
+  "  await session.start({",
+  '    agent: voice.Agent.create({ instructions: "Help the caller." }),',
+  "    room: ctx.room,",
+  "  });",
+  "}",
+  "",
+].join("\n");
+
+const NODE_WORKER_MONITORED = NODE_WORKER_BEFORE.replace(
+  'import { type JobContext, voice } from "@livekit/agents";',
+  [
+    'import { monitorLiveKit } from "@egma/livekit";',
+    'import { type JobContext, voice } from "@livekit/agents";',
+  ].join("\n"),
+).replace(
+  "export async function entrypoint(ctx: JobContext) {\n  const session",
+  "export async function entrypoint(ctx: JobContext) {\n  monitorLiveKit(ctx);\n  const session",
+);
+
+const NODE_MANIFEST_BEFORE = `${JSON.stringify(
+  {
+    name: "livekit-js-front-desk",
+    version: "1.0.0",
+    type: "module",
+    dependencies: { "@livekit/agents": "^1.7.1" },
+  },
+  null,
+  2,
+)}\n`;
+
+const NODE_MANIFEST_WITH_EGMA = `${JSON.stringify(
+  {
+    name: "livekit-js-front-desk",
+    version: "1.0.0",
+    type: "module",
+    dependencies: {
+      "@egma/livekit": "^0.1.0",
+      "@livekit/agents": "^1.7.1",
+    },
+  },
+  null,
+  2,
+)}\n`;
+
 /** The worker after one Both-mode integration edit. */
 const WORKER_BOTH = WORKER_BEFORE.replace(
   "async def entrypoint(ctx: agents.JobContext) -> None:\n    await ctx.connect()",
@@ -214,11 +268,16 @@ function liveKitDiscovery(): FakeStep[] {
 }
 
 function nodeLiveKitDiscovery(): FakeStep[] {
-  return liveKitDiscovery().map((step) =>
-    step.kind === "say" && step.text.includes("framework livekit-agents")
-      ? { kind: "say" as const, text: "egma:found framework @livekit/agents\n" }
-      : step,
-  );
+  return liveKitDiscovery().map((step) => {
+    if (step.kind !== "say") return step;
+    if (step.text.includes("framework livekit-agents")) {
+      return { kind: "say" as const, text: "egma:found framework @livekit/agents\n" };
+    }
+    if (step.text.includes("entrypoint agent.py")) {
+      return { kind: "say" as const, text: "egma:found entrypoint agent.ts\n" };
+    }
+    return step;
+  });
 }
 
 /** The coding agent applying the monitoring entry, and naming the agent. */
@@ -233,6 +292,23 @@ function appliesMonitorEntry(): FakeStep[] {
     { kind: "say", text: "egma:note Added monitor_livekit(ctx) to agent.py\n" },
     { kind: "say", text: "egma:found worker-entry agent.py\n" },
     { kind: "say", text: "egma:found dependency-manifest requirements.txt\n" },
+    { kind: "say", text: "egma:found agent-name front-desk\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** The coding agent applying the JavaScript monitoring entry and dependency. */
+function appliesNodeMonitorEntry(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.ts", content: NODE_WORKER_MONITORED },
+    {
+      kind: "write-file",
+      path: "package.json",
+      content: NODE_MANIFEST_WITH_EGMA,
+    },
+    { kind: "say", text: "egma:note Added monitorLiveKit(ctx) to agent.ts\n" },
+    { kind: "say", text: "egma:found worker-entry agent.ts\n" },
+    { kind: "say", text: "egma:found dependency-manifest package.json\n" },
     { kind: "say", text: "egma:found agent-name front-desk\n" },
     { kind: "stop", reason: "end_turn" },
   ];
@@ -591,22 +667,57 @@ describe("choosing monitoring on LiveKit", () => {
     await writeFile(path.join(workspace.dir, "agent.py"), WORKER_BEFORE, "utf8");
   });
 
-  it("stops a Node worker before monitoring creates remote resources", async () => {
+  it("wires a Node worker for monitoring without opening the testing path", async () => {
+    await writeFile(path.join(workspace.dir, "agent.ts"), NODE_WORKER_BEFORE, "utf8");
+    await writeFile(path.join(workspace.dir, "package.json"), NODE_MANIFEST_BEFORE, "utf8");
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+
     const { report } = await walk({
       goal: "monitoring",
       steps: nodeLiveKitDiscovery(),
+      stepsByTask: [
+        { contains: WORKER_INTEGRATION_TASK, steps: appliesNodeMonitorEntry() },
+      ],
     });
 
-    expect(report.kind).toBe("failed");
-    if (report.kind !== "failed") throw new Error("expected Node refusal");
-    expect(report.reason).toContain("Egma SDK is Python only today");
-    expect(report.reason).toContain("did not create remote resources");
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.keys.minted).toHaveLength(0);
+    expect(report).toMatchObject({
+      kind: "monitoring-wired",
+      agentName: "front-desk",
+      envFile: ENV_FILE_NAME,
+      envRefusal: null,
+      wired: true,
+    });
+    expect(walkExitCode(report)).toBe(0);
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(0);
+    expect(platform.tests.tests).toHaveLength(0);
     expect(platform.running.runs).toHaveLength(0);
 
+    const worker = await readFile(path.join(workspace.dir, "agent.ts"), "utf8");
+    expect(worker).toBe(NODE_WORKER_MONITORED);
+    expect(worker.indexOf("monitorLiveKit(ctx)")).toBeLessThan(
+      worker.indexOf("new voice.AgentSession"),
+    );
+    expect(await readFile(path.join(workspace.dir, "package.json"), "utf8")).toBe(
+      NODE_MANIFEST_WITH_EGMA,
+    );
+
+    const minted = platform.keys.minted[0]!;
+    expect(await readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).toBe(
+      `EGMA_URL=${platform.url}\nEGMA_API_KEY=${minted.secret}\n`,
+    );
+
     const sent = await dispatched();
-    expect(sent.some((task) => task.includes(WORKER_INTEGRATION_TASK))).toBe(false);
+    const edit = sent.find((task) => task.includes(WORKER_INTEGRATION_TASK)) ?? "";
+    const task = edit.slice(edit.lastIndexOf("# Your task"));
+    expect(task).toContain("final mode is **monitoring**");
+    expect(task).toContain("the registry dependency @egma/livekit@^0.1.0");
+    expect(task).toContain("egma:found dependency-manifest package.json");
+    expect(task).not.toContain("egma:found dispatch-name");
+    expect(sent.some((instructions) => instructions.includes(MOCK_AUTHORING_TASK))).toBe(
+      false,
+    );
   });
 
   /**

@@ -207,7 +207,7 @@ export async function mockAuthoringStep(
 ): Promise<MockAuthored> {
   const { ui, drivenAgent, signal, log } = options;
 
-  // A Node worker cannot serve these answers with the Python-only SDK. The
+  // The JavaScript SDK does not yet provide session-isolated mock tools. The
   // integration task already said that once, so this step stays silent.
   if (!supportsLiveKitSdk(options.context.facts)) {
     return { halted: null };

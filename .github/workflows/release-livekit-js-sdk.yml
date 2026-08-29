@@ -1,0 +1,143 @@
+name: Release LiveKit JavaScript SDK
+
+# Publishing is one deliberate tag push. Merging does not publish.
+#
+#   git tag livekit-js-sdk-v0.1.0
+#   git push origin livekit-js-sdk-v0.1.0
+#
+# npm must trust this repository, workflow, and @egma/livekit package. GitHub
+# then supplies one short-lived OIDC credential. No long-lived npm token is
+# stored in this repository.
+
+on:
+  push:
+    tags:
+      - "livekit-js-sdk-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    name: Verify and publish
+    runs-on: ubuntu-latest
+    steps:
+      # This workflow holds npm publishing authority, so every action is pinned
+      # to the commit behind the human-readable version in its comment.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        # Version comes from "packageManager" in the root package.json.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Report toolchain
+        run: node --version && npm --version && pnpm --version
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the package version
+        run: |
+          tagged="${GITHUB_REF_NAME#livekit-js-sdk-v}"
+          packaged="$(node -p "require('./sdks/livekit-js/package.json').version")"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "Tag says $tagged and sdks/livekit-js/package.json says $packaged." >&2
+            exit 1
+          fi
+          echo "Releasing @egma/livekit $packaged."
+
+      - name: Test and build the SDK
+        run: |
+          pnpm --filter @egma/livekit test
+          pnpm --filter @egma/livekit build
+
+      - name: Pack the public SDK
+        id: pack
+        run: |
+          set -e
+          dir="$(mktemp -d)"
+          pnpm --config.node-linker=hoisted \
+            --filter @egma/livekit \
+            pack --pack-destination "$dir"
+          tarball="$(find "$dir" -maxdepth 1 -name '*.tgz' -print -quit)"
+          if [ -z "$tarball" ]; then
+            echo "pnpm did not produce an SDK tarball." >&2
+            exit 1
+          fi
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Use the minimum supported Node.js release
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Inspect and install the built package
+        run: |
+          set -e
+          tarball="${{ steps.pack.outputs.tarball }}"
+          dir="$(dirname "$tarball")"
+          tar -tzf "$tarball" > "$dir/files.txt"
+          for required in \
+            package/dist/index.js \
+            package/dist/index.d.ts \
+            package/LICENSE \
+            package/README.md; do
+            grep -Fx "$required" "$dir/files.txt" > /dev/null || {
+              echo "Packed SDK is missing $required." >&2
+              exit 1
+            }
+          done
+          if grep -F '.tsbuildinfo' "$dir/files.txt"; then
+            echo "Packed SDK contains a TypeScript build cache." >&2
+            exit 1
+          fi
+          if tar -xOzf "$tarball" package/package.json | grep -F 'workspace:'; then
+            echo "Packed SDK contains a workspace dependency range." >&2
+            exit 1
+          fi
+          if tar -xOzf "$tarball" | grep -E 'egma_sk_[A-Za-z0-9_-]{43}'; then
+            echo "Packed SDK contains an Egma API key." >&2
+            exit 1
+          fi
+          mkdir "$dir/clean"
+          cd "$dir/clean"
+          npm init -y > /dev/null
+          npm install "$tarball" \
+            "@livekit/agents@1.7.1" \
+            "@livekit/rtc-node@^0.13.34" \
+            "zod@^4.1.8" \
+            --no-audit --no-fund
+          node --input-type=module -e \
+            'import { monitorLiveKit } from "@egma/livekit"; if (typeof monitorLiveKit !== "function") process.exit(1); delete process.env.EGMA_URL; delete process.env.EGMA_API_KEY; monitorLiveKit({ job: { room: { name: "egma-sim-release-smoke" } } });'
+
+      - name: Restore the publishing toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install the trusted-publishing npm client
+        run: npm install --global npm@11.5.1
+
+      - name: Refuse a manifest npm would silently rewrite
+        run: |
+          set -e
+          status=0
+          out="$(npm publish --dry-run "${{ steps.pack.outputs.tarball }}" 2>&1)" || status=$?
+          echo "$out"
+          if echo "$out" | grep -qi "auto-corrected some errors"; then
+            echo "::error::npm would rewrite the packed manifest before publishing." >&2
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Publish to npm
+        run: npm publish "${{ steps.pack.outputs.tarball }}"

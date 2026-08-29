@@ -1,0 +1,105 @@
+---
+title: "Egma JavaScript SDK for LiveKit"
+sidebarTitle: "JavaScript SDK"
+description: "Send production spans from a LiveKit Agents JS worker to Egma Monitoring."
+---
+
+The `@egma/livekit` package sends production LiveKit spans to Egma
+Monitoring. Its public entry is `monitorLiveKit(ctx)`.
+
+This first JavaScript release is for production monitoring. It does not supply
+Python's `mockable` entry for simulation tools. See
+[Current testing boundary](#current-testing-boundary).
+
+## Install
+
+```bash
+npm install @egma/livekit
+```
+
+The package requires Node.js 22 or newer and
+`@livekit/agents>=1.7.1 <1.8`. The LiveKit range is narrow on purpose. Egma
+verifies the telemetry seam before it supports a new LiveKit minor.
+
+## Monitor production LiveKit agents
+
+Open **Monitoring → Start monitoring** and choose **LiveKit**. Create a project
+API key in **Settings → API keys**. Set the API origin and key where the worker
+runs:
+
+```bash
+export EGMA_URL=https://api.egma.ai
+export EGMA_API_KEY=egma_sk_...
+```
+
+For self-hosted Egma, use the published API address that the agent process can
+reach, such as `http://localhost:3100` when the worker runs on the same host.
+
+For a customer-hosted worker, use your normal deployment secret store. For a
+LiveKit Cloud deployment, put the values in a gitignored secrets file and run:
+
+```bash
+lk agent update-secrets --secrets-file=.env.monitoring
+```
+
+Call `monitorLiveKit` as the first statement of the job entrypoint, before
+`AgentSession.start`:
+
+```typescript
+import { monitorLiveKit } from "@egma/livekit";
+import { type JobContext, voice } from "@livekit/agents";
+
+export async function entrypoint(ctx: JobContext) {
+  monitorLiveKit(ctx);
+
+  const agent = voice.Agent.create({
+    instructions: "Help the caller.",
+    tools: [checkCalendar],
+  });
+  const session = new voice.AgentSession({ stt, llm, tts });
+  await session.start({ agent, room: ctx.room });
+}
+```
+
+You can pass configuration directly when your deployment does not use
+environment variables:
+
+```typescript
+monitorLiveKit(ctx, {
+  endpoint: "https://api.egma.ai",
+  apiKey: projectKey,
+});
+```
+
+The helper adds an OTLP/HTTP protobuf batch exporter and flushes its last batch
+when the job stops. It also leaves a fan-out point for LiveKit Cloud
+observability. If another integration installed an OpenTelemetry provider
+first, the helper stops with a safe setup error instead of replacing it. Call
+`monitorLiveKit` before other custom tracing setup.
+
+After you deploy the code and secrets, the first production conversation
+appears under **Monitoring** when the worker sends its spans. Egma cannot see a
+DNS, firewall, or network failure inside the worker. If nothing appears, check
+the worker logs and confirm that it can reach `EGMA_URL`.
+
+## How simulations stay separate
+
+Every room Egma creates for a simulation starts with `egma-sim-`. The helper
+reads that room name before it reads configuration. It does not export those
+spans through production Monitoring because the simulation keeps its own trace.
+
+The room name is the only signal. Egma does not write into your dispatch
+metadata. Refuse the `egma-sim-` prefix wherever your own system creates
+production room names.
+
+## Current testing boundary
+
+`@egma/livekit` does not yet provide `mockable`. LiveKit Agents JS 1.7 stores
+test mocks in one module-wide table keyed by the agent constructor, not by
+session. Repeated or overlapping sessions in one job can replace each other's
+mocks, and nested cleanup can restore stale mocks. Egma keeps JavaScript
+simulation testing blocked instead of claiming session isolation that this
+upstream hook does not provide.
+
+Use the [Python SDK](/integrations/python-sdk) when a LiveKit worker needs Egma
+mock tools today.

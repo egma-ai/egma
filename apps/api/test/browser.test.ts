@@ -3198,6 +3198,16 @@ describe("the complete product, walked in order in a second project", () => {
         .waitFor();
       expect(await sheet.innerText()).toContain("monitor_livekit(ctx)");
       expect(
+        await sheet.getByRole("tab", { name: "Python" }).getAttribute(
+          "aria-selected",
+        ),
+      ).toBe("true");
+      await sheet.getByRole("tab", { name: "JavaScript" }).click();
+      const javascriptInstructions = await sheet.innerText();
+      expect(javascriptInstructions).toContain("npm install @egma/livekit");
+      expect(javascriptInstructions).toContain("monitorLiveKit(ctx)");
+      expect(javascriptInstructions).not.toContain("monitor_livekit(ctx)");
+      expect(
         await sheet.getByRole("button", { name: /start monitoring/iu }).count(),
         "LiveKit monitoring is configured in customer code, not toggled here",
       ).toBe(0);

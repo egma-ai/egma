@@ -245,7 +245,7 @@ const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
  * that build error is to add a project reference — which makes the build pass
  * and ships the crash.** That is what this rule is for.
  */
-const PUBLISHED_PACKAGES = ["apps/cli/src/"];
+const PUBLISHED_PACKAGES = ["apps/cli/src/", "sdks/livekit-js/src/"];
 
 /**
  * Private workspace packages deliberately carried inside a published package.

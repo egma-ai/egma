@@ -6,10 +6,11 @@ description: "Send OpenTelemetry spans from your voice agent to Egma and query t
 
 Traces are the storage record of a conversation. Egma accepts standard
 OTLP/HTTP from an agent process that already emits OpenTelemetry spans. LiveKit
-Agents should use `monitor_livekit(ctx)` from the Egma Python SDK to create or
-safely reuse the required telemetry setup. Retell Monitoring polls Retell and
-writes normalized production traces without using this ingest endpoint. Use the
-read endpoints below for either source.
+Agents should use `monitor_livekit(ctx)` from the Egma Python SDK or
+`monitorLiveKit(ctx)` from the Egma JavaScript SDK to create the required
+telemetry setup. Retell Monitoring polls Retell and writes normalized
+production traces without using this ingest endpoint. Use the read endpoints
+below for either source.
 
 ---
 
