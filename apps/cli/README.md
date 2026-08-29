@@ -449,9 +449,8 @@ egma monitoring status
 
 For LiveKit, the coding agent installs the latest unpinned Egma SDK with the
 repository's package manager. It adds `monitor_livekit(ctx)` to a Python worker
-or `monitorLiveKit(ctx)` to a JavaScript worker. If `@egma/livekit` is not
-available from the package registry, it stops and reports that release boundary
-instead of using a local checkout. It then enables the exact monitoring target:
+or installs `@egma/livekit` and adds `monitorLiveKit(ctx)` to a JavaScript
+worker. It then enables the exact monitoring target:
 
 ```bash
 egma monitoring enable --platform livekit

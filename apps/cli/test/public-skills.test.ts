@@ -228,7 +228,11 @@ describe("the public skill source", () => {
     expect(liveKitWorker).toMatch(
       /JavaScript Both request[\s\S]*do not claim\s+that Both completed/u,
     );
+    expect(liveKitWorker).toMatch(
+      /For JavaScript, add the latest `@egma\/livekit` package with the repository's\s+package manager/u,
+    );
     expect(liveKitWorker).not.toContain("@egma/livekit@");
+    expect(liveKitWorker).not.toMatch(/npm view|E404|registry|local checkout/u);
 
     expect(skill).toMatch(
       /Pause only when the developer must approve browser login, supply a credential/u,

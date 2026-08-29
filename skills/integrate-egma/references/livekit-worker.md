@@ -34,19 +34,16 @@ For Python, add the latest Egma SDK from:
 egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python
 ```
 
-For JavaScript, ask the repository's package manager to add `@egma/livekit`.
-If the registry reports that the package is unavailable, report that release
-boundary and stop; do not substitute a machine-local checkout. Do not add an
-SDK version, tag, or commit to either dependency request. Let the repository's
-package manager resolve and lock the latest compatible release in its normal
-way.
+For JavaScript, add the latest `@egma/livekit` package with the repository's
+package manager. Do not add an SDK version, tag, or commit to either dependency
+request. Let the repository's package manager resolve and lock the latest
+compatible release in its normal way.
 
 ## Read the current source contract
 
 Run the read-only LiveKit source-contract command listed by the current
 `egma --help`. It reports the hook calls and positions, room signals, dispatch
-rule, and supported language. Do not replace the SDK with a machine-local
-checkout or a different package.
+rule, and supported language.
 
 ## Apply the printed contract
 
