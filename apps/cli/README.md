@@ -302,7 +302,7 @@ status: connected
 
 ```
 egma/
-  config.yaml     format 2 platform, project, agents, and connections
+  config.yaml     format 3 platform, project, agents, and connection modalities
   mock-tools.md   what Egma answers for the agent's tools with
   tests/
     release/      one local directory per suite
@@ -321,7 +321,7 @@ are code your team reviews in pull requests.
 each agent can name many connections:
 
 ```yaml
-format: 2
+format: 3
 platform:
   origin: https://app.egma.ai
 project:
@@ -332,18 +332,21 @@ agents:
     name: Front desk
     connections:
       - id: con_01K3XQ7M4E8YB2FVN0H9TZQWER
-        name: livekit-1
+        name: livekit_voice-1
+        modality: voice
       - id: con_01K3XQ7M4E8YB2FVN0H9TZQWES
         name: phone_number-1
+        modality: voice
   - id: agt_01K3XQ7M4E8YB2FVN0H9TZQWES
     name: After hours
     connections: []
 ```
 
-Format 2 is required. The former top-level `agent` and `connection` fields are
-refused; this CLI has no legacy reader or compatibility alias. Run the wizard
-again to add another target or another suite. It keeps the agents, connections,
-and suite directories that are already present.
+Format 3 is required. Every connection records `modality: chat` or
+`modality: voice`. Older folder formats are refused; this CLI has no legacy
+reader or compatibility alias. Run the wizard again to add another target or
+another suite. It keeps the agents, connections, and suite directories that are
+already present.
 
 Create a suite with `egma suite create release --name "Release contract"`.
 Egma creates the platform record first, then writes exactly:
@@ -509,7 +512,7 @@ more than one runnable agent or more than one connection under the selected
 agent, name them exactly:
 
 ```sh
-egma run order-line-tests --agent "Front desk" --connection livekit-1
+egma run order-line-tests --agent "Front desk" --connection livekit_voice-1
 ```
 
 It pins the version of every test it runs, prints every change as it lands, and

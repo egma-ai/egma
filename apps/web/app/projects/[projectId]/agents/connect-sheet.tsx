@@ -28,7 +28,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { Answer, Refusal } from "@/lib/api.ts";
-import type { ListedAgentWithConnections } from "@/lib/agents.ts";
+import {
+  modalityLabel,
+  type ListedAgentWithConnections,
+} from "@/lib/agents.ts";
 import {
   optionNamed,
   optionsForPlatform,
@@ -1423,7 +1426,11 @@ function LiveKitSimulationStep({
   return (
     <div className="flex flex-col gap-5">
       <StepIntro
-        title="Connect LiveKit for simulations"
+        title={
+          option === undefined
+            ? "Connect LiveKit for simulations"
+            : `Connect LiveKit ${modalityLabel(option.modality)} for simulations`
+        }
         description={
           endpoint
             ? "Egma requests a short-lived room token from your endpoint for every simulation."

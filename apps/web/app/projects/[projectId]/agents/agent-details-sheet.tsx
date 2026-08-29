@@ -13,7 +13,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { Refusal } from "@/lib/api.ts";
-import type { ListedAgentWithConnections } from "@/lib/agents.ts";
+import {
+  modalityLabel,
+  type ListedAgentWithConnections,
+} from "@/lib/agents.ts";
 import { cn } from "@/lib/utils";
 import { Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { RelativeInstant } from "@/ui/relative-time.tsx";
@@ -245,8 +248,13 @@ export function AgentDetailsSheet({
                     className="flex min-w-0 items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0"
                     key={connection.id}
                   >
-                    <span className="min-w-0 truncate text-sm text-foreground">
-                      {connection.name}
+                    <span className="flex min-w-0 flex-col text-sm">
+                      <span className="truncate text-foreground">
+                        {connection.name}
+                      </span>
+                      <span className="text-faint">
+                        {modalityLabel(connection.modality)}
+                      </span>
                     </span>
                     <Link
                       className="flex-none text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
@@ -460,6 +468,16 @@ type Fact = {
   readonly mono?: boolean;
 };
 
+function sharedConnectionValue(
+  values: readonly string[],
+  whenEmpty: string,
+): string {
+  const distinct = new Set(values);
+  if (distinct.size === 0) return whenEmpty;
+  if (distinct.size > 1) return "Varies by connection";
+  return values[0] ?? whenEmpty;
+}
+
 function providerFacts(
   agent: ListedAgentWithConnections,
   provider: AgentProvider,
@@ -482,28 +500,39 @@ function providerFacts(
     ];
   }
 
-  const room = agent.connections.find(
+  const rooms = agent.connections.filter(
     (connection) => connection.connectionType === "livekit_room",
   );
-  const liveKitAgentName = room?.config["agentName"];
+  const liveKitAgentName = sharedConnectionValue(
+    rooms.map(
+      (connection) =>
+        connection.config["agentName"] ??
+        (connection.accessVariant === "livekit_room.customer_token_endpoint"
+          ? "Provided by token endpoint"
+          : "Not set"),
+    ),
+    "Not set",
+  );
+  const webSocketUrl = sharedConnectionValue(
+    rooms.map((connection) => connection.config["url"] ?? "Not saved"),
+    "Not saved",
+  );
   return [
     {
       label: "LiveKit agent",
-      value:
-        liveKitAgentName ??
-        (room?.accessVariant === "livekit_room.customer_token_endpoint"
-          ? "Provided by token endpoint"
-          : "Not set"),
-      mono: liveKitAgentName !== undefined,
+      value: liveKitAgentName,
+      mono:
+        rooms.length > 0 &&
+        rooms.every(
+          (connection) => connection.config["agentName"] === liveKitAgentName,
+        ),
     },
     {
       label: "WebSocket URL",
-      value: room?.config["url"] ?? "Not saved",
-      mono: room?.config["url"] !== undefined,
-    },
-    {
-      label: "Access",
-      value: room?.productLabel ?? "Not configured",
+      value: webSocketUrl,
+      mono:
+        rooms.length > 0 &&
+        rooms.every((connection) => connection.config["url"] === webSocketUrl),
     },
   ];
 }

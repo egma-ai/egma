@@ -302,7 +302,7 @@ export function buildExitLine(report: ExitReport): string {
     case "run-started":
       return runStartedLine(report.resultsReady, report.total);
     case "connected":
-      return `Egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
+      return `Egma connected your agent: ${report.agentName}, over ${report.connectionName}.`;
     case "tests-pushed":
       return report.count === 1
         ? `Egma put 1 test on Egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`

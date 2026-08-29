@@ -144,7 +144,7 @@ This creates:
 
 ```
 egma/
-  config.yaml       format 2 platform, project, agents, and connections
+  config.yaml       format 3 platform, project, agents, and connection modalities
   mock-tools.md     default tool mock responses for simulations
   tests/
     receptionist-core/  one direct directory per test suite
@@ -160,7 +160,7 @@ Everything in this folder is committed to version control. No secrets ever land 
 The config supports many agents and many connections under each agent:
 
 ```yaml
-format: 2
+format: 3
 platform:
   origin: https://app.egma.ai
 project:
@@ -171,16 +171,19 @@ agents:
     name: Front desk
     connections:
       - id: con_01JXMK8P2QN4R6S9T1UV3WX5Y
-        name: livekit-1
+        name: livekit_voice-1
+        modality: voice
       - id: con_01JXMK8P2QN4R6S9T1UV3WX5Z
         name: phone_number-1
+        modality: voice
   - id: agt_01JXMK8P2QN4R6S9T1UV3WX5Z
     name: After hours
     connections: []
 ```
 
-Format 2 is required. The CLI refuses the former top-level `agent` and
-`connection` fields. It does not translate or alias an old folder shape.
+Format 3 is required. Every connection records `modality: chat` or
+`modality: voice`. The CLI refuses older folder formats. It does not translate
+or alias an old folder shape.
 
 <Note>
   LiveKit monitoring setup does not pause for a separate environment-line
@@ -277,7 +280,7 @@ connection together. If the config has more than one runnable agent or the
 selected agent has more than one connection, use exact names or IDs:
 
 ```bash
-egma run receptionist-core --agent "Front desk" --connection livekit-1
+egma run receptionist-core --agent "Front desk" --connection livekit_voice-1
 ```
 
 The simulator claims each simulation and conducts the conversation. The

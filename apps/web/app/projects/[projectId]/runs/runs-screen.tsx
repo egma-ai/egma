@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 import type { Refusal } from "../../../../lib/api.ts";
-import type { AgentPage } from "../../../../lib/agents.ts";
+import { modalityLabel, type AgentPage } from "../../../../lib/agents.ts";
 import { asListInstant, formatViewerInstant } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import {
@@ -92,8 +92,11 @@ function columnsFor(
       header: "Agent",
       width: "22%",
       cell: (run) => (
-        <span className="text-foreground">
-          {agentNames.get(run.agentId) ?? "Unavailable agent"}
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-foreground">
+            {agentNames.get(run.agentId) ?? "Unavailable agent"}
+          </span>
+          <span className="text-faint">{modalityLabel(run.modality)}</span>
         </span>
       ),
     },

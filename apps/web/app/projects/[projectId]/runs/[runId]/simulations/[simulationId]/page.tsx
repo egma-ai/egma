@@ -9,6 +9,7 @@ import {
 } from "@egma/platform-api/client";
 
 import type { Refusal } from "../../../../../../../lib/api.ts";
+import { modalityLabel } from "../../../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
 import {
   platformAnswer,
@@ -267,12 +268,12 @@ function EvidenceView({
              */}
             <Link href={projectPath(projectId, "personas")}>
               {read.persona.name ?? "A persona"}
-            </Link>{" "}
-            calling{" "}
+            </Link>
+            {read.modality === "chat" ? " chatting with " : " calling "}
             <Link href={projectPath(projectId, "agents", read.agent.id)}>
               {read.agent.name ?? "the agent"}
             </Link>
-            {` through ${read.connection.name ?? "the connection"}`}
+            {` through ${read.connection.name ?? "the connection"} · ${modalityLabel(read.modality)}`}
             {read.startedAt === null ? null : (
               <>
                 {" · started "}

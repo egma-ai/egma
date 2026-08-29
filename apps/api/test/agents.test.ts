@@ -1564,7 +1564,7 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      name: "livekit_room-1",
+      name: "livekit_voice-1",
       agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
@@ -1632,6 +1632,7 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
+      name: "livekit_chat-1",
       agentPlatform: "livekit",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",

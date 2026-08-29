@@ -164,7 +164,7 @@ describe("Egma's instruction content", () => {
   it("agrees with the README about the repository folder", () => {
     const layout = [
       "egma/",
-      "  config.yaml     format 2 platform, project, agents, and connections",
+      "  config.yaml     format 3 platform, project, agents, and connection modalities",
       "  mock-tools.md   what Egma answers for the agent's tools with",
       "  tests/",
       "    release/      one local directory per suite",

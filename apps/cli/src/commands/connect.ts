@@ -362,6 +362,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
         connection: {
           name: registered.connection.name,
           id: registered.connection.id,
+          modality: registered.connection.modality,
         },
       });
       options.out(`retell_agents: ${outcome.onTheAccount}`);

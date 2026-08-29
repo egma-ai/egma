@@ -657,15 +657,34 @@ describe("a livekit connection", () => {
     });
   });
 
-  it("defaults its name from the type, like every other", async () => {
+  it("defaults LiveKit names from the modality and leaves explicit names alone", async () => {
     const agentId = await agentNamed("LiveKit Unnamed");
 
-    const first = await addConnection(
+    const firstChat = await addConnection(
       actingAsAcme(),
       agentId,
-      livekitConnection({ name: undefined }),
+      livekitConnection({ name: undefined, modality: "chat" }),
     );
-    expect(first?.name).toBe("livekit_room-1");
+    const firstVoice = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: undefined, modality: "voice" }),
+    );
+    const secondChat = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: undefined, modality: "chat" }),
+    );
+    const explicitLegacyName = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: "livekit_room-1", modality: "chat" }),
+    );
+
+    expect(firstChat?.name).toBe("livekit_chat-1");
+    expect(firstVoice?.name).toBe("livekit_voice-1");
+    expect(secondChat?.name).toBe("livekit_chat-2");
+    expect(explicitLegacyName?.name).toBe("livekit_room-1");
   });
 
   it("seals both halves, and neither is in the row", async () => {

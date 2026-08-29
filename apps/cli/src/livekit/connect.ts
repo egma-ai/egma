@@ -28,7 +28,7 @@ type CommonRegistration = {
   /** The agent's name in Egma. */
   readonly name: string;
   readonly project?: string | undefined;
-  /** Omit and the platform chooses `livekit-1`. */
+  /** Omit and the platform chooses `livekit_chat-1` or `livekit_voice-1`. */
   readonly connectionName?: string | undefined;
   readonly environment?: string | undefined;
   /** The customer's LiveKit Cloud project or self-hosted server. */

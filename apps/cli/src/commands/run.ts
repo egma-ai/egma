@@ -57,7 +57,8 @@ function reportTargetRefusal(options: RunCommandOptions, refusal: RefusedTarget)
     options.out(`agent-option: ${agent.id} ${agent.name}`);
   }
   for (const connection of refusal.connections) {
-    options.out(`connection-option: ${connection.id} ${connection.name}`);
+    const modality = connection.modality === "chat" ? "Chat" : "Voice";
+    options.out(`connection-option: ${connection.id} ${connection.name} (${modality})`);
   }
   options.out(`status: ${refusal.status}`);
   options.fail(refusal.message);

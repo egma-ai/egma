@@ -70,7 +70,7 @@ beforeEach(async () => {
         {
           id: "agt_one",
           name: "Receptionist",
-          connections: [{ id: "con_one", name: "Phone" }],
+          connections: [{ id: "con_one", name: "Phone", modality: "voice" }],
         },
       ],
     },

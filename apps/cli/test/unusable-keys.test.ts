@@ -46,7 +46,11 @@ beforeEach(async () => {
           name: "receptionist",
           id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
           connections: [
-            { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+            {
+              name: "retell-1",
+              id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES",
+              modality: "chat",
+            },
           ],
         },
       ],

@@ -30,7 +30,7 @@ The folder has this shape:
 
 ```text
 egma/
-  config.yaml     format 2 platform, project, agents, and connections
+  config.yaml     format 3 platform, project, agents, and connection modalities
   mock-tools.md   what Egma answers for the agent's tools with
   tests/
     release/      one local directory per suite
@@ -44,7 +44,7 @@ egma/
 The config hierarchy is:
 
 ```yaml
-format: 2
+format: 3
 platform:
   origin: https://app.egma.ai
 project:
@@ -55,14 +55,16 @@ agents:
     name: Front desk
     connections:
       - id: con_...
-        name: livekit-1
+        name: livekit_voice-1
+        modality: voice
   - id: agt_...
     name: After hours
     connections: []
 ```
 
-Format 2 is strict. The CLI has no reader, migration, or alias for the former
-top-level `agent` and `connection` fields. Report that refusal as written.
+Format 3 is strict. Every connection has `modality: chat` or `modality: voice`.
+The CLI has no reader, migration, or alias for an older folder format. Report
+that refusal as written.
 
 When the developer asks to onboard or extend the repository, run the wizard.
 It authorizes the CLI before it discovers installed coding agents. The first

@@ -90,6 +90,7 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
               {
                 id: registered.connection.id,
                 name: registered.connection.name,
+                modality: "chat",
               },
             ],
           },

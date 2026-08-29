@@ -86,7 +86,10 @@ export type IdentifiedThing = {
 };
 
 /** One committed way Egma can reach an agent. */
-export type FolderConnection = IdentifiedThing;
+export type FolderConnection = IdentifiedThing & {
+  /** Whether this connection carries typed turns or spoken audio. */
+  readonly modality: "chat" | "voice";
+};
 
 /** One agent in this project, and every committed way Egma can reach it. */
 export type FolderAgent = IdentifiedThing & {
@@ -110,7 +113,7 @@ export type FolderConfig = {
   readonly agents: readonly FolderAgent[];
 };
 
-export const CONFIG_FORMAT = 2 as const;
+export const CONFIG_FORMAT = 3 as const;
 
 export const EMPTY_CONFIG: FolderConfig = {
   format: CONFIG_FORMAT,
@@ -121,6 +124,7 @@ export const EMPTY_CONFIG: FolderConfig = {
 
 const ROOT_CONFIG_KEYS = ["format", "platform", "project", "agents"] as const;
 const NAMED_KEYS = ["id", "name"] as const;
+const CONNECTION_KEYS = [...NAMED_KEYS, "modality"] as const;
 const AGENT_KEYS = [...NAMED_KEYS, "connections"] as const;
 
 const CONFIG_HEADER = [
@@ -160,6 +164,7 @@ export function serializeConfig(config: FolderConfig): string {
       for (const connection of agent.connections) {
         lines.push(`      - id: ${yamlScalar(connection.id)}`);
         lines.push(`        name: ${yamlScalar(connection.name)}`);
+        lines.push(`        modality: ${connection.modality}`);
       }
     }
   }
@@ -179,8 +184,12 @@ function unsupportedKeys(
   }
 }
 
-function identifiedThing(mapping: YamlMapping, where: string): IdentifiedThing {
-  unsupportedKeys(mapping, NAMED_KEYS, where);
+function identifiedThing(
+  mapping: YamlMapping,
+  where: string,
+  supported: readonly string[] = NAMED_KEYS,
+): IdentifiedThing {
+  unsupportedKeys(mapping, supported, where);
   const id = textAt(mapping, "id");
   const name = textAt(mapping, "name");
   if (id === null || name === null) {
@@ -190,6 +199,18 @@ function identifiedThing(mapping: YamlMapping, where: string): IdentifiedThing {
     throw new Error(`${where} has outer whitespace in its id or name.`);
   }
   return { id, name };
+}
+
+function identifiedConnection(
+  mapping: YamlMapping,
+  where: string,
+): FolderConnection {
+  const connection = identifiedThing(mapping, where, CONNECTION_KEYS);
+  const modality = textAt(mapping, "modality");
+  if (modality !== "chat" && modality !== "voice") {
+    throw new Error(`${where} must contain modality chat or voice.`);
+  }
+  return { ...connection, modality };
 }
 
 /**
@@ -297,10 +318,10 @@ export function parseConfig(document: string, where: string): FolderConfig {
     ).entries()) {
       if (typeof connectionEntry !== "object") {
         throw new Error(
-          `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id and name.`,
+          `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id, name, and modality.`,
         );
       }
-      const connection = identifiedThing(
+      const connection = identifiedConnection(
         connectionEntry,
         `${where} agent ${agent.id} connection ${String(connectionIndex + 1)}`,
       );
@@ -353,7 +374,7 @@ export type RegisteredTarget = {
   readonly project?: IdentifiedThing;
   readonly agent: IdentifiedThing;
   /** Omitted for an agent configured only for production monitoring. */
-  readonly connection?: IdentifiedThing;
+  readonly connection?: FolderConnection;
 };
 
 /**

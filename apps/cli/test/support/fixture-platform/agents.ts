@@ -1275,14 +1275,21 @@ export function agentRoutes(options: {
   const freeConnectionName = (
     agentId: string,
     connectionType: string,
+    modality: string,
   ): string => {
     const taken = new Set(
       connections
         .filter((held) => held.agentId === agentId)
         .map((held) => held.name),
     );
+    const stem =
+      connectionType === "livekit_room"
+        ? modality === "chat"
+          ? "livekit_chat"
+          : "livekit_voice"
+        : connectionType;
     for (let n = 1; ; n += 1) {
-      const candidate = `${connectionType}-${n}`;
+      const candidate = `${stem}-${n}`;
       if (!taken.has(candidate)) return candidate;
     }
   };
@@ -1387,7 +1394,8 @@ export function agentRoutes(options: {
     input: Admitted,
   ): StoredConnection => {
     const { connectionType, modality, config, credentials } = input;
-    const name = input.name ?? freeConnectionName(agent.id, connectionType);
+    const name =
+      input.name ?? freeConnectionName(agent.id, connectionType, modality);
     if (
       connections.some(
         (held) => held.agentId === agent.id && held.name === name,

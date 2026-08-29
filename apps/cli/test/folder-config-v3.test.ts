@@ -26,10 +26,10 @@ afterEach(async () => {
   workspace = null;
 });
 
-describe("folder config format 2", () => {
+describe("folder config format 3", () => {
   it("round-trips many agents and their connections", () => {
     const config = {
-      format: 2,
+      format: 3,
       platform: { origin: "https://egma.example" },
       project: { id: PROJECT_ID, name: "LiveKit examples" },
       agents: [
@@ -37,8 +37,8 @@ describe("folder config format 2", () => {
           id: FIRST_AGENT_ID,
           name: "Appointment scheduler",
           connections: [
-            { id: FIRST_CONNECTION_ID, name: "livekit-1" },
-            { id: SECOND_CONNECTION_ID, name: "phone_number-1" },
+            { id: FIRST_CONNECTION_ID, name: "livekit-1", modality: "chat" },
+            { id: SECOND_CONNECTION_ID, name: "phone_number-1", modality: "voice" },
           ],
         },
         {
@@ -57,7 +57,7 @@ describe("folder config format 2", () => {
         "#",
         "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
         "# beside each name once it has registered one.",
-        "format: 2",
+        "format: 3",
         "platform:",
         "  origin: https://egma.example",
         "project:",
@@ -69,8 +69,10 @@ describe("folder config format 2", () => {
         "    connections:",
         `      - id: ${FIRST_CONNECTION_ID}`,
         "        name: livekit-1",
+        "        modality: chat",
         `      - id: ${SECOND_CONNECTION_ID}`,
         "        name: phone_number-1",
+        "        modality: voice",
         `  - id: ${SECOND_AGENT_ID}`,
         "    name: Billing support",
         "    connections: []",
@@ -84,20 +86,43 @@ describe("folder config format 2", () => {
     [
       "the former unversioned singleton shape",
       "platform:\nproject:\nagent:\nconnection:\n",
-      /folder format none.*requires format 2.*no legacy reader/i,
+      /folder format none.*requires format 3.*no legacy reader/i,
     ],
     [
-      "another explicit format",
-      "format: 1\nplatform:\nproject:\nagents: []\n",
-      /folder format 1.*requires format 2.*no legacy reader/i,
+      "the former format",
+      "format: 2\nplatform:\nproject:\nagents: []\n",
+      /folder format 2.*requires format 3.*no legacy reader/i,
     ],
   ])("refuses %s", (_name, document, message) => {
     expect(() => parseConfig(document, "config.yaml")).toThrow(message);
   });
 
+  it.each([
+    ["a missing modality", null],
+    ["an unknown modality", "video"],
+  ])("refuses %s on a stored connection", (_name, modality) => {
+    const document = [
+      "format: 3",
+      "platform:",
+      "project:",
+      "agents:",
+      `  - id: ${FIRST_AGENT_ID}`,
+      "    name: One",
+      "    connections:",
+      `      - id: ${FIRST_CONNECTION_ID}`,
+      "        name: First",
+      ...(modality === null ? [] : [`        modality: ${modality}`]),
+      "",
+    ].join("\n");
+
+    expect(() => parseConfig(document, "config.yaml")).toThrow(
+      /must contain modality chat or voice/i,
+    );
+  });
+
   it("refuses duplicate agent and connection identities", () => {
     const duplicateAgent = [
-      "format: 2",
+      "format: 3",
       "platform:",
       "project:",
       "agents:",
@@ -114,7 +139,7 @@ describe("folder config format 2", () => {
     );
 
     const duplicateConnection = [
-      "format: 2",
+      "format: 3",
       "platform:",
       "project:",
       "agents:",
@@ -123,11 +148,13 @@ describe("folder config format 2", () => {
       "    connections:",
       `      - id: ${FIRST_CONNECTION_ID}`,
       "        name: First",
+      "        modality: chat",
       `  - id: ${SECOND_AGENT_ID}`,
       "    name: Two",
       "    connections:",
       `      - id: ${FIRST_CONNECTION_ID}`,
       "        name: Copy",
+      "        modality: voice",
       "",
     ].join("\n");
     expect(() => parseConfig(duplicateConnection, "config.yaml")).toThrow(
@@ -148,7 +175,9 @@ describe("folder config format 2", () => {
         {
           id: FIRST_AGENT_ID,
           name: "Old appointment name",
-          connections: [{ id: FIRST_CONNECTION_ID, name: "old-livekit" }],
+          connections: [
+            { id: FIRST_CONNECTION_ID, name: "old-livekit", modality: "chat" },
+          ],
         },
         {
           id: SECOND_AGENT_ID,
@@ -161,11 +190,19 @@ describe("folder config format 2", () => {
     await recordRegisteredTarget(file, {
       project: { id: PROJECT_ID, name: "LiveKit Examples" },
       agent: { id: FIRST_AGENT_ID, name: "Appointment scheduler" },
-      connection: { id: SECOND_CONNECTION_ID, name: "phone_number-1" },
+      connection: {
+        id: SECOND_CONNECTION_ID,
+        name: "phone_number-1",
+        modality: "voice",
+      },
     });
     const recorded = await recordRegisteredTarget(file, {
       agent: { id: FIRST_AGENT_ID, name: "Appointment scheduler" },
-      connection: { id: SECOND_CONNECTION_ID, name: "phone-production" },
+      connection: {
+        id: SECOND_CONNECTION_ID,
+        name: "phone-production",
+        modality: "voice",
+      },
     });
 
     expect(recorded.project?.name).toBe("LiveKit Examples");
@@ -174,8 +211,8 @@ describe("folder config format 2", () => {
         id: FIRST_AGENT_ID,
         name: "Appointment scheduler",
         connections: [
-          { id: FIRST_CONNECTION_ID, name: "old-livekit" },
-          { id: SECOND_CONNECTION_ID, name: "phone-production" },
+          { id: FIRST_CONNECTION_ID, name: "old-livekit", modality: "chat" },
+          { id: SECOND_CONNECTION_ID, name: "phone-production", modality: "voice" },
         ],
       },
       {
@@ -197,7 +234,9 @@ describe("folder config format 2", () => {
             {
               id: FIRST_AGENT_ID,
               name: "Appointment scheduler",
-              connections: [{ id: FIRST_CONNECTION_ID, name: "livekit-1" }],
+              connections: [
+                { id: FIRST_CONNECTION_ID, name: "livekit-1", modality: "voice" },
+              ],
             },
           ],
         },

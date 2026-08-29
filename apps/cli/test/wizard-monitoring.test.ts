@@ -488,7 +488,7 @@ describe("choosing monitoring on Retell", () => {
     expect(config.agents).toHaveLength(1);
     expect(config.agents[0]?.connections).toEqual([]);
     expect(config).toMatchObject({
-      format: 2,
+      format: 3,
       platform: { origin: platform.url },
       project: { id: platform.registered.agents[0]?.projectId },
       agents: [
@@ -670,7 +670,7 @@ describe("choosing monitoring on LiveKit", () => {
     expect(config.agents).toHaveLength(1);
     expect(config.agents[0]?.connections).toEqual([]);
     expect(config).toMatchObject({
-      format: 2,
+      format: 3,
       platform: { origin: platform.url },
       project: { id: platform.registered.agents[0]?.projectId },
       agents: [

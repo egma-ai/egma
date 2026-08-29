@@ -483,7 +483,7 @@ export function helpText(): string {
     "",
     "The wizard signs this machine in before it looks for supported coding agents.",
     "Its first generated suite has four tests. Run the wizard again to add another target or suite.",
-    "egma/config.yaml requires format 2 with agents and nested connections; there is no legacy reader.",
+    "egma/config.yaml requires format 3 with each nested connection's modality; there is no legacy reader.",
   ].join("\n");
 }
 

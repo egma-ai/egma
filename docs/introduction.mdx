@@ -12,11 +12,12 @@ Voice agents are hard to test with unit tests alone. The behavior that matters e
 
 **Simulation testing** lets you group Markdown scenarios into test suites, then
 run one complete suite as real conversations against your agent. The simulator
-conducts each test and produces a recording and a transcript. The Expected
-behaviors grader checks each behavior statement, keeps its evidence in the
-details, and returns one normalized score for the completed simulation.
+conducts each test and produces a transcript. Voice simulations also produce a
+recording when the call connects; chat simulations never produce audio. The
+Expected behaviors grader checks each behavior statement, keeps its evidence
+in the details, and returns one normalized score for the completed simulation.
 
-**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, observed metrics, and grades when a project grader applies. Simulation recordings stay with the run that Egma conducted.
+**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, observed metrics, and grades when a project grader applies. Voice simulation recordings stay with the run that Egma conducted.
 
 ## How it works
 

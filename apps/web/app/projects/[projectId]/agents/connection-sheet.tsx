@@ -19,7 +19,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { Refusal } from "@/lib/api.ts";
-import type { ListedConnection } from "@/lib/agents.ts";
+import { modalityLabel, type ListedConnection } from "@/lib/agents.ts";
 import {
   optionNamed,
   type ConnectionOption,
@@ -262,7 +262,7 @@ export function ConnectionSheet({
     if (editing !== null && option !== undefined) {
       return (
         <>
-          <Field label="Name*" htmlFor="edit-connection-name">
+          <Field label="Connection name*" htmlFor="edit-connection-name">
             <Input
               aria-required="true"
               id="edit-connection-name"
@@ -472,9 +472,9 @@ function ReadRow({
 /**
  * The record, read.
  *
- * **Five kinds of row and no more** (`ITZ-0`, `JYY-0`, `K40-0`): Name, Access,
- * the rows the catalog names for what is stored, the Config block, and
- * Created. Updated-at, Env and Platform left with the 2026-08-24 boards —
+ * **Six kinds of row and no more** (`ITZ-0`, `JYY-0`, `K40-0`): Name, Access,
+ * Modality, the rows the catalog names for what is stored, the Config block,
+ * and Created. Updated-at, Env and Platform left with the 2026-08-24 boards —
  * Platform because Access already says which product this is, Updated-at
  * because nobody reads a connection to find out when it was touched, and Env
  * because the product stopped speaking that word (the column stays where it
@@ -520,6 +520,7 @@ function ReadConnection({
       <ReadRow label="Access">
         {option?.accessVariantLabel ?? connection.accessVariant}
       </ReadRow>
+      <ReadRow label="Modality">{modalityLabel(connection.modality)}</ReadRow>
       {rows.map((row) => (
         <ReadRow key={row.label} label={row.label} mono>
           {row.value}

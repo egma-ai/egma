@@ -74,7 +74,7 @@ async function wizardInBoundRepository(): Promise<TerminalRun> {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
-      format: 2,
+      format: 3,
       platform: { origin: platform.url },
       project: null,
       agents: [],

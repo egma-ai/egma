@@ -75,7 +75,7 @@ export type RegisteredConnection = {
   readonly agentPlatform: string | null;
   readonly connectionType: string;
   readonly accessVariant: string;
-  readonly modality: string;
+  readonly modality: ConnectionInput["modality"];
   readonly productLabel: string;
   /** The last characters of the sealed secret, which is all that comes back. */
   readonly credentialsHint: string | null;
@@ -178,7 +178,7 @@ function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
       connection.agentPlatform === null ? null : platformText(connection.agentPlatform),
     connectionType: platformText(connection.connectionType),
     accessVariant: platformText(connection.accessVariant),
-    modality: platformText(connection.modality),
+    modality: connection.modality,
     productLabel: platformText(connection.productLabel),
     credentialsHint:
       connection.credentialsHint === null

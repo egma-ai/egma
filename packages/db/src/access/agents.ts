@@ -81,7 +81,7 @@ import { within } from "./within.ts";
  */
 
 export type NewConnection = {
-  /** Defaults from the product label, so onboarding never stalls. */
+  /** Defaults from the connection kind and modality, so onboarding never stalls. */
   readonly name?: string | undefined;
   readonly agentPlatform: AgentPlatform | null;
   readonly connectionType: ConnectionType;
@@ -713,15 +713,26 @@ function admitConnection(input: NewConnection): AdmittedConnection {
   };
 }
 
+/** The stable stem for one generated connection name. */
+function defaultNameStem(
+  connectionType: ConnectionType,
+  modality: Modality,
+): string {
+  if (connectionType !== "livekit_room") return connectionType;
+  return modality === "chat" ? "livekit_chat" : "livekit_voice";
+}
+
 /**
  * The smallest free `<kind>-<n>` among the agent's living names, so an unnamed
  * add always lands — a removed connection's number comes back into play the
- * same way its name does.
+ * same way its name does. LiveKit includes its modality because one worker can
+ * have both a chat connection and a voice connection.
  */
 async function freeDefaultName(
   on: Queryable,
   agentId: string,
   connectionType: ConnectionType,
+  modality: Modality,
 ): Promise<string> {
   const taken = new Set(
     (
@@ -732,8 +743,9 @@ async function freeDefaultName(
     ).map((row) => row.name),
   );
 
+  const stem = defaultNameStem(connectionType, modality);
   for (let n = 1; ; n += 1) {
-    const candidate = `${connectionType}-${n}`;
+    const candidate = `${stem}-${n}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
@@ -849,7 +861,12 @@ async function insertConnection(
   );
   const name =
     admitted.name ??
-    (await freeDefaultName(on, home.id, admitted.connectionType));
+    (await freeDefaultName(
+      on,
+      home.id,
+      admitted.connectionType,
+      admitted.modality,
+    ));
 
   const [inserted] = await on
     .insert(connection)
