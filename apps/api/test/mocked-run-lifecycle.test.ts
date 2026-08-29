@@ -84,7 +84,7 @@ type Account = {
      * account back. Consumed the first time it is used, so whoever comes next
      * is not stopped too.
      */
-    holdOneDelete?: Promise<void>;
+    holdOneDelete?: Promise<void> | undefined;
     /** Called as that delete arrives, so a test knows the teardown is inside. */
     onDelete?: () => void;
     /** Called as a version is branched, so a test knows a copy now stands. */
