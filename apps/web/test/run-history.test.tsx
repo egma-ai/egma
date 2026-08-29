@@ -951,7 +951,13 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/events": [
         {
           status: 200,
-          body: { events: [], next: 0, caughtUp: true, done: false },
+          body: {
+            events: [],
+            next: 0,
+            observedThrough: 0,
+            caughtUp: true,
+            done: false,
+          },
         },
         {
           status: 200,
@@ -971,6 +977,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1060,6 +1067,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1072,6 +1080,222 @@ describe("one run after suites", () => {
     await screen.findByRole("button", {
       name: "Reschedules service, Patient caller, Execution failed",
     });
+    expect(notify).not.toHaveBeenCalled();
+    expect(screen.queryByText("Simulation execution failed")).toBeNull();
+  });
+
+  it("toasts a new failure that arrives while a long history is still paging", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 2,
+      simulationCounts: { ...NO_SIMULATIONS, running: 2 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const first = simulation({
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const second = simulation({
+      id: "sim_2",
+      position: 2,
+      testId: "tst_2",
+      testName: "Reschedules service",
+      status: "running",
+      gradingState: null,
+      combinedScore: null,
+      endedAt: null,
+    });
+    const history = Array.from({ length: 200 }, (_, index) => ({
+      seq: index + 1,
+      at: "2026-08-21T10:00:00.000Z",
+      kind: "run",
+      status: "running",
+    }));
+    answers({
+      ...detailStubs(
+        activeRun,
+        [
+          {
+            status: 200,
+            body: { simulations: [first, second], nextPageToken: null },
+          },
+          {
+            status: 200,
+            body: {
+              simulations: [
+                first,
+                {
+                  ...second,
+                  status: "failed",
+                  reason: "simulator_error",
+                  executionFailure: "The media connection closed unexpectedly.",
+                  endedAt: "2026-08-21T10:01:00.000Z",
+                },
+              ],
+              nextPageToken: null,
+            },
+          },
+        ],
+        "never",
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: history,
+            next: 200,
+            observedThrough: 200,
+            // Event 201 landed after the boundary read but before the page
+            // query, so this response knows another page exists.
+            caughtUp: false,
+            done: false,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 201,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_2",
+                testName: "Reschedules service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 201,
+            observedThrough: 201,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(notify).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).toHaveBeenCalledWith("Simulation execution failed", {
+      id: "run_1:201",
+      description:
+        "Reschedules service · Patient caller: The media connection closed unexpectedly.",
+    });
+  });
+
+  it("waits for the initial selection before choosing a toast or persistent message", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const notify = vi.spyOn(toast, "error");
+    let answerSimulationList!: (response: Response) => void;
+    const refreshedSimulationList = new Promise<Response>((resolve) => {
+      answerSimulationList = resolve;
+    });
+    const activeRun = runDetail({
+      status: "running",
+      finishedAt: null,
+      expectedSimulationCount: 1,
+      completedCount: 0,
+      simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+      finishedCount: 0,
+      gradableCount: 0,
+      gradedCount: 0,
+    });
+    const failed = simulation({
+      status: "failed",
+      gradingState: "not_requested",
+      combinedScore: null,
+      reason: "simulator_error",
+      executionFailure: "The media connection closed unexpectedly.",
+      endedAt: "2026-08-21T10:01:00.000Z",
+    });
+    answers({
+      ...detailStubs(
+        activeRun,
+        ["never", { deferred: refreshedSimulationList }],
+        {
+          status: 200,
+          body: simulationEvidence({
+            status: "failed",
+            gradingState: "not_requested",
+            combinedScore: null,
+            reason: "simulator_error",
+            executionFailure: "The media connection closed unexpectedly.",
+            endedAt: "2026-08-21T10:01:00.000Z",
+            grades: [],
+            gradeHistory: [],
+            gradingPlan: null,
+            transcript: null,
+          }),
+        },
+      ),
+      "/v1/runs/run_1/events": [
+        {
+          status: 200,
+          body: {
+            events: [
+              {
+                seq: 1,
+                at: "2026-08-21T10:01:00.000Z",
+                kind: "simulation",
+                simulationId: "sim_1",
+                testName: "Books service",
+                personaName: "Patient caller",
+                status: "failed",
+                reason: "simulator_error",
+                executionFailure: "The media connection closed unexpectedly.",
+              },
+            ],
+            next: 1,
+            // The failure landed after this first response captured its
+            // history boundary, while the simulation list was still loading.
+            observedThrough: 0,
+            caughtUp: true,
+            done: false,
+          },
+        },
+        "never",
+      ],
+    });
+    render(<RunDetailPage />);
+
+    await waitFor(
+      () => {
+        expect(
+          sent.filter(
+            (request) => request.path === "/v1/runs/run_1/simulations",
+          ),
+        ).toHaveLength(2);
+      },
+      { timeout: 4000 },
+    );
+    expect(notify).not.toHaveBeenCalled();
+
+    answerSimulationList(
+      new Response(
+        JSON.stringify({ simulations: [failed], nextPageToken: null }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const alert = await screen.findByRole("alert", undefined, { timeout: 4000 });
+    expect(alert.textContent).toContain(
+      "The media connection closed unexpectedly.",
+    );
     expect(notify).not.toHaveBeenCalled();
     expect(screen.queryByText("Simulation execution failed")).toBeNull();
   });
@@ -1146,7 +1370,13 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/events": [
         {
           status: 200,
-          body: { events: [], next: 0, caughtUp: true, done: false },
+          body: {
+            events: [],
+            next: 0,
+            observedThrough: 0,
+            caughtUp: true,
+            done: false,
+          },
         },
         {
           status: 200,
@@ -1166,6 +1396,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1231,7 +1462,13 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/events": [
         {
           status: 200,
-          body: { events: [], next: 0, caughtUp: true, done: false },
+          body: {
+            events: [],
+            next: 0,
+            observedThrough: 0,
+            caughtUp: true,
+            done: false,
+          },
         },
         { deferred: late },
       ],
@@ -1265,6 +1502,7 @@ describe("one run after suites", () => {
             },
           ],
           next: 1,
+          observedThrough: 1,
           caughtUp: true,
           done: false,
         }),
@@ -1488,6 +1726,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            observedThrough: 1,
             caughtUp: true,
             done: false,
           },
@@ -1701,7 +1940,13 @@ describe("one run after suites", () => {
       "/v1/runs/run_1/events": [
         {
           status: 200,
-          body: { events: [], next: 0, caughtUp: true, done: false },
+          body: {
+            events: [],
+            next: 0,
+            observedThrough: 0,
+            caughtUp: true,
+            done: false,
+          },
         },
         {
           status: 200,
@@ -1719,6 +1964,7 @@ describe("one run after suites", () => {
               },
             ],
             next: 1,
+            observedThrough: 1,
             caughtUp: true,
             done: false,
           },

@@ -98,6 +98,29 @@ type Moved = {
   readonly executionFailure: RunSimulation["executionFailure"];
 };
 
+type FailureToastCandidate = {
+  readonly seq: number;
+  readonly simulationId: string;
+  readonly testName: string | null;
+  readonly personaName: string | null;
+  readonly reason: RunSimulation["reason"];
+  readonly executionFailure: RunSimulation["executionFailure"];
+};
+
+function showFailureToast(runId: string, failure: FailureToastCandidate): void {
+  const simulationName = [failure.testName, failure.personaName]
+    .filter((name): name is string => name !== null)
+    .join(" · ") || "Simulation";
+  toast.error("Simulation execution failed", {
+    id: `${runId}:${String(failure.seq)}`,
+    description:
+      `${simulationName}: ${executionFailureMessage(
+        failure.reason,
+        failure.executionFailure,
+      )}`,
+  });
+}
+
 type LoadedSimulationPage = {
   readonly cursor: string;
   readonly value: RunSimulationPage;
@@ -167,8 +190,11 @@ function RunDetailView({
   const [runStatus, setRunStatus] = useState<string | null>(null);
   /** The last sequence number applied. The whole of the cursor. */
   const applied = useRef(0);
-  /** Failure toasts begin only after the initial historical event tail is read. */
-  const failureToastsArmed = useRef(false);
+  /** Last event already present when this page first observed the run. */
+  const failureToastHistoryThrough = useRef<number | null>(null);
+  /** Live failures wait here until selected-vs-unselected is known. */
+  const pendingFailureToasts = useRef<FailureToastCandidate[]>([]);
+  const initialSelectionReady = useRef(false);
   const [selectedSimulationId, setSelectedSimulationId] = useState<string | null>(null);
   const selectedSimulationIdRef = useRef<string | null>(null);
   const [finishedByFeed, setFinishedByFeed] = useState(false);
@@ -194,7 +220,9 @@ function RunDetailView({
    */
   useEffect(() => {
     applied.current = 0;
-    failureToastsArmed.current = false;
+    failureToastHistoryThrough.current = null;
+    pendingFailureToasts.current = [];
+    initialSelectionReady.current = false;
     selectedSimulationIdRef.current = null;
     setSelectedSimulationId(null);
     setMoved(new Map());
@@ -225,14 +253,19 @@ function RunDetailView({
   }, [answer, simulationPage]);
 
   useEffect(() => {
-    if (
-      simulationPage?.status !== "ready" ||
-      selectedSimulationIdRef.current !== null
-    ) {
-      return;
+    if (simulationPage?.status !== "ready" || initialSelectionReady.current) return;
+    if (selectedSimulationIdRef.current === null) {
+      selectSimulation(simulationPage.value.simulations[0]?.id ?? null);
     }
-    selectSimulation(simulationPage.value.simulations[0]?.id ?? null);
-  }, [selectSimulation, simulationPage]);
+    initialSelectionReady.current = true;
+    const pending = pendingFailureToasts.current;
+    pendingFailureToasts.current = [];
+    for (const failure of pending) {
+      if (failure.simulationId !== selectedSimulationIdRef.current) {
+        showFailureToast(runId, failure);
+      }
+    }
+  }, [runId, selectSimulation, simulationPage]);
 
   const stillMoving =
     run !== null &&
@@ -307,8 +340,10 @@ function RunDetailView({
     // it has and asks again; the numbers it already applied are still right.
     if (asked.status !== "ready") return false;
 
-    const { events, next, caughtUp, done } = asked.value;
-    const mayToastFailures = failureToastsArmed.current;
+    const { events, next, observedThrough, done } = asked.value;
+    const historyThrough =
+      failureToastHistoryThrough.current ?? observedThrough;
+    failureToastHistoryThrough.current = historyThrough;
 
     /*
      * **Which events are new is decided here, once, and never inside a state
@@ -341,22 +376,23 @@ function RunDetailView({
       for (const event of fresh) {
         if (event.kind === "run") setRunStatus(event.status);
         if (
-          mayToastFailures &&
+          event.seq > historyThrough &&
           event.kind === "simulation" &&
-          event.status === "failed" &&
-          event.simulationId !== selectedSimulationIdRef.current
+          event.status === "failed"
         ) {
-          const simulationName = [event.testName, event.personaName]
-            .filter((name): name is string => name !== null)
-            .join(" · ") || "Simulation";
-          toast.error("Simulation execution failed", {
-            id: `${runId}:${String(event.seq)}`,
-            description:
-              `${simulationName}: ${executionFailureMessage(
-                event.reason,
-                event.executionFailure,
-              )}`,
-          });
+          const failure: FailureToastCandidate = {
+            seq: event.seq,
+            simulationId: event.simulationId,
+            testName: event.testName,
+            personaName: event.personaName,
+            reason: event.reason,
+            executionFailure: event.executionFailure,
+          };
+          if (!initialSelectionReady.current) {
+            pendingFailureToasts.current.push(failure);
+          } else if (event.simulationId !== selectedSimulationIdRef.current) {
+            showFailureToast(runId, failure);
+          }
         }
       }
       const terminalSimulationLanded = fresh.some(
@@ -375,7 +411,6 @@ function RunDetailView({
       }
     }
 
-    if (caughtUp) failureToastsArmed.current = true;
     if (done) setFinishedByFeed(true);
     return done;
   }, [projectId, runId, refreshLoadedSimulationPages]);

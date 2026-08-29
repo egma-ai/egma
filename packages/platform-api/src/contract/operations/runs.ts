@@ -530,10 +530,11 @@ export const runOperations = {
           properties: {
             events: arrayOf(runEventSchema),
             next: integerSchema,
+            observedThrough: integerSchema,
             caughtUp: booleanSchema,
             done: booleanSchema,
           },
-          required: ["events", "next", "caughtUp", "done"],
+          required: ["events", "next", "observedThrough", "caughtUp", "done"],
           additionalProperties: false,
         },
       },

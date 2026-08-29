@@ -16562,6 +16562,9 @@
                     "next": {
                       "type": "integer"
                     },
+                    "observedThrough": {
+                      "type": "integer"
+                    },
                     "caughtUp": {
                       "type": "boolean"
                     },
@@ -16572,6 +16575,7 @@
                   "required": [
                     "events",
                     "next",
+                    "observedThrough",
                     "caughtUp",
                     "done"
                   ],

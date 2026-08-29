@@ -4527,6 +4527,7 @@ export type ListRunEventsResponses = {
             executionFailure: string | null;
         }>;
         next: number;
+        observedThrough: number;
         caughtUp: boolean;
         done: boolean;
     };

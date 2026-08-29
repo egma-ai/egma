@@ -3085,6 +3085,8 @@ export type RunEventPage = {
   readonly events: readonly RunEvent[];
   /** Hand back as `after` to continue; the same number again on an empty page. */
   readonly next: number;
+  /** Last event present when this page began reading; zero when there were none. */
+  readonly observedThrough: number;
   /** True when this page reached the end of the event tail that existed when it was read. */
   readonly caughtUp: boolean;
   /** True once the run has finished, and only then. */
@@ -3129,6 +3131,25 @@ export async function listRunEvents(
 
   const header = await getRun(auth, runId);
   if (header === undefined) return undefined;
+
+  /*
+   * Capture the history boundary before reading the page. A follower can use
+   * the first value it sees to keep old failures quiet while still noticing a
+   * failure appended during a long, multi-page catch-up. Reading this first is
+   * load-bearing: a later event either appears in the page with a larger
+   * sequence number or waits for the next page, and is new in both cases.
+   */
+  const [observed] = await db()
+    .select({ seq: max(runEvent.seq) })
+    .from(runEvent)
+    .where(
+      within(
+        auth,
+        runEvent,
+        and(eq(runEvent.runId, runId), inActingProject(auth, runEvent)),
+      ),
+    );
+  const observedThrough = observed?.seq ?? 0;
 
   const rows = await db()
     .select({
@@ -3179,6 +3200,7 @@ export async function listRunEvents(
   return {
     events,
     next: events.at(-1)?.seq ?? after,
+    observedThrough,
     caughtUp: !hasLater,
     done: header.finishedAt !== null && !hasLater,
   };

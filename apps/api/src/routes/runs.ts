@@ -789,6 +789,7 @@ export async function runRoutes(
       return reply.send({
         events: found.events.map(describedEvent),
         next: found.next,
+        observedThrough: found.observedThrough,
         caughtUp: found.caughtUp,
         done: found.done && gradingDone,
       });
