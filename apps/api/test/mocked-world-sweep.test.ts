@@ -36,7 +36,14 @@ const RETELL_AGENT = "agent_b0e2e9cb267c47e7e7026cd8e8";
 const KEY = "retell-secret-A1B2C3D4WXYZ";
 const PINNED_NUMBER = "+15550100";
 
-/** A Retell that only ever has to answer the delete a teardown might send. */
+/**
+ * A Retell that only ever has to answer the delete a teardown might send, and
+ * the read that proves it.
+ *
+ * The listing is what says the deleted version is gone. A teardown records the
+ * account as put back only when that read agrees, so this account answers with
+ * the published version and nothing else — no temporary version stands on it.
+ */
 const RETELL: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input);
   const method = init?.method ?? "GET";
@@ -47,6 +54,12 @@ const RETELL: typeof fetch = (async (input: string | URL | Request, init?: Reque
       items: [
         { agent_id: RETELL_AGENT, agent_name: "After hours", channel: "voice" },
       ],
+      has_more: false,
+    });
+  }
+  if (url.includes("/list-agent-versions/")) {
+    return json({
+      items: [{ version: 105, is_published: true }],
       has_more: false,
     });
   }

@@ -73,6 +73,14 @@ type Account = {
   /** Read afterwards, so a test can say what the account looks like now. */
   readonly state: {
     versions: Set<number>;
+    /**
+     * Which of those versions Retell has published.
+     *
+     * Kept apart from `versions` because it is what the serving read now turns
+     * on: `latest_published` resolves out of this set, and an account with
+     * nothing in it is an agent a run is refused for.
+     */
+    published: Set<number>;
     engines: Map<number, Record<string, unknown>>;
     bindings: Map<string, readonly Record<string, unknown>[]>;
     /** Flipped by a test to make every delete fail — a teardown that cannot
@@ -101,12 +109,19 @@ type Account = {
   };
 };
 
-function anAccount(options: { branching?: "fork" | "share" } = {}): {
+function anAccount(
+  options: {
+    branching?: "fork" | "share";
+    /** Whether the agent's one version is published. It is, unless said not. */
+    published?: boolean;
+  } = {},
+): {
   readonly fetchImpl: typeof fetch;
   readonly state: Account["state"];
 } {
   const state: Account["state"] = {
     versions: new Set([105]),
+    published: new Set((options.published ?? true) ? [105] : []),
     engines: new Map([[105, { conversation_flow_id: FLOW, version: 105, tools: structuredClone(FLOW_TOOLS) }]]),
     bindings: new Map([
       ["+12567332874", [{ agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 }]],
@@ -169,15 +184,33 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       state.bindings.set(number, inbound);
       return json({ phone_number: number });
     }
+    if (path.startsWith("/list-agent-versions/")) {
+      // Retell's current listing, which is what a teardown proves a deletion
+      // with. The legacy `/get-agent-versions` retires 2026-09-15 and this
+      // account deliberately has no route for it.
+      return json({
+        items: [...state.versions].map((version) => ({
+          version,
+          is_published: state.published.has(version),
+        })),
+        has_more: false,
+      });
+    }
     if (path.startsWith("/get-agent/")) {
       const asked = new URL(url).searchParams.get("version") ?? "latest";
+      const standing = [...state.versions];
+      const published = standing.filter((one) => state.published.has(one));
       const version =
-        asked === "latest" ? Math.max(...state.versions) : Number(asked);
+        asked === "latest"
+          ? Math.max(...standing)
+          : asked === "latest_published"
+            ? (published.length === 0 ? Number.NaN : Math.max(...published))
+            : Number(asked);
       if (!state.versions.has(version)) return json({ error: "gone" }, 404);
       return json({
         agent_id: RETELL_AGENT,
         version,
-        is_published: version === 105,
+        is_published: state.published.has(version),
         response_engine: {
           type: "conversation-flow",
           conversation_flow_id: FLOW,
@@ -230,9 +263,15 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
         await holding;
       }
       if (state.refuseDeletes) return json({ error: "not today" }, 500);
-      const asked = Number(path.split("/").at(-1));
+      // The version rides in the query string. Retell's router has no
+      // path-segment route for it and answers that shape 404 "Cannot DELETE",
+      // which Egma once read as "already deleted".
+      const named = new URL(url).searchParams.get("version");
+      if (named === null) return json({ error: "Cannot DELETE" }, 404);
+      const asked = Number(named);
       if (!state.versions.has(asked)) return json({ error: "gone" }, 404);
       state.versions.delete(asked);
+      state.published.delete(asked);
       state.engines.delete(asked);
       return json({ deleted: true });
     }
@@ -254,7 +293,7 @@ type Ready = {
 /** A ticked Retell agent with one test, ready for a run. */
 async function aTickedAgent(
   label: string,
-  options: { branching?: "fork" | "share" } = {},
+  options: { branching?: "fork" | "share"; published?: boolean } = {},
 ): Promise<Ready> {
   const account = anAccount(options);
   api = await createApi(label, {
@@ -557,6 +596,59 @@ describe("a web-call run whose connection has the switch off", () => {
     // that rides `latest` was never repointed.
     expect([...ready.state.versions]).toEqual([105]);
     expect(ready.state.writes).toEqual([]);
+  });
+});
+
+describe("a run over a Retell lane against an agent that publishes nothing", () => {
+  it("is refused before any run row exists, and names both doors", async () => {
+    const ready = await aTickedAgent("web_call_never_published", {
+      published: false,
+    });
+
+    const refused = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+
+    // A settled fact about the agent, not a bad moment: 422, not 503.
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    const message = String(refused.body.message);
+    expect(message).toContain("no published version");
+    // Door one, and door two.
+    expect(message).toContain("publish the version");
+    expect(message).toContain("name a version for this run explicitly");
+    expect(JSON.stringify(refused.body)).not.toContain(KEY);
+
+    // Nothing was started, and that is a fact about the record rather than a
+    // sentence: no run row, so no simulation can ever be conducted against a
+    // version nobody chose.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
+
+    // And nothing was written to Retell: no branch, no pin.
+    expect([...ready.state.versions]).toEqual([105]);
+    expect(ready.state.writes).toEqual([]);
+  });
+
+  it("conducts the run once that version is published", async () => {
+    const ready = await aTickedAgent("web_call_published_after", {
+      published: false,
+    });
+    // The developer takes door one.
+    ready.state.published.add(105);
+
+    const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    expect(started.body.agentVersion).toBe(105);
   });
 });
 

@@ -1,6 +1,7 @@
 import {
+  LATEST_PUBLISHED,
   readEngineConfiguration,
-  resolveAgentVersion,
+  resolveServingAgentVersion,
   type AgentVersion,
   type Fetch as ProviderFetch,
   type RetellCredential,
@@ -12,11 +13,18 @@ import {
  * **Both Retell lanes that reach a live agent read the same one fact first:
  * which version is serving.** Resolved once, here, and named explicitly on
  * every request from then on. Retell's own default is "the newest version", and
- * the newest version is exactly the one a concurrent edit has just made — so a
- * suite that leaned on the default could be testing two different agents
- * halfway through. Resolving `latest` once and pinning the number it answers is
- * the whole fix, and the number is what the run's record carries so a reader
- * months later knows which agent the result speaks for.
+ * the newest version is exactly the one a concurrent edit — or another run's
+ * draft — has just made, so a suite that leaned on the default could be testing
+ * two different agents halfway through. Resolving the **published** pointer once
+ * and pinning the number it answers is the whole fix, and the number is what the
+ * run's record carries so a reader months later knows which agent the result
+ * speaks for. See `WHAT_IS_SERVING` below for why it is that pointer and not
+ * the newest one.
+ *
+ * **An agent that has published nothing is refused here**, before a run row
+ * exists, with a sentence naming both doors: publish the version to be tested,
+ * or name a version for the run. There is no third answer, because the third
+ * answer is a run conducted against a draft nobody chose.
  *
  * **The text-mode lane reads one thing more, and refuses on it.** A custom LLM
  * has no configuration on Retell at all: the brain and the tools live on the
@@ -83,11 +91,27 @@ function credential(value: string): RetellCredential {
 /**
  * What Egma asks Retell for when it asks "which version is serving".
  *
- * `latest` is Retell's own word for it, and asking for it **once** is the
- * opposite of leaning on it: what comes back is a number, and the number is
- * what every later request names.
+ * `latest_published` — the newest version the customer has **published** — and
+ * deliberately not `latest`, which is Retell's word for the newest version
+ * *created*, drafts included. The difference is one word in a query string and
+ * it decided which agent a whole production run graded: a mocked run mints a
+ * draft, a teardown that deleted nothing left it standing, and the next run's
+ * `latest` was that leftover. Asking for the published pointer cannot select a
+ * draft even when one exists, because nothing in Egma publishes anything.
+ *
+ * Asking for it **once** is the opposite of leaning on it: what comes back is a
+ * number, and the number is what every later request of the run names — so a
+ * concurrent edit, or another run's draft, cannot change what a run tests
+ * halfway through. The number is also what the run's record carries.
+ *
+ * **One divergence is known and owned.** A customer whose traffic is pinned to
+ * an older published version, or routed through an environment tag, reaches a
+ * version this does not. The door for them is the one that already exists:
+ * everywhere Egma takes a version it takes Retell's own version reference, so a
+ * run may name the tag or the bound number, and Egma resolves it once and pins
+ * what comes back.
  */
-const WHAT_IS_SERVING = "latest";
+const WHAT_IS_SERVING = LATEST_PUBLISHED;
 
 /** Retell would not answer, said the same way whichever read met it. */
 function unavailable(what: string): {
@@ -128,12 +152,19 @@ async function readServingVersion(
   | { readonly kind: "serving"; readonly agentVersion: AgentVersion }
   | Exclude<PlatformWorldRead, { readonly kind: "world" }>
 > {
-  const resolved = await resolveAgentVersion(
+  const resolved = await resolveServingAgentVersion(
     lane.key,
     lane.agentId,
     WHAT_IS_SERVING,
     lane.reach,
   );
+  // The agent is there and has published nothing. A settled fact about the
+  // agent, so it is a refusal rather than a "try again", and the sentence is
+  // the package's one sentence for it — the mocked world's serving read says
+  // the same words, so a developer meets one refusal and not three.
+  if (resolved.kind === "none-published") {
+    return { kind: "refused", message: resolved.reason };
+  }
   if (resolved.kind === "invalid-key") {
     return {
       kind: "refused",
