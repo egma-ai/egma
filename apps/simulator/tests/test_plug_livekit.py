@@ -28,6 +28,9 @@ import inspect
 import json
 import logging
 import socket
+import sys
+from array import array
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -59,7 +62,13 @@ from egma_simulator.media.livekit_room import (
     LiveKitRoomBackend,
     RoomSettings,
 )
-from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX, JoinedRoom
+from egma_simulator.media.room import (
+    MIX_CHANNELS,
+    MIX_SAMPLE_RATE,
+    PERSONA_IDENTITY,
+    ROOM_PREFIX,
+    JoinedRoom,
+)
 from egma_simulator.media.scripted_transport import FRAME_SECONDS
 from egma_simulator.mock_tools import PROTOCOL_VERSION, MockToolSeam
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -152,21 +161,44 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
             disconnected = self.handlers["on_disconnected"]
             await disconnected(self)
 
+    class EventCallbacks:
+        """What Pipecat tells the transport about the room's tracks."""
+
+        async def on_audio_track_subscribed(self, _participant_id: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
+        async def on_audio_track_unsubscribed(self, _participant_id: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
     class EventClient:
+        """Every part of the pinned client the drain takes over, and no
+        more — each one refusing, so a wrapper that failed to install
+        shows up here rather than in a live room."""
+
         def __init__(self) -> None:
             self._audio_queue: asyncio.Queue[object] = asyncio.Queue()
             self._audio_streams: dict[str, object] = {}
+            self._audio_tracks: dict[str, object] = {}
+            self._callbacks = EventCallbacks()
 
         async def get_next_audio_frame(self):
             raise AssertionError("the pinned drain wrapper was not installed")
             yield
 
-        async def _process_audio_stream(
-            self, _stream: object, _participant_id: str
+        async def _process_audio_stream(self, _stream: object, _key: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
+        async def _close_audio_stream(self, _key: str) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
+
+        async def _async_on_track_subscribed(
+            self, _track: object, _publication: object, _participant: object
         ) -> None:
             raise AssertionError("the pinned drain wrapper was not installed")
 
-        async def _close_audio_stream(self, _participant_id: str) -> None:
+        async def _async_on_track_unsubscribed(
+            self, _track: object, _publication: object, _participant: object
+        ) -> None:
             raise AssertionError("the pinned drain wrapper was not installed")
 
     class EventInput:
@@ -402,6 +434,289 @@ async def test_pipecat_17_unsubscribe_drains_before_participant_departure():
     receiving.cancel()
     with pytest.raises(asyncio.CancelledError):
         await receiving
+
+
+# -- Every track in the room, and one stream out of them --------------------
+#
+# The agent under test may publish more than one audio track — a voice and
+# an ambient background, which is what a caller's ear really gets. Pipecat
+# 1.7.0 keys incoming audio by *participant*, so the second track closed the
+# first and the persona spent whole calls listening to background noise.
+# Egma keys by track and mixes, which is what the four below hold.
+
+
+class ScriptedTrack:
+    """One audio track a participant published, with no LiveKit under it."""
+
+    def __init__(self, sid: str) -> None:
+        from livekit import rtc
+
+        self.sid = sid
+        self.kind = rtc.TrackKind.KIND_AUDIO
+
+
+class ScriptedPublisher:
+    """Whoever published it. One participant publishes all of them here,
+    because one participant publishing two tracks is the whole defect."""
+
+    def __init__(self, sid: str) -> None:
+        self.sid = sid
+        self.identity = sid
+
+
+class DisposalCount:
+    """What a native stream's handle counts, so a test can say a track was
+    left alone rather than closed."""
+
+    def __init__(self) -> None:
+        self.disposals = 0
+
+    def dispose(self) -> None:
+        self.disposals += 1
+
+
+def scripted_audio_stream() -> Any:
+    """A LiveKit audio stream with a queue and nothing native behind it.
+
+    The same stand-in the drain tests above build, and the only thing
+    stood in for: what reads it, keys it, mixes it and hands it on is
+    egma's own code against the installed Pipecat.
+    """
+    from livekit import rtc
+    from livekit.rtc._utils import RingQueue
+
+    class Kept(rtc.AudioStream):
+        def __del__(self) -> None:
+            pass
+
+    stream = object.__new__(Kept)
+    stream._queue = RingQueue(0)
+    stream._track = None
+    stream._ffi_handle = DisposalCount()
+    stream._processor = None
+    finished = asyncio.get_running_loop().create_future()
+    finished.set_result(None)
+    stream._task = finished
+    return stream
+
+
+def a_tone(value: int, *, samples: int = 160) -> Any:
+    """One frame of flat tone, at the rate every room track arrives at.
+
+    Flat on purpose: two flat tones added together are a third flat tone a
+    reader can check by eye, so what the mix produced is read against
+    arithmetic rather than against the mixer's own working.
+    """
+    from livekit import rtc
+
+    pcm = array("h", [value] * samples)
+    if sys.byteorder != "little":
+        pcm.byteswap()
+    return rtc.AudioFrameEvent(
+        rtc.AudioFrame(
+            data=pcm.tobytes(),
+            sample_rate=MIX_SAMPLE_RATE,
+            num_channels=MIX_CHANNELS,
+            samples_per_channel=samples,
+        )
+    )
+
+
+def heard(event: Any) -> list[int]:
+    """One frame's samples, whatever byte order this machine reads in."""
+    pcm = array("h")
+    pcm.frombytes(event.frame.data.tobytes())
+    if sys.byteorder != "little":
+        pcm.byteswap()
+    return pcm.tolist()
+
+
+SETTLING_TURNS = 200
+"""How many event-loop turns a test gives the room's reader tasks.
+
+Turns and not seconds: nothing below waits on time, so a count of turns is
+a deadline that cannot be flaky on a loaded machine and cannot be slow on
+a fast one. A reader needs about two turns per frame.
+"""
+
+
+async def settled(ready: Callable[[], bool], *, why: str) -> None:
+    """Let the room's readers run until something is true of them."""
+    for _ in range(SETTLING_TURNS):
+        if ready():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(why)
+
+
+async def taken_from(stream: Any) -> None:
+    """Wait until the room has read everything put on one track.
+
+    The queue read is of the stub stream's own deque, which this file
+    filled — never of anything the room owns.
+    """
+    await settled(
+        lambda: not stream._queue._queue, why="the room never read the track"
+    )
+    # And past the reader's own turn, so a frame that only buffers has
+    # reached the mix before the next one is put on the clocking track.
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+async def reached_the_persona(client: Any) -> tuple[Any, str]:
+    """The next frame the room hands Pipecat's unchanged input path."""
+    await settled(
+        lambda: not client._audio_queue.empty(),
+        why="no frame reached the persona",
+    )
+    carried, who = client._audio_queue.get_nowait()
+    client._audio_queue.task_done()
+    return carried, who
+
+
+class RoomWithNobodyElse:
+    """The rtc room Pipecat reads back inside its own subscribe callback.
+
+    Pipecat 1.7.0 answers a subscribed audio track by looking the
+    participant up and re-subscribing every audio publication it finds —
+    against ``participant.audio_tracks``, which LiveKit 1.1.14 does not
+    have. An empty room is what stops that callback before it reaches the
+    attribute, so these tests exercise egma's handler rather than a
+    traceback out of the pinned package.
+    """
+
+    remote_participants: dict[str, object] = {}
+
+
+def a_joined_room() -> tuple[JoinedRoom, Any]:
+    """One room, and the pinned LiveKit client its transport stands on."""
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    client = media.input[0]._client
+    client._room = RoomWithNobodyElse()
+    return room, client
+
+
+async def test_one_audio_track_reaches_the_persona_exactly_as_it_arrived(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The pass-through, and what keeps the working lanes working.
+
+    A phone call and an ordinary LiveKit agent publish one track. Nothing
+    is mixed, resampled, copied or re-framed for them: the very frame
+    LiveKit delivered is the frame the persona's pipeline gets, under the
+    participant it came from.
+    """
+    from livekit import rtc
+
+    _room, client = a_joined_room()
+    only = ScriptedTrack("TR_0001")
+    stream = scripted_audio_stream()
+    monkeypatch.setattr(rtc, "AudioStream", lambda _track, **_rest: stream)
+    speaker = ScriptedPublisher("PA_agent")
+
+    await client._async_on_track_subscribed(only, only, speaker)
+    said = a_tone(100)
+    stream._queue.put(said)
+    stream._queue.put(None)
+    _stream, reader = client._audio_streams[next(iter(client._audio_streams))]
+    await asyncio.wait_for(reader, timeout=2.0)
+
+    carried, who = await reached_the_persona(client)
+    assert carried is said, "one track is carried, not rebuilt"
+    assert who == speaker.sid
+    assert client._audio_queue.empty()
+
+
+async def test_two_audio_tracks_from_one_participant_are_one_mixed_stream(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The defect itself: an agent publishing its voice and an ambience.
+
+    Pipecat 1.7.0 keyed both by the participant, so subscribing the second
+    closed the first and the persona heard whichever arrived last. Egma
+    keys by track, so both are read, and what reaches the persona is the
+    two added together — one stream, at one rate, under the one
+    participant that published them.
+
+    Which track is which is deliberately not decided here. Egma does not
+    distinguish them, because the caller's own ear does not either, and
+    nothing Retell publishes says which is the voice.
+    """
+    from livekit import rtc
+
+    _room, client = a_joined_room()
+    speaker = ScriptedPublisher("PA_agent")
+    one = ScriptedTrack("TR_0001")
+    other = ScriptedTrack("TR_0002")
+    streams = {one.sid: scripted_audio_stream(), other.sid: scripted_audio_stream()}
+    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+
+    await client._async_on_track_subscribed(one, one, speaker)
+    await client._async_on_track_subscribed(other, other, speaker)
+
+    # Two tracks are being read, not one replaced by the other.
+    assert len(client._audio_streams) == 2
+    assert streams[one.sid]._ffi_handle.disposals == 0
+    assert streams[other.sid]._ffi_handle.disposals == 0
+
+    streams[other.sid]._queue.put(a_tone(7))
+    await taken_from(streams[other.sid])
+    streams[one.sid]._queue.put(a_tone(100))
+    await taken_from(streams[one.sid])
+
+    carried, who = await reached_the_persona(client)
+    assert heard(carried) == [107] * 160, "both tracks, added"
+    assert carried.frame.sample_rate == MIX_SAMPLE_RATE
+    assert carried.frame.num_channels == MIX_CHANNELS
+    assert who == speaker.sid
+    # One stream out of two tracks: nothing was carried twice, which would
+    # be two frames of media time for one frame of conversation.
+    assert client._audio_queue.empty()
+
+
+async def test_a_track_that_arrives_mid_call_joins_the_mix(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A second track published after the exchange is under way.
+
+    It joins what the persona hears rather than taking the place of what
+    was already being heard — the track already carrying audio is never
+    closed, and the frame after the newcomer arrives holds both.
+    """
+    from livekit import rtc
+
+    _room, client = a_joined_room()
+    speaker = ScriptedPublisher("PA_agent")
+    speaking = ScriptedTrack("TR_0001")
+    later = ScriptedTrack("TR_0002")
+    streams = {
+        speaking.sid: scripted_audio_stream(),
+        later.sid: scripted_audio_stream(),
+    }
+    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+
+    await client._async_on_track_subscribed(speaking, speaking, speaker)
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [100] * 160
+
+    # The newcomer, mid-call.
+    await client._async_on_track_subscribed(later, later, speaker)
+    assert streams[speaking.sid]._ffi_handle.disposals == 0, "never replaced"
+    assert len(client._audio_streams) == 2
+
+    streams[later.sid]._queue.put(a_tone(7))
+    await taken_from(streams[later.sid])
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+
+    carried, who = await reached_the_persona(client)
+    assert heard(carried) == [107] * 160
+    assert who == speaker.sid
+    assert client._audio_queue.empty()
 
 
 async def test_a_swallowed_reader_error_cannot_become_normal_departure():
