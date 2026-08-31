@@ -18,22 +18,19 @@ This solves a real problem: a simulation that reaches your real tools has real s
 ## Install
 
 ```bash
-pip install 'egma>=0.2.0'
+pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
 ```
 
 Or with uv:
 
 ```bash
-uv add 'egma>=0.2.0'
+uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
 ```
 
 Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
-The floor is `0.2.0` because that is the first release in which both functions
-read the room's name. A LiveKit connection puts your worker in an Egma room along
-three dispatch paths; releases below the floor looked in dispatch metadata, where
-Egma no longer writes anything, so `0.2.0` is what makes mock tools and the
-monitoring guard work at all.
+Do not add an SDK version, tag, or commit. Let the repository's package manager
+resolve and lock the latest compatible SDK.
 
 <Note>
   The `livekit-agents` version is pinned to one minor version intentionally. Mock tools use LiveKit's testing API. Monitoring must also read LiveKit's current tracer provider because its public telemetry API has a setter but no getter. The fixture and live tests verify both seams before the supported range changes. See [Version pinning](#version-pinning) below.
@@ -41,10 +38,9 @@ monitoring guard work at all.
 
 ## Monitor production LiveKit agents
 
-Open **Agents → Connect an agent** and copy the **Monitoring** or **Both**
-prompt into the coding agent that is working in your repository. The prompt
-includes this Egma platform address. The coding agent installs the latest SDK,
-updates the worker, configures its deployment, and checks the result.
+Open **Agents → Connect an agent**, choose **Monitoring** or **Both**, and then
+choose **LiveKit**. The guided flow shows the Python SDK, hook, and environment
+values that the worker needs.
 
 The manual path is below. A LiveKit agent pushes its own spans, so there is
 nothing to switch on in the web application.
@@ -68,7 +64,7 @@ lk agent update-secrets --secrets-file=.env.monitoring
 
 For a new LiveKit Cloud deployment, use `lk agent create --secrets-file=.env.monitoring`. LiveKit Cloud encrypts these secrets, injects them as environment variables, and restarts the agent after an update. See [LiveKit's secrets guide](https://docs.livekit.io/deploy/agents/secrets/).
 
-Call `monitor_livekit` before `AgentSession.start`:
+Call `monitor_livekit` as the first statement of the job entrypoint, before `ctx.connect` and `AgentSession.start`:
 
 ```python
 from egma import monitor_livekit

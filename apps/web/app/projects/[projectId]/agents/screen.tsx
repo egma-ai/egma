@@ -39,7 +39,11 @@ import {
   monitoringCapabilityOf,
   simulationCapabilityOf,
 } from "./agent-details-sheet.tsx";
-import { ConnectAgentSheet } from "./connect-sheet.tsx";
+import {
+  ConnectAgentSheet,
+  type ConnectAgentGoal,
+  type ConnectAgentPlatform,
+} from "./connect-sheet.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
 import { MockToolsSheet } from "./mock-tools-sheet.tsx";
 import { RenameAgentSheet } from "./rename-sheet.tsx";
@@ -82,7 +86,12 @@ import { RenameAgentSheet } from "./rename-sheet.tsx";
 
 /** The panel a route insists on, whatever the query string says. */
 export type ForcedSheet =
-  | { readonly kind: "connect" }
+  | {
+      readonly kind: "connect";
+      readonly agentId?: string;
+      readonly goal?: ConnectAgentGoal;
+      readonly platform?: ConnectAgentPlatform;
+    }
   | { readonly kind: "agent"; readonly agentId: string }
   | { readonly kind: "connection"; readonly agentId: string; readonly connectionId: string };
 
@@ -607,9 +616,27 @@ export function AgentsScreen({
 
       {sheet?.kind === "connect" ? (
         <ConnectAgentSheet
+          projectId={projectId}
+          agents={items}
+          {...(sheet.agentId === undefined ? {} : { agentId: sheet.agentId })}
+          {...(sheet.goal === undefined ? {} : { goal: sheet.goal })}
+          {...(sheet.platform === undefined ? {} : { platform: sheet.platform })}
           mayAuthor={mayAuthor}
           role={role}
           onClose={close}
+          onConnected={() => {
+            /*
+             * **A save closes onto the list, and nothing navigates.**
+             *
+             * There is no agent page to land on any more: the row is the agent,
+             * and the row this save just wrote is right there behind the panel.
+             * `replace` rather than `push`, because the address behind is the
+             * panel that was just finished with — Back should be the list it
+             * was opened from, not the form opening again.
+             */
+            router.replace(home);
+            refresh();
+          }}
         />
       ) : null}
 
@@ -762,7 +789,14 @@ function openSheet(
   const agentId = query.get("agent");
   const connectionId = query.get("connection");
   if (kind === "connect") {
-    return { kind: "connect" };
+    const goal = connectGoal(query.get("goal"));
+    const platform = connectPlatform(query.get("platform"));
+    return {
+      kind: "connect",
+      ...(agentId === null ? {} : { agentId }),
+      ...(goal === undefined ? {} : { goal }),
+      ...(platform === undefined ? {} : { platform }),
+    };
   }
   if (kind === "agent" && agentId !== null) {
     return { kind: "agent", agentId };
@@ -771,4 +805,16 @@ function openSheet(
     return { kind: "connection", agentId, connectionId };
   }
   return null;
+}
+
+/** Only providers implemented by this setup flow can become sheet state. */
+function connectPlatform(value: string | null): ConnectAgentPlatform | undefined {
+  return value === "retell" || value === "livekit" ? value : undefined;
+}
+
+/** Only the three public setup goals can become sheet state. */
+function connectGoal(value: string | null): ConnectAgentGoal | undefined {
+  return value === "simulation" || value === "monitoring" || value === "both"
+    ? value
+    : undefined;
 }

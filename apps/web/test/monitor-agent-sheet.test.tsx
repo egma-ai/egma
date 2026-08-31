@@ -86,7 +86,8 @@ function stub(): { readonly seen: Seen[] } {
 }
 
 const TRANSCRIPTS = "/projects/prj_2/monitoring/transcripts";
-const MONITORING_SETUP = "/projects/prj_2/agents?sheet=connect";
+const MONITORING_SETUP =
+  "/projects/prj_2/agents?sheet=connect&goal=monitoring";
 
 function at(address: string): void {
   globalThis.history.replaceState({}, "", address);
@@ -102,7 +103,7 @@ afterEach(() => {
 });
 
 describe("the Monitoring entry", () => {
-  it("opens the shared coding-agent handoff", async () => {
+  it("opens Connect agent with Monitoring selected", async () => {
     const { seen } = stub();
     render(<MonitoringTranscriptsPage />);
 
@@ -138,14 +139,14 @@ describe("the Monitoring entry", () => {
     ).toBeNull();
   });
 
-  it("forwards a copied legacy sheet query without restoring wizard state", async () => {
+  it("forwards a copied legacy sheet query and carries its agent", async () => {
     at(`${TRANSCRIPTS}?sheet=monitor&agent=agt_2`);
     stub();
     render(<MonitoringTranscriptsPage />);
 
     await waitFor(() => {
       expect(routed.replace).toHaveBeenCalledWith(
-        MONITORING_SETUP,
+        "/projects/prj_2/agents?sheet=connect&agent=agt_2&goal=monitoring",
       );
     });
     expect(screen.queryByRole("dialog", { name: "Monitor an agent" })).toBeNull();
@@ -156,8 +157,20 @@ describe("the retired Start-monitoring address", () => {
   it("forwards to the same shared flow", async () => {
     await StartMonitoringAlias({
       params: Promise.resolve({ projectId: "prj_2" }),
+      searchParams: Promise.resolve({}),
     });
 
     expect(routed.redirect).toHaveBeenCalledWith(MONITORING_SETUP);
+  });
+
+  it("carries an agent named by an old link", async () => {
+    await StartMonitoringAlias({
+      params: Promise.resolve({ projectId: "prj_2" }),
+      searchParams: Promise.resolve({ agent: "agt_2" }),
+    });
+
+    expect(routed.redirect).toHaveBeenCalledWith(
+      "/projects/prj_2/agents?sheet=connect&agent=agt_2&goal=monitoring",
+    );
   });
 });

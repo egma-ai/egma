@@ -22,15 +22,15 @@ grader selects simulations only, so it does not grade production traffic.
 Production evidence reaches Egma in one of two ways, and which one depends on
 the agent platform.
 
-- **Retell is pulled.** Open **Agents → Connect an agent** and copy the
-  **Monitoring** or **Both** prompt into the coding agent that is working in
-  your repository. It uses the current CLI to select the exact Retell agent,
-  stores the key on that agent, and enables **pull production calls**. Egma
-  imports the previous 30 days and then polls about every 30 seconds. The
-  switch lives on the agent, so each agent is started and stopped on its own.
-  See [Retell](/integrations/retell).
+- **Retell is pulled.** Open **Agents → Connect an agent**, choose
+  **Monitoring** or **Both**, and then choose **Retell**. Enter one Retell
+  platform API key and select the exact Retell agent. Egma stores the key on
+  that agent, enables **pull production calls**, imports the previous 30 days,
+  and then polls about every 30 seconds. The switch lives on the agent, so each
+  agent is started and stopped on its own. See [Retell](/integrations/retell).
 - **LiveKit is pushed.** Install the Egma SDK for the worker's language. Call
-  `monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+  `monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript as the
+  first statement of the job entrypoint, before `ctx.connect` and
   `AgentSession.start`. The worker sends OTLP to `POST /v1/traces`. There is
   nothing to switch on: the conversations appear as soon as the worker sends
   them.
@@ -75,13 +75,12 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
 Install the Python SDK:
 
 ```bash
-pip install 'egma>=0.2.0'
+pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
 ```
 
 The helper reads the job's room name and keeps a simulation's spans out of
 Monitoring, so a test does not arrive here a second time as a production
-conversation. The `0.2.0` floor is what makes that hold on every LiveKit
-dispatch path. See [the Python SDK](/integrations/python-sdk#how-the-sdk-knows-it-is-in-a-simulation).
+conversation. See [the Python SDK](/integrations/python-sdk#how-the-sdk-knows-it-is-in-a-simulation).
 
 Set the Egma API origin and an existing project API key:
 

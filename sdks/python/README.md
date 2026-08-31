@@ -14,23 +14,20 @@ Calling one function never enables or changes the other.
 ## Install
 
 ```bash
-pip install 'egma>=0.2.0'
+pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
 ```
 
-`0.2.0` is the floor because it is the first release that knows a
-simulation by the room's name, and so the first that holds on every one of
-the three dispatch paths. An unpinned install can resolve to a release
-that looks in the dispatch metadata instead, where Egma no longer writes
-anything — inert inside a real simulation on all three.
+This source request has no version, tag, or commit. Let the repository's
+package manager resolve and lock the latest compatible SDK.
 
 For a LiveKit agent on Python 3.11 or newer.
 
 ## Production monitoring
 
-Open **Agents → Connect an agent** and copy the **Monitoring** or **Both**
-prompt into the coding agent that is working in your repository. It installs
-the latest SDK and completes these worker, key, and deployment steps. A LiveKit
-agent pushes its own spans, so there is nothing to switch on in Egma.
+Open **Agents → Connect an agent**, choose **Monitoring** or **Both**, and then
+choose **LiveKit**. The guided flow shows these worker, key, and deployment
+steps. A LiveKit agent pushes its own spans, so there is nothing to switch on
+in Egma.
 
 Set the Egma API origin and an existing project API key in the agent's
 environment:
@@ -56,7 +53,8 @@ lk agent update-secrets --secrets-file=.env.monitoring
 Use the same file with `lk agent create --secrets-file=.env.monitoring` for a
 new deployment. LiveKit Cloud restarts the agent after a secret update.
 
-Call `monitor_livekit` before `AgentSession.start`:
+Call `monitor_livekit` as the first statement of the job entrypoint, before
+`ctx.connect` and `AgentSession.start`:
 
 ```python
 from egma import monitor_livekit
