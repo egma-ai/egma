@@ -1992,7 +1992,9 @@ describe("the saved theme", () => {
       await expect
         .poll(() => page.locator("html").getAttribute("data-theme"))
         .toBe("light");
-      const account = page.locator('aside button[aria-label^="Account"]');
+      const accountSelector = 'aside button[aria-label^="Account"]';
+      await reactHasTakenOver(page, accountSelector);
+      const account = page.locator(accountSelector);
       await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
@@ -2012,7 +2014,8 @@ describe("the saved theme", () => {
       await expect
         .poll(() => page.locator("html").getAttribute("data-theme"))
         .toBe("dark");
-      await page.locator('aside button[aria-label^="Account"]').click();
+      await reactHasTakenOver(page, accountSelector);
+      await page.locator(accountSelector).click();
       await expect
         .poll(() => page.getByRole("switch", { name: "Dark theme" }).first().getAttribute("aria-checked"))
         .toBe("true");
