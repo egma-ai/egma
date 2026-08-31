@@ -230,6 +230,14 @@ const connectionInput = {
         "unless the request says otherwise; the first switch-on imports the " +
         "fixed 30-day history.",
     },
+    mockToolsEnabled: {
+      type: "boolean",
+      description:
+        "Whether runs over this connection answer the agent's tools with " +
+        "your test data. Sent by the setup flow so mocking is always an " +
+        "explicit yes; absent leaves the lane's own default. Never true for " +
+        "a phone_number connection, which reaches your real tools.",
+    },
     agentPlatformSelection,
   },
   required: ["agentPlatform", "connectionType", "accessVariant", "modality"],

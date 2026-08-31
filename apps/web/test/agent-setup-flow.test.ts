@@ -8,7 +8,8 @@ import {
   retellCandidateForLane,
   retellCandidateValue,
   retellCandidatesForPlan,
-  retellLanesInOrder,
+  retellLaneBranchesDraft,
+  retellLaneMocksTools,
   RETELL_LANES,
   RETELL_LANE_HELP,
   RETELL_LANE_LABELS,
@@ -203,16 +204,26 @@ describe("the goal-first agent setup plan", () => {
     expect(RETELL_LANE_HELP.phone).toContain("real tools");
   });
 
-  it("saves the picked lanes in reading order, whatever order they were ticked", () => {
-    // Two people ticking the same three boxes in different orders must write
-    // the same three connections in the same order.
-    expect(retellLanesInOrder(["phone", "text"])).toEqual(["text", "phone"]);
-    expect(retellLanesInOrder(["web-call", "text", "phone"])).toEqual([
-      "text",
-      "web-call",
-      "phone",
-    ]);
-    expect(retellLanesInOrder([])).toEqual([]);
+  it("says which lanes can answer tools with test data, and which branches a draft", () => {
+    // The phone lane dials the customer's own published number, so what
+    // answers is their real agent with their real tools: it is never asked the
+    // mock question rather than asked and refused.
+    expect(retellLaneMocksTools("text")).toBe(true);
+    expect(retellLaneMocksTools("web-call")).toBe(true);
+    expect(retellLaneMocksTools("phone")).toBe(false);
+
+    // Only the web call branches a version. A text run carries its mocked
+    // answers on each request, so nothing is written to the Retell account and
+    // there is no draft for a number or a tag to reach.
+    expect(retellLaneBranchesDraft("web-call")).toBe(true);
+    expect(retellLaneBranchesDraft("text")).toBe(false);
+    expect(retellLaneBranchesDraft("phone")).toBe(false);
+  });
+
+  it("says mocking is supported on the two lanes that support it", () => {
+    expect(RETELL_LANE_HELP.text).toContain("Supports mocking of tools");
+    expect(RETELL_LANE_HELP["web-call"]).toContain("Supports mocking of tools");
+    expect(RETELL_LANE_HELP.phone).not.toContain("mocking");
   });
 
   it("maps every lane to the one candidate that saves it", () => {
@@ -249,14 +260,19 @@ describe("the goal-first agent setup plan", () => {
   });
 
   it("asks for a phone number only when the phone lane is picked", () => {
-    // A developer who picked only Text is never asked for a phone number.
-    expect(stepAfterRetellLanes(["text"])).toBeNull();
-    expect(stepAfterRetellLanes(["web-call"])).toBeNull();
-    expect(stepAfterRetellLanes(["text", "web-call"])).toBeNull();
-    expect(stepAfterRetellLanes(["phone"])).toBe("retell-phone");
-    expect(stepAfterRetellLanes(["text", "web-call", "phone"])).toBe(
-      "retell-phone",
-    );
+    // A developer who picked Text is never asked for a phone number nothing
+    // will dial; the two lanes that save here have nothing left to ask.
+    expect(stepAfterRetellLanes("text")).toBeNull();
+    expect(stepAfterRetellLanes("web-call")).toBeNull();
+    expect(stepAfterRetellLanes("phone")).toBe("retell-phone");
+  });
+
+  it("never lets Back cross the write the mock question is about", () => {
+    // The connection exists before that screen appears, and its tools are read
+    // against it.
+    expect(
+      previousAgentSetupStep({ step: "retell-mocks", goal: "simulation" }),
+    ).toBeNull();
   });
 
   it("defines the approved screen graph without putting screen order in provider payloads", () => {

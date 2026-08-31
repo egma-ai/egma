@@ -94,18 +94,6 @@ export function monitoringCapabilityOf(
   return "Not configured";
 }
 
-/** Whether this agent can have a mocked world at all, and whether it has one. */
-export function mockToolsCapabilityOf(
-  agent: ListedAgentWithConnections,
-): MockToolsCapability {
-  if (providerOf(agent) !== "retell") return "Not available";
-  // The switch is per connection now, so the agent's summary word is "any of
-  // its lanes has it on".
-  return agent.connections.some((connection) => connection.mockToolsEnabled)
-    ? "On"
-    : "Off";
-}
-
 function stateClass(
   state: SimulationCapability | MonitoringCapability | MockToolsCapability,
 ): string {
@@ -167,7 +155,6 @@ export function AgentDetailsSheet({
   stopping,
   stopRefused,
   onStopMonitoring,
-  onMockTools,
   onRename,
   onDelete,
   onClose,
@@ -182,7 +169,6 @@ export function AgentDetailsSheet({
   readonly stopRefused: Refusal | null;
   readonly onStopMonitoring: () => void;
   /** Open the panel that explains, discovers and ticks the mocked world. */
-  readonly onMockTools: () => void;
   readonly onRename: () => void;
   readonly onDelete: () => void;
   readonly onClose: () => void;
@@ -192,7 +178,6 @@ export function AgentDetailsSheet({
   const provider = providerOf(agent);
   const simulation = simulationCapabilityOf(agent);
   const monitoring = monitoringCapabilityOf(agent);
-  const mockTools = mockToolsCapabilityOf(agent);
   const setup = (goal: "simulation" | "monitoring") =>
     `${home}?sheet=connect&agent=${encodeURIComponent(agent.id)}&goal=${goal}&platform=${provider}`;
   const restoreFocus = useSheetReturnFocus(returnFocusTo);
@@ -233,8 +218,19 @@ export function AgentDetailsSheet({
               <h2 className="m-0 text-base font-medium" id="agent-connections-heading">
                 Connections
               </h2>
-              <Link className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground" href={setup("simulation")}>
-                Add connection
+              {/*
+                The accent, and the plus that says what it makes. `DESIGN.md`
+                names Ember for directional icons and quiet actions and keeps
+                the wash fill for the page's own primary; this sits inside a
+                section heading row, so it is the quiet text action.
+                (Developer decision, 2026-08-31.)
+              */}
+              <Link
+                className="flex-none text-sm text-brand pointer-hover:underline pointer-hover:underline-offset-4"
+                data-slot="agent-add-connection"
+                href={setup("simulation")}
+              >
+                + Add Connection
               </Link>
             </div>
             {agent.connections.length === 0 ? (
@@ -256,6 +252,26 @@ export function AgentDetailsSheet({
                         {modalityLabel(connection.modality)}
                       </span>
                     </span>
+                    {/*
+                      A read-only fact about the connection, not a control:
+                      what a run over it meets. `DESIGN.md` asks every state to
+                      carry a word, so it is the word and no colour of its own.
+                    */}
+                    {connection.connectionType === "phone_number" ? (
+                      <span
+                        className="flex-none text-sm text-faint"
+                        data-slot="connection-tools-badge"
+                      >
+                        real tools
+                      </span>
+                    ) : connection.mockToolsEnabled ? (
+                      <span
+                        className="flex-none text-sm text-faint"
+                        data-slot="connection-tools-badge"
+                      >
+                        mocks on
+                      </span>
+                    ) : null}
                     <Link
                       className="flex-none text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
                       href={`${home}?sheet=connection&agent=${encodeURIComponent(agent.id)}&connection=${encodeURIComponent(connection.id)}`}
@@ -324,29 +340,6 @@ export function AgentDetailsSheet({
                   )
                 }
               />
-              {mockTools === "Not available" ? null : (
-                <CapabilityRow
-                  label="Mock tools during simulations"
-                  state={<CapabilityState state={mockTools} />}
-                  detail={
-                    mockTools === "On"
-                      ? "A temporary version per run, deleted after. Your live agent is untouched."
-                      : "Simulations reach your real tools."
-                  }
-                  action={
-                    <Button
-                      className="h-auto min-h-0 p-0 text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
-                      disabled={!mayAuthor}
-                      onClick={onMockTools}
-                      type="button"
-                      variant="ghost"
-                      {...(whyNotChange === undefined ? {} : { why: whyNotChange })}
-                    >
-                      {mockTools === "On" ? "Review mock tools" : "Set up mock tools"}
-                    </Button>
-                  }
-                />
-              )}
             </div>
             {stopRefused === null ? null : (
               <p className="m-0 text-sm text-failure" role="alert">

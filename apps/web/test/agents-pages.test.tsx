@@ -976,6 +976,53 @@ describe("reading an agent's reach from the list", () => {
     expect(within(rows[2]!).getByText("Voice")).toBeDefined();
   });
 
+  it("says what a run over each connection meets, and offers no mock control", async () => {
+    // The switch lives in the setup flow now. What an agent's own screen shows
+    // is the fact: what a run over this connection reaches.
+    listOf({
+      ...LISTED_AGENT,
+      connections: [
+        { ...CONNECTION, mockToolsEnabled: true },
+        MEASURED_CONNECTION,
+        { ...LIVEKIT_CONNECTION, mockToolsEnabled: false },
+      ],
+    });
+    routed.search = "?sheet=agent&agent=agt_1";
+    render(<AgentsPage />);
+    const panel = within(
+      await screen.findByRole("dialog", { name: "Front desk" }),
+    );
+    const connections = panel
+      .getByRole("heading", { name: "Connections" })
+      .closest("section");
+    const rows = within(connections!).getAllByRole("listitem");
+    expect(within(rows[0]!).getByText("mocks on")).toBeDefined();
+    // A phone connection reaches the real number and the real tools, always.
+    expect(within(rows[1]!).getByText("real tools")).toBeDefined();
+    // Nothing where mocks are simply off.
+    expect(within(rows[2]!).queryByText("mocks on")).toBeNull();
+
+    // No agent-level mock control survives.
+    expect(
+      panel.queryByText("Mock tools during simulations"),
+    ).toBeNull();
+    expect(panel.queryByRole("button", { name: /mock tools/i })).toBeNull();
+  });
+
+  it("offers the accent Add Connection action on the agent sheet", async () => {
+    listOf({ ...LISTED_AGENT, connections: [CONNECTION] });
+    routed.search = "?sheet=agent&agent=agt_1";
+    render(<AgentsPage />);
+    const panel = within(
+      await screen.findByRole("dialog", { name: "Front desk" }),
+    );
+    const add = panel.getByRole("link", { name: "+ Add Connection" });
+    // The accent, per DESIGN.md's Ember-for-quiet-actions rule, and never a
+    // filled primary: this sits in a section heading row.
+    expect(add.className).toContain("text-brand");
+    expect(add.className).not.toContain("bg-");
+  });
+
   it("does not present one LiveKit connection's access as an agent fact", async () => {
     const chat = {
       ...LIVEKIT_CONNECTION,
@@ -1195,7 +1242,7 @@ describe("goal-first agent setup", () => {
     });
   }
 
-  it("asks for the goal first, then offers Retell before LiveKit", async () => {
+  it("asks for the goal first, then offers LiveKit before Retell", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
 
@@ -1233,8 +1280,8 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     expect(screen.queryByText("Setup · Platform")).toBeNull();
     expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual([
-      "Retell",
       "LiveKit",
+      "Retell",
     ]);
     for (const provider of screen.getAllByRole("radio")) {
       expect(provider.className).toContain("min-h-(--control-lg)");
@@ -1778,8 +1825,8 @@ describe("goal-first agent setup", () => {
     expect(screen.getByText("Web call")).toBeDefined();
     expect(screen.getByText("Phone call")).toBeDefined();
 
-    fireEvent.click(screen.getByLabelText("Text"));
-    const connect = screen.getByRole("button", { name: "Set up simulation" });
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Text") }));
+    const connect = screen.getByRole("button", { name: "Continue" });
     expect(connect.closest("[data-slot=sheet-footer]")).not.toBeNull();
     fireEvent.click(connect);
 
@@ -1804,8 +1851,191 @@ describe("goal-first agent setup", () => {
         config: { retellAgentId: "agent_voice_1" },
         platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        mockToolsEnabled: false,
       },
     });
+  });
+
+  /** What the mock question's discovery answers with, tools and all. */
+  const MOCK_TOOLS_FOUND = {
+    status: 200,
+    body: {
+      mockable: true,
+      refusal: null,
+      engine: "conversation-flow",
+      servingVersion: 105,
+      tools: [
+        { name: "get_availability", type: "custom", coverage: "mocked", answered: false },
+        { name: "book_appointment", type: "custom", coverage: "mocked", answered: false },
+      ],
+      warnings: [],
+      numbers: [],
+      seeded: [],
+    },
+  };
+
+  /** The registration a Retell text lane lands, so the mock question has an agent. */
+  const TEXT_LANE_SAVED = {
+    status: 201,
+    body: {
+      result: "created",
+      agent: {
+        ...AGENT,
+        name: "Appointment line",
+        platformAgentId: "agent_voice_1",
+      },
+      connection: { ...CONNECTION, connectionType: "retell_text_mode" },
+    },
+  };
+
+  /** Walk a Retell simulation as far as the mock question, on the text lane. */
+  async function reachMockQuestion(): Promise<void> {
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Appointment line");
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Text") }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: "Mock this agent's tools?" }),
+    ).toBeDefined();
+  }
+
+  it("asks about mocks after the connection, listing the agent's own tools", async () => {
+    // The question is about the agent's tools, and Egma reads those through
+    // the agent it has just made — so it comes after the write, and the
+    // connection is already written `false` until the switch says otherwise.
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        TEXT_LANE_SAVED,
+      ],
+      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
+    });
+    await reachMockQuestion();
+
+    expect(await screen.findByText("get_availability")).toBeDefined();
+    expect(screen.getByText("book_appointment")).toBeDefined();
+
+    // Off unless it is turned on.
+    const toggle = screen.getByRole("switch", { name: "Mock tools on runs" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    // The connection was written before this screen, with mocks off.
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    expect(
+      (registration?.body as { connection?: { mockToolsEnabled?: boolean } })
+        ?.connection?.mockToolsEnabled,
+    ).toBe(false);
+
+    // **The text lane never carries the Latest Created note**, on or off: it
+    // writes nothing to the Retell account, so no draft exists for a number or
+    // a tag to reach.
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+    });
+    expect(screen.queryByText(/A draft counts as Latest Created/)).toBeNull();
+  });
+
+  it("turning the switch on writes the flag onto the connection it just made", async () => {
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        TEXT_LANE_SAVED,
+      ],
+      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
+      "/v1/agents/agt_1/connections/con_1": {
+        status: 200,
+        body: { connection: { ...CONNECTION, mockToolsEnabled: true } },
+      },
+    });
+    await reachMockQuestion();
+
+    fireEvent.click(
+      await screen.findByRole("switch", { name: "Mock tools on runs" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Set up simulation" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.method === "PATCH" && call.url.includes("con_1")),
+      ).toBe(true);
+    });
+    const patched = sent.find(
+      (call) => call.method === "PATCH" && call.url.includes("con_1"),
+    );
+    expect(patched?.body).toEqual({ mockToolsEnabled: true });
+  });
+
+  it("says why mocks are refused, and still finishes the connection", async () => {
+    // Every reason discovery refuses is a fact no answer here can change, so
+    // the switch goes with the list — and the connection, already written with
+    // mocks off, is exactly what it would have been.
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        TEXT_LANE_SAVED,
+      ],
+      "/v1/agents/agt_1/mock-tools:discover": {
+        status: 200,
+        body: {
+          mockable: false,
+          refusal: {
+            reason: "never_published",
+            message:
+              "this agent has no published version on Retell. Publish in Retell the version you want tested.",
+          },
+          engine: null,
+          servingVersion: null,
+          tools: [],
+          warnings: [],
+          numbers: [],
+          seeded: [],
+        },
+      },
+    });
+    await reachMockQuestion();
+
+    expect(
+      await screen.findByText(/no published version on Retell/),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("switch", { name: "Mock tools on runs" }),
+    ).toBeNull();
+    // The connection stands: it was written before this screen appeared.
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    expect(registration).toBeDefined();
+  });
+
+  it("never asks a phone lane about mocks", async () => {
+    // The phone lane dials the customer's own published number, so what
+    // answers is their real agent with their real tools.
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Appointment line");
+    fireEvent.click(
+      screen.getByRole("radio", { name: new RegExp("^Phone call") }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByLabelText("Phone number*")).toBeDefined();
+    expect(
+      screen.queryByRole("heading", { name: "Mock this agent's tools?" }),
+    ).toBeNull();
   });
 
   /** A voice agent as discovery now describes one, text mode door and all. */
@@ -1875,8 +2105,8 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     expect(screen.queryByLabelText("Phone number*")).toBeNull();
 
-    fireEvent.click(screen.getByLabelText("Text"));
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Text") }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     await waitFor(() => {
       expect(
@@ -1899,241 +2129,9 @@ describe("goal-first agent setup", () => {
         config: { retellAgentId: "agent_voice_1" },
         platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        mockToolsEnabled: false,
       },
     });
-  });
-
-  it("retries only the unsaved Retell lanes after a partial provider failure", async () => {
-    sheetAnswers({
-      "/v1/connection-options": {
-        status: 200,
-        body: {
-          items: [
-            ...TYPES.items,
-            {
-              ...TYPES.items[1],
-              connectionType: "retell_web_call",
-              accessVariant: "retell_web_call.api_key",
-              modality: "voice",
-              productLabel: "Retell web call",
-            },
-          ],
-        },
-      },
-      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        {
-          status: 201,
-          body: {
-            result: "created",
-            agent: {
-              ...AGENT,
-              id: "agt_multi",
-              name: "Front desk",
-              platformAgentId: "agent_voice_1",
-            },
-            connection: {
-              ...CONNECTION,
-              id: "con_text",
-              connectionType: "retell_text_mode",
-            },
-          },
-        },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_multi/connections": [
-        {
-          status: 503,
-          body: {
-            error: "provider_unavailable",
-            message: "Retell did not save the web call. Try again.",
-          },
-        },
-        {
-          status: 201,
-          body: {
-            connection: {
-              ...CONNECTION,
-              id: "con_web",
-              connectionType: "retell_web_call",
-            },
-          },
-        },
-      ],
-      "/v1/agents/agt_multi": {
-        status: 200,
-        body: {
-          agent: {
-            ...AGENT,
-            id: "agt_multi",
-            platformAgentId: "agent_voice_1",
-          },
-          connections: [
-            {
-              ...CONNECTION,
-              id: "con_text",
-              agentId: "agt_multi",
-              connectionType: "retell_text_mode",
-              accessVariant: "retell_text_mode.api_key",
-              modality: "chat",
-              config: { retellAgentId: "agent_voice_1" },
-            },
-          ],
-        },
-      },
-    });
-    render(<RegisterAgentPage />);
-    await choose("Run simulations", "Retell");
-    await findRetellAgents();
-    await pickRetellAgent("Front desk");
-
-    fireEvent.click(screen.getByLabelText("Text"));
-    fireEvent.click(screen.getByLabelText("Web call"));
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
-
-    expect(
-      await screen.findByText(/Egma saved 1 of 2 connections/),
-    ).toBeDefined();
-    expect((screen.getByLabelText("Text") as HTMLInputElement).disabled).toBe(
-      true,
-    );
-    expect(
-      (screen.getByLabelText("Web call") as HTMLInputElement).disabled,
-    ).toBe(true);
-    expect(screen.getByText("Close", { selector: "button" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
-    expect(
-      await screen.findByText("Retell did not save the web call. Try again."),
-    ).toBeDefined();
-    expect(
-      sent.filter(
-        (call) => call.method === "POST" && call.url.includes("/connections"),
-      ),
-    ).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
-    await waitFor(() => {
-      expect(
-        sent.filter(
-          (call) => call.method === "POST" && call.url.includes("/connections"),
-        ),
-      ).toHaveLength(2);
-    });
-    expect(
-      sent.filter(
-        (call) =>
-          call.method === "POST" &&
-          call.url === "/v1/agents?projectId=prj_1",
-      ),
-    ).toHaveLength(1);
-    expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
-  });
-
-  it("reads back a committed Retell lane instead of duplicating it after a lost response", async () => {
-    sheetAnswers({
-      "/v1/connection-options": {
-        status: 200,
-        body: {
-          items: [
-            ...TYPES.items,
-            {
-              ...TYPES.items[1],
-              connectionType: "retell_web_call",
-              accessVariant: "retell_web_call.api_key",
-              modality: "voice",
-              productLabel: "Retell web call",
-            },
-          ],
-        },
-      },
-      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        {
-          status: 201,
-          body: {
-            result: "created",
-            agent: {
-              ...AGENT,
-              id: "agt_lost_response",
-              name: "Front desk",
-              platformAgentId: "agent_voice_1",
-            },
-            connection: {
-              ...CONNECTION,
-              id: "con_text",
-              connectionType: "retell_text_mode",
-            },
-          },
-        },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
-      "/v1/agents/agt_lost_response/connections": {
-        status: 503,
-        body: {
-          error: "response_lost",
-          message: "The connection may have been saved. Try again.",
-        },
-      },
-      "/v1/agents/agt_lost_response": {
-        status: 200,
-        body: {
-          agent: {
-            ...AGENT,
-            id: "agt_lost_response",
-            platformAgentId: "agent_voice_1",
-          },
-          connections: [
-            {
-              ...CONNECTION,
-              id: "con_text",
-              agentId: "agt_lost_response",
-              connectionType: "retell_text_mode",
-              accessVariant: "retell_text_mode.api_key",
-              modality: "chat",
-              config: { retellAgentId: "agent_voice_1" },
-            },
-            {
-              ...CONNECTION,
-              id: "con_web_committed",
-              agentId: "agt_lost_response",
-              connectionType: "retell_web_call",
-              accessVariant: "retell_web_call.api_key",
-              modality: "voice",
-              config: { retellAgentId: "agent_voice_1" },
-            },
-          ],
-        },
-      },
-    });
-    render(<RegisterAgentPage />);
-    await choose("Run simulations", "Retell");
-    await findRetellAgents();
-    await pickRetellAgent("Front desk");
-
-    fireEvent.click(screen.getByLabelText("Text"));
-    fireEvent.click(screen.getByLabelText("Web call"));
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
-
-    expect(
-      await screen.findByText("The connection may have been saved. Try again."),
-    ).toBeDefined();
-    expect(
-      sent.filter(
-        (call) => call.method === "POST" && call.url.includes("/connections"),
-      ),
-    ).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
-    await waitFor(() => {
-      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
-    });
-    expect(
-      sent.filter(
-        (call) => call.method === "POST" && call.url.includes("/connections"),
-      ),
-    ).toHaveLength(1);
   });
 
   it("keeps a committed phone lane through Close and resumes monitoring after reopen", async () => {
@@ -2397,7 +2395,7 @@ describe("goal-first agent setup", () => {
         name: "How should Egma test this agent?",
       }),
     ).toBeDefined();
-    fireEvent.click(screen.getByLabelText("Phone call"));
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Phone call") }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     // The phone chooser, which only the phone lane leads into.
@@ -2562,6 +2560,7 @@ describe("goal-first agent setup", () => {
         platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
         pullProductionCalls: true,
+        mockToolsEnabled: false,
       },
     });
     expect(

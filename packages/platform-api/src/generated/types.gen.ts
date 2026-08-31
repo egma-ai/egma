@@ -273,6 +273,10 @@ export type RegisterAgentData = {
              */
             pullProductionCalls?: boolean;
             /**
+             * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
+             */
+            mockToolsEnabled?: boolean;
+            /**
              * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
              */
             agentPlatformSelection?: {
@@ -610,6 +614,10 @@ export type AddConnectionData = {
          * Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history.
          */
         pullProductionCalls?: boolean;
+        /**
+         * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
+         */
+        mockToolsEnabled?: boolean;
         /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
