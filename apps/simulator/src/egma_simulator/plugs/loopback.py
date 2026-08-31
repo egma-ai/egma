@@ -16,6 +16,7 @@ _KNOWN_KEYS = {
     "ends_after_replies",
     "answer_delay_seconds",
     "echoes_what_it_hears",
+    "goes_quiet_after_replies",
     "provider_reference",
 }
 
@@ -80,6 +81,17 @@ class LoopbackCounterpart:
             raise PlugError(
                 "loopback config: answer_delay_seconds must be zero or more"
             )
+        goes_quiet = config.get("goes_quiet_after_replies", False)
+        if not isinstance(goes_quiet, bool):
+            raise PlugError(
+                "loopback config: goes_quiet_after_replies must be a bool"
+            )
+        if goes_quiet and ends_after_replies:
+            raise PlugError(
+                "loopback config: a counterpart that goes quiet stays in the "
+                "room, so goes_quiet_after_replies cannot be combined with "
+                "ends_after_replies"
+            )
         reference = config.get("provider_reference")
         if reference is not None and not isinstance(reference, str):
             raise PlugError("loopback config: provider_reference must be a string")
@@ -90,7 +102,15 @@ class LoopbackCounterpart:
             replies=list(replies),
             answer_delay_seconds=float(delay),
             ends_after_replies=ends_after_replies,
-            fallback_reply=None if ends_after_replies else FALLBACK_REPLY,
+            # The counterpart's default is to keep the conversation going
+            # once its script runs out, because most tests want a far end
+            # that stays available. ``goes_quiet_after_replies`` is the
+            # other real agent: one that is in the room, publishing, and
+            # saying nothing — which is what a broken worker looks like,
+            # and the case the silent-agent rule exists for.
+            fallback_reply=(
+                None if ends_after_replies or goes_quiet else FALLBACK_REPLY
+            ),
             echoes_what_it_hears=echoes,
         )
 

@@ -1360,10 +1360,77 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     turns = [(speaker, text) for speaker, text, _began, _ended in spans]
     assert ("agent", "") in turns, turns
     assert [speaker for speaker, _text in turns] == ["human", "agent", "human"]
+    # The persona reached the end of its scenario and concluded, which is
+    # what says the turn really was given up on rather than waited out —
+    # the run got all the way to its natural end inside the limits.
+    assert turns[-1] == ("human", GOODBYE), turns
     # And the simulation is a failure the contract never grades, never one
     # of the deliberate endings it used to claim.
     assert failed_ending(silent.value) == ERROR
     assert str(silent.value) == SAID_NOTHING
+
+
+async def test_a_turn_limit_of_one_keeps_its_own_ending(tmp_path: Path):
+    """A spec that allows one turn ends before the agent could answer.
+
+    The persona speaks, the budget is spent, and the run stops — with no
+    agent turn on the record, which looks exactly like an agent that said
+    nothing. It is not: the limit is deliberate and is never the agent
+    failing, so the run keeps ``limit_reached`` rather than being called
+    a silence. One persona turn is the whole of the difference, which is
+    why the silence rule waits for a second one.
+    """
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="One point. Two point.",
+        greeting=None,
+        replies=[],
+        max_turns=1,
+    )
+
+    assert observed.conducted.status == "completed"
+    assert observed.conducted.ending == "limit_reached"
+    assert [speaker for speaker, _text in observed.turns] == ["human"]
+
+
+class CancelsOnceUnderWay(ConversationControls):
+    """A cancel directive that lands after the exchange has opened.
+
+    A directive really arrives on a heartbeat answer, mid-exchange. One
+    that landed before the exchange opened would prove nothing about the
+    order the two answers are decided in.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._steps = 0
+
+    async def guard(self, coroutine):
+        self._steps += 1
+        if self._steps > 1:
+            self.request_cancel()
+        return await super().guard(coroutine)
+
+
+async def test_a_cancel_outranks_a_silence(tmp_path: Path):
+    """A run stopped on purpose is not a run that failed.
+
+    The two land together here: an agent that never says a word, and a
+    directive cancelling the run. The cancel is somebody's own act, so it
+    is the answer — reporting the run failed would put a defect on the
+    record where a decision belongs, and it would be a defect nobody can
+    act on, because the run was stopped before it could finish.
+    """
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="One point. Two point. Three point.",
+        greeting=None,
+        replies=[],
+        controls=CancelsOnceUnderWay(),
+    )
+
+    assert observed.conducted.status == "canceled"
+    assert observed.conducted.ending == "canceled"
 
 
 async def test_an_unconfigured_voice_exchange_connects_nothing(
