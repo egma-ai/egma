@@ -596,6 +596,7 @@ class _Pipecat17InputDrain:
             ],
         ] = {}
         self._departures: dict[str, asyncio.Task[None]] = {}
+        self._watching = False
         client._process_audio_stream = self._read_audio_stream
         client._close_audio_stream = self.finish_stream
         client._async_on_track_subscribed = self._track_subscribed
@@ -617,12 +618,22 @@ class _Pipecat17InputDrain:
         self.watch_mutes()
 
     def watch_mutes(self) -> None:
-        """Take LiveKit's mute events, which Pipecat 1.7.0 ignores."""
+        """Take LiveKit's mute events, which Pipecat 1.7.0 ignores.
+
+        Once, however many times it is asked. Pipecat's own ``setup`` is
+        called by the input transport *and* the output transport and
+        guards itself with an early return; this hangs off that same
+        call, so without a guard of its own the second call would put a
+        second pair of handlers on the same room.
+        """
+        if self._watching:
+            return
         room = getattr(self._client, "_room", None)
         if room is None:
             return
         room.on("track_muted")(self._track_muted)
         room.on("track_unmuted")(self._track_unmuted)
+        self._watching = True
 
     def _track_muted(self, participant: Any, publication: Any) -> None:
         """A publisher stopped sending on one track. Hand the clock on.

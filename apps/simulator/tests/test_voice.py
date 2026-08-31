@@ -1288,6 +1288,25 @@ async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
         await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
 
 
+class DeafEars(FrameProcessor):
+    """A listening leg that carries audio but emits no transcription.
+
+    What a transcriber handed a stretch of audio it finds no words in
+    really does: it pushes no frame at all. Every agent turn is then
+    recorded with no words, which is the shape of the dead call the
+    silence rule exists for, and the cheapest way to script one.
+    """
+
+    async def process_frame(self, frame, direction) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
+def deaf_legs(providers, *, voice):
+    """The scripted legs, with nobody listening on the agent's side."""
+    return SpeechLegs(stt=DeafEars(), tts=ScriptedTTS(voice=voice), voice=voice)
+
+
 async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1326,20 +1345,6 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     the dead call this product must never grade, so the run fails instead
     of ending.
     """
-
-    class DeafEars(FrameProcessor):
-        """A listening leg that carries audio but emits no transcription."""
-
-        async def process_frame(self, frame, direction) -> None:
-            await super().process_frame(frame, direction)
-            await self.push_frame(frame, direction)
-
-    def deaf_legs(providers, *, voice):
-        return SpeechLegs(
-            stt=DeafEars(),
-            tts=ScriptedTTS(voice=voice),
-            voice=voice,
-        )
 
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
 
@@ -1393,42 +1398,63 @@ async def test_a_turn_limit_of_one_keeps_its_own_ending(tmp_path: Path):
     assert [speaker for speaker, _text in observed.turns] == ["human"]
 
 
-class CancelsOnceUnderWay(ConversationControls):
-    """A cancel directive that lands after the exchange has opened.
+class CancelsOnce(ConversationControls):
+    """A cancel directive that lands the moment the record says to.
 
-    A directive really arrives on a heartbeat answer, mid-exchange. One
-    that landed before the exchange opened would prove nothing about the
-    order the two answers are decided in.
+    A directive really arrives on a heartbeat answer, mid-exchange, and
+    *when* it lands is the whole subject of the test below. A cancel that
+    landed before the agent had taken a turn would be answered the same
+    way whichever order the two answers were decided in, so it would
+    prove nothing: the record has to already hold what the silence rule
+    fires on at the moment the directive arrives.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, when: Callable[[], bool]) -> None:
         super().__init__()
-        self._steps = 0
+        self._when = when
 
     async def guard(self, coroutine):
-        self._steps += 1
-        if self._steps > 1:
+        if self._when():
             self.request_cancel()
         return await super().guard(coroutine)
 
 
-async def test_a_cancel_outranks_a_silence(tmp_path: Path):
+async def test_a_cancel_outranks_a_silence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """A run stopped on purpose is not a run that failed.
 
-    The two land together here: an agent that never says a word, and a
-    directive cancelling the run. The cancel is somebody's own act, so it
-    is the answer — reporting the run failed would put a defect on the
-    record where a decision belongs, and it would be a defect nobody can
-    act on, because the run was stopped before it could finish.
+    Both answers are true of this run at once. Nobody is listening on the
+    agent's side, so every turn it takes is recorded with no words — the
+    dead call the silence rule fails runs for — and the directive lands
+    only once one of those turns is on the record, so the rule really
+    would fire if it were asked first.
+
+    The cancel is the answer. It is somebody's own act, and a run stopped
+    before it could finish is not a run that failed: reporting a defect
+    there would put one on the record where a decision belongs, and it
+    would be a defect nobody could act on.
     """
+    monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+
+    spans: list[tuple[str, str, int, int]] = []
     observed = await voice_simulation(
         tmp_path,
         scenario="One point. Two point. Three point.",
-        greeting=None,
-        replies=[],
-        controls=CancelsOnceUnderWay(),
+        replies=["Noted.", "Noted again."],
+        parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+        controls=CancelsOnce(
+            lambda: any(speaker == "agent" for speaker, *_rest in spans)
+        ),
+        spans=spans,
     )
 
+    # The record really did hold a wordless agent turn when the directive
+    # landed — without this the test would pass on an empty record, which
+    # the silence rule leaves alone anyway.
+    turns = [(speaker, text) for speaker, text, _began, _ended in spans]
+    assert ("agent", "") in turns, turns
+    # And the cancel is still what the run is reported as.
     assert observed.conducted.status == "canceled"
     assert observed.conducted.ending == "canceled"
 

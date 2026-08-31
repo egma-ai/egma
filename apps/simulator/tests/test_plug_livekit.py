@@ -624,20 +624,28 @@ class ScriptedRtcRoom:
 
     def __init__(self) -> None:
         self.remote_participants: dict[str, object] = {}
-        self.handlers: dict[str, Any] = {}
+        self.handlers: dict[str, list[Any]] = {}
+        self.mutes_fired = 0
+        """How many mute handlers a mute reached. A list per event and a
+        count, because ``rtc.Room.on`` really does keep every handler it
+        is given — so registering twice is a thing this fake can show
+        rather than hide behind a dict that overwrites."""
 
     def on(self, event: str) -> Any:
         def keep(handler: Any) -> Any:
-            self.handlers[event] = handler
+            self.handlers.setdefault(event, []).append(handler)
             return handler
 
         return keep
 
     def mute(self, participant: Any, publication: Any) -> None:
-        self.handlers["track_muted"](participant, publication)
+        for handler in self.handlers["track_muted"]:
+            self.mutes_fired += 1
+            handler(participant, publication)
 
     def unmute(self, participant: Any, publication: Any) -> None:
-        self.handlers["track_unmuted"](participant, publication)
+        for handler in self.handlers["track_unmuted"]:
+            handler(participant, publication)
 
 
 @dataclass(frozen=True)
@@ -894,15 +902,32 @@ async def test_a_muted_lead_hands_the_room_on_instead_of_deafening_it(
     assert heard(carried) == [7] * 160
 
     # Unmuted, it is live again — and joins under the track that took the
-    # clock rather than taking it back, so only one track ever clocks.
+    # clock rather than taking it back.
     client._room.unmute(speaker, speaking)
+
+    # Which is a claim with a consequence, so it is made on its own: a
+    # frame on the unmuted track alone reaches nobody, because it is a
+    # backing track now. A track that had taken the clock back would carry
+    # its frame straight out, and the room would be clocked by two.
     streams[speaking.sid]._queue.put(a_tone(100))
     await taken_from(streams[speaking.sid])
+    assert client._audio_queue.empty(), "the unmuted track rejoined at the back"
+
+    # The lead's next frame carries it, added underneath.
     streams[ambience.sid]._queue.put(a_tone(7))
     await taken_from(streams[ambience.sid])
     carried, _who = await reached_the_persona(client)
     assert heard(carried) == [107] * 160
     assert client._audio_queue.empty(), "one track clocks the room, never two"
+
+    # And asking for the handlers again registers nothing more, which
+    # matters because Pipecat's setup is called by both transports.
+    joined.room._input_drain.watch_mutes()
+    fired_before = client._room.mutes_fired
+    client._room.mute(speaker, ambience)
+    assert client._room.mutes_fired == fired_before + 1, (
+        "one pair of handlers on the room, not two"
+    )
 
 
 async def test_what_a_track_buffered_is_carried_out_after_it_goes_quiet(
@@ -1095,8 +1120,16 @@ async def test_a_reader_that_broke_still_lets_its_track_be_torn_down(
 
     # The teardown runs to the end rather than stopping on the reader:
     # the track is let go, and Pipecat's own unsubscribed event fires.
+    left: list[str] = []
+
+    async def note_the_departure(participant_id: str) -> None:
+        left.append(participant_id)
+
+    joined.room._input_drain._left_a_track = note_the_departure
+
     await client._async_on_track_unsubscribed(broken, broken, speaker)
     assert key not in client._audio_streams
+    assert left == [speaker.sid], "the unsubscribed event still went out"
 
 
 async def test_a_swallowed_reader_error_cannot_become_normal_departure():
