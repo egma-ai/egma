@@ -150,12 +150,11 @@ describe("a mock tool in a file", () => {
     expect(() => read(list)).toThrow(/"check_availability".*\{"answer"/su);
   });
 
-  it("compares two entries by what they say, not by the order they say it in", () => {
-    // The order somebody typed the entry's own keys in is not something they
-    // said: egma has one order it writes them in, and a file that arrived in
-    // another is the same mock tool. What is *inside* those keys is compared as
-    // written, because an answer is whatever shape that tool's contract has and
-    // the platform compares an answer the same way.
+  it("compares two entries by JSON value, not object-key order", () => {
+    // JSON object keys have no semantic order. PostgreSQL can return nested
+    // answer keys in a different order from the authored file, so both the
+    // entry and every object inside its answer must compare by value. Array
+    // order still matters because it is part of the JSON value.
     expect(
       sameMockTools(
         [{ tool: "t", says: { delay_ms: 250, answer: { a: 1, b: 2 } } }],
@@ -166,6 +165,12 @@ describe("a mock tool in a file", () => {
       sameMockTools(
         [{ tool: "t", says: { answer: { a: 1, b: 2 } } }],
         [{ tool: "t", says: { answer: { b: 2, a: 1 } } }],
+      ),
+    ).toBe(true);
+    expect(
+      sameMockTools(
+        [{ tool: "t", says: { answer: { slots: ["09:00", "10:00"] } } }],
+        [{ tool: "t", says: { answer: { slots: ["10:00", "09:00"] } } }],
       ),
     ).toBe(false);
   });

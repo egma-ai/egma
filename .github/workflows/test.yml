@@ -11,8 +11,8 @@ name: Tests
 # real-browser proof, the simulator tests, the SDK tests and the fixture
 # tests. That is the handoff gate, and nothing in it is allowed to skip.
 #
-# A push to `main` runs the same six jobs again on the tree `main` now owns.
-# One `Deploy` job then waits for all six. This keeps the test names identical
+# A push to `main` runs the same jobs again on the tree `main` now owns.
+# One `Deploy` job then waits for all of them. This keeps the test names identical
 # on pull requests and main, and gives production one gate and one owner.
 #
 # The split is deliberate rather than thrifty. An effort lands as a dozen pull
@@ -308,6 +308,50 @@ jobs:
       - name: Run the Python and JavaScript SDK tests
         run: pnpm test:sdk
 
+  livekit-js-compatibility:
+    name: LiveKit JS ${{ matrix.livekit }} compatibility
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.5.0 is the mock-tool floor. 1.5.5 is the monitoring floor.
+        # 1.6.4 is the exact Rentlyx pin. The remaining lanes catch a break at
+        # each supported minor boundary and at the current upper edge.
+        livekit: ["1.5.0", "1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build and pack the SDK
+        id: pack
+        run: |
+          pnpm --filter @egma/livekit build
+          dir="$(mktemp -d)"
+          pnpm --config.node-linker=hoisted \
+            --filter @egma/livekit \
+            pack --pack-destination "$dir"
+          tarball="$(find "$dir" -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the packed SDK with LiveKit ${{ matrix.livekit }}
+        run: >-
+          node sdks/livekit-js/test/verify-packed-compatibility.mjs
+          "${{ steps.pack.outputs.tarball }}"
+          "${{ matrix.livekit }}"
+
   fixture:
     name: Fixture agent tests
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
@@ -341,7 +385,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, sdk, fixture]
+    needs: [checks, fast, browser, simulator, sdk, livekit-js-compatibility, fixture]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

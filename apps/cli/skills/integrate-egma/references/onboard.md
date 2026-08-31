@@ -12,12 +12,12 @@ remain in the active state while waiting for required human input or resolving
 a safe refusal.
 
 - `login` — Resolve the intended Egma platform, let login reuse valid credentials or keep it open while the developer approves the browser request without a reply or Enter press, and move to `discovery` after credentials are stored.
-- `discovery` — Inspect the repository until one exact voice agent is selected, then move supported testing or both to `connection-setup`, monitoring or JavaScript Both to `monitoring-setup`, or stop at `no-agent`, `unsupported-platform`, or `unsupported-capability` from the evidence.
+- `discovery` — Inspect the repository until one exact voice agent is selected, then move testing or both to `connection-setup`, monitoring to `monitoring-setup`, or stop at `no-agent`, `unsupported-platform`, or `unsupported-capability` from the evidence.
 - `connection-setup` — Apply any required LiveKit worker change and platform setup, create or recover the exact simulation connection, record its receipt, and move to `test-writing`.
 - `test-writing` — Let the CLI create the suite scaffold and list valid personas, use the test-writing skill for the smallest grounded suite and any required mock answers, and move to `publish`.
 - `publish` — Use the operating skill to validate and publish the completed repository without losing remote work, then move to `run`.
 - `run` — Use the operating skill to start and follow the first suite, pause only for a cost-bearing phone run, and move testing to `complete` or both to `monitoring-setup` after execution and grading are terminal.
-- `monitoring-setup` — Apply any required LiveKit worker change and platform setup, enable monitoring on the settled agent, read its exact status, and move to `complete` or to `unsupported-capability` when JavaScript monitoring is the supported part of a Both request.
+- `monitoring-setup` — Apply any required LiveKit worker change and platform setup, enable monitoring on the settled agent, read its exact status, and move to `complete`.
 - `complete` — Stop only when Testing has a terminal run receipt, Monitoring has an enabled status receipt, or Both has both receipts for the same voice agent.
 - `no-agent` — Stop without setup writes and report that no supported voice agent was found.
 - `unsupported-platform` — Stop before remote setup and report the discovered Pipecat or Vapi boundary.
@@ -84,12 +84,10 @@ Before either LiveKit setup state, read
 by the selected outcome. Run the repository's focused checks before continuing
 to remote setup.
 
-When Both supports testing, create the simulation connection first, then enable
-monitoring on that recorded agent. For JavaScript Both, skip simulation setup,
-complete monitoring, and finish at `unsupported-capability`. Reuse a settled
-identity and any secure provider input still available to the process instead
-of creating a second logical agent or asking the developer to reveal a secret
-again.
+For Both, create the simulation connection first, then enable monitoring on
+that recorded agent. Reuse a settled identity and any secure provider input
+still available to the process instead of creating a second logical agent or
+asking the developer to reveal a secret again.
 
 ## Let each owner write its files
 

@@ -1,7 +1,7 @@
 {
   "name": "@egma/livekit",
-  "version": "0.1.0",
-  "description": "Send LiveKit Agents JS production traces to Egma.",
+  "version": "0.2.0",
+  "description": "Test and monitor LiveKit Agents JS workers with Egma.",
   "type": "module",
   "license": "Apache-2.0",
   "homepage": "https://github.com/egma-ai/egma",
@@ -16,6 +16,9 @@
   "keywords": [
     "livekit",
     "voice-agents",
+    "testing",
+    "mock-tools",
+    "simulation",
     "monitoring",
     "opentelemetry"
   ],
@@ -45,7 +48,7 @@
     "test": "tsc -p tsconfig.test.json && vitest run --config vitest.config.ts"
   },
   "peerDependencies": {
-    "@livekit/agents": ">=1.7.1 <1.8"
+    "@livekit/agents": ">=1.5.0 <1.8"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

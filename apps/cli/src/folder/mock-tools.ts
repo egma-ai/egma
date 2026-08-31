@@ -222,21 +222,25 @@ export function writeMockTools(
 /**
  * What one entry says, in a shape two entries can be compared by.
  *
- * The entry's own keys are put in one order first, because the order somebody
- * typed `delay_ms` and `answer` in is not something they said — egma has one
- * order it writes them in, and a file that arrived in another is the same mock
- * tool. What is inside each of those keys is left exactly as it is, and is
- * compared by its serialization: an answer is whatever shape that tool's own
- * contract has, so there is no set of fields to be exhaustive over, and the
- * platform compares an answer the same way for the same reason.
+ * Every object's keys are put in one order first, because JSON object-key
+ * order is not part of the value. This includes objects inside an answer:
+ * PostgreSQL can return those keys in a different order from the authored
+ * file. Arrays keep their order because array order is part of the value.
  */
-function saidInOneOrder(entry: MockToolEntry): string {
-  const says = entry.says;
-  return JSON.stringify(
-    Object.keys(says)
+function jsonInOneOrder(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(jsonInOneOrder);
+  if (typeof value !== "object" || value === null) return value;
+
+  const record = value as Readonly<Record<string, unknown>>;
+  return Object.fromEntries(
+    Object.keys(record)
       .sort()
-      .map((key) => [key, says[key]]),
+      .map((key) => [key, jsonInOneOrder(record[key])]),
   );
+}
+
+function saidInOneOrder(entry: MockToolEntry): string {
+  return JSON.stringify(jsonInOneOrder(entry.says));
 }
 
 /** Whether two entries say the same thing, whatever order they say it in. */

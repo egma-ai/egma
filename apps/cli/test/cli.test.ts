@@ -152,7 +152,13 @@ describe("the egma command", () => {
     expect(result.stdout).toContain(
       "python_monitoring_call: monitor_livekit(ctx)",
     );
-    expect(result.stdout).toContain("javascript_testing: unsupported");
+    expect(result.stdout).toContain("javascript_testing: supported");
+    expect(result.stdout).toContain(
+      "javascript_testing_package: @egma/livekit",
+    );
+    expect(result.stdout).toContain(
+      "javascript_testing_call: await mockable(agent, ctx, session)",
+    );
     expect(result.stdout).toContain(
       "javascript_monitoring_package: @egma/livekit",
     );
@@ -163,6 +169,7 @@ describe("the egma command", () => {
     expect(result.stdout).toContain("status: ready");
     expect(result.stdout).not.toContain("dependency:");
     expect(result.stdout).not.toContain("@egma/livekit@");
+    expect(result.stdout).not.toContain("javascript_testing_reason:");
     expect(result.stdout).not.toContain("approve_url:");
   });
 

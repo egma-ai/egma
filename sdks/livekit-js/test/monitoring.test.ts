@@ -7,15 +7,28 @@ import {
   trace,
   type Context,
   type Span,
+  type TracerProvider,
 } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   NodeTracerProvider,
   type ReadableSpan,
+  type SpanExporter,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
 import { telemetry, type JobContext } from "@livekit/agents";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@livekit/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@livekit/agents")>();
+  return {
+    ...actual,
+    telemetry: {
+      ...actual.telemetry,
+      setTracerProvider: vi.fn(actual.telemetry.setTracerProvider),
+    },
+  };
+});
 
 import {
   monitorLiveKit,
@@ -26,6 +39,43 @@ import {
 } from "../src/monitoring.ts";
 
 const PROJECT_KEY = `egma_sk_${"a".repeat(43)}`;
+
+type CompatibleFanoutSpanProcessor = SpanProcessor & {
+  add(processor: SpanProcessor): void;
+};
+
+type CompatibleCloudSpanProcessorFactory = (options: {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+  readonly exporter?: SpanExporter;
+}) => SpanProcessor;
+
+const compatibleTelemetry = telemetry as unknown as {
+  readonly FanoutSpanProcessor?: new () => CompatibleFanoutSpanProcessor;
+  readonly tracer: typeof telemetry.tracer & {
+    getProvider: () => TracerProvider;
+  };
+  readonly setTracerProvider: (
+    provider: TracerProvider,
+    options?: {
+      readonly createCloudSpanProcessor?: CompatibleCloudSpanProcessorFactory;
+    },
+  ) => void;
+};
+
+const SUPPORTS_SHARED_TELEMETRY =
+  typeof compatibleTelemetry.FanoutSpanProcessor === "function" &&
+  typeof compatibleTelemetry.tracer.getProvider === "function";
+
+function setLiveKitTracerProvider(provider: TracerProvider): void {
+  compatibleTelemetry.setTracerProvider(provider);
+}
+
+function liveKitTracerProvider(): TracerProvider | undefined {
+  return typeof compatibleTelemetry.tracer.getProvider === "function"
+    ? compatibleTelemetry.tracer.getProvider()
+    : undefined;
+}
 
 type StubContext = {
   job: { room: { name: string }; agentName: string };
@@ -53,7 +103,7 @@ function asJobContext(value: StubContext): JobContext {
 function unusedProviders() {
   const liveKit = new ProxyTracerProvider();
   const global = new ProxyTracerProvider();
-  telemetry.setTracerProvider(liveKit);
+  setLiveKitTracerProvider(liveKit);
   vi.spyOn(NodeTracerProvider.prototype, "register").mockImplementation(
     () => undefined,
   );
@@ -62,14 +112,14 @@ function unusedProviders() {
 
 afterEach(() => {
   resetMonitoringForTests();
-  telemetry.setTracerProvider(new ProxyTracerProvider());
+  setLiveKitTracerProvider(new ProxyTracerProvider());
   otelContext.disable();
   trace.disable();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
-describe("monitorLiveKit", () => {
+describe("simulation monitoring separation", () => {
   it.each([
     ["voice", "egma-sim-sim_123"],
     ["chat", "egma-sim-chat-sim_123"],
@@ -100,7 +150,9 @@ describe("monitorLiveKit", () => {
       );
     },
   );
+});
 
+describe.runIf(SUPPORTS_SHARED_TELEMETRY)("monitorLiveKit", () => {
   it("ignores dispatch metadata and LiveKit's simulation context in a production room", () => {
     const { global } = unusedProviders();
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
@@ -137,9 +189,7 @@ describe("monitorLiveKit", () => {
     );
     expect(first.callbacks).toHaveLength(1);
     expect(monitoringStateForTests()?.roomName).toBe("production-room");
-    expect(telemetry.tracer.getProvider()).toBe(
-      monitoringStateForTests()?.provider,
-    );
+    expect(liveKitTracerProvider()).toBe(monitoringStateForTests()?.provider);
   });
 
   it("refuses a different job in the same process without exposing either room", () => {
@@ -224,7 +274,9 @@ describe("monitorLiveKit", () => {
 
   it("refuses to erase tracing that another integration already configured", () => {
     const provider = new NodeTracerProvider();
-    vi.spyOn(telemetry.tracer, "getProvider").mockReturnValue(provider);
+    vi.spyOn(compatibleTelemetry.tracer, "getProvider").mockReturnValue(
+      provider,
+    );
     vi.spyOn(trace, "getTracerProvider").mockReturnValue(provider);
 
     expect(() =>
@@ -264,7 +316,8 @@ describe("monitorLiveKit", () => {
       async shutdown() {},
     };
     const createCloudSpanProcessor = vi.fn(() => cloudProcessor);
-    const fanout = new telemetry.FanoutSpanProcessor();
+    const FanoutSpanProcessor = compatibleTelemetry.FanoutSpanProcessor!;
+    const fanout = new FanoutSpanProcessor();
     fanout.add(existingProcessor);
     const provider = new NodeTracerProvider({ spanProcessors: [fanout] });
     provider.register();
@@ -284,7 +337,6 @@ describe("monitorLiveKit", () => {
       roomId: "cloud-room-id",
       jobId: "cloud-job-id",
       cloudHostname: "example.livekit.cloud",
-      agentName: "appointment-agent",
       enableTraces: true,
       enableLogs: false,
     });
@@ -292,7 +344,7 @@ describe("monitorLiveKit", () => {
     await provider.forceFlush();
 
     expect(monitoringStateForTests()?.provider).toBe(provider);
-    expect(telemetry.tracer.getProvider()).toBe(provider);
+    expect(liveKitTracerProvider()).toBe(provider);
     expect(existingSpans.map((span) => span.name)).toEqual([
       "shared-existing",
     ]);
@@ -314,7 +366,7 @@ describe("monitorLiveKit", () => {
     const provider = new NodeTracerProvider();
     provider.register();
     const globalProvider = trace.getTracerProvider();
-    telemetry.setTracerProvider(globalProvider);
+    setLiveKitTracerProvider(globalProvider);
 
     expect(globalProvider).toBeInstanceOf(ProxyTracerProvider);
     expect((globalProvider as ProxyTracerProvider).getDelegate()).toBe(provider);
@@ -385,7 +437,109 @@ describe("monitorLiveKit", () => {
     expect(output).not.toContain(PROJECT_KEY);
     expect(output).not.toContain(leakedFailure);
   });
+
+  it("keeps Egma and LiveKit Cloud export active on its owned provider", async () => {
+    trace.disable();
+    vi.stubEnv("LIVEKIT_API_KEY", "devkey");
+    vi.stubEnv(
+      "LIVEKIT_API_SECRET",
+      "secretsecretsecretsecretsecretsecret",
+    );
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const exported = vi
+      .spyOn(OTLPTraceExporter.prototype, "export")
+      .mockImplementation((_spans, callback) => callback({ code: 0 }));
+
+    monitorLiveKit(asJobContext(context()), {
+      endpoint: "https://api.egma.ai",
+      apiKey: PROJECT_KEY,
+    });
+    await telemetry.setupCloudTracer({
+      roomId: "cloud-room-id",
+      jobId: "cloud-job-id",
+      cloudHostname: "example.livekit.cloud",
+      enableTraces: true,
+      enableLogs: false,
+    });
+    const provider = monitoringStateForTests()?.provider;
+    provider?.getTracer("proof").startSpan("shared-owned").end();
+    await (provider as NodeTracerProvider | undefined)?.forceFlush();
+
+    expect(exported).toHaveBeenCalledTimes(2);
+    expect(warning).not.toHaveBeenCalledWith(
+      expect.stringContaining("LiveKit Cloud tracing is disabled"),
+    );
+
+    await (provider as NodeTracerProvider | undefined)?.shutdown();
+  });
+
+  it("keeps LiveKit's supplied cloud upload gate on its owned provider", async () => {
+    const { global } = unusedProviders();
+    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
+    const setTracerProvider = vi.mocked(
+      compatibleTelemetry.setTracerProvider,
+    );
+    setTracerProvider.mockClear();
+    vi.spyOn(OTLPTraceExporter.prototype, "export").mockImplementation(
+      (_spans, callback) => callback({ code: 0 }),
+    );
+
+    monitorLiveKit(asJobContext(context()), {
+      endpoint: "https://api.egma.ai",
+      apiKey: PROJECT_KEY,
+    });
+    const options = setTracerProvider.mock.calls.at(-1)?.[1];
+    const createCloudSpanProcessor = options?.createCloudSpanProcessor;
+    if (createCloudSpanProcessor === undefined) {
+      throw new Error("monitorLiveKit did not provide a cloud processor factory");
+    }
+    const exportThroughGate = vi.fn<SpanExporter["export"]>(
+      (_spans, callback) => callback({ code: 0 }),
+    );
+    const uploadGate: SpanExporter = {
+      export: exportThroughGate,
+      async shutdown() {},
+    };
+    const cloudProcessor = createCloudSpanProcessor({
+      url: "https://example.livekit.cloud/observability/traces/otlp/v0",
+      headers: { authorization: "Bearer livekit" },
+      exporter: uploadGate,
+    });
+    const provider = new NodeTracerProvider({
+      spanProcessors: [cloudProcessor],
+    });
+    provider.getTracer("proof").startSpan("gated-cloud-span").end();
+    await provider.forceFlush();
+
+    expect(exportThroughGate).toHaveBeenCalledOnce();
+
+    await provider.shutdown();
+  });
 });
+
+describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
+  "monitorLiveKit without LiveKit shared telemetry",
+  () => {
+    it("keeps an Egma simulation inert before checking telemetry support", () => {
+      const warning = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const ctx = context("egma-sim-legacy");
+
+      expect(() => monitorLiveKit(asJobContext(ctx))).not.toThrow();
+      expect(ctx.callbacks).toHaveLength(0);
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("not exported"),
+      );
+    });
+
+    it("names the minimum LiveKit version for production monitoring", () => {
+      expect(() => monitorLiveKit(asJobContext(context()))).toThrow(
+        /@livekit\/agents>=1\.5\.5/u,
+      );
+    });
+  },
+);
 
 describe("configuration", () => {
   it.each([
@@ -418,7 +572,7 @@ describe("configuration", () => {
 });
 
 describe("the public helper and real exporter", () => {
-  it("flushes a LiveKit tracer span as authenticated OTLP protobuf", async () => {
+  it.runIf(SUPPORTS_SHARED_TELEMETRY)("flushes a LiveKit tracer span as authenticated OTLP protobuf", async () => {
     let server: Server | undefined;
     const received = new Promise<{
       method: string | undefined;
