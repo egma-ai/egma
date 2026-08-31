@@ -2927,6 +2927,9 @@ describe("the complete product, walked in order in a second project", () => {
       );
       const handoff = walk.getByRole("dialog", { name: "Connect an agent" });
       await handoff.waitFor();
+      await handoff
+        .getByRole("heading", { level: 3, name: "Simulation" })
+        .waitFor();
       expect(
         await handoff.getByRole("heading", { level: 3 }).allInnerTexts(),
       ).toEqual(["Simulation", "Monitoring", "Both"]);
@@ -3150,6 +3153,9 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(`${at("agents", "new")}?goal=monitoring&platform=livekit`);
       const sheet = walk.getByRole("dialog", { name: "Connect an agent" });
       await sheet.waitFor();
+      await sheet
+        .getByRole("heading", { level: 3, name: "Simulation" })
+        .waitFor();
       expect(
         await sheet.getByRole("heading", { level: 3 }).allInnerTexts(),
         "an old narrowed link still offers all three current outcomes",
