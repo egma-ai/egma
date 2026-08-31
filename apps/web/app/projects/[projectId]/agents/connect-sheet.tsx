@@ -5,6 +5,7 @@ import {
   addConnection,
   discoverAgents,
   getAgent,
+  listAgents,
   listConnectionOptions,
   registerAgent,
   startMonitoring,
@@ -92,6 +93,10 @@ export type ConnectSheetResult = {
 
 export type ConnectAgentGoal = AgentSetupGoal;
 export type ConnectAgentPlatform = AgentSetupPlatform;
+export type RetellRecovery = {
+  readonly agentId: string | null;
+  readonly platformAgentId: string;
+};
 
 type ConnectionBody = NonNullable<
   Parameters<typeof registerAgent>[0]["connection"]
@@ -132,8 +137,10 @@ type ConnectAgentSheetProps = {
   readonly platform?: ConnectAgentPlatform;
   readonly mayAuthor: boolean;
   readonly role: string | null;
+  readonly retellRecovery: RetellRecovery | null;
   readonly onClose: () => void;
   readonly onConnected: (result: ConnectSheetResult) => void;
+  readonly onRecoveryNeeded: (recovery: RetellRecovery) => void;
 };
 
 const NEW_AGENT = "";
@@ -188,8 +195,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     platform: initialPlatform,
     mayAuthor,
     role,
+    retellRecovery,
     onClose,
     onConnected,
+    onRecoveryNeeded,
   } = props;
   const draftNavigation = useDraftNavigation();
 
@@ -645,7 +654,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       return {
         agentId: answer.value.agent.id,
         connectionId: answer.value.connection?.id ?? null,
-        created: true,
+        created: answer.value.result === "created",
       };
     }
 
@@ -742,6 +751,27 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     if (goal === "" || selectedRetellAgent === undefined) return;
     if (lanesToSave.length === 0) return;
 
+    const requestedLanes: Array<{
+      readonly body: ConnectionBody;
+      readonly pullsProduction: boolean;
+    }> = [];
+    for (const lane of lanesToSave) {
+      const candidate = retellCandidateForLane(
+        selectedRoutes,
+        lane,
+        retellRoute,
+      );
+      if (candidate === undefined) return;
+      const option = optionNamed(catalog, candidate);
+      if (option === undefined) return;
+      const pullsProduction =
+        plan?.pullWithConnection === true && lane === "phone";
+      requestedLanes.push({
+        body: connectionBody(option, candidate, pullsProduction),
+        pullsProduction,
+      });
+    }
+
     const resumesStoredMonitoring =
       goal !== "simulation" &&
       storedRetellKey &&
@@ -758,16 +788,77 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       retellProgress?.signature === retellSaveSignature
         ? retellProgress
         : null;
-    const existingLanding =
+    const explicitLanding =
       agentId === undefined || agentId === NEW_AGENT
         ? null
         : { agentId, connectionId: null, created: false };
+    const recoveryLanding =
+      retellRecovery !== null &&
+      retellRecovery.platformAgentId ===
+        selectedRetellAgent.platformAgentId &&
+      retellRecovery.agentId !== null
+        ? {
+            agentId: retellRecovery.agentId,
+            connectionId: null,
+            created: false,
+          }
+        : null;
+    const exactLandings = (
+      listed: readonly ListedAgentWithConnections[],
+    ): readonly ListedAgentWithConnections[] =>
+      listed.filter(
+        (one) =>
+          one.agentPlatform === "retell" &&
+          one.platformAgentId === selectedRetellAgent.platformAgentId &&
+          one.connections.some((stored) =>
+            requestedLanes.some(({ body }) => sameConnection(stored, body)),
+          ),
+      );
+    let listedLandings =
+      saved !== null || explicitLanding !== null || recoveryLanding !== null
+        ? []
+        : exactLandings(agents);
+    if (
+      saved === null &&
+      explicitLanding === null &&
+      recoveryLanding === null &&
+      listedLandings.length === 0 &&
+      retellRecovery?.platformAgentId ===
+        selectedRetellAgent.platformAgentId
+    ) {
+      setSaving(true);
+      setRefused(null);
+      const answer = await platformAnswer(
+        listAgents({ projectId }, { client: platformClient }),
+      );
+      setSaving(false);
+      if (!finishAnswer(answer)) return;
+      listedLandings = exactLandings(answer.value.agents);
+    }
+    if (listedLandings.length > 1) {
+      setRefused({
+        error: "unprocessable",
+        message:
+          "More than one Egma agent already has this Retell setup. Open the agent you want to finish, then try again.",
+      });
+      return;
+    }
+    const listedLanding = listedLandings[0];
     let landed: ConnectSheetResult | null =
-      saved?.landed ?? existingLanding;
-    const firstUnsavedLane = saved?.completedLanes ?? 0;
+      saved?.landed ??
+      explicitLanding ??
+      recoveryLanding ??
+      (listedLanding === undefined
+        ? null
+        : {
+            agentId: listedLanding.id,
+            connectionId: null,
+            created: false,
+          });
     let retryConnections: readonly ListedConnection[] = [];
     let retryPullEnabled = false;
-    if (saved !== null && landed !== null) {
+    let readReusedLanding = false;
+    if (landed !== null) {
       setSaving(true);
       setRefused(null);
       const answer = await platformAnswer(
@@ -781,23 +872,42 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       retryConnections = answer.value.connections;
       retryPullEnabled = answer.value.agent.pullProductionCalls;
     }
-    for (const [index, lane] of lanesToSave.entries()) {
-      if (index < firstUnsavedLane) continue;
-      const candidate = retellCandidateForLane(selectedRoutes, lane, retellRoute);
-      if (candidate === undefined) return;
-      const option = optionNamed(catalog, candidate);
-      if (option === undefined) return;
-      const pullsProduction =
-        plan?.pullWithConnection === true && lane === "phone";
-      const body = connectionBody(option, candidate, pullsProduction);
+    for (const [index, { body, pullsProduction }] of requestedLanes.entries()) {
+      if (readReusedLanding && landed !== null) {
+        setSaving(true);
+        setRefused(null);
+        const answer = await platformAnswer(
+          getAgent(
+            { agentId: landed.agentId, projectId },
+            { client: platformClient },
+          ),
+        );
+        setSaving(false);
+        if (!finishAnswer(answer)) return;
+        retryConnections = answer.value.connections;
+        retryPullEnabled = answer.value.agent.pullProductionCalls;
+        readReusedLanding = false;
+      }
       /*
        * A provider write can commit while its HTTP response is lost. On a
-       * retry, read the landed agent first and accept the exact lane already
-       * there instead of issuing the non-idempotent POST a second time.
+       * retry or reopen, accept the exact lane already there instead of
+       * issuing the non-idempotent POST a second time. `retellProgress` only
+       * explains partial work in the UI; the server read decides what exists.
        */
       const committed = retryConnections.find((one) =>
         sameConnection(one, body),
       );
+      if (committed !== undefined && landed !== null) {
+        onRecoveryNeeded({
+          agentId: landed.agentId,
+          platformAgentId: selectedRetellAgent.platformAgentId,
+        });
+        setRetellProgress({
+          signature: retellSaveSignature,
+          completedLanes: index + 1,
+          landed,
+        });
+      }
       if (
         committed !== undefined &&
         pullsProduction &&
@@ -819,24 +929,37 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           landed,
         });
       }
-      const result =
-        committed !== undefined
-          ? {
-              agentId: landed?.agentId ?? committed.agentId,
-              connectionId: committed.id,
-              created: landed?.created ?? false,
-            }
-          : await saveConnection(
-              selectedRetellAgent.name,
-              body,
-              landed?.agentId,
-            );
+      let result: ConnectSheetResult | null;
+      if (committed !== undefined) {
+        result = {
+          agentId: landed?.agentId ?? committed.agentId,
+          connectionId: committed.id,
+          created: landed?.created ?? false,
+        };
+      } else {
+        // The request may commit even when its answer never reaches this tab.
+        // Keep the parent screen in recovery mode before the write begins so
+        // Close, retry, or a filtered list cannot turn that uncertainty into a
+        // second non-idempotent request.
+        onRecoveryNeeded({
+          agentId: landed?.agentId ?? null,
+          platformAgentId: selectedRetellAgent.platformAgentId,
+        });
+        result = await saveConnection(
+          selectedRetellAgent.name,
+          body,
+          landed?.agentId,
+        );
+      }
       if (result === null) return;
+      const landedBeforeThisLane = landed;
       landed = {
         ...result,
         agentId: landed === null ? result.agentId : landed.agentId,
         created: landed?.created ?? result.created,
       };
+      readReusedLanding =
+        landedBeforeThisLane === null && result.created === false;
       const progress = {
         signature: retellSaveSignature,
         completedLanes: index + 1,

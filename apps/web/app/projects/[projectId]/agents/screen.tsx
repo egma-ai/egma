@@ -43,6 +43,7 @@ import {
   ConnectAgentSheet,
   type ConnectAgentGoal,
   type ConnectAgentPlatform,
+  type RetellRecovery,
 } from "./connect-sheet.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
 import { MockToolsSheet } from "./mock-tools-sheet.tsx";
@@ -164,6 +165,9 @@ export function AgentsScreen({
   const [renaming, setRenaming] = useState<ListedAgentWithConnections | null>(null);
   /** The agent whose mocked world is being explained and ticked. */
   const [mocking, setMocking] = useState<ListedAgentWithConnections | null>(null);
+  /** A Retell write whose answer may have been lost, kept across sheet Close. */
+  const [retellRecovery, setRetellRecovery] =
+    useState<RetellRecovery | null>(null);
 
   const carried = after !== null && after.project === projectId ? after.page : null;
 
@@ -172,6 +176,7 @@ export function AgentsScreen({
 
   useEffect(() => {
     showing.current = projectId;
+    setRetellRecovery(null);
     setAfter(null);
     setMoreRefused(null);
     setLoadingMore(false);
@@ -623,8 +628,24 @@ export function AgentsScreen({
           {...(sheet.platform === undefined ? {} : { platform: sheet.platform })}
           mayAuthor={mayAuthor}
           role={role}
-          onClose={close}
+          retellRecovery={retellRecovery}
+          onRecoveryNeeded={(next) =>
+            setRetellRecovery((current) =>
+              next.agentId === null &&
+              current?.platformAgentId === next.platformAgentId
+                ? current
+                : next,
+            )
+          }
+          onClose={() => {
+            close();
+            // A write can commit after the browser loses its answer. Refresh
+            // the list before the next setup opens so it can reconcile from
+            // the saved agent instead of trusting sheet-local retry state.
+            if (retellRecovery !== null) refresh();
+          }}
           onConnected={() => {
+            setRetellRecovery(null);
             /*
              * **A save closes onto the list, and nothing navigates.**
              *

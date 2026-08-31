@@ -2136,37 +2136,42 @@ describe("goal-first agent setup", () => {
     ).toHaveLength(1);
   });
 
-  it("starts pulling on a committed phone lane instead of adding the phone again", async () => {
+  it("keeps a committed phone lane through Close and resumes monitoring after reopen", async () => {
     routed.search = "?sheet=connect&agent=agt_1";
+    const emptyAgent = {
+      status: 200,
+      body: {
+        agent: {
+          ...AGENT,
+          platformAgentId: "agent_voice_1",
+        },
+        connections: [],
+      },
+    };
+    const committedAgent = {
+      status: 200,
+      body: {
+        agent: {
+          ...AGENT,
+          platformAgentId: "agent_voice_1",
+          pullProductionCalls: false,
+        },
+        connections: [
+          {
+            ...MEASURED_CONNECTION,
+            agentId: "agt_1",
+            config: { phoneNumber: "+14155550100" },
+          },
+        ],
+      },
+    };
     sheetAnswers({
       "/v1/agents/agt_1": [
-        {
-          status: 200,
-          body: {
-            agent: {
-              ...AGENT,
-              platformAgentId: "agent_voice_1",
-            },
-            connections: [],
-          },
-        },
-        {
-          status: 200,
-          body: {
-            agent: {
-              ...AGENT,
-              platformAgentId: "agent_voice_1",
-              pullProductionCalls: false,
-            },
-            connections: [
-              {
-                ...MEASURED_CONNECTION,
-                agentId: "agt_1",
-                config: { phoneNumber: "+14155550100" },
-              },
-            ],
-          },
-        },
+        emptyAgent,
+        emptyAgent,
+        committedAgent,
+        committedAgent,
+        committedAgent,
       ],
       "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
       "/v1/agents/agt_1/connections": {
@@ -2176,20 +2181,29 @@ describe("goal-first agent setup", () => {
           message: "The phone may have been saved. Try again.",
         },
       },
-      "/v1/monitoring/start": {
-        status: 200,
-        body: {
-          watching: [
-            {
-              agentId: "agt_1",
-              platformAgentId: "agent_voice_1",
-            },
-          ],
-          refused: [],
+      "/v1/monitoring/start": [
+        {
+          status: 503,
+          body: {
+            error: "provider_unavailable",
+            message: "Monitoring did not start. Try again.",
+          },
         },
-      },
+        {
+          status: 200,
+          body: {
+            watching: [
+              {
+                agentId: "agt_1",
+                platformAgentId: "agent_voice_1",
+              },
+            ],
+            refused: [],
+          },
+        },
+      ],
     });
-    render(<AgentsPage />);
+    const firstOpen = render(<AgentsPage />);
     await choose("Set up both", "Retell");
     await findRetellAgents();
     await pickRetellAgent("Front desk");
@@ -2199,6 +2213,36 @@ describe("goal-first agent setup", () => {
       await screen.findByText("The phone may have been saved. Try again."),
     ).toBeDefined();
 
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    expect(
+      await screen.findByText("Monitoring did not start. Try again."),
+    ).toBeDefined();
+
+    const close = screen.getAllByRole("button", { name: "Close" }).at(-1);
+    if (close === undefined) {
+      throw new Error("the setup sheet has no close button");
+    }
+    fireEvent.click(close);
+    const warning = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    fireEvent.click(
+      within(warning).getByRole("button", { name: "Discard changes" }),
+    );
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+    routed.search = "";
+    firstOpen.rerender(<AgentsPage />);
+    expect(
+      await screen.findByText("No agents in this project yet"),
+    ).toBeDefined();
+    routed.search = "?sheet=connect";
+    firstOpen.rerender(<AgentsPage />);
+
+    await choose("Set up both", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
     fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
     await waitFor(() => {
       expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
@@ -2214,14 +2258,117 @@ describe("goal-first agent setup", () => {
           call.method === "POST" &&
           call.url.startsWith("/v1/monitoring/start"),
       ),
+    ).toHaveLength(2);
+    for (const start of sent.filter((call) =>
+      call.url.startsWith("/v1/monitoring/start"),
+    )) {
+      expect(start.body).toEqual({
+        agentPlatform: "retell",
+        apiKey: "retell-secret-A1B2C3D4WXYZ",
+        watch: [{ agentId: "agt_1", platformAgentId: "agent_voice_1" }],
+      });
+    }
+  });
+
+  it("recovers a new agent's committed phone from the refreshed list after Close", async () => {
+    routed.search = "?sheet=connect";
+    const recoveredAgent = {
+      ...AGENT,
+      id: "agt_recovered",
+      platformAgentId: "agent_voice_1",
+      connections: [
+        {
+          ...MEASURED_CONNECTION,
+          agentId: "agt_recovered",
+          config: { phoneNumber: "+14155550100" },
+        },
+      ],
+    };
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 503,
+          body: {
+            error: "response_lost",
+            message: "The phone may have been saved. Try again.",
+          },
+        },
+        {
+          status: 200,
+          body: { agents: [], nextPageToken: null },
+        },
+        {
+          status: 200,
+          body: { agents: [recoveredAgent], nextPageToken: null },
+        },
+      ],
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
+      "/v1/agents/agt_recovered": {
+        status: 200,
+        body: {
+          agent: recoveredAgent,
+          connections: recoveredAgent.connections,
+        },
+      },
+      "/v1/monitoring/start": {
+        status: 200,
+        body: {
+          watching: [
+            {
+              agentId: "agt_recovered",
+              platformAgentId: "agent_voice_1",
+            },
+          ],
+          refused: [],
+        },
+      },
+    });
+    const firstOpen = render(<AgentsPage />);
+    await choose("Set up both", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    expect(
+      await screen.findByText("The phone may have been saved. Try again."),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const warning = await screen.findByRole("dialog", {
+      name: "Leave without saving?",
+    });
+    fireEvent.click(
+      within(warning).getByRole("button", { name: "Discard changes" }),
+    );
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+    routed.search = "";
+    firstOpen.rerender(<AgentsPage />);
+    expect(
+      await screen.findByText("No agents in this project yet"),
+    ).toBeDefined();
+    routed.search = "?sheet=connect";
+    firstOpen.rerender(<AgentsPage />);
+
+    await choose("Set up both", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+
+    expect(
+      sent.filter(
+        (call) => call.method === "POST" && call.url.startsWith("/v1/agents?"),
+      ),
     ).toHaveLength(1);
     expect(
-      sent.find((call) => call.url.startsWith("/v1/monitoring/start"))?.body,
-    ).toEqual({
-      agentPlatform: "retell",
-      apiKey: "retell-secret-A1B2C3D4WXYZ",
-      watch: [{ agentId: "agt_1", platformAgentId: "agent_voice_1" }],
-    });
+      sent.filter((call) =>
+        call.url.startsWith("/v1/monitoring/start"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("takes a Simulation voice agent to the phone picker only when Phone call is picked", async () => {
