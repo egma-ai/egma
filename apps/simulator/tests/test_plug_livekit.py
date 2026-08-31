@@ -31,7 +31,7 @@ import socket
 import sys
 from array import array
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -178,8 +178,10 @@ async def test_room_transport_loss_is_not_remote_participant_departure(
         def __init__(self) -> None:
             self._audio_queue: asyncio.Queue[object] = asyncio.Queue()
             self._audio_streams: dict[str, object] = {}
-            self._audio_tracks: dict[str, object] = {}
             self._callbacks = EventCallbacks()
+
+        async def setup(self, _setup: object) -> None:
+            raise AssertionError("the pinned drain wrapper was not installed")
 
         async def get_next_audio_frame(self):
             raise AssertionError("the pinned drain wrapper was not installed")
@@ -461,7 +463,6 @@ class ScriptedPublisher:
 
     def __init__(self, sid: str) -> None:
         self.sid = sid
-        self.identity = sid
 
 
 class DisposalCount:
@@ -475,12 +476,15 @@ class DisposalCount:
         self.disposals += 1
 
 
-def scripted_audio_stream() -> Any:
+def scripted_audio_stream(*, ends_at: object = None) -> Any:
     """A LiveKit audio stream with a queue and nothing native behind it.
 
-    The same stand-in the drain tests above build, and the only thing
-    stood in for: what reads it, keys it, mixes it and hands it on is
-    egma's own code against the installed Pipecat.
+    The one stand-in these suites use, and the only thing stood in for:
+    what reads it, keys it, mixes it and hands it on is egma's own code
+    against the installed Pipecat. ``ends_at`` is the future the native
+    reader would have been waiting on — a finished one for a stream that
+    is already over, and a pending one for a close that has to be waited
+    out.
     """
     from livekit import rtc
     from livekit.rtc._utils import RingQueue
@@ -494,10 +498,29 @@ def scripted_audio_stream() -> Any:
     stream._track = None
     stream._ffi_handle = DisposalCount()
     stream._processor = None
-    finished = asyncio.get_running_loop().create_future()
-    finished.set_result(None)
-    stream._task = finished
+    if ends_at is None:
+        ends_at = asyncio.get_running_loop().create_future()
+        ends_at.set_result(None)
+    stream._task = ends_at
     return stream
+
+
+def only_the_mix_format(streams: dict[str, Any]) -> Callable[..., Any]:
+    """Hand back a scripted stream, and pin what the room asked for.
+
+    The room asks LiveKit for one rate and one channel count by name — a
+    request, not a default it inherits — and that request is the whole
+    reason the mix is arithmetic. Checked right here, where the ask is
+    made, so deleting it from the driver fails these tests rather than
+    quietly changing what two tracks add up to.
+    """
+
+    def built(track: Any, **asked: Any) -> Any:
+        assert asked.get("sample_rate") == MIX_SAMPLE_RATE, asked
+        assert asked.get("num_channels") == MIX_CHANNELS, asked
+        return streams[track.sid]
+
+    return built
 
 
 def a_tone(value: int, *, samples: int = 160) -> Any:
@@ -539,6 +562,12 @@ a deadline that cannot be flaky on a loaded machine and cannot be slow on
 a fast one. A reader needs about two turns per frame.
 """
 
+TURNS_PAST_A_FRAME = 10
+"""Turns given to a reader after its queue is empty, to get past the frame
+it just took. Small because there is nothing to wait for — the reader has
+no await between taking a frame and finishing with it — and generous
+enough that it cannot be the reason a test fails."""
+
 
 async def settled(ready: Callable[[], bool], *, why: str) -> None:
     """Let the room's readers run until something is true of them."""
@@ -560,7 +589,7 @@ async def taken_from(stream: Any) -> None:
     )
     # And past the reader's own turn, so a frame that only buffers has
     # reached the mix before the next one is put on the clocking track.
-    for _ in range(10):
+    for _ in range(TURNS_PAST_A_FRAME):
         await asyncio.sleep(0)
 
 
@@ -575,27 +604,68 @@ async def reached_the_persona(client: Any) -> tuple[Any, str]:
     return carried, who
 
 
-class RoomWithNobodyElse:
-    """The rtc room Pipecat reads back inside its own subscribe callback.
+class ScriptedRtcRoom:
+    """The ``rtc.Room`` under the pinned client, with no LiveKit behind it.
 
-    Pipecat 1.7.0 answers a subscribed audio track by looking the
-    participant up and re-subscribing every audio publication it finds —
+    Two jobs. It is what Pipecat reads back inside its own subscribe
+    callback — 1.7.0 answers a subscribed audio track by looking the
+    participant up and re-subscribing every audio publication it finds,
     against ``participant.audio_tracks``, which LiveKit 1.1.14 does not
-    have. An empty room is what stops that callback before it reaches the
+    have; an empty room stops that callback before it reaches the
     attribute, so these tests exercise egma's handler rather than a
     traceback out of the pinned package.
+
+    And it is where the mute events live. Egma registers for them here
+    because Pipecat does not, and :meth:`mute` fires one the way LiveKit
+    fires it — the participant first and the publication second, which is
+    the opposite order from the subscribe events and the one thing a fake
+    here must not quietly get right by accident.
     """
 
-    remote_participants: dict[str, object] = {}
+    def __init__(self) -> None:
+        self.remote_participants: dict[str, object] = {}
+        self.handlers: dict[str, Any] = {}
+
+    def on(self, event: str) -> Any:
+        def keep(handler: Any) -> Any:
+            self.handlers[event] = handler
+            return handler
+
+        return keep
+
+    def mute(self, participant: Any, publication: Any) -> None:
+        self.handlers["track_muted"](participant, publication)
+
+    def unmute(self, participant: Any, publication: Any) -> None:
+        self.handlers["track_unmuted"](participant, publication)
 
 
-def a_joined_room() -> tuple[JoinedRoom, Any]:
-    """One room, and the pinned LiveKit client its transport stands on."""
+@dataclass(frozen=True)
+class AJoinedRoom:
+    """One room under test, and the parts of it a test reaches for."""
+
+    room: JoinedRoom
+    media: Any
+    client: Any
+
+    @property
+    def input(self) -> Any:
+        return self.media.input[0]
+
+
+def a_joined_room() -> AJoinedRoom:
+    """One room, its transport, and the pinned LiveKit client under it.
+
+    The ``rtc.Room`` is stood in for and the mute handlers are registered
+    on it the way production registers them — through the drain's own
+    :meth:`watch_mutes`, which Pipecat's ``setup`` calls for real.
+    """
     room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
     media = room.create_transport()
     client = media.input[0]._client
-    client._room = RoomWithNobodyElse()
-    return room, client
+    client._room = ScriptedRtcRoom()
+    room._input_drain.watch_mutes()
+    return AJoinedRoom(room=room, media=media, client=client)
 
 
 async def test_one_audio_track_reaches_the_persona_exactly_as_it_arrived(
@@ -610,10 +680,11 @@ async def test_one_audio_track_reaches_the_persona_exactly_as_it_arrived(
     """
     from livekit import rtc
 
-    _room, client = a_joined_room()
+    joined = a_joined_room()
+    client = joined.client
     only = ScriptedTrack("TR_0001")
     stream = scripted_audio_stream()
-    monkeypatch.setattr(rtc, "AudioStream", lambda _track, **_rest: stream)
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format({only.sid: stream}))
     speaker = ScriptedPublisher("PA_agent")
 
     await client._async_on_track_subscribed(only, only, speaker)
@@ -646,12 +717,13 @@ async def test_two_audio_tracks_from_one_participant_are_one_mixed_stream(
     """
     from livekit import rtc
 
-    _room, client = a_joined_room()
+    joined = a_joined_room()
+    client = joined.client
     speaker = ScriptedPublisher("PA_agent")
     one = ScriptedTrack("TR_0001")
     other = ScriptedTrack("TR_0002")
     streams = {one.sid: scripted_audio_stream(), other.sid: scripted_audio_stream()}
-    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
 
     await client._async_on_track_subscribed(one, one, speaker)
     await client._async_on_track_subscribed(other, other, speaker)
@@ -687,7 +759,8 @@ async def test_a_track_that_arrives_mid_call_joins_the_mix(
     """
     from livekit import rtc
 
-    _room, client = a_joined_room()
+    joined = a_joined_room()
+    client = joined.client
     speaker = ScriptedPublisher("PA_agent")
     speaking = ScriptedTrack("TR_0001")
     later = ScriptedTrack("TR_0002")
@@ -695,7 +768,7 @@ async def test_a_track_that_arrives_mid_call_joins_the_mix(
         speaking.sid: scripted_audio_stream(),
         later.sid: scripted_audio_stream(),
     }
-    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
 
     await client._async_on_track_subscribed(speaking, speaking, speaker)
     streams[speaking.sid]._queue.put(a_tone(100))
@@ -732,7 +805,8 @@ async def test_a_track_that_runs_out_hands_the_room_on_instead_of_muting_it(
     """
     from livekit import rtc
 
-    _room, client = a_joined_room()
+    joined = a_joined_room()
+    client = joined.client
     speaker = ScriptedPublisher("PA_agent")
     first = ScriptedTrack("TR_0001")
     second = ScriptedTrack("TR_0002")
@@ -740,7 +814,7 @@ async def test_a_track_that_runs_out_hands_the_room_on_instead_of_muting_it(
         first.sid: scripted_audio_stream(),
         second.sid: scripted_audio_stream(),
     }
-    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
 
     await client._async_on_track_subscribed(first, first, speaker)
     await client._async_on_track_subscribed(second, second, speaker)
@@ -763,6 +837,266 @@ async def test_a_track_that_runs_out_hands_the_room_on_instead_of_muting_it(
     carried, who = await reached_the_persona(client)
     assert heard(carried) == [7] * 160
     assert who == speaker.sid
+
+
+async def test_a_muted_lead_hands_the_room_on_instead_of_deafening_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The publisher mutes the track the room is clocked by.
+
+    Publishing only while speaking is an ordinary pattern, and a mute is
+    not the end of a track: nothing is unsubscribed and the stream never
+    ends, so a mix that only handed the clock on at those two events would
+    hold it forever. The persona would then hear nothing while the other
+    track published — this lane's own defect by a second door, and one
+    that ends the run as a silent agent.
+
+    LiveKit publishes the mute; Pipecat 1.7.0 registers no handler for it,
+    so the room does.
+    """
+    from livekit import rtc
+
+    joined = a_joined_room()
+    client = joined.client
+    speaker = ScriptedPublisher("PA_agent")
+    speaking = ScriptedTrack("TR_0001")
+    ambience = ScriptedTrack("TR_0002")
+    streams = {
+        speaking.sid: scripted_audio_stream(),
+        ambience.sid: scripted_audio_stream(),
+    }
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
+
+    await client._async_on_track_subscribed(speaking, speaking, speaker)
+    await client._async_on_track_subscribed(ambience, ambience, speaker)
+    assert client._room.handlers.keys() >= {"track_muted", "track_unmuted"}
+
+    # The publisher mutes the track that was clocking the room. Nothing is
+    # closed: a mute is a pause, and the reader is still there for it.
+    client._room.mute(speaker, speaking)
+    assert streams[speaking.sid]._ffi_handle.disposals == 0
+    assert len(client._audio_streams) == 2
+
+    # The other track clocks the room now, and is heard.
+    streams[ambience.sid]._queue.put(a_tone(7))
+    await taken_from(streams[ambience.sid])
+    carried, who = await reached_the_persona(client)
+    assert heard(carried) == [7] * 160
+    assert who == speaker.sid
+
+    # Whatever the muted track still sends is dropped rather than mixed:
+    # its publisher meant it not to be heard.
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+    streams[ambience.sid]._queue.put(a_tone(7))
+    await taken_from(streams[ambience.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [7] * 160
+
+    # Unmuted, it is live again — and joins under the track that took the
+    # clock rather than taking it back, so only one track ever clocks.
+    client._room.unmute(speaker, speaking)
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+    streams[ambience.sid]._queue.put(a_tone(7))
+    await taken_from(streams[ambience.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [107] * 160
+    assert client._audio_queue.empty(), "one track clocks the room, never two"
+
+
+async def test_what_a_track_buffered_is_carried_out_after_it_goes_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A track that stops leading still owes the room what it buffered.
+
+    Real audio the agent published, already read off the wire and waiting
+    for a frame to ride out on. Dropping it on the mute would lose a
+    stretch of the conversation that egma had in its hand.
+    """
+    from livekit import rtc
+
+    joined = a_joined_room()
+    client = joined.client
+    speaker = ScriptedPublisher("PA_agent")
+    speaking = ScriptedTrack("TR_0001")
+    ambience = ScriptedTrack("TR_0002")
+    streams = {
+        speaking.sid: scripted_audio_stream(),
+        ambience.sid: scripted_audio_stream(),
+    }
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
+
+    await client._async_on_track_subscribed(speaking, speaking, speaker)
+    await client._async_on_track_subscribed(ambience, ambience, speaker)
+
+    # The ambient track buffers a frame, and is then muted before any lead
+    # frame has carried it.
+    streams[ambience.sid]._queue.put(a_tone(7))
+    await taken_from(streams[ambience.sid])
+    client._room.mute(speaker, ambience)
+
+    # The lead's next frame still carries it out.
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [107] * 160
+
+    # And once carried, it is gone: the frame after is the lead's alone.
+    streams[speaking.sid]._queue.put(a_tone(100))
+    await taken_from(streams[speaking.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [100] * 160
+
+
+async def test_the_mix_holds_a_hot_sum_to_the_ends_of_the_format(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Two loud tracks add past what a 16-bit sample can hold.
+
+    Held at the end they went past, never wrapped round to the opposite
+    sign — which is silence turning into a click, and the one arithmetic
+    mistake in a mixer a listener hears immediately.
+    """
+    from livekit import rtc
+
+    joined = a_joined_room()
+    client = joined.client
+    speaker = ScriptedPublisher("PA_agent")
+    one = ScriptedTrack("TR_0001")
+    other = ScriptedTrack("TR_0002")
+    streams = {one.sid: scripted_audio_stream(), other.sid: scripted_audio_stream()}
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format(streams))
+
+    await client._async_on_track_subscribed(one, one, speaker)
+    await client._async_on_track_subscribed(other, other, speaker)
+
+    streams[other.sid]._queue.put(a_tone(20000))
+    await taken_from(streams[other.sid])
+    streams[one.sid]._queue.put(a_tone(20000))
+    await taken_from(streams[one.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [32767] * 160, "40000 is held at the ceiling"
+
+    streams[other.sid]._queue.put(a_tone(-20000))
+    await taken_from(streams[other.sid])
+    streams[one.sid]._queue.put(a_tone(-20000))
+    await taken_from(streams[one.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [-32768] * 160, "-40000 is held at the floor"
+
+
+async def test_a_departure_waits_for_an_unsubscribe_already_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The agent unsubscribes a track and leaves in the same breath.
+
+    A stream is taken out of the registry before its close is awaited, so
+    a departure that looked only at the registry would find nothing to
+    wait for and announce the participant gone over audio still on its way
+    into the pipeline. The departure has to wait for the close that is
+    already running.
+    """
+    from livekit import rtc
+
+    joined = a_joined_room()
+    client = joined.client
+    speaker = ScriptedPublisher("PA_agent")
+    going = ScriptedTrack("TR_0001")
+    closing = asyncio.Event()
+    let_it_close = asyncio.Event()
+
+    stream = scripted_audio_stream()
+
+    async def blocked_aclose() -> None:
+        """A close that is under way and has not finished.
+
+        It ends the stream's queue on its way out, the way a real
+        ``aclose`` does — the native side puts the end marker, and the
+        reader stops on it. Holding that back would be a stream that never
+        ends rather than a close that is slow.
+        """
+        closing.set()
+        await let_it_close.wait()
+        stream._queue.put(None)
+
+    stream.aclose = blocked_aclose
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format({going.sid: stream}))
+    await client._async_on_track_subscribed(going, going, speaker)
+
+    markers: list[object] = []
+
+    async def catch_marker(frame: object, *_args: object) -> None:
+        markers.append(frame)
+        frame.completed.set()
+
+    joined.input._audio_in_queue = asyncio.Queue()
+    joined.input.push_frame = catch_marker
+
+    # The unsubscribe is under way and stuck inside the close, which is
+    # exactly when the key has already left the registry.
+    unsubscribing = asyncio.create_task(
+        client._async_on_track_unsubscribed(going, going, speaker)
+    )
+    await asyncio.wait_for(closing.wait(), timeout=2.0)
+    assert not any(going.sid in key for key in client._audio_streams), (
+        "the close takes the key out of the registry before it awaits, "
+        "which is the whole trap this test is about"
+    )
+    assert not markers
+
+    # The participant leaves while that close is still running.
+    ended = asyncio.Event()
+    departing = asyncio.create_task(
+        joined.room._input_drain.participant_left(speaker.sid, ended)
+    )
+    for _ in range(TURNS_PAST_A_FRAME):
+        await asyncio.sleep(0)
+    assert not markers, "the departure ran ahead of a close still in flight"
+    assert not ended.is_set()
+
+    let_it_close.set()
+    await asyncio.wait_for(asyncio.gather(unsubscribing, departing), timeout=2.0)
+    assert len(markers) == 1
+    assert ended.is_set()
+
+
+async def test_a_reader_that_broke_still_lets_its_track_be_torn_down(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A reader raising must not stop the unsubscribe half-done.
+
+    Pipecat's own task manager swallowed reader errors; the readers here
+    are plain tasks, so the close absorbs them on purpose. The run still
+    fails — the reader recorded that — but the track is let go, and
+    Pipecat's own unsubscribed bookkeeping still runs.
+    """
+    from livekit import rtc
+
+    joined = a_joined_room()
+    client = joined.client
+    speaker = ScriptedPublisher("PA_agent")
+    broken = ScriptedTrack("TR_0001")
+    stream = scripted_audio_stream()
+    # Not a RingQueue: the reader refuses it and raises, which is what a
+    # LiveKit whose stream shape moved would really do.
+    stream._queue = object()
+    monkeypatch.setattr(rtc, "AudioStream", only_the_mix_format({broken.sid: stream}))
+
+    await client._async_on_track_subscribed(broken, broken, speaker)
+    key = next(iter(client._audio_streams))
+    _stream, reader = client._audio_streams[key]
+    with pytest.raises(RuntimeError):
+        await reader
+
+    assert joined.media.failed.is_set(), (
+        "a broken reader is still a lost media path"
+    )
+
+    # The teardown runs to the end rather than stopping on the reader:
+    # the track is let go, and Pipecat's own unsubscribed event fires.
+    await client._async_on_track_unsubscribed(broken, broken, speaker)
+    assert key not in client._audio_streams
 
 
 async def test_a_swallowed_reader_error_cannot_become_normal_departure():

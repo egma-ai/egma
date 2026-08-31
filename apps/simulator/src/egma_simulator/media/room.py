@@ -71,17 +71,20 @@ PIPECAT_VERSION = "1.7.0"
 LIVEKIT_VERSION = "1.1.14"
 QUOTED_REFUSAL_CHARS = 200
 
+# ``MIX_SAMPLE_RATE`` and ``MIX_CHANNELS`` are one fact in two names: the
+# single format every remote audio track is read and mixed at. The
+# docstring under them describes both.
 MIX_SAMPLE_RATE = 48000
 MIX_CHANNELS = 1
 """The one format every remote audio track is read and mixed at.
 
-LiveKit's own numbers, asked for by name rather than inherited: ``rtc.AudioStream``
-already normalises whatever a publisher sent to exactly these, on its
-native side, before a frame ever reaches Python. Naming them here is what
-makes the mix below arithmetic instead of a guess — every track arrives
-at the same rate and channel count, so adding two of them together is
-adding two lists of numbers, with no resampler in the path and no
-question about which of two rates the sum is in.
+LiveKit's own numbers, asked for by name rather than inherited:
+``rtc.AudioStream`` already normalises whatever a publisher sent to
+exactly these, on its native side, before a frame ever reaches Python.
+Naming them here is what makes the mix below arithmetic instead of a
+guess — every track arrives at the same rate and channel count, so adding
+two of them together is adding two lists of numbers, with no resampler in
+the path and no question about which of two rates the sum is in.
 
 They are also a pin. A LiveKit release that moved either default would
 otherwise move the mix under it silently; asked for by name, the room
@@ -100,8 +103,15 @@ audio a second old is no longer part of the conversation the persona is
 having.
 """
 
-LOUDEST = 32767
-QUIETEST = -32768
+INT16_CEILING = 32767
+INT16_FLOOR = -32768
+"""The two numbers a signed 16-bit sample cannot go past.
+
+Not a loudness policy — the representable ends of the format the room
+carries. A sum that goes outside them is held at the end it went past,
+because the alternative is wrapping a loud moment round to the opposite
+sign, which is a click where the loud moment was.
+"""
 
 
 def fresh_room_name() -> str:
@@ -206,25 +216,42 @@ class _RoomAudioMix:
     document backs, and the customer's production experience includes the
     background.
 
-    **One track clocks the room.** The earliest track still being read is
-    the *lead*: its frames are what the persona's pipeline is handed, one
-    for one, at their own cadence. Every other track buffers, and each of
-    the lead's frames takes as much of each backlog as it is long. That is
-    what keeps a room with two tracks worth exactly as much media time as
-    a room with one — the conductor reads every position out of the input
-    frames it is given, so a second track carried beside the first rather
-    than into it would make the whole conversation run at double speed.
+    **One track clocks the room.** The earliest track that is live — being
+    read, and not muted — is the *lead*: its frames are what the persona's
+    pipeline is handed, one for one, at their own cadence. Every other
+    track buffers, and each of the lead's frames takes as much of each
+    backlog as it is long. That is what keeps a room with two tracks worth
+    exactly as much media time as a room with one — the conductor reads
+    every position out of the input frames it is given, so a second track
+    carried beside the first rather than into it would make the whole
+    conversation run at double speed.
 
     **One track is a pass-through.** With nothing else in the room the
-    lead's frame is returned as it arrived — the same object, not copied,
-    not re-framed and not inspected. A phone call and an ordinary LiveKit
+    lead's frame is returned as it arrived: the same object, and no copy
+    of its audio is taken at all. A phone call and an ordinary LiveKit
     agent publish one track, so the lanes that already worked are
     untouched by this, byte for byte.
 
-    A track that turns up mid-call joins as a backing track from its first
-    frame. A lead that goes away hands the clock to whichever track was
-    registered next, and whatever it had buffered by then goes out with
-    its first frame as lead rather than being thrown away.
+    **The clock is handed on, never held.** A track that turns up mid-call
+    joins as a backing track from its first frame. A lead that goes quiet
+    for good — its stream ended, its publisher unsubscribed it, or its
+    publisher *muted* it — stops leading at once, and the earliest
+    remaining live track takes over. A lead that kept the clock while
+    muted would be a room the persona hears nothing in while another
+    track is publishing, which is this lane's own defect by a second
+    door.
+
+    **Nothing buffered is thrown away.** A track that stops leading keeps
+    whatever it had already buffered, and the new lead's frames carry it
+    out. Only an empty backlog is forgotten.
+
+    **The mix is one participant's.** Where two participants publish at
+    once their audio folds into the lead's frame and reaches the pipeline
+    under the *lead's* participant. That is the accepted cost of one
+    stream at one cadence, and it is a decision rather than an oversight:
+    egma conducts one agent under test, the persona has one ear, and
+    nothing downstream of here reads the participant for anything but a
+    label.
 
     One reader task per track calls in here, and nothing in it awaits.
     That is deliberate and it is what makes a lock unnecessary: a call
@@ -234,51 +261,95 @@ class _RoomAudioMix:
     """
 
     def __init__(self) -> None:
+        self._known: set[str] = set()
+        """Every track the mix has been told about and not been told is
+        over. A muted track is still known — that is what makes its own
+        frames droppable rather than mistaken for a track nobody
+        registered."""
         self._order: list[str] = []
-        """Every track being read, in the order it was subscribed. The
-        first is the lead, so the room's clock survives a track leaving."""
+        """Every *live* track, in the order it joined — known, and not
+        muted. The first leads, so the room's clock survives a track
+        going quiet or going away."""
         self._backlog: dict[str, bytearray] = {}
+        """Audio waiting to be carried, per track. A track keeps its entry
+        after it stops leading until the last of it has been carried, so
+        no buffered audio is lost to a mute or a departure."""
 
     def joined(self, key: str) -> None:
-        if key in self._backlog:
-            return
-        self._order.append(key)
-        self._backlog[key] = bytearray()
+        """One track is live: being read, and not muted."""
+        self._known.add(key)
+        if key not in self._order:
+            self._order.append(key)
+        self._backlog.setdefault(key, bytearray())
 
-    def left(self, key: str) -> None:
-        if key not in self._backlog:
-            return
-        self._order.remove(key)
-        del self._backlog[key]
+    def quiet(self, key: str) -> None:
+        """One track stopped sending, and may start again — a mute.
+
+        It stops leading and takes no more audio in, and it stays known,
+        so what it sends while muted is dropped rather than carried. What
+        it already buffered stays until the lead has carried it out.
+        """
+        if key in self._order:
+            self._order.remove(key)
+        self._forget_an_empty(key)
+
+    def gone(self, key: str) -> None:
+        """One track is over: its reader has stopped, for good.
+
+        What it buffered still goes out under the lead's next frames; only
+        the track itself is forgotten.
+        """
+        self._known.discard(key)
+        if key in self._order:
+            self._order.remove(key)
+        self._forget_an_empty(key)
+
+    def _forget_an_empty(self, key: str) -> None:
+        if key in self._backlog and not self._backlog[key]:
+            del self._backlog[key]
+
+    def leading(self) -> str | None:
+        """Which track clocks the room, if any is live."""
+        return self._order[0] if self._order else None
 
     def mixed(self, key: str, event: Any) -> Any | None:
         """One track's frame as the persona's next frame, or nothing yet.
 
-        ``None`` means the frame was a backing track's and is waiting for
-        the lead's next frame to carry it. A track this mix was never told
-        about is carried through untouched, which is what a stream nobody
-        registered — a test driving the reader directly — has always done.
+        ``None`` for a backing track's frame, which waits for the lead's
+        next frame to carry it, and for a frame from a known track that is
+        not live — a publisher that muted a track meant it not to be
+        heard, so what it sends after that is dropped rather than mixed.
         """
-        if key not in self._backlog:
+        if key not in self._known:
+            # A stream nobody registered. Only the drain suites reach the
+            # reader that way; every track a room subscribes is announced
+            # here first. Carried through untouched rather than dropped,
+            # because dropping would make those tests pass on silence.
             return event
-        if self._order[0] != key:
-            self._buffered(key, event.frame)
+        if self.leading() != key:
+            if key in self._order:
+                self._buffered(key, event.frame)
             return None
-        waiting = bytes(self._backlog[key])
-        self._backlog[key].clear()
-        said = waiting + event.frame.data.tobytes()
+        waiting = self._backlog[key]
         under = [
-            beneath
-            for beneath in (self._taken(other, len(said)) for other in self._order[1:])
-            if beneath
+            other
+            for other in self._backlog
+            if other != key and self._backlog[other]
         ]
         if not under and not waiting:
+            # Read before anything is copied: the single-track lanes must
+            # not pay a whole frame of PCM per frame to find that out.
             return event
-        _mixable(event.frame)
-        return _one_frame(_added(said, under), event.frame)
+        said = bytes(waiting) + event.frame.data.tobytes()
+        waiting.clear()
+        _require_the_mix_format(event.frame)
+        taken = (self._taken(other, len(said)) for other in under)
+        return _one_frame(
+            _added(said, [beneath for beneath in taken if beneath]), event.frame
+        )
 
     def _buffered(self, key: str, frame: Any) -> None:
-        _mixable(frame)
+        _require_the_mix_format(frame)
         backlog = self._backlog[key]
         backlog.extend(frame.data.tobytes())
         spare = len(backlog) - _LARGEST_BACKLOG_BYTES
@@ -289,6 +360,10 @@ class _RoomAudioMix:
         backlog = self._backlog[key]
         taken = bytes(backlog[:wanted])
         del backlog[:wanted]
+        # A track that stopped leading is kept only for what it still owes
+        # the room. Once that is carried, it is gone.
+        if not backlog and key not in self._order:
+            del self._backlog[key]
         return taken
 
 
@@ -297,7 +372,7 @@ _LARGEST_BACKLOG_BYTES = round(
 )
 
 
-def _mixable(frame: Any) -> None:
+def _require_the_mix_format(frame: Any) -> None:
     """Refuse to add together audio that is not in the room's one format.
 
     Unreachable through a room egma joined: it asks every stream for
@@ -324,15 +399,25 @@ def _added(said: bytes, under: list[bytes]) -> bytes:
     ambience. Two ordinary speech tracks do not reach the ends of the
     range together often enough to matter; a mix that moved the voice's
     level would matter on every frame.
+
+    The whole sum is taken first and held to the range once, at the end.
+    Clipping each track in turn would make the answer depend on the order
+    the tracks happen to be added in: three tracks at 20000, 20000 and
+    -20000 are 20000 however they are grouped, but clipped as they go they
+    come out 12767.
     """
-    mixed = _samples(said)
+    totals = list(_samples(said))
     for beneath in under:
         for index, value in enumerate(_samples(beneath)):
-            total = mixed[index] + value
-            mixed[index] = (
-                LOUDEST if total > LOUDEST else QUIETEST if total < QUIETEST else total
-            )
-    return _as_pcm(mixed)
+            totals[index] += value
+    return _as_pcm(array("h", [_within_int16(total) for total in totals]))
+
+
+def _within_int16(total: int) -> int:
+    """One summed sample, held to the ends of the format that carries it."""
+    if total > INT16_CEILING:
+        return INT16_CEILING
+    return INT16_FLOOR if total < INT16_FLOOR else total
 
 
 def _samples(pcm: bytes) -> array:
@@ -372,21 +457,23 @@ def _one_frame(said: bytes, like: Any) -> Any:
     )
 
 
-def track_key(participant_id: str, track: Any) -> str:
+def track_key(participant_id: str, published: Any) -> str:
     """One subscribed audio track's name, inside the room.
 
     The participant and the track, in that order, so the participant can
-    be read straight back off it — see :meth:`_Pipecat17InputDrain.
-    _tracks_of`. That saves a second registry to keep true, and it makes a
-    key say what it is wherever one is read. Participant and track
-    identifiers are LiveKit's own ``PA_``/``TR_`` sids, which carry no
-    colon, so the split is unambiguous.
+    be read straight back off it — see
+    :meth:`_Pipecat17InputDrain._stream_keys_of`. That saves a second
+    registry to keep true, and it makes a key say what it is wherever one
+    is read. Participant and track identifiers are LiveKit's own
+    ``PA_``/``TR_`` sids, which carry no colon, so the split is
+    unambiguous.
 
-    A stream registered under a bare participant — Pipecat's own keying,
-    and what a test driving the reader by hand hands over — reads back as
-    that participant with no track, which is exactly right.
+    ``published`` is either the track or its publication: LiveKit gives
+    both the same ``sid``, and the two events this key is built from hand
+    over one each — ``track_subscribed`` a track, ``track_muted`` a
+    publication.
     """
-    return f"{participant_id}:{getattr(track, 'sid', None) or id(track)}"
+    return f"{participant_id}:{getattr(published, 'sid', None) or id(published)}"
 
 
 class _Pipecat17InputDrain:
@@ -405,14 +492,22 @@ class _Pipecat17InputDrain:
     room the way a caller does. One track stays a pass-through, so the
     phone and LiveKit lanes go through the same path unchanged.
 
+    **Mute, which nothing else watches.** LiveKit publishes ``track_muted``
+    and ``track_unmuted``, and Pipecat 1.7.0 registers no handler for
+    either. Without them a track that its publisher muted — the ordinary
+    publish-on-speech pattern — goes quiet without ending, and if it was
+    the one clocking the room the persona hears nothing for as long as the
+    mute lasts. The shim registers those two on the room itself and hands
+    the mix's clock on and back.
+
     **Departure after audio.** LiveKit 1.1.14's iterator stops as soon as
     its native task ends, before it reads buffered frames that precede the
     queue's explicit end marker. The shim replaces the stream reader and
     close coordinator, makes the existing client iterator joinable, then
     joins BaseInput before one ordinary control frame enters the pipeline.
 
-    Pipecat's conversion and push path remain unchanged in both. What the
-    version guard below pins is the whole of what is reached into.
+    Pipecat's conversion and push path remain unchanged in all three. What
+    the version guard below pins is the whole of what is reached into.
     """
 
     def __init__(self, input_transport: object, failed: asyncio.Event) -> None:
@@ -443,12 +538,12 @@ class _Pipecat17InputDrain:
             client = input_transport._client
             audio_queue = client._audio_queue
             streams = client._audio_streams
-            tracks = client._audio_tracks
             reader = client._process_audio_stream
             client_iterator = client.get_next_audio_frame
             stream_closer = client._close_audio_stream
             subscribed = client._async_on_track_subscribed
             unsubscribed = client._async_on_track_unsubscribed
+            room_setup = client.setup
             callbacks = client._callbacks
             joined_a_track = callbacks.on_audio_track_subscribed
             left_a_track = callbacks.on_audio_track_unsubscribed
@@ -462,12 +557,12 @@ class _Pipecat17InputDrain:
             type(audio_queue) is not asyncio.Queue
             or not audio_queue.empty()
             or not isinstance(streams, dict)
-            or not isinstance(tracks, dict)
             or not callable(reader)
             or not callable(client_iterator)
             or not callable(stream_closer)
             or not callable(subscribed)
             or not callable(unsubscribed)
+            or not callable(room_setup)
             or not callable(joined_a_track)
             or not callable(left_a_track)
         ):
@@ -477,10 +572,12 @@ class _Pipecat17InputDrain:
                 ending=ERROR,
             )
         self._input = input_transport
+        self._client = client
         self._failed = failed
         self._stock_close = stream_closer
         self._stock_subscribed = subscribed
         self._stock_unsubscribed = unsubscribed
+        self._stock_setup = room_setup
         self._joined_a_track = joined_a_track
         self._left_a_track = left_a_track
         self._canceling = False
@@ -490,7 +587,6 @@ class _Pipecat17InputDrain:
         self._audio_event_type = rtc.AudioFrameEvent
         self._audio_kind = rtc.TrackKind.KIND_AUDIO
         self._streams: dict[str, tuple[object, asyncio.Task[Any]]] = streams
-        self._tracks: dict[str, object] = tracks
         self._mix = _RoomAudioMix()
         self._finishes: dict[
             str,
@@ -504,8 +600,57 @@ class _Pipecat17InputDrain:
         client._close_audio_stream = self.finish_stream
         client._async_on_track_subscribed = self._track_subscribed
         client._async_on_track_unsubscribed = self._track_unsubscribed
+        client.setup = self._setup
 
     # -- Every track the agent publishes, kept and mixed ---------------------
+
+    async def _setup(self, setup: Any) -> None:
+        """Let Pipecat build its room, then watch what it does not watch.
+
+        Pipecat makes the ``rtc.Room`` here and registers its own handlers
+        on it. The two mute events are not among them, and this is the
+        first moment there is a room to put them on — earlier than the
+        connect, so no publisher can mute a track before egma is listening
+        for it.
+        """
+        await self._stock_setup(setup)
+        self.watch_mutes()
+
+    def watch_mutes(self) -> None:
+        """Take LiveKit's mute events, which Pipecat 1.7.0 ignores."""
+        room = getattr(self._client, "_room", None)
+        if room is None:
+            return
+        room.on("track_muted")(self._track_muted)
+        room.on("track_unmuted")(self._track_unmuted)
+
+    def _track_muted(self, participant: Any, publication: Any) -> None:
+        """A publisher stopped sending on one track. Hand the clock on.
+
+        The reader stays: a mute is not the end of a track, and the same
+        publisher usually unmutes it a moment later. What changes is that
+        the track stops leading, so the room is clocked by something that
+        is actually producing audio.
+
+        Note the argument order — LiveKit puts the participant first on
+        these two events and last on the subscribe events. Reversing them
+        here would silently key every mute to nothing.
+        """
+        key = track_key(participant.sid, publication)
+        if key in self._streams:
+            self._mix.quiet(key)
+
+    def _track_unmuted(self, participant: Any, publication: Any) -> None:
+        """The publisher is sending again, so the track is live again.
+
+        It rejoins at the back, which makes it a backing track rather than
+        the lead. That is deliberate: whatever took the clock while it was
+        muted is producing audio now, and moving the clock a second time
+        would cost a frame for nothing.
+        """
+        key = track_key(participant.sid, publication)
+        if key in self._streams:
+            self._mix.joined(key)
 
     async def _track_subscribed(
         self, track: Any, publication: Any, participant: Any
@@ -537,7 +682,6 @@ class _Pipecat17InputDrain:
             name="livekit-audio-track-reader",
         )
         self._streams[key] = (stream, task)
-        self._tracks[key] = track
         await self._joined_a_track(participant.sid)
 
     async def _track_unsubscribed(
@@ -547,18 +691,25 @@ class _Pipecat17InputDrain:
         if track.kind != self._audio_kind:
             await self._stock_unsubscribed(track, publication, participant)
             return
-        key = track_key(participant.sid, track)
-        await self.finish_stream(key)
-        self._tracks.pop(key, None)
+        await self.finish_stream(track_key(participant.sid, track))
         await self._left_a_track(participant.sid)
 
-    def _tracks_of(self, participant_id: str) -> list[str]:
-        """Every audio track one participant is being read on."""
-        return [
+    def _stream_keys_of(self, participant_id: str) -> list[str]:
+        """The keys of every audio stream one participant reached here on.
+
+        Both the streams still registered and the ones already being
+        finished. A stream is taken out of :attr:`_streams` before its
+        close is awaited, so a departure that read only the registry would
+        miss a track whose unsubscribe was still in flight — and then
+        announce the departure over audio still on its way in.
+        """
+        keys = [key for key in self._streams if key.split(":", 1)[0] == participant_id]
+        keys.extend(
             key
-            for key in list(self._streams)
-            if key.split(":", 1)[0] == participant_id
-        ]
+            for key in self._finishes
+            if key not in keys and key.split(":", 1)[0] == participant_id
+        )
+        return keys
 
     async def _read_audio_stream(self, stream: object, key: str) -> None:
         """Read LiveKit 1.1.14 through its explicit end marker.
@@ -568,13 +719,17 @@ class _Pipecat17InputDrain:
         and never which of their tracks — the mix has already made that
         question meaningless.
 
-        This reader's own exit is what takes the track out of the mix, and
-        it is the earliest honest moment for it: the frames are read here,
-        so a reader that has stopped is a track with no more audio, and no
-        tail can be left to carry past the mix. Waiting for the
-        unsubscribe event instead would leave a track that ran out first
-        still holding the room's clock — which, for the earliest track, is
-        a persona that hears nothing at all while the others buffer.
+        The reader takes its track out of the mix on the way out, and
+        never puts it in — that is the subscribe handler's job, and the
+        mute handler's. A reader that registered its own track would put a
+        muted one back the moment it next ran, which is a mute undone by a
+        race.
+
+        Taking it out here rather than at the unsubscribe event is the
+        earliest honest moment: the frames are read here, so a reader that
+        has stopped is a track with no more audio and no tail left to
+        carry. A track that ran out but still held the room's clock would
+        leave the persona hearing nothing while the others buffered.
         """
         participant_id = key.split(":", 1)[0]
         try:
@@ -593,11 +748,19 @@ class _Pipecat17InputDrain:
                 await self._audio_queue.put((carried, participant_id))
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except MediaBackendError:
+            # Egma's own named refusal, already saying exactly what was
+            # wrong with the audio. Carried up as itself so the sentence
+            # reaches the log instead of dying inside a generic one.
             self._failed.set()
-            raise RuntimeError("the livekit input stream could not be read") from None
+            raise
+        except Exception as unreadable:
+            self._failed.set()
+            raise RuntimeError(
+                "the livekit input stream could not be read"
+            ) from unreadable
         finally:
-            self._mix.left(key)
+            self._mix.gone(key)
 
     def _finish_for(self, key: str) -> asyncio.Task[None] | None:
         entry = self._streams.get(key)
@@ -635,7 +798,20 @@ class _Pipecat17InputDrain:
                 if self._streams.get(key) is entry:
                     self._streams.pop(key)
                 await stream.aclose()
-                await reader
+                try:
+                    await reader
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # A reader that broke is still a reader that is over,
+                    # and this close is what the bookkeeping after it hangs
+                    # off — the unsubscribe event, and Pipecat's own
+                    # registry. The reader already set ``failed``, so the
+                    # simulation still fails; what must not happen is a
+                    # teardown that stops halfway because of it. (Pipecat's
+                    # own task manager swallowed these; the reader tasks
+                    # here are plain, so the swallowing is explicit.)
+                    pass
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
@@ -653,7 +829,7 @@ class _Pipecat17InputDrain:
             # The backstop for a track whose reader never ran at all. A
             # reader that did run has already taken itself out of the mix
             # on its way past its own last frame, and this is a no-op.
-            self._mix.left(key)
+            self._mix.gone(key)
 
     async def participant_left(
         self, participant_id: str, completed: asyncio.Event
@@ -678,12 +854,18 @@ class _Pipecat17InputDrain:
         # is the participant's and the tracks are only the ways it reached
         # here. One left unfinished would hold audio the marker below then
         # claims came before it.
-        held = (self._finish_for(key) for key in self._tracks_of(participant_id))
+        held = (self._finish_for(key) for key in self._stream_keys_of(participant_id))
         finishes = [finish for finish in held if finish is not None]
         try:
             async with asyncio.timeout(AUDIO_STREAM_CLOSE_SECONDS):
                 if finishes:
-                    await asyncio.shield(asyncio.gather(*finishes))
+                    # Waited out, never judged: whether one of them failed
+                    # is already recorded in ``failed``, and the check
+                    # below is what reads it. What matters here is only
+                    # that none is still running when the marker goes.
+                    await asyncio.shield(
+                        asyncio.gather(*finishes, return_exceptions=True)
+                    )
                 self._require_working_media()
                 await self._audio_queue.join()
                 self._require_working_media()

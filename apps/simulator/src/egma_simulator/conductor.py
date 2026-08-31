@@ -98,6 +98,17 @@ class ConductParameters:
 
 DEFAULT_CONDUCT = ConductParameters()
 
+ASKED_BEFORE_A_SILENCE_COUNTS = 2
+"""How many persona turns an agent must go quiet through before its
+silence is read as a failure rather than an ending.
+
+Only for the case where the agent took no turn at all. Two, because one
+persona turn is what a spec whose turn limit is one produces on its own —
+the persona speaks, the budget is spent, and the agent never had a
+chance. A limit is deliberate and is never the agent failing, so that run
+keeps its own ending. By the second turn nothing else explains the quiet.
+"""
+
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
 OnAnswered = Callable[[], Awaitable[None]]
@@ -914,18 +925,31 @@ class VoiceConductor:
         through is none of those. It reported itself as one, and the
         grader judged the silence as a finished conversation.
 
-        A record with no turns at all is left where its ending put it. Then
-        nobody spoke, the exchange never got under way, and egma never
-        listened to the agent long enough to be entitled to say it was
-        quiet — a limit that tripped while the line was still ringing is
-        that record, and the limit is the true story of it. The silence
-        this refuses is the other one: the persona talking, and nothing
-        coming back, for as long as the simulation lasted.
+        The bar is that the agent **had a real chance and said nothing**,
+        which is two shapes:
+
+        - it took turns, and every one of them was wordless. Whatever it
+          was doing, none of it reached the transcript, so there is
+          nothing for a grader to read.
+        - it took no turn at all, and the persona got through
+          :data:`ASKED_BEFORE_A_SILENCE_COUNTS` of its own waiting for
+          one. Two rather than one, because one is what a spec whose turn
+          limit *is* one produces by itself: the persona speaks, the
+          budget is spent, and the run ends before the agent could ever
+          have answered. A limit is deliberate and is never the agent
+          failing, so a run a limit ended that early keeps its own ending.
+
+        A record with no turns at all is left where its ending put it for
+        the same reason — nobody spoke, the exchange never got under way,
+        and a limit that tripped while the line was still ringing is that
+        record.
         """
-        if not self._record.history:
+        answers = [turn for turn in self._record.history if turn.speaker == "agent"]
+        if any(turn.text.strip() for turn in answers):
             return
-        for turn in self._record.history:
-            if turn.speaker == "agent" and turn.text.strip():
+        if not answers:
+            asked = sum(1 for turn in self._record.history if turn.speaker == "human")
+            if asked < ASKED_BEFORE_A_SILENCE_COUNTS:
                 return
         raise SilentAgent(SAID_NOTHING)
 

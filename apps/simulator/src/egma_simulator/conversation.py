@@ -12,6 +12,13 @@ directive honored at a heartbeat, and the duration watchdog. Both act
 through :class:`ConversationControls`, and the first cause to land is the one the
 record shows — a cause arriving after the conversation already ended changes
 nothing, because what happened is the record.
+
+One outcome here is deliberately *not* an ending: :class:`SilentAgent`,
+raised where a voice simulation ran and the agent never said a word. It is
+an execution failure, so the run is reported failed rather than completed
+and is never graded. It lives beside the endings because it is the same
+question answered — how did this simulation turn out — and it is the one
+answer that is not a conversation.
 """
 
 from __future__ import annotations
@@ -141,6 +148,10 @@ class Conducted:
 # comparing the same scenario over both modalities is comparing exactly
 # that. The sentences are asserted verbatim by the acceptance suite, so a
 # second copy of one is a way for the two to drift apart silently.
+#
+# The silent-agent failure below is the exception to both halves of that
+# sentence, and says so where it is defined: it is not an ending, and it
+# is the voice conductor's alone.
 
 Ending = tuple[str, str]
 """One ending: the contract's word for it, and the prose a report carries."""
@@ -151,6 +162,14 @@ PERSONA_CONCLUDED: Ending = (
 )
 AGENT_ENDED: Ending = ("agent_ended", "the agent ended the exchange")
 
+
+# -- The one outcome that is not an ending -----------------------------------
+#
+# Raised, never returned, and by the voice conductor only. A chat agent
+# that types nothing in any turn is the same shape of problem and is
+# deliberately left alone here: the decision that produced this rule was
+# written about voice, and a rule extended past what was decided is a
+# rule nobody agreed to.
 
 SAID_NOTHING = (
     "the agent said nothing in this simulation: every one of its turns was "
