@@ -193,7 +193,8 @@ export function AgentDetailsSheet({
   const simulation = simulationCapabilityOf(agent);
   const monitoring = monitoringCapabilityOf(agent);
   const mockTools = mockToolsCapabilityOf(agent);
-  const setup = `${home}?sheet=connect`;
+  const setup = (goal: "simulation" | "monitoring") =>
+    `${home}?sheet=connect&agent=${encodeURIComponent(agent.id)}&goal=${goal}&platform=${provider}`;
   const restoreFocus = useSheetReturnFocus(returnFocusTo);
 
   return (
@@ -232,7 +233,7 @@ export function AgentDetailsSheet({
               <h2 className="m-0 text-base font-medium" id="agent-connections-heading">
                 Connections
               </h2>
-              <Link className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground" href={setup}>
+              <Link className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground" href={setup("simulation")}>
                 Add connection
               </Link>
             </div>
@@ -279,7 +280,7 @@ export function AgentDetailsSheet({
                   simulation === "Configured" ? undefined : (
                     <Link
                       className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
-                      href={setup}
+                      href={setup("simulation")}
                     >
                       Set up simulation
                     </Link>
@@ -298,7 +299,7 @@ export function AgentDetailsSheet({
                   provider === "livekit" ? (
                     <Link
                       className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
-                      href={setup}
+                      href={setup("monitoring")}
                     >
                       View setup instructions
                     </Link>
@@ -316,7 +317,7 @@ export function AgentDetailsSheet({
                   ) : (
                     <Link
                       className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
-                      href={setup}
+                      href={setup("monitoring")}
                     >
                       {monitoring === "Stopped" ? "Resume monitoring" : "Set up monitoring"}
                     </Link>

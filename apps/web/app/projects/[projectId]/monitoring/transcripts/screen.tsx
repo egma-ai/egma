@@ -12,6 +12,7 @@ import {
 } from "../../../../../lib/platform-client.ts";
 import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
 import {
+  AGENT_PARAMETER,
   MONITOR_SHEET,
   SHEET_PARAMETER,
 } from "../../../../../lib/monitoring.ts";
@@ -546,21 +547,29 @@ export function TranscriptsScreen({
 
   /*
    * A copied legacy `sheet=monitor` link cannot reopen the retired picker.
-   * It forwards to the same Agents-owned handoff as the visible action. The
-   * handoff discovers the repository instead of restoring old wizard state.
+   * It forwards to the same Agents-owned flow as the visible action and keeps
+   * an agent the old link named.
    */
   const legacySetup = query.get(SHEET_PARAMETER) === MONITOR_SHEET;
+  const legacyAgentId = query.get(AGENT_PARAMETER);
   const replace = router.replace;
   useEffect(() => {
     if (!legacySetup) return;
-    replace(monitoringSetupPath(projectId));
-  }, [legacySetup, projectId, replace]);
+    replace(
+      monitoringSetupPath(
+        projectId,
+        legacyAgentId === null ? undefined : legacyAgentId,
+      ),
+    );
+  }, [legacyAgentId, legacySetup, projectId, replace]);
 
   /**
    * The one action this screen offers, and the same control wherever it sits.
    *
-   * **Agents owns setup.** This page opens the same three-prompt coding-agent
-   * handoff as every other setup entry point.
+   * **Agents owns setup.** This page only states the user's goal. The address
+   * opens Connect agent on Agents with Monitoring selected, so first setup and
+   * later setup use one provider-specific flow instead of two forms that can
+   * disagree.
    *
    * **One page for every role, and the control that changes data is disabled
    * rather than removed.** Setup requires `configure_monitoring`, which a
