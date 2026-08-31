@@ -55,9 +55,11 @@ from .conversation import (
     AGENT_ENDED,
     CANCEL_DIRECTIVE,
     PERSONA_CONCLUDED,
+    SAID_NOTHING,
     Conducted,
     ConversationControls,
     Ending,
+    SilentAgent,
     duration_limit_reached,
     turn_limit_reached,
 )
@@ -889,15 +891,43 @@ class VoiceConductor:
             await self.close()
 
         if controls.cause == CANCEL_DIRECTIVE:
+            # A directive is somebody's own act, so it is answered before
+            # the silence below is even looked at: a run stopped on
+            # purpose is not a run that failed, whatever it had heard.
             return Conducted(
                 status="canceled",
                 ending="canceled",
                 reason=None,
                 provider_reference=self.provider_reference,
             )
+        self._refuse_a_silence()
         if controls.cause is not None:
             return self._ended(duration_limit_reached(max_duration_seconds))
         return self._ended(self._ending or turn_limit_reached(max_turns))
+
+    def _refuse_a_silence(self) -> None:
+        """A conversation the agent said no word in is a failure, not an ending.
+
+        Ahead of every deliberate ending on purpose. The endings below all
+        describe a conversation — the persona concluded one, the agent
+        ended one, a limit cut one short — and a call the agent was silent
+        through is none of those. It reported itself as one, and the
+        grader judged the silence as a finished conversation.
+
+        A record with no turns at all is left where its ending put it. Then
+        nobody spoke, the exchange never got under way, and egma never
+        listened to the agent long enough to be entitled to say it was
+        quiet — a limit that tripped while the line was still ringing is
+        that record, and the limit is the true story of it. The silence
+        this refuses is the other one: the persona talking, and nothing
+        coming back, for as long as the simulation lasted.
+        """
+        if not self._record.history:
+            return
+        for turn in self._record.history:
+            if turn.speaker == "agent" and turn.text.strip():
+                return
+        raise SilentAgent(SAID_NOTHING)
 
     def _ended(self, named: Ending) -> Conducted:
         ending, reason = named

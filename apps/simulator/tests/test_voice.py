@@ -37,7 +37,12 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
-from egma_simulator.conversation import Conducted, ConversationControls
+from egma_simulator.conversation import (
+    SAID_NOTHING,
+    Conducted,
+    ConversationControls,
+    SilentAgent,
+)
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -111,6 +116,7 @@ async def voice_simulation(
     speech: SpeechProviders = SCRIPTED_PAIR,
     parameters: ConductParameters | None = None,
     controls: ConversationControls | None = None,
+    spans: list[tuple[str, str, int, int]] | None = None,
     **overrides,
 ) -> Observed:
     """One voice simulation, conducted the way the service conducts it."""
@@ -128,6 +134,7 @@ async def voice_simulation(
         assembled,
         spec,
         controls=controls or ConversationControls(),
+        spans=spans,
     )
 
 
@@ -137,9 +144,17 @@ async def observe(
     spec: SimulationSpec,
     *,
     controls: ConversationControls,
+    spans: list[tuple[str, str, int, int]] | None = None,
 ) -> Observed:
-    """Conduct, and keep everything the conductor said about it."""
-    spans: list[tuple[str, str, int, int]] = []
+    """Conduct, and keep everything the conductor said about it.
+
+    ``spans`` is a list the caller owns, filled turn by turn as the
+    conversation runs. The same handle :func:`room_walk` offers next door,
+    and for the same reason: a simulation that ends in a raise never
+    returns an :class:`Observed`, and what it said before it raised is
+    often the whole subject.
+    """
+    spans = [] if spans is None else spans
     measures: list[tuple[str, float]] = []
 
     async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
@@ -1303,6 +1318,13 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     its duration limit and the record says "limit reached" about hold
     music. What the record should say is that the turn carried no words,
     which is what it did.
+
+    That backstop is the subject here, and it holds: the turn closes, it
+    is recorded with no words, and the persona carries on rather than
+    waiting out the clock. What the whole simulation is then *worth* is
+    the second half of the story — every one of the agent's turns empty is
+    the dead call this product must never grade, so the run fails instead
+    of ending.
     """
 
     class DeafEars(FrameProcessor):
@@ -1321,18 +1343,27 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
 
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
 
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="One point.",
-        replies=["Noted."],
-        # Only the waiting is shortened; what is given up on is exactly
-        # what a deployment gives up on.
-        parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
-    )
+    spans: list[tuple[str, str, int, int]] = []
+    with pytest.raises(SilentAgent) as silent:
+        await voice_simulation(
+            tmp_path,
+            scenario="One point.",
+            replies=["Noted."],
+            # Only the waiting is shortened; what is given up on is exactly
+            # what a deployment gives up on.
+            parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+            spans=spans,
+        )
 
-    assert observed.conducted.status == "completed"
-    assert observed.conducted.ending == "persona_concluded"
-    assert ("agent", "") in observed.turns, observed.turns
+    # The backstop did its work: the turn was closed and recorded, and the
+    # persona spoke on both sides of it rather than the clock running out.
+    turns = [(speaker, text) for speaker, text, _began, _ended in spans]
+    assert ("agent", "") in turns, turns
+    assert [speaker for speaker, _text in turns] == ["human", "agent", "human"]
+    # And the simulation is a failure the contract never grades, never one
+    # of the deliberate endings it used to claim.
+    assert failed_ending(silent.value) == ERROR
+    assert str(silent.value) == SAID_NOTHING
 
 
 async def test_an_unconfigured_voice_exchange_connects_nothing(

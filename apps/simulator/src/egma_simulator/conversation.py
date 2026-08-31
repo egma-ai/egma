@@ -152,6 +152,38 @@ PERSONA_CONCLUDED: Ending = (
 AGENT_ENDED: Ending = ("agent_ended", "the agent ended the exchange")
 
 
+SAID_NOTHING = (
+    "the agent said nothing in this simulation: every one of its turns was "
+    "empty, so there is no conversation to grade — check that the agent's "
+    "worker speaks, and that the audio it publishes is its voice"
+)
+"""Why a simulation the agent was silent through is a failure, in the
+words the developer who has to fix it reads.
+
+Actionable on purpose: the two things it names are the two that were
+really wrong the day this rule was written — an agent whose worker was
+speaking fluently, and a second audio track that reached egma's ear
+instead of that voice. A reader of this sentence goes and looks at one of
+those rather than at the transcript, which says nothing by definition.
+"""
+
+
+class SilentAgent(Exception):
+    """The agent produced no words in any turn, so nothing was tested.
+
+    An execution failure and never an ending: the contract's failed
+    endings all mean "the test never ran" or "the test broke", and none of
+    them is ever graded. A silence reported as ``persona_concluded`` or
+    ``limit_reached`` is graded like any other conversation, which is the
+    one outcome worse than a failed run — the product would be judging an
+    agent on ten minutes of nothing.
+
+    It carries no ``ending`` of its own, so :func:`plugs.failed_ending`
+    reads it as ``error``: the simulator could not conduct through what it
+    was given.
+    """
+
+
 def turn_limit_reached(max_turns: int) -> Ending:
     """The turn limit tripped, named with the budget that ran out."""
     return "limit_reached", f"the turn limit ({max_turns} turns) tripped"
