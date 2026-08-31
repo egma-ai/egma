@@ -249,9 +249,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const [lanes, setLanes] = useState<readonly RetellLane[]>([]);
   const [discovering, setDiscovering] = useState(false);
 
-  const [livekitLanguage, setLivekitLanguage] = useState<
-    LiveKitWorkerLanguage | ""
-  >("");
+  // This chooses which source instructions are visible. It is never written
+  // to the connection, and Python is the first documentation view rather than
+  // an unanswered setup question.
+  const [livekitLanguage, setLivekitLanguage] =
+    useState<LiveKitWorkerLanguage>("python");
   const [livekitModality, setLivekitModality] = useState<"chat" | "voice" | "">(
     "",
   );
@@ -280,7 +282,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setLanes([]);
-    setLivekitLanguage("");
+    setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -496,7 +498,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setLanes([]);
-    setLivekitLanguage("");
+    setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -1061,7 +1063,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         return;
       }
       case "livekit-monitoring":
-        if (livekitLanguage === "") return;
         // Monitoring needs a language-specific source hook. Both carries that
         // instruction choice forward; it is never part of the room connection.
         if (goal === "both" && completed === null) {
@@ -1504,9 +1505,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
     (step === "livekit-modality" && livekitModality === "") ||
-    (step === "livekit-simulation" && completed === null && !livekitReady) ||
-    (step === "livekit-testing" && livekitLanguage === "") ||
-    (step === "livekit-monitoring" && livekitLanguage === "");
+    (step === "livekit-simulation" && completed === null && !livekitReady);
 
   const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
   const usable =

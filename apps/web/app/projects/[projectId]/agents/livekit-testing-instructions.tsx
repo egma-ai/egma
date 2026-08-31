@@ -126,7 +126,7 @@ Do not start any independent audio publisher, such as background audio, while ch
 ${JAVASCRIPT_PROMPT_END}`;
 
 type LiveKitTestingInstructionsProps = {
-  readonly language: LiveKitWorkerLanguage | "";
+  readonly language: LiveKitWorkerLanguage;
   readonly modality: "chat" | "voice";
   readonly onLanguageChange: (language: LiveKitWorkerLanguage) => void;
 };
@@ -207,23 +207,17 @@ export function LiveKitTestingInstructions({
           <TabsTrigger value="python">Python</TabsTrigger>
           <TabsTrigger value="javascript">JavaScript</TabsTrigger>
         </TabsList>
-        {language === "" ? null : (
-          <>
-            <TabsContent className="pt-3" value="python">
-              <TestingSteps language="python" chat={chat} />
-            </TabsContent>
-            <TabsContent className="pt-3" value="javascript">
-              <TestingSteps language="javascript" chat={chat} />
-            </TabsContent>
-          </>
-        )}
+        <TabsContent className="pt-3" value="python">
+          <TestingSteps language="python" chat={chat} />
+        </TabsContent>
+        <TabsContent className="pt-3" value="javascript">
+          <TestingSteps language="javascript" chat={chat} />
+        </TabsContent>
       </Tabs>
-      {language === "" ? null : (
-        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-          Production rooms keep the worker&apos;s existing behavior. Egma cannot
-          see this change from here. The first simulation confirms it.
-        </p>
-      )}
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        Production rooms keep the worker&apos;s existing behavior. Egma cannot see
+        this change from here. The first simulation confirms it.
+      </p>
     </section>
   );
 }

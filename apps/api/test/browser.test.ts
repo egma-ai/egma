@@ -3186,12 +3186,12 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await sheet.innerText()).toContain(
         "What language is your LiveKit worker?",
       );
-      expect(await sheet.innerText()).not.toContain("monitor_livekit(ctx)");
+      expect(await sheet.innerText()).toContain("monitor_livekit(ctx)");
       expect(
         await sheet.getByRole("tab", { name: "Python" }).getAttribute(
           "aria-selected",
         ),
-      ).toBe("false");
+      ).toBe("true");
 
       // The switch shows both monitoring contracts before any simulation
       // connection exists. The selected language then drives the testing

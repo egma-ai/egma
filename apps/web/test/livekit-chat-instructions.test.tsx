@@ -40,8 +40,8 @@ afterEach(() => {
 
 describe("LiveKit testing instructions", () => {
   function InstructionsPicker() {
-    const [language, setLanguage] = useState<"javascript" | "python" | "">(
-      "",
+    const [language, setLanguage] = useState<"javascript" | "python">(
+      "python",
     );
     return (
       <LiveKitTestingInstructions
@@ -52,18 +52,26 @@ describe("LiveKit testing instructions", () => {
     );
   }
 
-  it("waits until the instruction language is chosen", () => {
+  it("starts with one valid instruction view and lets the person switch it", () => {
     render(<InstructionsPicker />);
 
     expect(screen.getByText("Show instructions for")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Python" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Python" }).getAttribute("aria-selected"),
+    ).toBe("true");
     expect(screen.getByRole("tab", { name: "JavaScript" })).toBeTruthy();
-    expect(screen.queryByText("Install the latest Egma SDK")).toBeNull();
+    expect(screen.getByText("Install the latest Egma SDK")).toBeTruthy();
+    expect(document.body.textContent).toContain(PYTHON_TESTING_SETUP_INSTALL);
 
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
 
-    expect(screen.getByText("Install the latest Egma SDK")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("tab", { name: "JavaScript" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
     expect(document.body.textContent).toContain(JAVASCRIPT_TESTING_SETUP_INSTALL);
+    expect(document.body.textContent).not.toContain(PYTHON_TESTING_SETUP_INSTALL);
   });
 
   it("hands over the complete chat setup and claims nothing about it", () => {

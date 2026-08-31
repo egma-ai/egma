@@ -3082,14 +3082,12 @@ describe("goal-first agent setup", () => {
     expect(
       screen.getByText("What language is your LiveKit worker?"),
     ).toBeDefined();
-    expect(document.body.textContent).not.toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
     expect(
       (screen.getByRole("button", {
         name: "Return to agents",
       }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
+    ).toBe(false);
 
     const copy = document.body.textContent ?? "";
     expect(copy).toContain("monitor_livekit(ctx)");
@@ -3139,8 +3137,6 @@ describe("goal-first agent setup", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeDefined();
-    expect(document.body.textContent).not.toContain("monitor_livekit(ctx)");
-    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain("monitor_livekit(ctx)");
     fireEvent.click(
       screen.getByRole("button", { name: "Continue to simulation" }),
@@ -3208,7 +3204,9 @@ describe("goal-first agent setup", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeDefined();
-    expect(screen.queryByText("Install the Egma SDK")).toBeNull();
+    expect(screen.getByText("Install the Egma SDK")).toBeDefined();
+    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).not.toContain("monitorLiveKit(ctx)");
 
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
 

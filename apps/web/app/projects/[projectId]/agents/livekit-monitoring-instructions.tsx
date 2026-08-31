@@ -104,7 +104,7 @@ export function LiveKitMonitoringInstructions({
   onLanguageChange,
 }: {
   readonly projectId: string;
-  readonly language: LiveKitWorkerLanguage | "";
+  readonly language: LiveKitWorkerLanguage;
   readonly onLanguageChange: (language: LiveKitWorkerLanguage) => void;
 }) {
   return (
@@ -137,30 +137,24 @@ export function LiveKitMonitoringInstructions({
           <TabsTrigger value="python">Python</TabsTrigger>
           <TabsTrigger value="javascript">JavaScript</TabsTrigger>
         </TabsList>
-        {language === "" ? null : (
-          <>
-            <TabsContent className="pt-3" value="python">
-              <WorkerSteps language="python" />
-            </TabsContent>
-            <TabsContent className="pt-3" value="javascript">
-              <WorkerSteps language="javascript" />
-            </TabsContent>
-          </>
-        )}
+        <TabsContent className="pt-3" value="python">
+          <WorkerSteps language="python" />
+        </TabsContent>
+        <TabsContent className="pt-3" value="javascript">
+          <WorkerSteps language="javascript" />
+        </TabsContent>
       </Tabs>
-      {language === "" ? null : (
-        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-          Create a project key in{" "}
-          <Link
-            className="text-foreground underline underline-offset-2 pointer-hover:text-brand"
-            href={`/projects/${encodeURIComponent(projectId)}/settings/keys`}
-          >
-            API keys
-          </Link>
-          , then replace {API_KEY_PLACEHOLDER}. Set {EGMA_URL_PLACEHOLDER} to the
-          public Egma API URL that your deployed LiveKit worker can reach.
-        </p>
-      )}
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        Create a project key in{" "}
+        <Link
+          className="text-foreground underline underline-offset-2 pointer-hover:text-brand"
+          href={`/projects/${encodeURIComponent(projectId)}/settings/keys`}
+        >
+          API keys
+        </Link>
+        , then replace {API_KEY_PLACEHOLDER}. Set {EGMA_URL_PLACEHOLDER} to the
+        public Egma API URL that your deployed LiveKit worker can reach.
+      </p>
     </section>
   );
 }
