@@ -5,11 +5,14 @@ import {
   bindingVerdictOf,
   branchAgentVersion,
   deleteAgentVersion,
+  LATEST_PUBLISHED,
+  listAgentVersions,
   listRoutedNumbers,
   numbersRouting,
   pinNumberBinding,
   readEngineConfiguration,
   resolveAgentVersion,
+  resolveServingAgentVersion,
   restoreNumberBinding,
   writeEngineTools,
   type RetellCredential,
@@ -340,17 +343,30 @@ describe("branching, writing and deleting a version", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("deletes one version by number", async () => {
+  it("names the version to delete as a query parameter", async () => {
+    // Retell's router has no `/delete-agent-version/{agent}/{version}` route:
+    // the path form answers 404 "Cannot DELETE" and the query form answers 204
+    // (verified live, 2026-08-31). The stand-in answers exactly that way, so a
+    // return to the path form fails here rather than on somebody's account.
     const { fetchImpl, seen } = retell([
-      () => new Response(null, { status: 204 }),
+      (request) =>
+        request.method === "DELETE" &&
+        new URL(request.url).searchParams.get("version") === null
+          ? json({ error: "Cannot DELETE" }, 404)
+          : new Response(null, { status: 204 }),
     ]);
+
     expect(await deleteAgentVersion(key, AGENT, 106, REACH(fetchImpl))).toEqual({
       kind: "deleted",
     });
     expect(seen[0]?.method).toBe("DELETE");
     expect(seen[0]?.url).toBe(
-      `https://retell.invalid/delete-agent-version/${AGENT}/106`,
+      `https://retell.invalid/delete-agent-version/${AGENT}?version=106`,
     );
+    // Version zero is the one a caller is most likely to fumble into a falsy
+    // check and leave off the query string entirely.
+    await deleteAgentVersion(key, AGENT, 0, REACH(fetchImpl));
+    expect(new URL(String(seen[1]?.url)).searchParams.get("version")).toBe("0");
   });
 
   it("answers gone for a version that is already not there", async () => {
@@ -358,6 +374,191 @@ describe("branching, writing and deleting a version", () => {
     expect(await deleteAgentVersion(key, AGENT, 106, REACH(fetchImpl))).toEqual({
       kind: "gone",
     });
+  });
+});
+
+describe("reading an agent's versions back", () => {
+  it("reads the current listing, never the one that retires 2026-09-15", async () => {
+    const { fetchImpl, seen } = retell([
+      (request) =>
+        request.url.includes("/list-agent-versions/")
+          ? json([
+              { version: 105, is_published: true },
+              { version: 106, is_published: false },
+            ])
+          : undefined,
+    ]);
+
+    const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+
+    expect(listed).toEqual({
+      kind: "versions",
+      versions: [
+        { version: 105, published: true },
+        { version: 106, published: false },
+      ],
+    });
+    expect(seen[0]?.url).toContain(
+      `https://retell.invalid/list-agent-versions/${AGENT}?`,
+    );
+    expect(seen.some((one) => one.url.includes("/get-agent-versions"))).toBe(
+      false,
+    );
+  });
+
+  it("pages to the end of a paged listing", async () => {
+    const { fetchImpl, seen } = retell([
+      (request) => {
+        if (!request.url.includes("/list-agent-versions/")) return undefined;
+        const cursor = new URL(request.url).searchParams.get("pagination_key");
+        return cursor === null
+          ? json({
+              items: [{ version: 105, is_published: true }],
+              has_more: true,
+              pagination_key: "page-2",
+            })
+          : json({ items: [{ version: 106 }], has_more: false });
+      },
+    ]);
+
+    const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+    expect(listed).toEqual({
+      kind: "versions",
+      versions: [
+        { version: 105, published: true },
+        { version: 106, published: false },
+      ],
+    });
+    expect(seen).toHaveLength(2);
+  });
+
+  it("says it cannot tell rather than answering an empty list", async () => {
+    for (const [answer, reason] of [
+      [json({ nothing: true }), /malformed/u],
+      [json({ items: [], has_more: true }), /without a new cursor/u],
+      [json({ error: "boom" }, 500), /unavailable/u],
+    ] as const) {
+      const { fetchImpl } = retell([() => answer.clone()]);
+      const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+      expect(listed.kind).toBe("refused");
+      expect(listed.kind === "refused" ? listed.reason : "").toMatch(reason);
+    }
+  });
+});
+
+describe("resolving the version a run should conduct against", () => {
+  it("asks Retell for the newest published version, and pins the number", async () => {
+    const { fetchImpl, seen } = retell([
+      () =>
+        json({
+          version: 105,
+          is_published: true,
+          response_engine: {
+            type: "conversation-flow",
+            conversation_flow_id: "flow_1",
+            version: 105,
+          },
+        }),
+    ]);
+
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+
+    expect(serving.kind).toBe("version");
+    expect(
+      serving.kind === "version" ? serving.agentVersion.version : null,
+    ).toBe(105);
+    expect(seen).toHaveLength(1);
+    expect(new URL(String(seen[0]?.url)).searchParams.get("version")).toBe(
+      "latest_published",
+    );
+  });
+
+  it("refuses an agent whose newest version is a draft, and names both doors", async () => {
+    // Retell answers the published reference with nothing, and `latest` with a
+    // draft: the agent is there and has published nothing.
+    const { fetchImpl } = retell([
+      (request) =>
+        new URL(request.url).searchParams.get("version") === "latest"
+          ? json({ version: 3, is_published: false, response_engine: {} })
+          : json({ error: "not found" }, 404),
+    ]);
+
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+
+    expect(serving.kind).toBe("none-published");
+    const reason = serving.kind === "none-published" ? serving.reason : "";
+    expect(reason).toContain("no published version");
+    expect(reason).toContain("publish the version");
+    expect(reason).toContain("name a version for this run explicitly");
+  });
+
+  it("refuses a published pointer that resolved to a draft anyway", async () => {
+    const { fetchImpl } = retell([
+      () => json({ version: 9, is_published: false, response_engine: {} }),
+    ]);
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+    expect(serving.kind).toBe("none-published");
+  });
+
+  it("still says gone for an agent that is not there at all", async () => {
+    const { fetchImpl } = retell([() => json({ error: "not found" }, 404)]);
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+    expect(serving).toEqual({ kind: "gone" });
+  });
+
+  it("passes an explicitly named version or tag straight through", async () => {
+    const { fetchImpl, seen } = retell([
+      () =>
+        json({
+          version: 42,
+          is_published: false,
+          response_engine: { type: "retell-llm", llm_id: "llm_1", version: 42 },
+        }),
+    ]);
+
+    // A draft named on purpose is a candidate a developer wants tested. It
+    // resolves, and nothing here second-guesses it.
+    const named = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      42,
+      REACH(fetchImpl),
+    );
+    expect(named.kind).toBe("version");
+    expect(named.kind === "version" ? named.agentVersion.version : null).toBe(
+      42,
+    );
+
+    const tagged = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      "prod",
+      REACH(fetchImpl),
+    );
+    expect(tagged.kind).toBe("version");
+    expect(seen.map((one) => new URL(one.url).searchParams.get("version"))).toEqual(
+      ["42", "prod"],
+    );
   });
 });
 

@@ -91,7 +91,11 @@ export type ReadEngineConfiguration =
 
 export type WroteEngineTools = { readonly kind: "written" } | RetellFailure;
 
-/** What a version reference may be: a number, `latest`, or a tag's name. */
+/**
+ * What a version reference may be: a number, `latest`, `latest_published`, or
+ * an environment tag's name — Retell's own type, accepted wherever egma accepts
+ * a version at all.
+ */
 export type VersionReference = number | string;
 
 /**
@@ -209,6 +213,92 @@ export async function resolveAgentVersion(
     };
   }
   return { kind: "version", agentVersion };
+}
+
+/**
+ * Retell's own word for the newest version an agent has **published**.
+ *
+ * Beside it Retell has `latest`, which means the newest version *created* —
+ * drafts included. The two words are one character apart in a query string and
+ * a world apart in what they select: `latest` reaches whichever draft was
+ * minted last, anywhere on the account, and a run that resolved it tested that
+ * draft instead of the agent real callers reach. Every serving read in egma
+ * names this one.
+ */
+export const LATEST_PUBLISHED = "latest_published";
+
+/**
+ * What a developer whose agent has published nothing is told, and where the two
+ * doors are.
+ *
+ * One sentence in one place, because three surfaces say it — the web-call
+ * lane's run start, the text-mode lane's, and the mocked world's serving read —
+ * and three phrasings of one refusal would read as three different problems.
+ */
+export function noPublishedVersion(agentId: string): string {
+  return (
+    `Retell agent ${agentId} has no published version. Egma conducts a run ` +
+    "against the version real callers reach and never against a draft, so " +
+    "there is nothing here to test. Two doors open it: publish the version " +
+    "you want tested in Retell, or name a version for this run explicitly — a " +
+    "version number, or an environment tag — and Egma conducts against " +
+    "whatever that resolves to."
+  );
+}
+
+export type ResolvedServingVersion =
+  | { readonly kind: "version"; readonly agentVersion: AgentVersion }
+  /** The agent is there, and nothing on it is published. */
+  | { readonly kind: "none-published"; readonly reason: string }
+  | RetellFailure;
+
+/**
+ * The version a run conducts against, resolved once and answered as a number.
+ *
+ * A thin layer over `resolveAgentVersion` that exists for one reference —
+ * `latest_published` — and passes every other one straight through. A number,
+ * an environment tag and a bound version are the developer's own explicit
+ * choice and keep working exactly as they do: resolved once here, and it is the
+ * **number that comes back** every later request names, so a tag reassigned or
+ * a draft minted mid-run cannot move what a run is testing.
+ *
+ * What this adds is the two things `latest_published` needs and a bare resolve
+ * cannot give:
+ *
+ * 1. **A published answer, or none.** Retell resolving `latest_published` to an
+ *    unpublished version would be Retell contradicting its own schema, and the
+ *    safe reading of a contradiction is the refusal — never a run conducted
+ *    against a draft by accident.
+ * 2. **A 404 read rather than guessed.** One status carries two facts here: the
+ *    agent is not there, or the agent is there and has published nothing. They
+ *    have different next moves, so the difference is settled with one extra
+ *    request — on the failure path only, and never on the path a run takes.
+ */
+export async function resolveServingAgentVersion(
+  key: RetellCredential,
+  agentId: string,
+  reference: VersionReference,
+  reach: RetellReach = {},
+): Promise<ResolvedServingVersion> {
+  const resolved = await resolveAgentVersion(key, agentId, reference, reach);
+  if (reference !== LATEST_PUBLISHED) return resolved;
+
+  if (resolved.kind === "version") {
+    return resolved.agentVersion.published
+      ? resolved
+      : { kind: "none-published", reason: noPublishedVersion(agentId) };
+  }
+  if (resolved.kind !== "gone") return resolved;
+
+  // The one disambiguating read. Positive evidence only: the agent answers, and
+  // what it answers is a draft. Anything else — the agent gone too, the read
+  // failing, a published `latest` that `latest_published` somehow missed —
+  // leaves the original answer standing rather than inventing a diagnosis.
+  const newest = await resolveAgentVersion(key, agentId, "latest", reach);
+  if (newest.kind === "version" && !newest.agentVersion.published) {
+    return { kind: "none-published", reason: noPublishedVersion(agentId) };
+  }
+  return resolved;
 }
 
 /** Where one engine document is read, at the version it is asked for. */
@@ -363,10 +453,20 @@ export async function writeEngineTools(
 /**
  * Delete one agent version.
  *
- * `gone` is a success in every teardown that calls this: a version that is not
- * there is a version that is not serving anybody, which is the whole of what a
- * delete is for. The caller decides that, not this verb — a sweep reads it as
- * done, and a proof that a delete really happened reads it as the answer it is.
+ * **The version is a query parameter and never a path segment.** Retell's
+ * router has no `/delete-agent-version/{agent}/{version}` route at all: it
+ * answers that shape 404 "Cannot DELETE", the query shape 204 (verified live,
+ * 2026-08-31). Egma sent the path shape for a week, read every 404 back as
+ * "already gone", and reported a teardown that had deleted nothing — which is
+ * why no caller of this may treat 404 as proof on its own. See
+ * `finishMockedWorld`, which deletes and then reads the versions back.
+ *
+ * Deleting an agent version takes the lockstep conversation-flow version with
+ * it (verified live in Retell's own version panel), so there is no second
+ * cleanup here and none is needed.
+ *
+ * `gone` is still answered rather than swallowed, because a version that is not
+ * there is a version serving nobody. What it is worth is the caller's to judge.
  */
 export async function deleteAgentVersion(
   key: RetellCredential,
@@ -378,7 +478,7 @@ export async function deleteAgentVersion(
   try {
     answer = await ask(key, reach, {
       method: "DELETE",
-      path: `/delete-agent-version/${encodeURIComponent(agentId)}/${version}`,
+      path: `/delete-agent-version/${encodeURIComponent(agentId)}?version=${version}`,
     });
   } catch (cause) {
     return unreachableFrom(cause);
@@ -386,4 +486,124 @@ export async function deleteAgentVersion(
 
   const failure = failureIn(answer);
   return failure ?? { kind: "deleted" };
+}
+
+/** One agent version, as the listing names it. */
+export type AgentVersionSummary = {
+  readonly version: number;
+  readonly published: boolean;
+};
+
+export type ListedAgentVersions =
+  | {
+      readonly kind: "versions";
+      readonly versions: readonly AgentVersionSummary[];
+    }
+  | RetellFailure;
+
+/** How many versions one listing request asks for. */
+const VERSION_PAGE_SIZE = 1000;
+
+/** A provider must finish a listing before it can hold this process forever. */
+const MAX_VERSION_PAGES = 100;
+
+/** A listed version, or `null` for a row that is not one. */
+function versionSummaryFrom(row: unknown): AgentVersionSummary | null {
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
+  const held = row as Record<string, unknown>;
+  const version = held["version"];
+  if (typeof version !== "number") return null;
+  return { version, published: held["is_published"] === true };
+}
+
+/**
+ * Every version an agent has right now, read from the **current** listing.
+ *
+ * `/list-agent-versions/` and never `/get-agent-versions/`: the second is
+ * removed on 2026-09-15 and egma has never used it. Nothing here may move back
+ * to it.
+ *
+ * This is what a teardown proves a deletion with. A delete's own answer cannot
+ * do that job — a malformed request answers 404 exactly as a version that was
+ * never there does, and that is the confusion that let a broken teardown
+ * report an account put back for a week. So absence is read, not inferred, and
+ * every ambiguity below is answered as a refusal rather than as absence: a
+ * malformed page, a cursor that does not advance, and a bare full page with no
+ * cursor at all are all "Egma cannot say", which is the honest answer for a
+ * proof.
+ */
+export async function listAgentVersions(
+  key: RetellCredential,
+  agentId: string,
+  reach: RetellReach = {},
+): Promise<ListedAgentVersions> {
+  const versions: AgentVersionSummary[] = [];
+  let paginationKey: string | undefined;
+  const seenPaginationKeys = new Set<string>();
+
+  try {
+    for (let page = 0; page < MAX_VERSION_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        limit: String(VERSION_PAGE_SIZE),
+        ...(paginationKey === undefined
+          ? {}
+          : { pagination_key: paginationKey }),
+      });
+      const answer = await ask(key, reach, {
+        method: "GET",
+        path:
+          `/list-agent-versions/${encodeURIComponent(agentId)}` +
+          `?${query.toString()}`,
+      });
+
+      // This listing names one agent, so a 404 is that agent being gone.
+      const failure = failureIn(answer);
+      if (failure !== undefined) return failure;
+
+      const held = parsed(answer);
+      const bare = Array.isArray(held);
+      const rows = bare ? (held as unknown[]) : held["items"];
+      if (!Array.isArray(rows)) {
+        return {
+          kind: "refused",
+          reason: "Retell answered a malformed agent-version page.",
+        };
+      }
+      for (const row of rows) {
+        const summary = versionSummaryFrom(row);
+        if (summary !== null) versions.push(summary);
+      }
+
+      // A bare array carries no cursor, so the only page is the whole listing —
+      // unless it came back full, and a full one is refused rather than read as
+      // complete.
+      if (bare) {
+        return rows.length >= VERSION_PAGE_SIZE
+          ? {
+              kind: "refused",
+              reason:
+                "Retell answered a full page of agent versions and no cursor.",
+            }
+          : { kind: "versions", versions };
+      }
+      if (held["has_more"] !== true) return { kind: "versions", versions };
+
+      const next = plain(held["pagination_key"]);
+      if (next === "" || seenPaginationKeys.has(next)) {
+        return {
+          kind: "refused",
+          reason: "Retell answered an agent-version page without a new cursor.",
+        };
+      }
+      seenPaginationKeys.add(next);
+      paginationKey = next;
+    }
+  } catch (cause) {
+    return unreachableFrom(cause);
+  }
+
+  return {
+    kind: "refused",
+    reason: "Retell answered too many agent-version pages.",
+  };
 }

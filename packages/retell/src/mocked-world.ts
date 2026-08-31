@@ -30,11 +30,14 @@
  * 7. **Verify** — read the serving version's tools back and compare them to the
  *    capture. A difference means the swap landed somewhere it should not have;
  *    the capture is written back and the run fails loudly.
- * 8. **Teardown** — `finishMockedWorld` again: **delete the copy first, then
- *    restore any pin**, and **never restore blind** — a restore reads where the
- *    number points now and writes only where it still points at what this run
- *    pinned it to. The reverse order is lethal: restoring `latest` while the
- *    copy exists makes the copy *be* latest.
+ * 8. **Teardown** — `finishMockedWorld` again: **delete the copy first, prove
+ *    the delete, then restore any pin**, and **never restore blind** — a
+ *    restore reads where the number points now and writes only where it still
+ *    points at what this run pinned it to. The reverse order is lethal:
+ *    restoring `latest` while the copy exists makes the copy *be* latest. The
+ *    proof is a read of the agent's versions, because the delete's own answer
+ *    cannot be one: a malformed delete and a version that was never there both
+ *    answer 404.
  *
  * ## The record is an obligation, not a report
  *
@@ -122,9 +125,12 @@ import {
   branchAgentVersion,
   deleteAgentVersion,
   engineTypeOf,
+  listAgentVersions,
   readEngineConfiguration,
   resolveAgentVersion,
+  resolveServingAgentVersion,
   writeEngineTools,
+  LATEST_PUBLISHED,
   type EngineConfiguration,
   type EngineReference,
   type VersionReference,
@@ -263,10 +269,27 @@ export type RecordMockRun = (state: MockRunRecord) => Promise<void>;
  * agent reaches — while the tick, which resolves the same way, would read the
  * wrong version's tools.
  *
- * `latest` where the agent has no number at all, which is the ordinary case for
- * a chat agent and the right answer for it: a conversation created against no
- * named version gets the platform's own default, and this makes the run test
- * what that default is.
+ * **`latest_published` where no binding names a version** — an agent with no
+ * number at all, which is the ordinary case for a chat agent, and an agent
+ * every number of which rides `latest`.
+ *
+ * It used to be `latest`, and that one word is the whole of the fourth defect
+ * this design was rebuilt around. `latest` is Retell's word for the newest
+ * version *created*, drafts included; every mocked run mints a draft; and a
+ * teardown that deleted nothing left each run's draft standing. So each run
+ * resolved `latest` onto the previous run's leftover and conducted the suite
+ * against egma's own mocks instead of against the customer's agent. The
+ * teardown is fixed beside this, but the reference is the part that must never
+ * have depended on the teardown being right: `latest_published` cannot select a
+ * draft even when one exists, because nothing in this package publishes
+ * anything.
+ *
+ * It is also the closer reading of the question. What a run wants is the
+ * version real callers reach, and a number riding `latest` is a deploy habit
+ * rather than an intent to serve a draft. An agent whose traffic really is
+ * pinned to an older published version — an environment tag, a bound number —
+ * is answered above, by its own binding, and a run may always name a version
+ * outright.
  */
 export function versionReferenceIn(
   decisions: readonly BindingDecision[],
@@ -282,7 +305,7 @@ export function versionReferenceIn(
       }
     }
   }
-  return "latest";
+  return LATEST_PUBLISHED;
 }
 
 export type MockedWorldBuild = {
@@ -441,14 +464,20 @@ export async function buildMockedWorld(
   const decisions = bindingDecisionsFor(listed.numbers, agentId);
 
   // 3a. The serving version, resolved once. Everything after this names the
-  // number rather than the reference, so a tag reassigned mid-run moves
-  // nothing.
-  const serving = await resolveAgentVersion(
+  // number rather than the reference, so a tag reassigned mid-run — or a draft
+  // minted by anybody — moves nothing.
+  //
+  // The reference defaults to `latest_published`, and an agent that has
+  // published nothing is refused here rather than conducted against a draft.
+  const serving = await resolveServingAgentVersion(
     key,
     agentId,
     build.versionReference ?? versionReferenceIn(decisions),
     reach,
   );
+  if (serving.kind === "none-published") {
+    return { kind: "refused", reason: serving.reason, state: null };
+  }
   if (serving.kind !== "version") {
     return {
       kind: "refused",
@@ -750,7 +779,7 @@ function toolsWriteOf(
 }
 
 /**
- * Put the account back: **delete the copy first, then restore any pin.**
+ * Put the account back: **delete the copy, prove it, then restore any pin.**
  *
  * One function, two callers. A run's own teardown calls it when every
  * simulation is terminal; the next run's claim calls it over whatever a crashed
@@ -762,6 +791,12 @@ function toolsWriteOf(
  * mocked agent until the delete lands. In this order every failure is benign: a
  * failed delete leaves a real version pinned with a stray copy, and a failed
  * restore leaves a real version pinned. The next sweep finishes either.
+ *
+ * **The delete is proved and never assumed.** A 404 to egma's own delete is not
+ * evidence the version is gone — a request Retell has no route for answers the
+ * same way, which is exactly how a teardown that deleted nothing reported an
+ * account put back for a week. So the agent's versions are read back, from the
+ * current listing endpoint, and "gone" counts only when that read agrees.
  *
  * **A restore never writes blind.** It reads where the number points now and
  * writes only where it still points at what this run's own note says it pinned
@@ -839,31 +874,63 @@ export async function finishMockedWorld(
   }
 
   if (state.tempMockAgentVersion !== null) {
-    const deleted = await deleteAgentVersion(
-      key,
-      input.agentId,
-      state.tempMockAgentVersion,
-      reach,
-    );
-    // `gone` is a success here and nowhere else in this file: a version that is
-    // not there is a version serving nobody, which is the whole of what the
-    // delete is for.
+    const temporary = state.tempMockAgentVersion;
+    const deleted = await deleteAgentVersion(key, input.agentId, temporary, reach);
     if (deleted.kind !== "deleted" && deleted.kind !== "gone") {
-      unfinished.push(
-        sentenceOf(
-          deleted,
-          `deleting temporary version ${state.tempMockAgentVersion}`,
-        ),
-      );
+      unfinished.push(sentenceOf(deleted, `deleting temporary version ${temporary}`));
       // Nothing below this line runs. The pin is what keeps real callers off
       // the copy, and the copy is still there.
       return { state, unfinished, leftAlone };
     }
-    // The version number stays on the record: it is what this run branched,
-    // and a reader asking what a run did months later still deserves the
-    // answer. What says whether it still exists is the cleanup flag, and a
-    // retry that deletes an already-deleted version is answered `gone`, which
-    // is a success here.
+
+    // **The proof, and the reason this whole function stopped trusting a status
+    // code.** Egma sent the delete with the version as a path segment for a
+    // week. Retell has no such route, answered 404, and 404 maps to `gone` —
+    // "the thing you named is not there" — so every teardown reported the
+    // account put back while every draft survived, and the next run resolved
+    // one of them. A malformed request and a version that was never there are
+    // the same three digits; only a second, different read tells them apart.
+    //
+    // So the versions are read back, and the account is recorded as put back
+    // only when that read agrees. Everything that is not agreement — the read
+    // failing, the read being unable to say, the version still standing — is
+    // reported as still owed. That is deliberately the expensive direction: an
+    // unsettled world blocks the next mocked run of this agent, and a world
+    // wrongly called settled is a customer's version panel filling with egma's
+    // litter and a suite quietly grading the wrong agent.
+    const listed = await listAgentVersions(key, input.agentId, reach);
+    if (listed.kind === "gone") {
+      unfinished.push(
+        `Retell answered 404 when Egma read agent ${input.agentId}'s versions ` +
+          `back to prove temporary version ${temporary} is gone. That is not ` +
+          "proof: a request Retell has no route for answers exactly the same " +
+          "way. Egma left the account as it stands and says so.",
+      );
+      return { state, unfinished, leftAlone };
+    }
+    if (listed.kind !== "versions") {
+      unfinished.push(
+        sentenceOf(
+          listed,
+          `reading agent ${input.agentId}'s versions back to prove temporary ` +
+            `version ${temporary} is gone`,
+        ),
+      );
+      return { state, unfinished, leftAlone };
+    }
+    if (listed.versions.some((one) => one.version === temporary)) {
+      unfinished.push(
+        `Retell accepted the delete of temporary version ${temporary} and its ` +
+          "versions still hold it. Egma did not restore anything on the " +
+          "strength of a delete that did not happen; the pin is what keeps " +
+          "real callers off that version, and it stays.",
+      );
+      return { state, unfinished, leftAlone };
+    }
+    // Proven absent. The version number stays on the record: it is what this
+    // run branched, and a reader asking what a run did months later still
+    // deserves the answer. What says whether it still exists is the cleanup
+    // flag.
   }
 
   const notes = state.mockMetadata?.numbers ?? [];
