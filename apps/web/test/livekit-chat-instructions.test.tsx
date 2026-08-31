@@ -7,12 +7,17 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  CHAT_SETUP_PROMPT,
-  CHAT_SETUP_SNIPPET,
+  JAVASCRIPT_CHAT_SETUP_PROMPT,
+  JAVASCRIPT_CHAT_SETUP_SNIPPET,
+  JAVASCRIPT_TESTING_SETUP_INSTALL,
+  JAVASCRIPT_VOICE_SETUP_PROMPT,
+  JAVASCRIPT_VOICE_SETUP_SNIPPET,
   LiveKitTestingInstructions,
-  TESTING_SETUP_INSTALL,
-  VOICE_SETUP_PROMPT,
-  VOICE_SETUP_SNIPPET,
+  PYTHON_CHAT_SETUP_PROMPT,
+  PYTHON_CHAT_SETUP_SNIPPET,
+  PYTHON_TESTING_SETUP_INSTALL,
+  PYTHON_VOICE_SETUP_PROMPT,
+  PYTHON_VOICE_SETUP_SNIPPET,
 } from "../app/projects/[projectId]/agents/livekit-testing-instructions.tsx";
 
 /**
@@ -35,7 +40,7 @@ afterEach(() => {
 describe("LiveKit testing instructions", () => {
   it("hands over the complete chat setup and claims nothing about it", () => {
     const { container } = render(
-      <LiveKitTestingInstructions modality="chat" />,
+      <LiveKitTestingInstructions language="python" modality="chat" />,
     );
 
     expect(
@@ -64,7 +69,7 @@ describe("LiveKit testing instructions", () => {
     // The prompt carries the worker's name as well: dispatching by name is
     // what puts the one agent under test in the marked room.
     expect(copy).toContain("agent_name in its WorkerOptions");
-    expect(copy).toContain(TESTING_SETUP_INSTALL);
+    expect(copy).toContain(PYTHON_TESTING_SETUP_INSTALL);
     expect(copy).not.toMatch(/egma[>=~^]/);
 
     // The mirror of the monitoring surface's promise: the web explains work it
@@ -76,12 +81,12 @@ describe("LiveKit testing instructions", () => {
 
   it("gives voice workers the testing hook without chat-only room changes", () => {
     const { container } = render(
-      <LiveKitTestingInstructions modality="voice" />,
+      <LiveKitTestingInstructions language="python" modality="voice" />,
     );
 
     const copy = container.textContent ?? "";
-    expect(copy).toContain(VOICE_SETUP_PROMPT);
-    expect(copy).toContain(VOICE_SETUP_SNIPPET);
+    expect(copy).toContain(PYTHON_VOICE_SETUP_PROMPT);
+    expect(copy).toContain(PYTHON_VOICE_SETUP_SNIPPET);
     expect(copy).toContain("from egma import mockable");
     expect(copy).toContain("await mockable(agent, ctx, session)");
     expect(copy).toContain("agent_name in its WorkerOptions");
@@ -97,7 +102,9 @@ describe("LiveKit testing instructions", () => {
       configurable: true,
       value: { writeText },
     });
-    render(<LiveKitTestingInstructions modality="chat" />);
+    render(
+      <LiveKitTestingInstructions language="python" modality="chat" />,
+    );
 
     fireEvent.click(
       screen.getByRole("button", { name: "Copy coding-agent prompt" }),
@@ -111,7 +118,46 @@ describe("LiveKit testing instructions", () => {
         name: "Try to copy coding-agent prompt again",
       }),
     ).toBeTruthy();
-    expect(document.body.textContent).toContain(CHAT_SETUP_PROMPT);
+    expect(document.body.textContent).toContain(PYTHON_CHAT_SETUP_PROMPT);
+  });
+
+  it("hands over the complete JavaScript chat setup", () => {
+    const { container } = render(
+      <LiveKitTestingInstructions language="javascript" modality="chat" />,
+    );
+
+    const copy = container.textContent ?? "";
+    expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_PROMPT);
+    expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_SNIPPET);
+    expect(copy).toContain(JAVASCRIPT_TESTING_SETUP_INSTALL);
+    expect(copy).toContain('import { mockable } from "@egma/livekit"');
+    expect(copy).toContain(
+      'ctx.job.room?.name?.startsWith("egma-sim-chat-")',
+    );
+    expect(copy).toContain("inputOptions: { audioEnabled: false }");
+    expect(copy).toContain("outputOptions:");
+    expect(copy).toContain("syncTranscription: false");
+    expect(copy.indexOf("await mockable(agent, ctx, session)")).toBeLessThan(
+      copy.indexOf("await session.start"),
+    );
+    expect(copy).not.toContain("pip install");
+    expect(copy).not.toContain("from egma import mockable");
+    expect(copy).not.toMatch(/unsupported/i);
+  });
+
+  it("gives JavaScript voice workers no chat-only room changes", () => {
+    const { container } = render(
+      <LiveKitTestingInstructions language="javascript" modality="voice" />,
+    );
+
+    const copy = container.textContent ?? "";
+    expect(copy).toContain(JAVASCRIPT_VOICE_SETUP_PROMPT);
+    expect(copy).toContain(JAVASCRIPT_VOICE_SETUP_SNIPPET);
+    expect(copy).toContain('import { mockable } from "@egma/livekit"');
+    expect(copy).toContain("await mockable(agent, ctx, session)");
+    expect(copy).not.toContain("egma-sim-chat-");
+    expect(copy).not.toContain("independent audio publisher");
+    expect(copy).not.toContain("inputOptions");
   });
 
   /**
@@ -145,12 +191,36 @@ describe("LiveKit testing instructions", () => {
     );
     expect(contract).toContain("do not start any independent audio publisher");
     expect(contract).toContain("dispatch_name:");
-    expect(CHAT_SETUP_SNIPPET).toContain(
+    expect(contract).toContain("javascript_testing: supported");
+    expect(contract).toContain(
+      'javascript_testing_import: import { mockable } from "@egma/livekit"',
+    );
+    expect(contract).toContain(
+      "javascript_testing_call: await mockable(agent, ctx, session)",
+    );
+    expect(PYTHON_CHAT_SETUP_SNIPPET).toContain(
       'ctx.job.room.name.startswith("egma-sim-chat-")',
     );
-    expect(CHAT_SETUP_PROMPT).toContain("transcription sync off");
-    expect(CHAT_SETUP_PROMPT).toContain("await mockable(agent, ctx, session)");
-    expect(CHAT_SETUP_PROMPT).toContain("agent_name in its WorkerOptions");
-    expect(CHAT_SETUP_PROMPT).toContain("independent audio publisher");
+    expect(PYTHON_CHAT_SETUP_PROMPT).toContain("transcription sync off");
+    expect(PYTHON_CHAT_SETUP_PROMPT).toContain(
+      "await mockable(agent, ctx, session)",
+    );
+    expect(PYTHON_CHAT_SETUP_PROMPT).toContain(
+      "agent_name in its WorkerOptions",
+    );
+    expect(PYTHON_CHAT_SETUP_PROMPT).toContain("independent audio publisher");
+    expect(JAVASCRIPT_CHAT_SETUP_SNIPPET).toContain(
+      'ctx.job.room?.name?.startsWith("egma-sim-chat-")',
+    );
+    expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain("transcription sync off");
+    expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain(
+      "await mockable(agent, ctx, session)",
+    );
+    expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain(
+      "agentName in its WorkerOptions",
+    );
+    expect(JAVASCRIPT_CHAT_SETUP_PROMPT).toContain(
+      "independent audio publisher",
+    );
   });
 });

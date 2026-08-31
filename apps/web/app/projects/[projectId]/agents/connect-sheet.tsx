@@ -161,7 +161,7 @@ const MODALITY_CHOICES: Readonly<
   voice: {
     title: "Voice",
     description:
-      "Egma speaks to the agent in the room, the way a person reaches it. Your Python worker needs the Egma testing hook, which Egma shows you next.",
+      "Egma speaks to the agent in the room, the way a person reaches it. Your worker needs the Egma testing hook, which Egma shows you next.",
   },
   chat: {
     title: "Chat",
@@ -1045,10 +1045,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         return;
       case "livekit-language":
         if (livekitLanguage === "") return;
-        if (livekitLanguage === "javascript") {
-          leave();
-          return;
-        }
         transition("livekit-modality");
         return;
       case "livekit-modality":
@@ -1071,13 +1067,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "livekit-monitoring":
         if (livekitLanguage === "") return;
         // Both starts with Monitoring so the language is known before any
-        // simulation connection can be written. JavaScript finishes here;
-        // Python continues into the supported, session-isolated test setup.
-        if (
-          goal === "both" &&
-          livekitLanguage === "python" &&
-          completed === null
-        ) {
+        // simulation connection is written. The selected language decides
+        // which source contract the final testing screen shows.
+        if (goal === "both" && completed === null) {
           transition("livekit-modality");
           return;
         }
@@ -1419,16 +1411,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 compact
                 value="javascript"
                 title="JavaScript"
-                description="Production monitoring is supported. Simulation testing is not supported yet."
+                description="Simulation testing and production monitoring are supported."
               />
             </RadioGroup>
-            {livekitLanguage === "javascript" ? (
-              <Help>
-                Egma cannot set up JavaScript testing yet because it cannot
-                isolate each test run from other LiveKit sessions. Use the
-                Monitoring goal to add JavaScript monitoring.
-              </Help>
-            ) : null}
           </div>
         );
       case "livekit-modality":
@@ -1458,8 +1443,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           </div>
         );
       case "livekit-testing":
-        return livekitModality === "" ? null : (
-          <LiveKitTestingInstructions modality={livekitModality} />
+        return livekitModality === "" || livekitLanguage === "" ? null : (
+          <LiveKitTestingInstructions
+            language={livekitLanguage}
+            modality={livekitModality}
+          />
         );
       case "livekit-simulation":
         return (
@@ -1487,20 +1475,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         );
       case "livekit-monitoring":
         return (
-          <div className="flex flex-col gap-5">
-            <LiveKitMonitoringInstructions
-              projectId={projectId}
-              language={livekitLanguage}
-              onLanguageChange={setLivekitLanguage}
-            />
-            {goal === "both" && livekitLanguage === "javascript" ? (
-              <Help>
-                Monitoring is supported for JavaScript and finishes here.
-                Testing remains unsupported because Egma cannot isolate each
-                JavaScript test run from other LiveKit sessions.
-              </Help>
-            ) : null}
-          </div>
+          <LiveKitMonitoringInstructions
+            projectId={projectId}
+            language={livekitLanguage}
+            onLanguageChange={setLivekitLanguage}
+          />
         );
     }
   }
@@ -1512,9 +1491,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     step === "livekit-modality"
       ? "Continue"
       : step === "livekit-language"
-        ? livekitLanguage === "javascript"
-          ? "Return to agents"
-          : "Continue"
+        ? "Continue"
         : step === "retell-lanes"
           ? // Picking the phone lane carries on to the number chooser; every
             // other set of picks has nothing left to ask and saves here.
@@ -1542,9 +1519,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                     ? "Continue to testing"
                     : "Continue"
                 : step === "livekit-monitoring" && goal === "both"
-                  ? livekitLanguage === "javascript"
-                    ? "Finish monitoring"
-                    : "Continue to simulation"
+                  ? "Continue to simulation"
                   : "Return to agents";
 
   const primaryDisabled =

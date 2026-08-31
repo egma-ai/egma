@@ -315,8 +315,8 @@ describe("the goal-first agent setup plan", () => {
 
   /**
    * Language is known before any LiveKit simulation connection is written.
-   * Both asks on Monitoring first, so JavaScript finishes without creating a
-   * connection that would falsely claim session-isolated testing.
+   * Both asks on Monitoring first, so one language choice drives the matching
+   * monitoring and simulation source contracts.
    */
   it("captures the LiveKit language before simulation and never crosses a saved connection on Back", () => {
     const simulation = agentSetupPlan("simulation", "livekit");

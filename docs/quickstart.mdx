@@ -107,12 +107,6 @@ Choose one outcome:
   no simulation connection, suite, tests, or run.
 - **Both** completes the testing and monitoring outcomes for the same agent.
 
-LiveKit JavaScript is the current exception: it supports Monitoring, but its
-simulation mocks are not isolated between sessions. For JavaScript Testing,
-the coding agent reports that boundary before remote testing setup. For
-JavaScript Both, it completes Monitoring and reports that Testing remains
-unsupported instead of claiming that Both completed.
-
 The coding agent resolves the exact Egma platform, agent, provider target,
 modality, access method, and resources from repository evidence and live CLI
 facts. It asks only when those facts leave a material choice.
@@ -151,8 +145,9 @@ silently resolve that difference.
 
 ### LiveKit
 
-The simulation path in this section supports Python workers. A JavaScript
-worker follows the Monitoring path in section 8 instead.
+The simulation path in this section supports Python and JavaScript workers.
+The coding agent reads the worker source and applies the matching Egma SDK
+contract before it runs the first test.
 
 The coding agent reads the selected Egma instance's LiveKit catalog through
 three iterative, read-only calls. The first call lists modalities:
@@ -454,10 +449,8 @@ the key ID that the developer must revoke before retrying. The coding agent
 does not read the file or repeat its secret.
 
 A monitoring-only task ends after the CLI enables monitoring and the coding
-agent reads the status receipt. A Both task with supported testing ends only
-after the run and monitoring status reach their required end states. A
-JavaScript Both task ends after monitoring with a clear report that simulation
-testing remains unsupported.
+agent reads the status receipt. A Both task ends only after the run and
+monitoring status reach their required end states.
 
 ## Keep tests in step
 

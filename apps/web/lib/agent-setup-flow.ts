@@ -88,8 +88,8 @@ const PLANS: Readonly<
     both: {
       goal: "both",
       platform: "livekit",
-      // Python continues into simulation setup; JavaScript finishes after
-      // monitoring because its test runs cannot yet be isolated.
+      // Both languages continue into simulation setup after the customer has
+      // the matching production-monitoring instructions.
       mayWriteConnection: true,
       pullWithConnection: false,
       monitoringInstructions: true,
@@ -256,15 +256,14 @@ export function stepAfterPlatform(
 ): AgentSetupStep {
   if (platform === "retell") return "retell-key";
   // Monitoring asks for the worker language on its own instruction screen.
-  // Both starts there too, so JavaScript can finish Monitoring without first
-  // creating a simulation connection that the JavaScript SDK cannot isolate.
+  // Both starts there too, so one language choice drives both source hooks.
   return goal === "simulation" ? "livekit-language" : "livekit-monitoring";
 }
 
 /**
  * What follows a saved LiveKit simulation connection.
  *
- * Every Python worker needs the testing hook. Chat adds silent room handling.
+ * Every worker needs the testing hook. Chat adds silent room handling.
  * This is a screen and not a recorded state: Egma cannot see the source change
  * from the web application, so the sheet claims no completion for it.
  */
@@ -278,7 +277,7 @@ export function stepAfterLiveKitCredentials(
 export function stepAfterLiveKitTesting(
   _plan: AgentSetupPlan,
 ): AgentSetupStep | null {
-  // A Both flow completes Monitoring before it starts Python simulation setup.
+  // A Both flow completes Monitoring before it starts simulation setup.
   return null;
 }
 
@@ -326,9 +325,9 @@ export function previousAgentSetupStep({
     case "livekit-language":
       return "platform";
     case "livekit-modality":
-      // Both has already shown Monitoring and captured Python before it can
-      // enter simulation setup. Simulation-only captured Python on the
-      // language screen.
+      // Both has already shown Monitoring and captured the worker language
+      // before it enters simulation setup. Simulation-only captured the same
+      // choice on the language screen.
       return goal === "both" ? "livekit-monitoring" : "livekit-language";
     case "retell-agent":
       return "retell-key";

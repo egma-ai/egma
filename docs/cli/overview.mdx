@@ -127,13 +127,9 @@ cost money.
     response or a local manifest failure, it pulls before any new create.
   </Step>
   <Step title="Integrate the LiveKit test path">
-    For a Python LiveKit worker, the coding agent adds the Egma SDK testing
-    entry and writes grounded answers for external-dependency tools. The
-    JavaScript SDK supports monitoring only because LiveKit Agents JS does not
-    isolate mocks between sessions. A JavaScript Testing request stops before
-    remote testing setup. A JavaScript Both request completes monitoring, then
-    reports that simulation remains unsupported instead of claiming that Both
-    completed. Retell does not need this source integration.
+    For a Python or JavaScript LiveKit worker, the coding agent adds the matching
+    Egma SDK testing entry and writes grounded answers for external-dependency
+    tools. Retell does not need this source integration.
   </Step>
   <Step title="Validate and review">
     The coding agent runs focused repository checks and `egma validate`, reads

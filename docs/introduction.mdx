@@ -75,11 +75,10 @@ in the prompt and tools Retell actually runs. Production monitoring uses
 Retell's call-history APIs.
 
 **LiveKit** uses room connections with project credentials or a customer token
-endpoint. The coding agent grounds setup in committed worker source. Python
-workers support simulation testing and can let `egma run` own a
+endpoint. The coding agent grounds setup in committed worker source. Python and
+JavaScript workers support simulation testing. For Python, `egma run` can own a
 repository-local worker. Production monitoring calls `monitor_livekit(ctx)` in
-Python or `monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`. The
-JavaScript SDK supports monitoring, but not simulation testing.
+Python or `monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`.
 
 ## How setup works
 
