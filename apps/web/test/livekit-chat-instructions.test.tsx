@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -38,9 +39,40 @@ afterEach(() => {
 });
 
 describe("LiveKit testing instructions", () => {
+  function InstructionsPicker() {
+    const [language, setLanguage] = useState<"javascript" | "python" | "">(
+      "",
+    );
+    return (
+      <LiveKitTestingInstructions
+        language={language}
+        modality="voice"
+        onLanguageChange={setLanguage}
+      />
+    );
+  }
+
+  it("waits until the instruction language is chosen", () => {
+    render(<InstructionsPicker />);
+
+    expect(screen.getByText("Show instructions for")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Python" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "JavaScript" })).toBeTruthy();
+    expect(screen.queryByText("Install the latest Egma SDK")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
+
+    expect(screen.getByText("Install the latest Egma SDK")).toBeTruthy();
+    expect(document.body.textContent).toContain(JAVASCRIPT_TESTING_SETUP_INSTALL);
+  });
+
   it("hands over the complete chat setup and claims nothing about it", () => {
     const { container } = render(
-      <LiveKitTestingInstructions language="python" modality="chat" />,
+      <LiveKitTestingInstructions
+        language="python"
+        modality="chat"
+        onLanguageChange={vi.fn()}
+      />,
     );
 
     expect(
@@ -81,7 +113,11 @@ describe("LiveKit testing instructions", () => {
 
   it("gives voice workers the testing hook without chat-only room changes", () => {
     const { container } = render(
-      <LiveKitTestingInstructions language="python" modality="voice" />,
+      <LiveKitTestingInstructions
+        language="python"
+        modality="voice"
+        onLanguageChange={vi.fn()}
+      />,
     );
 
     const copy = container.textContent ?? "";
@@ -103,7 +139,11 @@ describe("LiveKit testing instructions", () => {
       value: { writeText },
     });
     render(
-      <LiveKitTestingInstructions language="python" modality="chat" />,
+      <LiveKitTestingInstructions
+        language="python"
+        modality="chat"
+        onLanguageChange={vi.fn()}
+      />,
     );
 
     fireEvent.click(
@@ -123,7 +163,11 @@ describe("LiveKit testing instructions", () => {
 
   it("hands over the complete JavaScript chat setup", () => {
     const { container } = render(
-      <LiveKitTestingInstructions language="javascript" modality="chat" />,
+      <LiveKitTestingInstructions
+        language="javascript"
+        modality="chat"
+        onLanguageChange={vi.fn()}
+      />,
     );
 
     const copy = container.textContent ?? "";
@@ -148,7 +192,11 @@ describe("LiveKit testing instructions", () => {
 
   it("gives JavaScript voice workers no chat-only room changes", () => {
     const { container } = render(
-      <LiveKitTestingInstructions language="javascript" modality="voice" />,
+      <LiveKitTestingInstructions
+        language="javascript"
+        modality="voice"
+        onLanguageChange={vi.fn()}
+      />,
     );
 
     const copy = container.textContent ?? "";

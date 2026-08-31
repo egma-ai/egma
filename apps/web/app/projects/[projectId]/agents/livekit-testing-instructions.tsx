@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import type { LiveKitWorkerLanguage } from "@/lib/agent-setup-flow.ts";
 
 import { CopyBlock } from "./copy-block.tsx";
@@ -120,8 +126,9 @@ Do not start any independent audio publisher, such as background audio, while ch
 ${JAVASCRIPT_PROMPT_END}`;
 
 type LiveKitTestingInstructionsProps = {
-  readonly language: LiveKitWorkerLanguage;
+  readonly language: LiveKitWorkerLanguage | "";
   readonly modality: "chat" | "voice";
+  readonly onLanguageChange: (language: LiveKitWorkerLanguage) => void;
 };
 
 type TestingContract = {
@@ -165,8 +172,69 @@ function testingContract(
 export function LiveKitTestingInstructions({
   language,
   modality,
+  onLanguageChange,
 }: LiveKitTestingInstructionsProps) {
   const chat = modality === "chat";
+
+  return (
+    <section
+      className="flex flex-col gap-5"
+      aria-labelledby="livekit-testing-title"
+    >
+      <h3
+        className="m-0 text-lg leading-(--line-tight) font-medium text-foreground"
+        data-setup-heading
+        id="livekit-testing-title"
+        tabIndex={-1}
+      >
+        Add simulation testing to your LiveKit agent
+      </h3>
+
+      <Tabs
+        className="flex flex-col gap-3"
+        value={language}
+        onValueChange={(value) =>
+          onLanguageChange(value as LiveKitWorkerLanguage)
+        }
+      >
+        <p
+          className="m-0 text-sm leading-(--line-normal) font-medium text-foreground"
+          id="livekit-testing-language"
+        >
+          Show instructions for
+        </p>
+        <TabsList aria-labelledby="livekit-testing-language">
+          <TabsTrigger value="python">Python</TabsTrigger>
+          <TabsTrigger value="javascript">JavaScript</TabsTrigger>
+        </TabsList>
+        {language === "" ? null : (
+          <>
+            <TabsContent className="pt-3" value="python">
+              <TestingSteps language="python" chat={chat} />
+            </TabsContent>
+            <TabsContent className="pt-3" value="javascript">
+              <TestingSteps language="javascript" chat={chat} />
+            </TabsContent>
+          </>
+        )}
+      </Tabs>
+      {language === "" ? null : (
+        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+          Production rooms keep the worker&apos;s existing behavior. Egma cannot
+          see this change from here. The first simulation confirms it.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function TestingSteps({
+  language,
+  chat,
+}: {
+  readonly language: LiveKitWorkerLanguage;
+  readonly chat: boolean;
+}) {
   const contract = testingContract(language, chat);
   const steps = [
     {
@@ -187,29 +255,15 @@ export function LiveKitTestingInstructions({
   ] as const;
 
   return (
-    <section
-      className="flex flex-col gap-5"
-      aria-labelledby="livekit-testing-title"
-    >
-      <div className="flex flex-col gap-2">
-        <h3
-          className="m-0 text-lg leading-(--line-tight) font-medium text-foreground"
-          data-setup-heading
-          id="livekit-testing-title"
-          tabIndex={-1}
-        >
-          Add simulation testing to your LiveKit agent
-        </h3>
-        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-          {chat
-            ? `A ${contract.languageLabel} worker needs the Egma testing hook, silent chat-room options, and a registered dispatch name.`
-            : `A ${contract.languageLabel} worker needs the Egma testing hook and a registered dispatch name.`}
-          {language === "javascript"
-            ? " This needs LiveKit Agents 1.5.0 or newer in the 1.x line."
-            : null}
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-5">
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        {chat
+          ? `A ${contract.languageLabel} worker needs the Egma testing hook, silent chat-room options, and a registered dispatch name.`
+          : `A ${contract.languageLabel} worker needs the Egma testing hook and a registered dispatch name.`}
+        {language === "javascript"
+          ? " This needs LiveKit Agents 1.5.0 or newer in the 1.x line."
+          : null}
+      </p>
       <ol className="m-0 flex list-none flex-col gap-5 p-0">
         {steps.map((step, index) => (
           <li className="flex gap-3" key={step.title}>
@@ -225,10 +279,6 @@ export function LiveKitTestingInstructions({
           </li>
         ))}
       </ol>
-      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-        Production rooms keep the worker&apos;s existing behavior. Egma cannot
-        see this change from here. The first simulation confirms it.
-      </p>
-    </section>
+    </div>
   );
 }

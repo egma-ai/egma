@@ -1043,10 +1043,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-phone":
         await finishRetellLanes();
         return;
-      case "livekit-language":
-        if (livekitLanguage === "") return;
-        transition("livekit-modality");
-        return;
       case "livekit-modality":
         if (livekitModality !== "") transition("livekit-simulation");
         return;
@@ -1066,9 +1062,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       }
       case "livekit-monitoring":
         if (livekitLanguage === "") return;
-        // Both starts with Monitoring so the language is known before any
-        // simulation connection is written. The selected language decides
-        // which source contract the final testing screen shows.
+        // Monitoring needs a language-specific source hook. Both carries that
+        // instruction choice forward; it is never part of the room connection.
         if (goal === "both" && completed === null) {
           transition("livekit-modality");
           return;
@@ -1389,33 +1384,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             </Help>
           </div>
         );
-      case "livekit-language":
-        return (
-          <div className="flex flex-col gap-5">
-            <StepIntro title="What language is your LiveKit worker?" />
-            <RadioGroup
-              className="gap-4"
-              aria-label="LiveKit worker language"
-              value={livekitLanguage}
-              onValueChange={(value) =>
-                setLivekitLanguage(value as LiveKitWorkerLanguage)
-              }
-            >
-              <ChoiceCard
-                compact
-                value="python"
-                title="Python"
-                description="Simulation testing and production monitoring are supported."
-              />
-              <ChoiceCard
-                compact
-                value="javascript"
-                title="JavaScript"
-                description="Simulation testing supports LiveKit Agents 1.5.0 and newer in the 1.x line. Production monitoring supports 1.5.5 and newer."
-              />
-            </RadioGroup>
-          </div>
-        );
       case "livekit-modality":
         return (
           <div className="flex flex-col gap-5">
@@ -1443,10 +1411,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           </div>
         );
       case "livekit-testing":
-        return livekitModality === "" || livekitLanguage === "" ? null : (
+        return livekitModality === "" ? null : (
           <LiveKitTestingInstructions
             language={livekitLanguage}
             modality={livekitModality}
+            onLanguageChange={setLivekitLanguage}
           />
         );
       case "livekit-simulation":
@@ -1490,9 +1459,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     step === "retell-agent" ||
     step === "livekit-modality"
       ? "Continue"
-      : step === "livekit-language"
-        ? "Continue"
-        : step === "retell-lanes"
+      : step === "retell-lanes"
           ? // Picking the phone lane carries on to the number chooser; every
             // other set of picks has nothing left to ask and saves here.
             pickedLanes.includes("phone")
@@ -1536,9 +1503,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         (!pickedLanes.includes("phone") && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
-    (step === "livekit-language" && livekitLanguage === "") ||
     (step === "livekit-modality" && livekitModality === "") ||
     (step === "livekit-simulation" && completed === null && !livekitReady) ||
+    (step === "livekit-testing" && livekitLanguage === "") ||
     (step === "livekit-monitoring" && livekitLanguage === "");
 
   const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
