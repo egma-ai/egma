@@ -19,6 +19,7 @@ import {
   type ProjectGrader,
 } from "../lib/graders.ts";
 import type { Me } from "../lib/me.ts";
+import { currentDraftState } from "../ui/settings-read.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /*
@@ -289,6 +290,50 @@ function rowOf(name: string): HTMLElement {
   const row = screen.getByRole("button", { name }).closest("tr");
   if (row === null) throw new Error(`no row for ${name}`);
   return row;
+}
+
+/** A create that is answered, so the page's own notice and draft can be read. */
+function answersThatCreateAGrader(): Record<string, Stubbed | Stubbed[]> {
+  return {
+    ...standardAnswers(),
+    "POST /v1/grader-library/custom": {
+      status: 201,
+      body: {
+        definition: {
+          ...LATENCY_DEFINITION,
+          id: "grl_custom",
+          name: "Polite resolution",
+          owner: "organization",
+          type: "llm_as_judge",
+          settingDefinitions: [],
+          activeProjectGraderId: "grd_custom",
+        },
+        grader: {
+          ...LATENCY,
+          id: "grd_custom",
+          graderDefinitionId: "grl_custom",
+          name: "Polite resolution",
+          owner: "organization",
+        },
+      },
+    },
+  };
+}
+
+/** Everything the create sheet asks for before it will send. */
+function fillCustomGrader(sheet: HTMLElement): void {
+  fireEvent.change(within(sheet).getByLabelText("Name*"), {
+    target: { value: "Polite resolution" },
+  });
+  fireEvent.change(within(sheet).getByLabelText("Grading instructions*"), {
+    target: { value: "the agent resolved the request" },
+  });
+  fireEvent.change(within(sheet).getByLabelText("Passes when*"), {
+    target: { value: "the agent confirms the request is done" },
+  });
+  fireEvent.change(within(sheet).getByLabelText("Fails when*"), {
+    target: { value: "the agent leaves the request open" },
+  });
 }
 
 function ScopeHarness() {
@@ -918,6 +963,98 @@ describe("the project Graders surface", () => {
         },
       });
     });
+  });
+
+  /**
+   * The notice a grader change leaves behind stays until somebody clears it.
+   *
+   * It carries no timer on purpose: a line that removed itself after a few
+   * seconds would be gone before a person who looked away could read it. So the
+   * way out is a control, and the control is the product's own icon button with
+   * the dismiss label `ui/feedback.tsx` already uses. One control serves all
+   * four of the page's messages, because `refreshAll` writes them all here.
+   */
+  it("lets a person dismiss the notice a grader change leaves behind", async () => {
+    apiAnswers(answersThatCreateAGrader());
+    render(<GradersPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create custom grader" }),
+    );
+
+    const sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    fillCustomGrader(sheet);
+    fireEvent.click(
+      within(sheet).getByRole("button", { name: "Create grader" }),
+    );
+
+    const said = "Custom grader created and added to Active graders.";
+    expect(await screen.findByText(said)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `Dismiss ${said}` }));
+    expect(screen.queryByText(said)).toBeNull();
+  });
+
+  /**
+   * A sheet that is not open holds no draft.
+   *
+   * The create sheet stays mounted after it closes — the page renders it
+   * unconditionally — and its fields are reset when it opens rather than when
+   * it closes, so what was typed survives and its `changed` stays true. With no
+   * `open` in the condition, that closed sheet kept a draft registered in the
+   * shared registry, and the next product link asked "Leave without saving?"
+   * about a grader that was already created.
+   */
+  it("stops protecting the custom-grader draft once the sheet closes", async () => {
+    apiAnswers(answersThatCreateAGrader());
+    render(<GradersPage />);
+    let sheet: HTMLElement;
+
+    async function openTheSheet(): Promise<HTMLElement> {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Create custom grader" }),
+      );
+      return await screen.findByRole("dialog", {
+        name: "Create custom grader",
+      });
+    }
+
+    async function waitForTheSheetToClose(): Promise<void> {
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("dialog", { name: "Create custom grader" }),
+        ).toBeNull();
+      });
+    }
+
+    function leaves(): boolean {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return !leaving.defaultPrevented;
+    }
+
+    await screen.findByRole("button", { name: "Create custom grader" });
+    sheet = await openTheSheet();
+    fillCustomGrader(sheet);
+    /* Open and typed into: this is a real draft, and it is protected. */
+    expect(currentDraftState()).toBe("unsaved");
+    expect(leaves()).toBe(false);
+
+    fireEvent.click(
+      within(sheet).getByRole("button", { name: "Create grader" }),
+    );
+    await waitForTheSheetToClose();
+    expect(currentDraftState()).toBe("unchanged");
+    expect(leaves()).toBe(true);
+
+    /* Cancel throws the draft away as plainly as creating does. */
+    sheet = await openTheSheet();
+    fillCustomGrader(sheet);
+    expect(currentDraftState()).toBe("unsaved");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitForTheSheetToClose();
+    expect(currentDraftState()).toBe("unchanged");
+    expect(leaves()).toBe(true);
   });
 
   it("offers no mechanism and no modality choice, and keeps the pass threshold", async () => {

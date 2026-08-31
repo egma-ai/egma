@@ -574,6 +574,7 @@ export function LibraryGraderSheet({
               <UseGraderForm
                 entry={read}
                 projectId={projectId}
+                open={open}
                 onCancel={() => setMode("details")}
                 onUsed={onUsed}
               />
@@ -660,11 +661,13 @@ function LibraryDetails({
 function UseGraderForm({
   entry,
   projectId,
+  open,
   onCancel,
   onUsed,
 }: {
   readonly entry: GraderLibraryEntry;
   readonly projectId: string;
+  readonly open: boolean;
   readonly onCancel: () => void;
   readonly onUsed: () => void;
 }) {
@@ -685,7 +688,7 @@ function UseGraderForm({
     JSON.stringify(settings) !==
       JSON.stringify(initialSettings(entry.settingDefinitions)) ||
     threshold !== "1";
-  useUnsavedChanges(changed && !saving, saving);
+  useUnsavedChanges(open && changed && !saving, saving);
 
   async function useGrader(): Promise<void> {
     if (!valid || saving) return;
@@ -864,7 +867,7 @@ function EditGraderForm({
     threshold !== String(grader.passThreshold);
   const valid =
     scopeValid && filledSettings !== null && filledThreshold !== null;
-  useUnsavedChanges(changed && !saving, saving);
+  useUnsavedChanges(open && changed && !saving, saving);
 
   async function save(): Promise<void> {
     if (!valid || saving || !changed || !mayAuthor) return;
@@ -1069,7 +1072,7 @@ export function CreateCustomGraderSheet({
     failsWhen !== "" ||
     JSON.stringify(scope) !== JSON.stringify(ALL_SIMULATIONS_SCOPE) ||
     threshold !== "1";
-  useUnsavedChanges(changed && !saving, saving);
+  useUnsavedChanges(open && changed && !saving, saving);
 
   async function create(): Promise<void> {
     if (!valid || saving || filledThreshold === null) return;
@@ -1181,7 +1184,7 @@ export function CreateCustomGraderSheet({
                 value={passesWhen}
                 disabled={saving}
                 aria-required="true"
-                rows={3}
+                rows={2}
                 onChange={(event) => setPassesWhen(event.target.value)}
               />
             </Field>
@@ -1195,7 +1198,7 @@ export function CreateCustomGraderSheet({
                 value={failsWhen}
                 disabled={saving}
                 aria-required="true"
-                rows={3}
+                rows={2}
                 onChange={(event) => setFailsWhen(event.target.value)}
               />
             </Field>

@@ -651,15 +651,52 @@ describe("what egma made of the exchange", () => {
     expect(grades.textContent).toContain("will appear here");
   });
 
-  it("shows nested assertion details inside the grade", async () => {
+  /*
+   * The stored grade says its one rationale twice — once at the top, once in
+   * its assertion — because the judge copies it. The assertion is the record,
+   * so the top line reads as the count and the sentence appears exactly once.
+   * Cited span ids stay stored but unshown: this surface has no way to say
+   * them that a reader can follow.
+   */
+  it("shows nested assertion details inside the grade, said once", async () => {
     stub({ status: 200, body: detail() });
     await open();
     await settled();
 
+    expect(screen.getByText("1 of 1 assertion passed.")).toBeTruthy();
     expect(screen.getByText("Assertion details")).toBeTruthy();
     expect(screen.getByText("Behavior 1")).toBeTruthy();
-    expect(screen.getAllByText("The agent offered Tuesday and the caller agreed.").length)
-      .toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("The agent offered Tuesday and the caller agreed.")
+        .length,
+    ).toBe(1);
+    expect(screen.queryByText(/Cited spans/)).toBeNull();
+    expect(screen.queryByText(/span_turn_agent/)).toBeNull();
+  });
+
+  it("keeps a written summary above assertions it does not repeat", async () => {
+    const SUMMARIZED = {
+      ...GRADE,
+      details: {
+        rationale: "1 of 1 expected behaviors passed.",
+        assertions: GRADE.details.assertions,
+      },
+    };
+    stub({
+      status: 200,
+      body: detail({
+        grades: [SUMMARIZED],
+        gradeHistory: [SUMMARIZED],
+      }),
+    });
+    await open();
+    await settled();
+
+    expect(screen.getByText("1 of 1 expected behaviors passed.")).toBeTruthy();
+    expect(
+      screen.getAllByText("The agent offered Tuesday and the caller agreed.")
+        .length,
+    ).toBe(1);
   });
 });
 
