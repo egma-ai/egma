@@ -780,13 +780,16 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
    * lock with the session, so what the holder has afterwards is a dead
    * connection and no claim.
    *
+   * Wait for the backend to finish stopping, so the next assertion observes
+   * the released lock rather than the short gap after Postgres sent the signal.
+   *
    * Scoped to this suite's own database, because an advisory lock is, and
    * because suites share a cluster: an unscoped kill would reach into another
    * suite's deployment and end a claim that is nothing to do with this one.
    */
   async function killTheDrainClaim(): Promise<void> {
     await api.database.sql(
-      `select pg_terminate_backend(pid) from pg_locks
+      `select pg_terminate_backend(pid, 5000) from pg_locks
         where locktype = 'advisory' and classid = $1 and objid = $2
           and granted and pid <> pg_backend_pid()
           and database = (select oid from pg_database
@@ -1091,6 +1094,8 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
       log: { warn: () => undefined, error: () => undefined },
       scanIntervalMilliseconds: 60 * 60_000,
     });
+    // Finish the automatic recovery pass before this suite arranges its first segment.
+    await drainer.drainNow();
   });
 
   afterAll(async () => {
