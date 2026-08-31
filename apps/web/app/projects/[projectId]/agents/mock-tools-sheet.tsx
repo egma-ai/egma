@@ -240,8 +240,9 @@ export function MockToolsSheet({
    * Whether Egma can keep the promises at all for this agent.
    *
    * A refusal is a fact about the account — a custom-LLM engine, two keys on
-   * two accounts, Retell not answering — so no lane's switch may go on while
-   * one stands, and the sentence says which it is.
+   * two accounts, Retell not answering, an agent that has published nothing —
+   * so no lane's switch may go on while one stands, and the sentence says which
+   * it is.
    */
   const mayMock = mayAuthor && found !== null && found.refusal === null;
 

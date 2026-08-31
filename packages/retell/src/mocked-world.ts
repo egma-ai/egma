@@ -234,6 +234,26 @@ export type MockEngineNote = {
 export type MockMetadataRecord = {
   readonly engine: MockEngineNote;
   readonly numbers: readonly MockNumberNote[];
+  /**
+   * Whether the temporary version has been deleted **and the deletion proved**.
+   *
+   * The one fact that must outlive the teardown that learned it. A teardown can
+   * finish the delete, prove it against the version listing, and then fail a
+   * restore — which leaves the world unsettled and the next sweep retrying it.
+   * Without this, that sweep would see a version number on the record and
+   * delete it again.
+   *
+   * **A second delete of the same number is not harmless.** Retell hands the
+   * next branch the lowest free number, so the number this run branched can
+   * belong to somebody else's draft by then — the customer's own, made in the
+   * window while Egma still owed a restore. The version number itself stays on
+   * the record, because a reader months later still deserves to know what a run
+   * branched; this is what says it is no longer standing.
+   *
+   * Absent on a note written before the delete, and on one whose run never
+   * branched anything.
+   */
+  readonly temporaryVersionGone?: boolean;
 };
 
 /**
@@ -273,8 +293,9 @@ export type RecordMockRun = (state: MockRunRecord) => Promise<void>;
  * number at all, which is the ordinary case for a chat agent, and an agent
  * every number of which rides `latest`.
  *
- * It used to be `latest`, and that one word is the whole of the fourth defect
- * this design was rebuilt around. `latest` is Retell's word for the newest
+ * It used to be `latest`, and that one word is half of the defect this design
+ * was rebuilt around — the teardown that deleted nothing is the other half, and
+ * neither is dangerous without the other. `latest` is Retell's word for the newest
  * version *created*, drafts included; every mocked run mints a draft; and a
  * teardown that deleted nothing left each run's draft standing. So each run
  * resolved `latest` onto the previous run's leftover and conducted the suite
@@ -697,6 +718,37 @@ export async function buildMockedWorld(
     };
   }
 
+  // 6b. **The write landed on the version it named, and minted nothing.**
+  //
+  // Retell's reference says nothing about whether a PATCH edits the named
+  // version in place or forks a new one, and only the version it answers with
+  // tells the truth per call. That is not a detail: there is no
+  // delete-conversation-flow-version anywhere in Retell's API, so an engine
+  // version minted here could never be removed — the account would keep it
+  // after the run's own version was deleted and proved gone, and no teardown
+  // could ever say the panel was as it was found.
+  //
+  // So the accident fails the run here rather than surviving it. The caller
+  // tears the world down, which deletes the agent version this branched; if a
+  // stray engine version really was minted, the run's failure is what makes a
+  // person look at it while it is still one version rather than a hundred.
+  if (
+    written.version !== null &&
+    written.version !== draft.engine.version
+  ) {
+    return {
+      kind: "refused",
+      reason:
+        `Egma wrote the mocked tools onto ${draft.engine.type} ` +
+        `${draft.engine.engineId} v${String(draft.engine.version)}, and Retell ` +
+        `answered that it wrote v${String(written.version)} instead. That is a ` +
+        "new engine version rather than an edit of the copy, and Retell has no " +
+        "endpoint that deletes one — so Egma stopped rather than leave behind " +
+        "something nothing can clean up.",
+      state,
+    };
+  }
+
   // 7. Verify. The one check that answers the question a developer actually
   // asks — "is my live agent still exactly as it was?" — by reading the engine
   // the note captured rather than by trusting the request that was just sent.
@@ -882,7 +934,16 @@ export async function finishMockedWorld(
     }
   }
 
-  if (state.tempMockAgentVersion !== null) {
+  // **A delete already proved is never made twice.** A teardown can finish the
+  // delete, prove it against the version listing, and still leave the world
+  // unsettled on a restore that failed — and the next sweep retries the whole
+  // of this function. Retell hands the next branch the lowest free number, so
+  // by then this run's number can belong to somebody else's draft: the
+  // customer's own, made in the window while Egma still owed a restore. The
+  // note is what carries the proof across those two calls.
+  const alreadyGone = state.mockMetadata?.temporaryVersionGone === true;
+
+  if (state.tempMockAgentVersion !== null && !alreadyGone) {
     const temporary = state.tempMockAgentVersion;
     const deleted = await deleteAgentVersion(
       key,
@@ -943,10 +1004,16 @@ export async function finishMockedWorld(
       );
       return { state, unfinished, leftAlone };
     }
-    // Proven absent. The version number stays on the record: it is what this
-    // run branched, and a reader asking what a run did months later still
-    // deserves the answer. What says whether it still exists is the cleanup
-    // flag.
+    // **Proven absent, and written down before anything else can fail.** The
+    // version number stays on the record — it is what this run branched, and a
+    // reader asking months later still deserves the answer — and this flag is
+    // what says it is no longer standing. Set here rather than at the end
+    // because everything below can fail, and a delete proved is a delete that
+    // must never be attempted again whatever happens next.
+    const metadata = state.mockMetadata;
+    if (metadata !== null) {
+      state = { ...state, mockMetadata: { ...metadata, temporaryVersionGone: true } };
+    }
   }
 
   const notes = state.mockMetadata?.numbers ?? [];
@@ -985,12 +1052,18 @@ export async function finishMockedWorld(
       mockMetadata:
         metadata === null ? null : { ...metadata, numbers: outstanding },
     };
-    // Recorded only where what egma owes actually moved — the record is an
-    // obligation, and a write that changes nothing is not a change in it. It
-    // is also refused: a finished run's header admits a write only where one
-    // of the two cleanup columns moved, so a teardown that put nothing back
-    // (every restore failed, or the note names no number at all) must not try.
-    if (settledSome) await input.record(state);
+    // Recorded where what egma owes actually moved — the record is an
+    // obligation, and a write that changes nothing is not a change in it. Two
+    // things can have moved: a number was put back, or the copy was deleted and
+    // proved gone. **The second matters most on this path**, because it is the
+    // one a retry must not undo by deleting a number Retell has since given to
+    // somebody else's draft.
+    //
+    // Both live in the note, which is one of the two columns a finished run's
+    // header still admits a write to — the version number beside it is frozen,
+    // and deliberately: it is what this run branched, and that never changes.
+    const provedGone = metadata?.temporaryVersionGone === true;
+    if (settledSome || provedGone) await input.record(state);
     return { state, unfinished, leftAlone };
   }
 

@@ -70,6 +70,22 @@ export type MockNumberNote = {
 export type MockMetadata = {
   readonly engine: MockEngineNote;
   readonly numbers: readonly MockNumberNote[];
+  /**
+   * Whether the temporary version was deleted **and the deletion proved**.
+   *
+   * The one fact a teardown has to hand to the next one. A teardown can delete
+   * the copy, prove it gone against the platform's own version listing, and
+   * then fail a restore — which leaves the world unsettled and the next sweep
+   * retrying it. Without this the sweep would read a version number off the
+   * row and delete it a second time, and by then the platform can have handed
+   * that number to somebody else's draft.
+   *
+   * It lives here rather than beside the version number because a finished
+   * run's header is frozen except for this note and the cleanup flag, and
+   * because the version number is a permanent answer to "what did this run
+   * branch" rather than a statement about what is standing now.
+   */
+  readonly temporaryVersionGone?: boolean;
 };
 
 /** The note a stored row holds, or `null` for a run that made no copy. */
@@ -83,11 +99,13 @@ export function mockMetadataFrom(
 
   const engine = row["engine"];
   const numbers = row["numbers"];
+  const gone = row["temporary_version_gone"];
   if (
     typeof engine !== "object" ||
     engine === null ||
     Array.isArray(engine) ||
-    !Array.isArray(numbers)
+    !Array.isArray(numbers) ||
+    (gone !== undefined && gone !== null && typeof gone !== "boolean")
   ) {
     throw malformed();
   }
@@ -110,6 +128,7 @@ export function mockMetadataFrom(
       version: engineVersion,
       ...(typeof print === "string" ? { toolPrint: print } : {}),
     },
+    ...(gone === true ? { temporaryVersionGone: true } : {}),
     numbers: numbers.map((entry) => {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
         throw malformed();
@@ -129,15 +148,18 @@ export function mockMetadataFrom(
 }
 
 /**
- * The note as a **reader of the run** sees it: everything except the print.
+ * The note as a **reader of the run** sees it: what Egma promised to put back,
+ * and nothing of how it goes about it.
  *
- * The print is egma's working note to itself — the whole of the serving
- * version's tools in one line — and it belongs to the teardown that has to
- * prove that version never moved. A run header is a report to a person about
- * what egma promised to put back, and a canonicalized copy of the customer's
- * tool declarations is neither something they can act on nor something a page
- * of runs should carry. So the sweep's read keeps it and the run's read drops
- * it, which is also why the published shape of the note does not name it.
+ * Two fields are the teardown's own working notes and are dropped here. The
+ * print is the whole of the serving version's tools in one line, kept so a
+ * resumed teardown can still prove that version never moved; a canonicalized
+ * copy of the customer's tool declarations is neither something a person can
+ * act on nor something a page of runs should carry. `temporaryVersionGone` is
+ * bookkeeping between one teardown and the next — what a reader wants to know
+ * about the copy is whether the account is back, and the cleanup flag beside
+ * the note says that. So the sweep's read keeps both and the run's read drops
+ * both, which is also why the published shape of the note names neither.
  */
 export function mockMetadataAsRead(
   metadata: MockMetadata | null,
@@ -166,5 +188,10 @@ export function mockMetadataRow(
       was: one.was,
       pinned_to: one.pinnedTo,
     })),
+    // The row's own spelling again. Written only when true, so a note from
+    // before this fact existed reads back exactly as it was written.
+    ...(metadata.temporaryVersionGone === true
+      ? { temporary_version_gone: true }
+      : {}),
   };
 }

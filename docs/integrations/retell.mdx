@@ -192,6 +192,24 @@ connections also keep a sealed copy because the simulator needs it. A phone
 connection keeps no key. The key never lands in the repository. Nothing in
 connection setup writes to the Retell account; provider requests are reads.
 
+## Which version a run tests
+
+Every simulation over a Retell connection is conducted against one version of
+your agent, and Egma resolves that version once, when the run starts. It reads
+the phone numbers routed to the agent first: where a number is bound to a
+version or to an environment tag, Egma follows that binding, because that is
+the agent your callers reach. Where no number names a version, Egma uses the
+**latest published** version — never the latest draft, so a version you are
+still editing is never what a suite grades. An agent with no published version
+and no number naming one is refused, and the run does not start. Publish the
+version you want tested, or pin a Retell phone number that routes to the agent
+to a version or an environment tag.
+
+Egma names the resolved version number on every request of that run, so an edit
+you make while the run is in flight cannot change what it is testing, and the
+run record carries that number — which is how a result read months later still
+says which version of the agent it speaks for.
+
 ## Author, validate, and run tests
 
 After connection setup, the coding agent follows the normal end-to-end sequence:

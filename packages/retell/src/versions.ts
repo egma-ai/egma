@@ -89,7 +89,20 @@ export type ReadEngineConfiguration =
   | { readonly kind: "not-held"; readonly reason: string }
   | RetellFailure;
 
-export type WroteEngineTools = { readonly kind: "written" } | RetellFailure;
+export type WroteEngineTools =
+  | {
+      readonly kind: "written";
+      /**
+       * The version Retell reports it wrote, or null when it named none.
+       *
+       * Read back rather than assumed to equal the version asked for: Retell's
+       * reference documents neither that an update edits in place nor that it
+       * mints a new version, and a PATCH that minted one would leave an engine
+       * version no documented endpoint can delete. The caller compares.
+       */
+      readonly version: number | null;
+    }
+  | RetellFailure;
 
 /**
  * What a version reference may be: a number, `latest`, `latest_published`, or
@@ -235,11 +248,20 @@ export const LATEST_PUBLISHED = "latest_published";
  * what a mocked run would find. The lead-ins are local to those surfaces; this
  * — the half a developer actually acts on — is one string, so the two can never
  * come to describe different ways out of the same dead end.
+ *
+ * **It names only ways that exist today.** Egma takes no version on a run and
+ * none on a connection, so telling somebody to "name a version for the run"
+ * would be sending them at a door with no handle. The one place a version can
+ * be named is where the customer already names one: a Retell phone number's own
+ * binding to this agent, which Egma reads and follows — the same read the
+ * enable-time screen and the mocked builder make. The day Egma grows a version
+ * of its own to pass, this clause grows the door with it.
  */
-export const PUBLISH_OR_NAME_A_VERSION =
-  "Two doors open it: publish the version you want tested in Retell, or name " +
-  "a version for the run explicitly — a version number, or an environment " +
-  "tag — and Egma conducts against whatever that resolves to.";
+export const PUBLISH_OR_BIND_A_VERSION =
+  "Two ways open it. Publish in Retell the version you want tested — that is " +
+  "the one Egma reaches when nothing else names one. Or pin a Retell phone " +
+  "number that routes to this agent to a version or to an environment tag: " +
+  "Egma follows that binding wherever it points, published or not.";
 
 /**
  * What a developer whose agent has published nothing is told when a **run** is
@@ -252,9 +274,10 @@ export const PUBLISH_OR_NAME_A_VERSION =
  */
 export function noPublishedVersion(agentId: string): string {
   return (
-    `Retell agent ${agentId} has no published version. Egma conducts a run ` +
-    "against the version real callers reach and never against a draft, so " +
-    `there is nothing here to test. ${PUBLISH_OR_NAME_A_VERSION}`
+    `Retell agent ${agentId} has no published version, and no phone number ` +
+    "routing to it names one either. Egma conducts a run against the version " +
+    "real callers reach and never against a draft, so there is nothing here " +
+    `to test. ${PUBLISH_OR_BIND_A_VERSION}`
   );
 }
 
@@ -459,7 +482,15 @@ export async function writeEngineTools(
   }
 
   const failure = failureIn(answer);
-  return failure ?? { kind: "written" };
+  if (failure !== undefined) return failure;
+  // **What Retell says it wrote, handed back rather than dropped.** The docs do
+  // not say whether a PATCH edits the named version in place or mints a new
+  // one, and only this field tells the truth per call. It matters because there
+  // is no documented way to remove a stray *flow* version — no
+  // delete-conversation-flow-version exists — so a write that quietly minted
+  // one would leave litter nothing can clean. The caller compares it to the
+  // version it asked for.
+  return { kind: "written", version: versionIn(parsed(answer)) };
 }
 
 /**
@@ -519,7 +550,15 @@ const VERSION_PAGE_SIZE = 1000;
 /** A provider must finish a listing before it can hold this process forever. */
 const MAX_VERSION_PAGES = 100;
 
-/** A listed version, or `null` for a row that is not one. */
+/**
+ * A listed version, or `null` for a row this reader cannot make one of.
+ *
+ * **A row that does not parse is not a row that is not there.** This listing's
+ * only caller is a proof of absence, and a dropped row would be read as one
+ * version fewer — so `"106"` arriving as a string where a number was expected
+ * would empty the whole list and green-light a put-back that deleted nothing.
+ * The caller refuses the page instead; nothing here is ever skipped quietly.
+ */
 function versionSummaryFrom(row: unknown): AgentVersionSummary | null {
   if (typeof row !== "object" || row === null || Array.isArray(row)) return null;
   const held = row as Record<string, unknown>;
@@ -568,7 +607,12 @@ export async function listAgentVersions(
           `?${query.toString()}`,
       });
 
-      // This listing names one agent, so a 404 is that agent being gone.
+      // A 404 here is a fact about **this request**, exactly as it is on the
+      // delete: Retell answers the same three digits for an agent it does not
+      // hold and for a route it does not have. So it is handed back as `gone`
+      // and never read as proof of anything — the caller that is proving a
+      // deletion treats every answer but an agreeing listing as "Egma cannot
+      // say". See `finishMockedWorld`.
       const failure = failureIn(answer);
       if (failure !== undefined) return failure;
 
@@ -583,7 +627,16 @@ export async function listAgentVersions(
       }
       for (const row of rows) {
         const summary = versionSummaryFrom(row);
-        if (summary !== null) versions.push(summary);
+        // Refused, never skipped: a row this reader cannot understand would
+        // otherwise leave the list one version short, and one version short is
+        // exactly how a version that is still there reads as absent.
+        if (summary === null) {
+          return {
+            kind: "refused",
+            reason: "Retell answered an agent version Egma could not read.",
+          };
+        }
+        versions.push(summary);
       }
 
       // A bare array carries no cursor, so the only page is the whole listing —

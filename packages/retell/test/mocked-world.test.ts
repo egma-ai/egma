@@ -81,6 +81,11 @@ type AccountOptions = {
    * no route for answered 404, and Egma read 404 as "already deleted".
    */
   readonly deletePretends?: "gone" | "deleted" | undefined;
+  /**
+   * The engine write mints a new version instead of editing the named one —
+   * the accident that would leave litter Retell has no endpoint to remove.
+   */
+  readonly writeMints?: boolean;
 };
 
 type Account = {
@@ -283,8 +288,21 @@ function account(options: AccountOptions = {}): Account {
       const asked = Number(new URL(url).searchParams.get("version"));
       const document = engines.get(engineKey(engineId, asked));
       if (document === undefined) return json({ error: "gone" }, 404);
+      if (options.writeMints) {
+        // What an account that forks on write looks like: the edit lands on a
+        // version nobody asked for, and Retell's own answer is the only place
+        // that is visible. Retell has no endpoint that deletes an engine
+        // version, so this one would outlive the run.
+        const minted = asked + 1;
+        engines.set(engineKey(engineId, minted), {
+          ...structuredClone(document),
+          ...structuredClone(body ?? {}),
+          version: minted,
+        });
+        return json({ version: minted });
+      }
       Object.assign(document, structuredClone(body ?? {}));
-      return json(document);
+      return json({ ...document, version: asked });
     }
 
     if (method === "DELETE" && path.startsWith("/delete-agent-version/")) {
@@ -673,8 +691,8 @@ describe("the version a run is conducted against", () => {
     expect(built.kind).toBe("refused");
     if (built.kind !== "refused") return;
     expect(built.reason).toContain("no published version");
-    expect(built.reason).toContain("publish the version");
-    expect(built.reason).toContain("name a version for the run explicitly");
+    expect(built.reason).toContain("Publish in Retell the version you want tested");
+    expect(built.reason).toContain("pin a Retell phone number that routes to this agent");
     // Nothing was made and nothing is owed.
     expect(built.state).toBeNull();
     expect(retell.versions.size).toBe(1);
@@ -695,6 +713,35 @@ describe("the version a run is conducted against", () => {
     expect(built.kind, JSON.stringify(built)).toBe("built");
     if (built.kind !== "built") return;
     expect(built.agentVersion).toBe(106);
+  });
+});
+
+describe("the write that must edit rather than mint", () => {
+  it("fails the run when Retell answers that it wrote a different version", async () => {
+    // Retell documents neither in-place editing nor minting, and only the
+    // version it answers with tells the truth per call. A minted engine version
+    // is litter no endpoint can remove — there is no
+    // delete-conversation-flow-version — so the accident fails the run rather
+    // than surviving it.
+    const retell = account({ writeMints: true });
+    const kept = recorder();
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("wrote v107 instead");
+    expect(built.reason).toContain("no endpoint that deletes one");
+    // The world is owed back, and the caller tears it down.
+    expect(built.state?.tempMockAgentVersion).toBe(106);
+    // And the version real callers reach was never written to.
+    expect(retell.toolsAt(105)[0]?.["url"]).toBe(
+      "https://backend.example.com/emrs/boulevard/tools/get_availability",
+    );
   });
 });
 
@@ -1198,6 +1245,71 @@ describe("the proof that the delete happened", () => {
       expect(finished.unfinished.join(" ")).toMatch(expected);
       expect(JSON.stringify(finished)).not.toContain(KEY);
     }
+  });
+
+  it("never deletes a version twice once the read-back proved it gone", async () => {
+    // A teardown can finish the delete, prove it, and still fail a restore —
+    // and the next sweep retries the whole function. Retell hands the next
+    // branch the lowest free number, so a second delete can land on somebody
+    // else's draft: the customer's own, made while Egma still owed a restore.
+    // Read live on every request, so the pin lands during the build and only
+    // the restore afterwards fails.
+    const refuse: Record<string, number> = {};
+    const retell = account({
+      numbers: { "+12567332874": RIDES_LATEST },
+      refuse,
+    });
+    const kept = recorder();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    refuse["/update-phone-number/"] = 500;
+
+    const first = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    // The copy is gone, and the restore is not: the world still owes something.
+    expect(retell.versions.has(106)).toBe(false);
+    expect(first.unfinished.join(" ")).toContain("restoring +12567332874");
+    expect(mockRunIsSettled(first.state)).toBe(false);
+    // The version number stays — it is what this run branched — and the note
+    // beside it says it is no longer standing.
+    expect(first.state.tempMockAgentVersion).toBe(106);
+    expect(first.state.mockMetadata?.temporaryVersionGone).toBe(true);
+    // Recorded, so the next process reads it rather than re-learning it.
+    expect(kept.last().mockMetadata?.temporaryVersionGone).toBe(true);
+
+    // The customer branches their own draft in the window, and Retell gives it
+    // the number Egma's copy freed.
+    retell.versions.set(106, {
+      agent_id: AGENT,
+      version: 106,
+      is_published: false,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: FLOW,
+        version: 106,
+      },
+    });
+
+    const before = retell.seen.length;
+    const second = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: first.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    const during = retell.seen.slice(before);
+
+    // Not one delete. The sweep goes straight to the restore it still owes.
+    expect(during.filter((one) => one.method === "DELETE")).toEqual([]);
+    expect(retell.versions.has(106)).toBe(true);
+    expect(second.unfinished.join(" ")).toContain("restoring +12567332874");
   });
 
   it("deletes the version with the version in the query string", async () => {

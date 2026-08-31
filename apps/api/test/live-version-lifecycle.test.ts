@@ -34,11 +34,13 @@ import { afterAll, describe, expect, it } from "vitest";
  *
  * ```sh
  * # EGMA_LIVE_RETELL_API_KEY is already exported in the developer's shell.
- * npx vitest run --project fast apps/api/test/live-version-lifecycle.test.ts
+ * EGMA_LIVE_RETELL_AGENT_ID=agent_… \
+ *   npx vitest run --project fast apps/api/test/live-version-lifecycle.test.ts
  * ```
  *
- * `EGMA_LIVE_RETELL_AGENT_ID` names a different agent when one is wanted; it
- * defaults to the agent this ticket was proven on.
+ * Both are required and neither has a default. The agent must have a published
+ * version — this proof branches from it — and whoever runs the proof names it,
+ * so no live target is ever spelled in the repository.
  *
  * ## Where it stops, and why
  *
@@ -68,8 +70,12 @@ import { afterAll, describe, expect, it } from "vitest";
  *    list did **not** grow again — the write edited in place.
  * 5. Delete the draft with the version as a query parameter; confirm the
  *    answer, then prove it with the read-back.
- * 6. Compare the version list against step 1: byte-equal. The account is as it
- *    was found, and that comparison is the whole point.
+ * 6. Compare against step 1. Three readings, because no one of them catches
+ *    everything: the same version numbers with the same published flags; the
+ *    same numbers behind `latest` and `latest_published`, which is what catches
+ *    a stray draft the list's flags would not; and the serving version's own
+ *    configuration unchanged. The account is as it was found, and that
+ *    comparison is the whole point.
  *
  * ## What to bank when it passes
  *
@@ -79,16 +85,32 @@ import { afterAll, describe, expect, it } from "vitest";
  * house convention.
  */
 
-const LIVE_KEY_VARIABLE = "EGMA_LIVE_RETELL_API_KEY";
+/**
+ * Both are required, and neither has a default.
+ *
+ * **The agent is named by whoever runs the proof, never by this file.** A real
+ * account's agent identifier baked in as a fallback is a live target sitting in
+ * the repository waiting for somebody who set only a key — and the account it
+ * belongs to is somebody's production. It would also make this file quietly
+ * wrong the day that agent is retired. The convention is the one
+ * `live-remedy.test.ts` beside it already follows: list what is needed, skip
+ * visibly while any of it is missing, and say which is missing.
+ */
+const NEEDED = [
+  "EGMA_LIVE_RETELL_API_KEY",
+  "EGMA_LIVE_RETELL_AGENT_ID",
+] as const;
 
-/** The agent this ticket was proven on. Overridable, never guessed. */
-const DEFAULT_AGENT = "agent_5b62a7f62293d1dc4ee417cf2a";
+const named = (variable: (typeof NEEDED)[number]): string =>
+  (process.env[variable] ?? "").trim();
 
-const liveKey = (process.env[LIVE_KEY_VARIABLE] ?? "").trim();
-const agentId = (process.env["EGMA_LIVE_RETELL_AGENT_ID"] ?? "").trim() || DEFAULT_AGENT;
-const live = liveKey === "" ? describe.skip : describe;
+const missing = NEEDED.filter((variable) => named(variable) === "");
+const live = missing.length === 0 ? describe : describe.skip;
 
-const key: RetellCredential = { reveal: () => liveKey };
+const agentId = named("EGMA_LIVE_RETELL_AGENT_ID");
+const key: RetellCredential = {
+  reveal: () => named("EGMA_LIVE_RETELL_API_KEY"),
+};
 
 /**
  * Where the swapped tool URLs point for the length of this proof.
@@ -105,15 +127,25 @@ const TARGET = {
 /** The one draft this proof made, so the teardown unmakes exactly that. */
 const made: { draftVersion: number | null } = { draftVersion: null };
 
-/** A version list in the one spelling two readings are compared in. */
+/**
+ * A version list in the one spelling two readings are compared in.
+ *
+ * **The stable fields, not the bytes.** What is compared is the set of version
+ * numbers this agent holds and which of them are published — the two things the
+ * version panel shows and the two things a run of Egma could have changed. Keys
+ * are sorted and the list is ordered by version, so neither Retell's
+ * serialization order nor the order it happened to page in can make an
+ * unchanged account look changed. Fields Egma never touches and Retell may move
+ * on its own — a modification timestamp, a version title — are deliberately
+ * outside it: a proof that failed because somebody renamed a version would be a
+ * loud failure about nothing.
+ */
 function print(versions: readonly AgentVersionSummary[]): string {
-  return canonicalJson(
-    [...versions].sort((a, b) => a.version - b.version),
-  );
+  return canonicalJson([...versions].sort((a, b) => a.version - b.version));
 }
 
 afterAll(async () => {
-  if (liveKey === "" || made.draftVersion === null) return;
+  if (missing.length > 0 || made.draftVersion === null) return;
   // Runs on every failure path, so a check that threw halfway through still
   // gives the account back.
   await deleteAgentVersion(key, agentId, made.draftVersion).catch(
@@ -129,6 +161,15 @@ live("the corrected version lifecycle, on the live agent", () => {
     if (before.kind !== "versions") return;
     const found = print(before.versions);
     console.log(`[live lifecycle] agent ${agentId} versions as found: ${found}`);
+
+    // What both version references resolve to before anything is made. The
+    // research file's own criterion for "the panel is as it was found" is that
+    // these two answer the same numbers afterwards — a stray draft would move
+    // `latest` without moving the list's published flags, so the list alone
+    // does not catch it.
+    const latestBefore = await resolveAgentVersion(key, agentId, "latest");
+    expect(latestBefore.kind, JSON.stringify(latestBefore)).toBe("version");
+    if (latestBefore.kind !== "version") return;
 
     // ── 2. Resolve the published pointer, and pin the number. ──
     const serving = await resolveServingAgentVersion(
@@ -214,7 +255,16 @@ live("the corrected version lifecycle, on the live agent", () => {
       version: engineVersion,
       tools: mocked.tools,
     });
-    expect(written, JSON.stringify(written)).toEqual({ kind: "written" });
+    // **Retell says which version it wrote, and it is the one asked for.** The
+    // reference documents neither in-place editing nor minting, and a PATCH
+    // that forked the flow would leave an engine version no endpoint can
+    // delete — there is no delete-conversation-flow-version. The product
+    // compares the same two numbers and fails the run on a mismatch; this is
+    // the live half of that check.
+    expect(written, JSON.stringify(written)).toEqual({
+      kind: "written",
+      version: engineVersion,
+    });
 
     // The write edited in place: no second version was minted by it.
     const afterWrite = await listAgentVersions(key, agentId);
@@ -239,7 +289,8 @@ live("the corrected version lifecycle, on the live agent", () => {
         `on version ${draft.version} in place`,
     );
 
-    // The version real callers reach, mid-proof: byte-identical to the capture.
+    // The version real callers reach, mid-proof: the same configuration this
+    // proof captured, compared key-order-insensitively.
     const during = await readEngineConfiguration(key, servingEngine);
     expect(during.kind).toBe("engine");
     if (during.kind !== "engine") return;
@@ -254,7 +305,6 @@ live("the corrected version lifecycle, on the live agent", () => {
     // answers 404 "Cannot DELETE", and Egma read that as "already deleted" for
     // a week while every draft survived.
     expect(removed, JSON.stringify(removed)).toEqual({ kind: "deleted" });
-    made.draftVersion = null;
 
     const proof = await listAgentVersions(key, agentId);
     expect(proof.kind, JSON.stringify(proof)).toBe("versions");
@@ -263,6 +313,13 @@ live("the corrected version lifecycle, on the live agent", () => {
       proof.versions.map((one) => one.version),
       "the delete was answered and the version is still there",
     ).not.toContain(draft.version);
+
+    // **Released only once the read-back agreed**, and never on the delete's own
+    // answer — which is the whole lesson this proof exists to hold. Clearing it
+    // above would have meant that the one outcome that matters, a delete Retell
+    // accepted while the version survived, is the outcome whose draft the
+    // teardown then walks away from.
+    made.draftVersion = null;
 
     // The agent version took its lockstep flow version with it, so there is no
     // second cleanup and none is needed.
@@ -273,10 +330,37 @@ live("the corrected version lifecycle, on the live agent", () => {
     ).toBe("gone");
 
     // ── 6. The account as it was found. ──
+    //
+    // Three readings, because no one of them catches everything. The version
+    // list says which versions exist and which are published. The two
+    // references say what each of them resolves to — a stray draft moves
+    // `latest` without moving any published flag, so the list alone would miss
+    // it. And the serving engine's own configuration says the tools a real
+    // caller reaches are untouched.
     expect(
       print(proof.versions),
       "the version panel is not as this proof found it",
     ).toBe(found);
+
+    const latestAfter = await resolveAgentVersion(key, agentId, "latest");
+    expect(latestAfter.kind).toBe("version");
+    if (latestAfter.kind !== "version") return;
+    expect(
+      latestAfter.agentVersion.version,
+      "`latest` resolves somewhere else than it did before this proof ran",
+    ).toBe(latestBefore.agentVersion.version);
+
+    const publishedAfter = await resolveServingAgentVersion(
+      key,
+      agentId,
+      LATEST_PUBLISHED,
+    );
+    expect(publishedAfter.kind).toBe("version");
+    if (publishedAfter.kind !== "version") return;
+    expect(
+      publishedAfter.agentVersion.version,
+      "`latest_published` resolves somewhere else than it did before",
+    ).toBe(servingVersion);
 
     const after = await readEngineConfiguration(key, servingEngine);
     expect(after.kind).toBe("engine");
@@ -287,17 +371,23 @@ live("the corrected version lifecycle, on the live agent", () => {
     ).toBe(servingToolsBefore);
 
     console.log(
-      `[live lifecycle] finished. Version list byte-equal before and after: ` +
-        `${found}`,
+      "[live lifecycle] finished. Version numbers and published flags equal " +
+        `before and after (${found}); latest and latest_published resolve to ` +
+        `${latestAfter.agentVersion.version} and ${servingVersion}, as they ` +
+        "did at the start.",
     );
   }, 120_000);
 
-  it("refuses a run against an agent with nothing published, and says so once", async () => {
-    // The published pointer on an agent that has one. This check exists to
-    // prove the resolve reads what Retell answers rather than a status code —
-    // the two-door refusal itself is proven against an agent that has published
-    // nothing in `packages/retell/test/live-fork.test.ts`, on a scratch agent
-    // this suite must never create here.
+  it("resolves latest and latest_published to different versions while a draft stands", async () => {
+    // The one word this ticket turned on, read off a real account. `latest`
+    // means the newest version *created* — so the moment any draft exists,
+    // anybody's, it is not the version real callers reach. What a run must ask
+    // for is the published pointer, and the two are asserted apart here rather
+    // than assumed apart from the documentation.
+    //
+    // The refusal an agent with nothing published earns is proven in
+    // `packages/retell/test/live-fork.test.ts`, against a scratch agent that
+    // suite creates and destroys — never against this one, which is serving.
     const serving = await resolveServingAgentVersion(
       key,
       agentId,
@@ -305,6 +395,7 @@ live("the corrected version lifecycle, on the live agent", () => {
     );
     expect(serving.kind).toBe("version");
     if (serving.kind !== "version") return;
+    expect(serving.agentVersion.published).toBe(true);
 
     // And `latest` is a different answer whenever a draft stands: the one word
     // that decided which agent a production run graded.
@@ -323,15 +414,17 @@ live("the corrected version lifecycle, on the live agent", () => {
 });
 
 describe("the live lifecycle proof's own gate", () => {
-  it("names what it needs, and reaches nothing without it", () => {
-    // Runs with or without the key, so a reader of a green CI log can see that
-    // the live proof exists and exactly why it did not run.
-    expect(LIVE_KEY_VARIABLE).toBe("EGMA_LIVE_RETELL_API_KEY");
-    expect(DEFAULT_AGENT).toBe("agent_5b62a7f62293d1dc4ee417cf2a");
-    if (liveKey === "") {
+  it("holds every check until the environment names a key and an agent", () => {
+    // Runs with or without the environment, so a reader of a green CI log can
+    // see that the live proof exists and exactly why it did not run.
+    expect(NEEDED).toContain("EGMA_LIVE_RETELL_API_KEY");
+    // No agent is a default: without one named, nothing here runs at all.
+    expect(NEEDED).toContain("EGMA_LIVE_RETELL_AGENT_ID");
+    expect(missing.length === 0).toBe(agentId !== "");
+    if (missing.length > 0) {
       console.log(
-        `[live lifecycle] skipped — set ${LIVE_KEY_VARIABLE} to run it. It ` +
-          "branches one draft on the live agent and deletes it again; it " +
+        `[live lifecycle] skipped — set ${missing.join(", ")} to run it. It ` +
+          "branches one draft on the agent named, and deletes it again; it " +
           "starts no run and publishes nothing.",
       );
     }

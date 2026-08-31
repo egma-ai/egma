@@ -1,4 +1,4 @@
-import { PUBLISH_OR_NAME_A_VERSION } from "@egma/retell";
+import { PUBLISH_OR_BIND_A_VERSION } from "@egma/retell";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -450,9 +450,9 @@ describe("the refusals the enable-time read carries", () => {
     // Door one, and door two — **the same clause a refused run carries**, held
     // to the one string both surfaces are built from, so a person meets one
     // fact once however they arrive at it and neither wording can drift.
-    expect(message).toContain("publish the version");
-    expect(message).toContain("name a version for the run explicitly");
-    expect(message).toContain(PUBLISH_OR_NAME_A_VERSION);
+    expect(message).toContain("Publish in Retell the version you want tested");
+    expect(message).toContain("pin a Retell phone number that routes to this agent");
+    expect(message).toContain(PUBLISH_OR_BIND_A_VERSION);
     // Never the sentence for a key that cannot see the agent: reconnecting it
     // would change nothing here.
     expect(message).not.toContain("have to be the same account's");

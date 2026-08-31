@@ -3,7 +3,7 @@ import {
   bindingDecisionsFor,
   discoverTools,
   listRoutedNumbers,
-  PUBLISH_OR_NAME_A_VERSION,
+  PUBLISH_OR_BIND_A_VERSION,
   readEngineConfiguration,
   resolveServingAgentVersion,
   versionReferenceIn,
@@ -15,7 +15,7 @@ import {
 } from "@egma/retell";
 
 /**
- * What enabling mock tools would find, and the three reasons it is refused.
+ * What enabling mock tools would find, and the four reasons it is refused.
  *
  * The refusals are here, together, on purpose. Each one is a different fact
  * about the customer's account, and each has a different next move — so
@@ -136,7 +136,7 @@ const PLATFORM_AWAY =
 const NEVER_PUBLISHED =
   "this agent has no published version on Retell. A mocked run is conducted " +
   "against the version real callers reach and never against a draft, so " +
-  `there is nothing here for Egma to stand in front of. ${PUBLISH_OR_NAME_A_VERSION}`;
+  `there is nothing here for Egma to stand in front of. ${PUBLISH_OR_BIND_A_VERSION}`;
 
 function refused(
   reason: MockToolsRefusalReason,
@@ -208,10 +208,13 @@ export async function discoverMockTools(
   }
   const numbers = bindingDecisionsFor(listed.numbers, input.platformAgentId);
 
-  // The same resolve a run start makes, through the same helper and over the
-  // same reference — a screen that explains what ticking will do and a run that
-  // is about to do it must not be able to disagree about which version that is,
-  // nor about what stops them.
+  // The same resolve a run start makes: the same reference, worked out from
+  // this agent's own bindings by the same `versionReferenceIn`, through the
+  // same verb. **That is now true of both surfaces rather than nearly true of
+  // them.** A run start that asked for the published pointer regardless would
+  // have refused an agent this screen had just called mockable on the strength
+  // of a number bound to version 5 — one account, two answers, and the person
+  // caught between them.
   const serving = await resolveServingAgentVersion(
     key,
     input.platformAgentId,

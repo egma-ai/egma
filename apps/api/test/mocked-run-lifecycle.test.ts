@@ -230,10 +230,13 @@ function anAccount(
       const next = Math.max(...state.versions) + 1;
       const engineVersion = branching === "share" ? base : next;
       if (branching !== "share") {
-        state.engines.set(
-          engineVersion,
-          structuredClone(state.engines.get(base) ?? {}),
-        );
+        state.engines.set(engineVersion, {
+          ...structuredClone(state.engines.get(base) ?? {}),
+          // A forked flow document reports its own version rather than the one
+          // it was forked from — and that field is where Egma reads whether a
+          // write landed in place or minted a version nothing can delete.
+          version: engineVersion,
+        });
       }
       state.versions.add(next);
       state.onBranch?.();
@@ -596,6 +599,15 @@ describe("a web-call run whose connection has the switch off", () => {
     // that rides `latest` was never repointed.
     expect([...ready.state.versions]).toEqual([105]);
     expect(ready.state.writes).toEqual([]);
+
+    // **The record and the call agree.** A run row naming a version the call
+    // did not target would be a result tied to the wrong agent, which is the
+    // whole thing the pinning exists to prevent. There is no temporary copy on
+    // this lane, so what the work order carries is the version run start
+    // pinned — and the simulator sends exactly that as `agent_version` on
+    // create-web-call.
+    const [spec] = await claim();
+    expect(spec?.["agent_version"]).toBe(105);
   });
 });
 
@@ -617,8 +629,8 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
     const message = String(refused.body.message);
     expect(message).toContain("no published version");
     // Door one, and door two.
-    expect(message).toContain("publish the version");
-    expect(message).toContain("name a version for the run explicitly");
+    expect(message).toContain("Publish in Retell the version you want tested");
+    expect(message).toContain("pin a Retell phone number that routes to this agent");
     expect(JSON.stringify(refused.body)).not.toContain(KEY);
 
     // Nothing was started, and that is a fact about the record rather than a

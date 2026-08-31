@@ -1,7 +1,9 @@
 import {
-  LATEST_PUBLISHED,
+  bindingDecisionsFor,
+  listRoutedNumbers,
   readEngineConfiguration,
   resolveServingAgentVersion,
+  versionReferenceIn,
   type AgentVersion,
   type Fetch as ProviderFetch,
   type RetellCredential,
@@ -15,16 +17,24 @@ import {
  * every request from then on. Retell's own default is "the newest version", and
  * the newest version is exactly the one a concurrent edit — or another run's
  * draft — has just made, so a suite that leaned on the default could be testing
- * two different agents halfway through. Resolving the **published** pointer once
- * and pinning the number it answers is the whole fix, and the number is what the
- * run's record carries so a reader months later knows which agent the result
- * speaks for. See `WHAT_IS_SERVING` below for why it is that pointer and not
- * the newest one.
+ * two different agents halfway through. Resolving once and pinning the number
+ * that comes back is the whole fix, and the number is what the run's record
+ * carries — and what the work order hands the simulator, so the version the run
+ * conducts against is the version the record names.
  *
- * **An agent that has published nothing is refused here**, before a run row
- * exists, with a sentence naming both doors: publish the version to be tested,
- * or name a version for the run. There is no third answer, because the third
- * answer is a run conducted against a draft nobody chose.
+ * **What "serving" means is decided in one place for every surface.** The
+ * account's numbers are read and this agent's own bindings answer it: a bound
+ * version, an environment tag, or — where no binding names anything — the
+ * newest *published* version, never Retell's `latest`, which means the newest
+ * version *created* and so reaches whichever draft was minted last. That rule
+ * is `versionReferenceIn` in the shared client, and the enable-time screen and
+ * the mocked builder ask it the same question, so no two surfaces can disagree
+ * about which version an agent is tested at.
+ *
+ * **An agent that publishes nothing and binds nothing is refused here**, before
+ * a run row exists, with a sentence naming the ways out. There is no third
+ * answer, because the third answer is a run conducted against a draft nobody
+ * chose.
  *
  * **The text-mode lane reads one thing more, and refuses on it.** A custom LLM
  * has no configuration on Retell at all: the brain and the tools live on the
@@ -88,31 +98,6 @@ function credential(value: string): RetellCredential {
   return { reveal: () => value };
 }
 
-/**
- * What Egma asks Retell for when it asks "which version is serving".
- *
- * `latest_published` — the newest version the customer has **published** — and
- * deliberately not `latest`, which is Retell's word for the newest version
- * *created*, drafts included. The difference is one word in a query string and
- * it decided which agent a whole production run graded: a mocked run mints a
- * draft, a teardown that deleted nothing left it standing, and the next run's
- * `latest` was that leftover. Asking for the published pointer cannot select a
- * draft even when one exists, because nothing in Egma publishes anything.
- *
- * Asking for it **once** is the opposite of leaning on it: what comes back is a
- * number, and the number is what every later request of the run names — so a
- * concurrent edit, or another run's draft, cannot change what a run tests
- * halfway through. The number is also what the run's record carries.
- *
- * **One divergence is known and owned.** A customer whose traffic is pinned to
- * an older published version, or routed through an environment tag, reaches a
- * version this does not. The door for them is the one that already exists:
- * everywhere Egma takes a version it takes Retell's own version reference, so a
- * run may name the tag or the bound number, and Egma resolves it once and pins
- * what comes back.
- */
-const WHAT_IS_SERVING = LATEST_PUBLISHED;
-
 /** Retell would not answer, said the same way whichever read met it. */
 function unavailable(what: string): {
   readonly kind: "unavailable";
@@ -145,6 +130,17 @@ type LaneReach = {
  * failures is a sentence about the connection, never about the request that met
  * it, and the credential is used and never returned, logged, or quoted — the
  * shared client owns that discipline.
+ *
+ * **Two requests, and the first one is what stops a screen and a run
+ * disagreeing.** The account's numbers are read, and this agent's own bindings
+ * decide the reference — a number bound to a version, a number riding an
+ * environment tag, and `latest_published` only where no binding names anything.
+ * That is the same reference `versionReferenceIn` gives the enable-time screen
+ * and the mocked builder, resolved through the same verb. Asking for the
+ * published pointer here regardless would have let a screen call an agent
+ * mockable, on the strength of a number bound to version 5, while the run
+ * refused it for publishing nothing — two surfaces reading one account and
+ * telling a developer two different things about it.
  */
 async function readServingVersion(
   lane: LaneReach,
@@ -152,10 +148,30 @@ async function readServingVersion(
   | { readonly kind: "serving"; readonly agentVersion: AgentVersion }
   | Exclude<PlatformWorldRead, { readonly kind: "world" }>
 > {
+  const listed = await listRoutedNumbers(lane.key, lane.reach);
+  if (listed.kind === "invalid-key") {
+    return {
+      kind: "refused",
+      message:
+        "Retell rejected this connection's stored API key, so Egma could not " +
+        "read which version of the agent is serving. Update the connection " +
+        "before starting another run.",
+    };
+  }
+  // No fallback. A run whose reference Egma could not work out is a run that
+  // would test whichever version a guess landed on, and the whole of this file
+  // exists so that a result names an agent a reader can go back to.
+  if (listed.kind !== "numbers") {
+    return unavailable("this agent's phone numbers");
+  }
+  const reference = versionReferenceIn(
+    bindingDecisionsFor(listed.numbers, lane.agentId),
+  );
+
   const resolved = await resolveServingAgentVersion(
     lane.key,
     lane.agentId,
-    WHAT_IS_SERVING,
+    reference,
     lane.reach,
   );
   // The agent is there and has published nothing. A settled fact about the

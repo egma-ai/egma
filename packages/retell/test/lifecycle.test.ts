@@ -320,12 +320,42 @@ describe("branching, writing and deleting a version", () => {
         },
         REACH(fetchImpl),
       );
-      expect(written).toEqual({ kind: "written" });
+      // The stand-in answers no version of its own, and that is not a
+      // mismatch — it is Retell saying nothing, which no caller may read as
+      // "it wrote somewhere else".
+      expect(written).toEqual({ kind: "written", version: null });
     }
 
     for (const request of seen) {
       expect(new URL(request.url).searchParams.get("version")).not.toBeNull();
     }
+  });
+
+  it("hands back the version Retell says it wrote", async () => {
+    // Retell's reference says nothing about whether a PATCH edits the named
+    // version or mints a new one, and only this field tells the truth per call.
+    // There is no endpoint that deletes a stray engine version, so the caller
+    // has to be able to see one being made.
+    const { fetchImpl } = retell([
+      (request) =>
+        json({
+          conversation_flow_id: "flow_1",
+          version:
+            Number(new URL(request.url).searchParams.get("version")) + 1,
+        }),
+    ]);
+
+    const written = await writeEngineTools(
+      key,
+      {
+        reference: { type: "conversation-flow", engineId: "flow_1", version: 106 },
+        version: 106,
+        tools: { tools: [] },
+      },
+      REACH(fetchImpl),
+    );
+
+    expect(written).toEqual({ kind: "written", version: 107 });
   });
 
   it("refuses to write onto a custom LLM, and asks Retell nothing", async () => {
@@ -444,6 +474,27 @@ describe("reading an agent's versions back", () => {
       expect(listed.kind === "refused" ? listed.reason : "").toMatch(reason);
     }
   });
+
+  it("refuses a page holding a row it cannot read, rather than dropping it", async () => {
+    // A dropped row is one version fewer, and one version fewer is exactly how
+    // a version that is still standing reads as absent — the false put-back
+    // this listing exists to prevent.
+    for (const row of [
+      { version: "106", is_published: false },
+      { version: null },
+      { is_published: true },
+      "106",
+    ]) {
+      const { fetchImpl } = retell([
+        () => json([{ version: 105, is_published: true }, row]),
+      ]);
+      const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+      expect(listed.kind, JSON.stringify(row)).toBe("refused");
+      expect(listed.kind === "refused" ? listed.reason : "").toMatch(
+        /could not read/u,
+      );
+    }
+  });
 });
 
 describe("resolving the version a run should conduct against", () => {
@@ -498,8 +549,8 @@ describe("resolving the version a run should conduct against", () => {
     expect(serving.kind).toBe("none-published");
     const reason = serving.kind === "none-published" ? serving.reason : "";
     expect(reason).toContain("no published version");
-    expect(reason).toContain("publish the version");
-    expect(reason).toContain("name a version for the run explicitly");
+    expect(reason).toContain("Publish in Retell the version you want tested");
+    expect(reason).toContain("pin a Retell phone number that routes to this agent");
   });
 
   it("refuses a published pointer that resolved to a draft anyway", async () => {
