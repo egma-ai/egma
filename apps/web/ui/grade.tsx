@@ -15,6 +15,24 @@ function summaryScore(score: number | null): string {
   return score === null ? "Not available" : score.toFixed(2);
 }
 
+/** The count a repeated single-assertion rationale gives way to. */
+function assertionCount(
+  assertions: readonly DisplayGradeAssertion[],
+): string {
+  const total = assertions.length;
+  const unit = total === 1 ? "assertion" : "assertions";
+  const ungraded = assertions.filter(
+    (assertion) => assertion.error !== undefined,
+  ).length;
+  if (ungraded > 0) {
+    return `${String(ungraded)} of ${String(total)} ${unit} could not be graded.`;
+  }
+  const passed = assertions.filter(
+    (assertion) => assertion.score === 1,
+  ).length;
+  return `${String(passed)} of ${String(total)} ${unit} passed.`;
+}
+
 /** The semantic tone shared by a grade badge and its evidence card. */
 export function gradeResultTone(
   result: DisplayGrade["result"],
@@ -85,11 +103,21 @@ export function GradeDetails({
   const rationale = grade.details.rationale;
   const error = grade.details.error;
   const assertions = grade.details.assertions ?? [];
+  /*
+   * The LLM judge writes one assertion and copies its rationale to the top of
+   * the grade, and every stored grade carries that copy. The assertion below is
+   * the record, so a top line that only repeats it becomes the count instead —
+   * computed here, so grades written before this rule read the same way.
+   */
+  const repeated =
+    typeof rationale === "string" &&
+    assertions.some((assertion) => assertion.rationale === rationale);
+  const topLine = repeated ? assertionCount(assertions) : rationale;
 
   return (
     <>
-      {typeof rationale === "string" && rationale.trim() !== "" ? (
-        <p className="m-0 text-sm wrap-anywhere text-foreground">{rationale}</p>
+      {typeof topLine === "string" && topLine.trim() !== "" ? (
+        <p className="m-0 text-sm wrap-anywhere text-foreground">{topLine}</p>
       ) : null}
       {typeof error === "string" && error.trim() !== "" ? (
         <p className="m-0 text-sm wrap-anywhere text-failure">{error}</p>
@@ -125,14 +153,13 @@ export function GradeDetails({
                       {assertion.error}
                     </p>
                   )}
-                  {citations === undefined || citations === null ? (
-                    assertion.citedSpanIds === undefined ||
-                    assertion.citedSpanIds.length === 0 ? null : (
-                      <p className="mt-1 mb-0 wrap-anywhere text-muted-foreground">
-                        Cited spans: {assertion.citedSpanIds.join(", ")}
-                      </p>
-                    )
-                  ) : (
+                  {/*
+                    * Only a surface that can say a citation well says it at
+                    * all: the simulation page passes turn links here. A raw
+                    * span id tells a reader nothing, so without a renderer the
+                    * cited ids stay stored and unshown.
+                    */}
+                  {citations === undefined || citations === null ? null : (
                     <p className="mt-1 mb-0 wrap-anywhere text-muted-foreground">
                       {citations}
                     </p>
