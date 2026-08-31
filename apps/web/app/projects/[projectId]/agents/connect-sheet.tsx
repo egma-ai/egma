@@ -664,6 +664,50 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     };
   }
 
+  async function startRetellMonitoringFor(
+    targetAgentId: string,
+    targetPlatformAgentId: string,
+  ): Promise<boolean> {
+    setSaving(true);
+    setRefused(null);
+    const answer = await platformAnswer(
+      startMonitoring(
+        {
+          projectId,
+          agentPlatform: "retell",
+          ...(storedRetellKey ? {} : { apiKey: apiKey.trim() }),
+          watch: [
+            {
+              agentId: targetAgentId,
+              platformAgentId: targetPlatformAgentId,
+            },
+          ],
+        },
+        { client: platformClient },
+      ),
+    );
+    setSaving(false);
+    if (!finishAnswer(answer)) return false;
+
+    const watching = answer.value.watching.find(
+      (one) => one.agentId === targetAgentId,
+    );
+    if (watching === undefined) {
+      const refusal = answer.value.refused.find(
+        (one) => one.platformAgentId === targetPlatformAgentId,
+      );
+      setRefused({
+        error: "monitoring_not_started",
+        message:
+          refusal?.message ??
+          "Egma did not start monitoring this agent. Try again.",
+      });
+      return false;
+    }
+
+    return true;
+  }
+
   async function resumeRetellMonitoring(): Promise<ConnectSheetResult | null> {
     if (
       agentId === undefined ||
@@ -674,41 +718,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       return null;
     }
 
-    setSaving(true);
-    setRefused(null);
-    const answer = await platformAnswer(
-      startMonitoring(
-        {
-          projectId,
-          agentPlatform: "retell",
-          watch: [
-            {
-              agentId,
-              platformAgentId: known.platformAgentId,
-            },
-          ],
-        },
-        { client: platformClient },
-      ),
+    const started = await startRetellMonitoringFor(
+      agentId,
+      known.platformAgentId,
     );
-    setSaving(false);
-    if (!finishAnswer(answer)) return null;
-
-    const watching = answer.value.watching.find(
-      (one) => one.agentId === agentId,
-    );
-    if (watching === undefined) {
-      const refusal = answer.value.refused.find(
-        (one) => one.platformAgentId === known.platformAgentId,
-      );
-      setRefused({
-        error: "monitoring_not_started",
-        message:
-          refusal?.message ??
-          "Egma did not start monitoring this agent. Try again.",
-      });
-      return null;
-    }
+    if (!started) return null;
 
     return { agentId, connectionId: null, created: false };
   }
@@ -744,7 +758,12 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       retellProgress?.signature === retellSaveSignature
         ? retellProgress
         : null;
-    let landed: ConnectSheetResult | null = saved?.landed ?? null;
+    const existingLanding =
+      agentId === undefined || agentId === NEW_AGENT
+        ? null
+        : { agentId, connectionId: null, created: false };
+    let landed: ConnectSheetResult | null =
+      saved?.landed ?? existingLanding;
     const firstUnsavedLane = saved?.completedLanes ?? 0;
     let retryConnections: readonly ListedConnection[] = [];
     let retryPullEnabled = false;
@@ -779,8 +798,29 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       const committed = retryConnections.find((one) =>
         sameConnection(one, body),
       );
+      if (
+        committed !== undefined &&
+        pullsProduction &&
+        !retryPullEnabled
+      ) {
+        const started = await startRetellMonitoringFor(
+          landed?.agentId ?? committed.agentId,
+          selectedRetellAgent.platformAgentId,
+        );
+        if (!started) return;
+        retryPullEnabled = true;
+      }
+      if (committed === undefined && landed !== null) {
+        // Preserve the landed agent even when this POST commits but its
+        // response is lost, including a one-lane setup on an existing agent.
+        setRetellProgress({
+          signature: retellSaveSignature,
+          completedLanes: index,
+          landed,
+        });
+      }
       const result =
-        committed !== undefined && (!pullsProduction || retryPullEnabled)
+        committed !== undefined
           ? {
               agentId: landed?.agentId ?? committed.agentId,
               connectionId: committed.id,

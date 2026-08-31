@@ -2136,6 +2136,94 @@ describe("goal-first agent setup", () => {
     ).toHaveLength(1);
   });
 
+  it("starts pulling on a committed phone lane instead of adding the phone again", async () => {
+    routed.search = "?sheet=connect&agent=agt_1";
+    sheetAnswers({
+      "/v1/agents/agt_1": [
+        {
+          status: 200,
+          body: {
+            agent: {
+              ...AGENT,
+              platformAgentId: "agent_voice_1",
+            },
+            connections: [],
+          },
+        },
+        {
+          status: 200,
+          body: {
+            agent: {
+              ...AGENT,
+              platformAgentId: "agent_voice_1",
+              pullProductionCalls: false,
+            },
+            connections: [
+              {
+                ...MEASURED_CONNECTION,
+                agentId: "agt_1",
+                config: { phoneNumber: "+14155550100" },
+              },
+            ],
+          },
+        },
+      ],
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
+      "/v1/agents/agt_1/connections": {
+        status: 503,
+        body: {
+          error: "response_lost",
+          message: "The phone may have been saved. Try again.",
+        },
+      },
+      "/v1/monitoring/start": {
+        status: 200,
+        body: {
+          watching: [
+            {
+              agentId: "agt_1",
+              platformAgentId: "agent_voice_1",
+            },
+          ],
+          refused: [],
+        },
+      },
+    });
+    render(<AgentsPage />);
+    await choose("Set up both", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    expect(
+      await screen.findByText("The phone may have been saved. Try again."),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+    expect(
+      sent.filter(
+        (call) => call.method === "POST" && call.url.includes("/connections"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      sent.filter(
+        (call) =>
+          call.method === "POST" &&
+          call.url.startsWith("/v1/monitoring/start"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      sent.find((call) => call.url.startsWith("/v1/monitoring/start"))?.body,
+    ).toEqual({
+      agentPlatform: "retell",
+      apiKey: "retell-secret-A1B2C3D4WXYZ",
+      watch: [{ agentId: "agt_1", platformAgentId: "agent_voice_1" }],
+    });
+  });
+
   it("takes a Simulation voice agent to the phone picker only when Phone call is picked", async () => {
     sheetAnswers({
       "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
