@@ -22,13 +22,18 @@ The package needs Node.js 22 or newer.
 
 | Helper | Supported `@livekit/agents` versions |
 |---|---|
-| `mockable` | `>=1.5.0 <1.8` |
-| `monitorLiveKit` | `>=1.5.5 <1.8` |
+| `mockable` | `>=1.5.0 <2` |
+| `monitorLiveKit` | `>=1.5.5 <2` |
 
 LiveKit `1.5.0` is the first stable JavaScript release with its public mock-tool
 hook. LiveKit `1.5.5` is the first release with the public telemetry bridge
 needed to keep LiveKit Cloud and Egma export active together. `1.6.4` is tested
 for Rentlyx compatibility, but it is not the minimum.
+
+The upper bound is LiveKit's next major release, not its next minor release.
+Egma treats the public LiveKit v1 APIs as one compatible line. Its test matrix
+pins the exact minimum, each available minor boundary, and the latest tested v1
+release.
 
 ## Use mock tools in simulations
 

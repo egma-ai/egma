@@ -57,6 +57,17 @@ try {
     "typescript@5.9.3",
   ]);
 
+  const installedEgma = JSON.parse(
+    await readFile(
+      path.join(directory, "node_modules/@egma/livekit/package.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    installedEgma.peerDependencies["@livekit/agents"],
+    ">=1.5.0 <2",
+  );
+
   const installedLiveKit = JSON.parse(
     await readFile(
       path.join(directory, "node_modules/@livekit/agents/package.json"),
@@ -329,7 +340,7 @@ if (hasMonitoringSeam) {
     (error) =>
       error instanceof Error &&
       error.message.includes(
-        "requires @livekit/agents>=1.5.5 <1.8",
+        "requires a supported @livekit/agents version (>=1.5.5 <2)",
       ),
   );
   assert.equal(shutdownCallbacks.length, 0);

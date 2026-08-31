@@ -108,7 +108,7 @@ export function monitorLiveKit(
   const sharedTelemetry = sharedLiveKitTelemetry();
   if (sharedTelemetry === undefined) {
     throw new Error(
-      "LiveKit production monitoring requires @livekit/agents>=1.5.5 <1.8 because older releases do not expose the shared telemetry seam Egma needs.",
+      "LiveKit production monitoring requires a supported @livekit/agents version (>=1.5.5 <2) that exposes the shared telemetry seam Egma needs.",
     );
   }
 

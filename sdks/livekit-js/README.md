@@ -13,14 +13,17 @@ The package needs Node.js 22 or newer.
 
 | Helper | Supported `@livekit/agents` versions |
 |---|---|
-| `mockable` | `>=1.5.0 <1.8` |
-| `monitorLiveKit` | `>=1.5.5 <1.8` |
+| `mockable` | `>=1.5.0 <2` |
+| `monitorLiveKit` | `>=1.5.5 <2` |
 
 The package peer range begins at `1.5.0` because that is the first stable
 LiveKit Agents JS release with `voice.testing.withMockTools`. Production
 monitoring begins at `1.5.5`, the first release with LiveKit's public
 OpenTelemetry fan-out bridge. Calling `monitorLiveKit` on an older supported
 version gives a direct version error. You do not need to pin to `1.6.4`.
+The upper bound is LiveKit's next major release, not its next minor release:
+Egma uses these public v1 APIs as one compatible line. CI pins the exact
+minimum, each available minor boundary, and the latest tested v1 release.
 
 ## Use mock tools in simulations
 
