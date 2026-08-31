@@ -102,6 +102,9 @@ describe("LiveKit monitoring instructions", () => {
     expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(3);
     expect(copy).toContain("npm install @egma/livekit");
     expect(copy).toContain(
+      "LiveKit Agents 1.5.5 or newer in the 1.x line",
+    );
+    expect(copy).toContain(
       'import { monitorLiveKit } from "@egma/livekit"',
     );
     expect(copy.indexOf("monitorLiveKit(ctx)")).toBeLessThan(

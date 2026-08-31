@@ -204,6 +204,9 @@ export function LiveKitTestingInstructions({
           {chat
             ? `A ${contract.languageLabel} worker needs the Egma testing hook, silent chat-room options, and a registered dispatch name.`
             : `A ${contract.languageLabel} worker needs the Egma testing hook and a registered dispatch name.`}
+          {language === "javascript"
+            ? " This needs LiveKit Agents 1.5.0 or newer in the 1.x line."
+            : null}
         </p>
       </div>
 

@@ -2740,6 +2740,9 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     expect(document.body.textContent).toContain("npm install @egma/livekit");
     expect(document.body.textContent).toContain(
+      "LiveKit Agents 1.5.0 or newer in the 1.x line",
+    );
+    expect(document.body.textContent).toContain(
       'import { mockable } from "@egma/livekit"',
     );
     expect(document.body.textContent).toContain(
@@ -3225,6 +3228,9 @@ describe("goal-first agent setup", () => {
     const shown = document.body.textContent ?? "";
     expect(shown).toContain("npm install @egma/livekit");
     expect(shown).toContain("monitorLiveKit(ctx)");
+    expect(shown).toContain(
+      "LiveKit Agents 1.5.5 or newer in the 1.x line",
+    );
     expect(shown).not.toMatch(/unsupported/i);
     expect(
       screen.getByRole("button", { name: "Continue to simulation" }),

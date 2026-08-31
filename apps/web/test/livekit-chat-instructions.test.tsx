@@ -130,6 +130,7 @@ describe("LiveKit testing instructions", () => {
     expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_PROMPT);
     expect(copy).toContain(JAVASCRIPT_CHAT_SETUP_SNIPPET);
     expect(copy).toContain(JAVASCRIPT_TESTING_SETUP_INSTALL);
+    expect(copy).toContain("LiveKit Agents 1.5.0 or newer in the 1.x line");
     expect(copy).toContain('import { mockable } from "@egma/livekit"');
     expect(copy).toContain(
       'ctx.job.room?.name?.startsWith("egma-sim-chat-")',

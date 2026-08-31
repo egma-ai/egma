@@ -1411,7 +1411,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 compact
                 value="javascript"
                 title="JavaScript"
-                description="Simulation testing and production monitoring are supported."
+                description="Simulation testing supports LiveKit Agents 1.5.0 and newer in the 1.x line. Production monitoring supports 1.5.5 and newer."
               />
             </RadioGroup>
           </div>

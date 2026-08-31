@@ -65,21 +65,29 @@ function WorkerSteps({
   ] as const;
 
   return (
-    <ol className="m-0 flex list-none flex-col gap-5 p-0">
-      {steps.map((step, index) => (
-        <li className="flex gap-3" key={step.title}>
-          <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
-            {index + 1}
-          </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
-              {step.title}
-            </p>
-            <CopyBlock value={step.value} copyLabel={step.copyLabel} />
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div className="flex flex-col gap-4">
+      {language === "javascript" ? (
+        <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+          JavaScript monitoring needs LiveKit Agents 1.5.5 or newer in the 1.x
+          line.
+        </p>
+      ) : null}
+      <ol className="m-0 flex list-none flex-col gap-5 p-0">
+        {steps.map((step, index) => (
+          <li className="flex gap-3" key={step.title}>
+            <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
+              {index + 1}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
+                {step.title}
+              </p>
+              <CopyBlock value={step.value} copyLabel={step.copyLabel} />
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
