@@ -567,6 +567,14 @@ class _Pipecat17InputDrain:
         so what the pipeline is handed still says which participant spoke
         and never which of their tracks — the mix has already made that
         question meaningless.
+
+        This reader's own exit is what takes the track out of the mix, and
+        it is the earliest honest moment for it: the frames are read here,
+        so a reader that has stopped is a track with no more audio, and no
+        tail can be left to carry past the mix. Waiting for the
+        unsubscribe event instead would leave a track that ran out first
+        still holding the room's clock — which, for the earliest track, is
+        a persona that hears nothing at all while the others buffer.
         """
         participant_id = key.split(":", 1)[0]
         try:
@@ -588,6 +596,8 @@ class _Pipecat17InputDrain:
         except Exception:
             self._failed.set()
             raise RuntimeError("the livekit input stream could not be read") from None
+        finally:
+            self._mix.left(key)
 
     def _finish_for(self, key: str) -> asyncio.Task[None] | None:
         entry = self._streams.get(key)
@@ -640,9 +650,9 @@ class _Pipecat17InputDrain:
                 reader.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await reader
-            # Last, and only once this track's reader has stopped: a track
-            # taken out of the mix while its own reader still held frames
-            # would carry that tail past the mix instead of through it.
+            # The backstop for a track whose reader never ran at all. A
+            # reader that did run has already taken itself out of the mix
+            # on its way past its own last frame, and this is a no-op.
             self._mix.left(key)
 
     async def participant_left(

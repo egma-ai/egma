@@ -719,6 +719,52 @@ async def test_a_track_that_arrives_mid_call_joins_the_mix(
     assert client._audio_queue.empty()
 
 
+async def test_a_track_that_runs_out_hands_the_room_on_instead_of_muting_it(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The agent stops publishing one of its two tracks, mid-call.
+
+    The track that ran out is the one the room was being clocked by, so
+    it stops clocking it the moment its audio ends, and the other track
+    is heard on its own. Waiting for the unsubscribe event to say so
+    instead would leave the persona hearing nothing at all in between,
+    while the track still publishing quietly filled a buffer.
+    """
+    from livekit import rtc
+
+    _room, client = a_joined_room()
+    speaker = ScriptedPublisher("PA_agent")
+    first = ScriptedTrack("TR_0001")
+    second = ScriptedTrack("TR_0002")
+    streams = {
+        first.sid: scripted_audio_stream(),
+        second.sid: scripted_audio_stream(),
+    }
+    monkeypatch.setattr(rtc, "AudioStream", lambda track, **_rest: streams[track.sid])
+
+    await client._async_on_track_subscribed(first, first, speaker)
+    await client._async_on_track_subscribed(second, second, speaker)
+
+    # Both running: the second is heard under the first.
+    streams[second.sid]._queue.put(a_tone(7))
+    await taken_from(streams[second.sid])
+    streams[first.sid]._queue.put(a_tone(100))
+    await taken_from(streams[first.sid])
+    carried, _who = await reached_the_persona(client)
+    assert heard(carried) == [107] * 160
+
+    # The first track runs out — its audio ends, with no unsubscribe.
+    streams[first.sid]._queue.put(None)
+    await taken_from(streams[first.sid])
+
+    # The second now clocks the room, and the persona still hears it.
+    streams[second.sid]._queue.put(a_tone(7))
+    await taken_from(streams[second.sid])
+    carried, who = await reached_the_persona(client)
+    assert heard(carried) == [7] * 160
+    assert who == speaker.sid
+
+
 async def test_a_swallowed_reader_error_cannot_become_normal_departure():
     """Pipecat logs reader errors; Egma must still refuse a normal ending."""
     from pipecat.utils.asyncio.task_manager import TaskManager
