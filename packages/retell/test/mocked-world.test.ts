@@ -674,7 +674,7 @@ describe("the version a run is conducted against", () => {
     if (built.kind !== "refused") return;
     expect(built.reason).toContain("no published version");
     expect(built.reason).toContain("publish the version");
-    expect(built.reason).toContain("name a version for this run explicitly");
+    expect(built.reason).toContain("name a version for the run explicitly");
     // Nothing was made and nothing is owed.
     expect(built.state).toBeNull();
     expect(retell.versions.size).toBe(1);

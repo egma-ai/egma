@@ -228,21 +228,33 @@ export async function resolveAgentVersion(
 export const LATEST_PUBLISHED = "latest_published";
 
 /**
- * What a developer whose agent has published nothing is told, and where the two
- * doors are.
+ * The way out of "this agent has published nothing", in one clause.
  *
- * One sentence in one place, because three surfaces say it — the web-call
- * lane's run start, the text-mode lane's, and the mocked world's serving read —
+ * Two kinds of surface say this one fact, and each leads into it in its own
+ * voice: a run start refuses with it, and the enable-time read explains with it
+ * what a mocked run would find. The lead-ins are local to those surfaces; this
+ * — the half a developer actually acts on — is one string, so the two can never
+ * come to describe different ways out of the same dead end.
+ */
+export const PUBLISH_OR_NAME_A_VERSION =
+  "Two doors open it: publish the version you want tested in Retell, or name " +
+  "a version for the run explicitly — a version number, or an environment " +
+  "tag — and Egma conducts against whatever that resolves to.";
+
+/**
+ * What a developer whose agent has published nothing is told when a **run** is
+ * refused for it.
+ *
+ * One sentence in one place, because three run-start surfaces say it — the
+ * web-call lane's, the text-mode lane's, and the mocked world's serving read —
  * and three phrasings of one refusal would read as three different problems.
+ * The enable-time read has its own lead-in and the same doors.
  */
 export function noPublishedVersion(agentId: string): string {
   return (
     `Retell agent ${agentId} has no published version. Egma conducts a run ` +
     "against the version real callers reach and never against a draft, so " +
-    "there is nothing here to test. Two doors open it: publish the version " +
-    "you want tested in Retell, or name a version for this run explicitly — a " +
-    "version number, or an environment tag — and Egma conducts against " +
-    "whatever that resolves to."
+    `there is nothing here to test. ${PUBLISH_OR_NAME_A_VERSION}`
   );
 }
 

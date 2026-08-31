@@ -60,10 +60,13 @@ import { Failure, Loading } from "@/ui/page-state.tsx";
  * outside the call: a real leg placed, a real message sent, even in a mocked
  * run. They are named rather than quietly left out of a coverage number.
  *
- * **A refusal is shown as a sentence, never as a disabled control.** Three
- * things stop mocks going on, and each has a different next move, so the panel
- * shows which one it is and what to do about it (`DESIGN.md`: make every state
- * truthful).
+ * **A refusal is shown as a sentence, never as a disabled control.** Four
+ * things stop mocks going on — a custom-LLM engine, two keys that see two
+ * accounts, a platform that would not answer, and an agent that has published
+ * nothing — and each has a different next move, so the panel shows which one it
+ * is and what to do about it (`DESIGN.md`: make every state truthful). The
+ * panel renders the sentence the read carries and never switches on the reason,
+ * so a fifth one needs nothing here.
  *
  * The surface is the house modal side sheet, and the only motion is the arrival
  * of the discovery result, which is a piece of the panel a person did not put

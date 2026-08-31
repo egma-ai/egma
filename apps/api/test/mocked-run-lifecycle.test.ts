@@ -618,7 +618,7 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
     expect(message).toContain("no published version");
     // Door one, and door two.
     expect(message).toContain("publish the version");
-    expect(message).toContain("name a version for this run explicitly");
+    expect(message).toContain("name a version for the run explicitly");
     expect(JSON.stringify(refused.body)).not.toContain(KEY);
 
     // Nothing was started, and that is a fact about the record rather than a

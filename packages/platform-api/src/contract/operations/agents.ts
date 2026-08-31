@@ -712,6 +712,7 @@ export const agentOperations = {
                     "custom_llm_engine",
                     "keys_disagree",
                     "platform_unavailable",
+                    "never_published",
                   ],
                 },
                 message: { type: "string" },

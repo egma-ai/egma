@@ -1,4 +1,5 @@
 import { newId } from "@egma/ids";
+import { PUBLISH_OR_NAME_A_VERSION } from "@egma/retell";
 import {
   createPersona,
   getSimulation,
@@ -471,7 +472,11 @@ describe("the run-start read", () => {
       const message = answer.kind === "refused" ? answer.message : "";
       expect(message).toContain("no published version");
       expect(message).toContain("publish the version");
-      expect(message).toContain("name a version for this run explicitly");
+      expect(message).toContain("name a version for the run explicitly");
+      // The same doors the enable-time read shows, held to the one string both
+      // are built from. A developer refused here and a developer reading the
+      // tick screen are told the same way out of the same dead end.
+      expect(message).toContain(PUBLISH_OR_NAME_A_VERSION);
       // Never the sentence for an agent Retell does not hold: an agent that is
       // there and publishes nothing has a different next move.
       expect(message).not.toContain("no longer holds agent");
@@ -609,7 +614,7 @@ describe("a run over a Retell text mode connection", () => {
     const message = String(refused.body.message);
     expect(message).toContain("no published version");
     expect(message).toContain("publish the version");
-    expect(message).toContain("name a version for this run explicitly");
+    expect(message).toContain("name a version for the run explicitly");
     expect(JSON.stringify(refused.body)).not.toContain(SENTINEL_KEY);
 
     const { rows } = await api.database.sql<{ count: string }>(

@@ -499,7 +499,7 @@ describe("resolving the version a run should conduct against", () => {
     const reason = serving.kind === "none-published" ? serving.reason : "";
     expect(reason).toContain("no published version");
     expect(reason).toContain("publish the version");
-    expect(reason).toContain("name a version for this run explicitly");
+    expect(reason).toContain("name a version for the run explicitly");
   });
 
   it("refuses a published pointer that resolved to a draft anyway", async () => {

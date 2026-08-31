@@ -1,3 +1,4 @@
+import { PUBLISH_OR_NAME_A_VERSION } from "@egma/retell";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -33,6 +34,14 @@ type Account = {
   readonly numbers?: readonly Record<string, unknown>[];
   /** Which agent id the listing answers with, for the two-keys check. */
   readonly listsAgent?: string;
+  /** Whether the agent's one version is published. It is, unless said not. */
+  readonly published?: boolean;
+  /**
+   * When true, the account holds no such agent at all: every version read is a
+   * 404. The other half of the pair the published pointer's 404 is ambiguous
+   * between, kept here so the two facts can be asserted apart.
+   */
+  readonly holdsNoAgent?: boolean;
 };
 
 const FLOW_TOOLS = [
@@ -108,10 +117,19 @@ function retell(account: Account = {}): typeof fetch {
       });
     }
     if (url.includes("/get-agent/")) {
+      if (account.holdsNoAgent) return json({ error: "not found" }, 404);
+      const published = account.published ?? true;
+      // The published pointer resolves to nothing on an agent that has
+      // published nothing, and Retell answers that with the same 404 it gives
+      // for an agent it does not hold — which is why the resolve reads `latest`
+      // afterwards rather than guessing from the status.
+      if (!published && new URL(url).searchParams.get("version") === "latest_published") {
+        return json({ error: "not found" }, 404);
+      }
       return json({
         agent_id: RETELL_AGENT,
         version: 105,
-        is_published: true,
+        is_published: published,
         response_engine:
           engine === "custom-llm"
             ? {
@@ -414,5 +432,44 @@ describe("the refusals the enable-time read carries", () => {
     expect(found.refusal?.reason).toBe("keys_disagree");
     expect(found.refusal?.message).toContain("agent_somebody_elses_0001");
     expect(found.refusal?.message).toContain("was never mocked");
+  });
+
+  it("names an agent that has published nothing, and both doors out of it", async () => {
+    // Every number rides `latest`, so no binding names a version and the read
+    // asks for the published pointer — which resolves to nothing here.
+    const { key, agentId } = await anAgent("mock_tools_never_published", {
+      numbers: numbered(RIDES_LATEST),
+      published: false,
+    });
+
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(false);
+    expect(found.refusal?.reason).toBe("never_published");
+    const message = String(found.refusal?.message);
+    expect(message).toContain("no published version");
+    // Door one, and door two — **the same clause a refused run carries**, held
+    // to the one string both surfaces are built from, so a person meets one
+    // fact once however they arrive at it and neither wording can drift.
+    expect(message).toContain("publish the version");
+    expect(message).toContain("name a version for the run explicitly");
+    expect(message).toContain(PUBLISH_OR_NAME_A_VERSION);
+    // Never the sentence for a key that cannot see the agent: reconnecting it
+    // would change nothing here.
+    expect(message).not.toContain("have to be the same account's");
+  });
+
+  it("keeps an agent the key cannot see apart from one that publishes nothing", async () => {
+    // Retell answers both with 404. This one is the account not holding the
+    // agent, and its next move is the key rather than a publish.
+    const { key, agentId } = await anAgent("mock_tools_agent_absent", {
+      numbers: numbered(RIDES_LATEST),
+      holdsNoAgent: true,
+    });
+
+    const found = await discovered(key, agentId);
+    expect(found.mockable).toBe(false);
+    expect(found.refusal?.reason).toBe("keys_disagree");
+    expect(found.refusal?.message).toContain("does not hold agent");
+    expect(found.refusal?.message).not.toContain("no published version");
   });
 });

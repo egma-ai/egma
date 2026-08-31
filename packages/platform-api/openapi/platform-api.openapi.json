@@ -2846,7 +2846,8 @@
                               "enum": [
                                 "custom_llm_engine",
                                 "keys_disagree",
-                                "platform_unavailable"
+                                "platform_unavailable",
+                                "never_published"
                               ]
                             },
                             "message": {

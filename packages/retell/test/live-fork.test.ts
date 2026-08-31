@@ -223,7 +223,7 @@ live("branching a live Retell-LLM agent", () => {
     if (serving.kind !== "none-published") return;
     expect(serving.reason).toContain("no published version");
     expect(serving.reason).toContain("publish the version");
-    expect(serving.reason).toContain("name a version for this run explicitly");
+    expect(serving.reason).toContain("name a version for the run explicitly");
   });
 
   it("deletes a version by the query parameter, and proves it with the listing", async () => {
