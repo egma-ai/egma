@@ -1091,6 +1091,8 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
       log: { warn: () => undefined, error: () => undefined },
       scanIntervalMilliseconds: 60 * 60_000,
     });
+    // Finish the automatic recovery pass before this suite arranges its first segment.
+    await drainer.drainNow();
   });
 
   afterAll(async () => {
