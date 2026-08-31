@@ -3,24 +3,37 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   branchAgentVersion,
   deleteAgentVersion,
+  LATEST_PUBLISHED,
+  listAgentVersions,
   readEngineConfiguration,
   resolveAgentVersion,
+  resolveServingAgentVersion,
   RETELL_API,
   type RetellCredential,
 } from "../src/index.ts";
 
 /**
- * Does branching an agent version fork a **Retell LLM** the way it provably
- * forks a conversation flow?
+ * Two questions this package answers against a live account, and nowhere else.
  *
- * The flow half is observed behaviour: `create-agent-version` mints a new
- * agent version with its own freshly forked flow version. The Retell-LLM half
- * is not — there is no LLM-versioning endpoint in the API at all, and
- * `response_engine.version` is the only pointer — so the question is settled
- * here, by a test, rather than by an assumption in the builder. **The builder
- * never assumes the answer either way**: its fork guard refuses a branch whose
- * engine reference still matches the serving version's, before any write.
- * Whatever this test finds is informational.
+ * **One: does branching an agent version fork a Retell LLM** the way it
+ * provably forks a conversation flow? The flow half is observed behaviour:
+ * `create-agent-version` mints a new agent version with its own freshly forked
+ * flow version. The Retell-LLM half is not — there is no LLM-versioning
+ * endpoint in the API at all, and `response_engine.version` is the only pointer
+ * — so the question is settled here, by a test, rather than by an assumption in
+ * the builder. **The builder never assumes the answer either way**: its fork
+ * guard refuses a branch whose engine reference still matches the serving
+ * version's, before any write. Whatever this test finds is informational.
+ *
+ * **Two: does the corrected version lifecycle hold on a real router?** Three
+ * facts this package now depends on, each of which a fake can only agree with:
+ * the delete names its version as a **query parameter** (the path form Egma
+ * sent for a week is not a route at all, and Retell answers it 404 "Cannot
+ * DELETE"); the **current listing** reads the versions back, so a deletion is
+ * proved rather than assumed; and `latest_published` resolves the newest
+ * published version rather than the newest draft. On this scratch agent
+ * nothing is published, which makes it the exact shape the two-door refusal
+ * exists for.
  *
  * ## The one command
  *
@@ -186,6 +199,70 @@ live("branching a live Retell-LLM agent", () => {
     const draftEngine = await readEngineConfiguration(key, after);
     expect(draftEngine.kind).toBe("engine");
   });
+
+  it("refuses the scratch agent, which has published nothing", async () => {
+    const agentId = made.agentId;
+    expect(agentId, "the fork check above must have made the agent").not.toBe(
+      null,
+    );
+    if (agentId === null) return;
+
+    // A freshly created agent has one version and it is a draft. `latest`
+    // reaches it — which is exactly what a run must never do — and the
+    // published pointer reaches nothing.
+    const serving = await resolveServingAgentVersion(
+      key,
+      agentId,
+      LATEST_PUBLISHED,
+    );
+    console.log(
+      `[retell lifecycle check] latest_published on an unpublished agent: ` +
+        `${serving.kind}`,
+    );
+    expect(serving.kind).toBe("none-published");
+    if (serving.kind !== "none-published") return;
+    expect(serving.reason).toContain("no published version");
+    expect(serving.reason).toContain("publish the version");
+    expect(serving.reason).toContain("name a version for this run explicitly");
+  });
+
+  it("deletes a version by the query parameter, and proves it with the listing", async () => {
+    const agentId = made.agentId;
+    const branched = made.branchedVersion;
+    expect(agentId, "the fork check above must have made the agent").not.toBe(
+      null,
+    );
+    expect(branched, "the fork check above must have branched a version").not.toBe(
+      null,
+    );
+    if (agentId === null || branched === null) return;
+
+    const before = await listAgentVersions(key, agentId);
+    expect(before.kind, JSON.stringify(before)).toBe("versions");
+    if (before.kind !== "versions") return;
+    expect(before.versions.map((one) => one.version)).toContain(branched);
+
+    const removed = await deleteAgentVersion(key, agentId, branched);
+    // The query form. The path form is not a route on Retell's router and
+    // answers 404 "Cannot DELETE", which Egma read as "already deleted".
+    expect(removed, JSON.stringify(removed)).toEqual({ kind: "deleted" });
+
+    const after = await listAgentVersions(key, agentId);
+    expect(after.kind, JSON.stringify(after)).toBe("versions");
+    if (after.kind !== "versions") return;
+    // The proof, and the whole point: absence read rather than inferred from a
+    // status code.
+    expect(after.versions.map((one) => one.version)).not.toContain(branched);
+
+    console.log(
+      `[retell lifecycle check] versions before=${JSON.stringify(
+        before.versions,
+      )} after=${JSON.stringify(after.versions)}`,
+    );
+
+    // The teardown has nothing left to delete.
+    made.branchedVersion = null;
+  });
 });
 
 describe("the live fork check's own gate", () => {
@@ -193,5 +270,12 @@ describe("the live fork check's own gate", () => {
     // Runs with or without a key, so a reader of a green CI log can see that
     // the live check exists and why it did not run.
     expect(LIVE_KEY_VARIABLE).toBe("EGMA_LIVE_RETELL_API_KEY");
+    if (liveKey === "") {
+      console.log(
+        `[retell lifecycle check] skipped — set ${LIVE_KEY_VARIABLE} to run ` +
+          "it. It creates one scratch agent and deletes it again, and never " +
+          "reads or writes an agent that was already on the account.",
+      );
+    }
   });
 });
