@@ -273,6 +273,9 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       // an arrangement and its assertion.
       scanIntervalMilliseconds: 60 * 60_000,
     });
+    // The product starts with one recovery pass. Finish that pass before this
+    // file begins arranging objects for its explicitly requested passes.
+    await drainer.drainNow();
   });
 
   afterAll(async () => {
