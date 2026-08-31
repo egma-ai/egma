@@ -11,13 +11,6 @@ This first JavaScript release is for production monitoring. It does not supply
 Python's `mockable` entry for simulation tools. See
 [Current testing boundary](#current-testing-boundary).
 
-<Warning>
-  Egma releases `@egma/livekit` to npm separately from the repository source.
-  Before setup, run `npm view @egma/livekit version` and confirm that it prints
-  `0.1.0` or newer. If npm returns `E404`, the package release is not complete
-  and the install below will not work.
-</Warning>
-
 ## Install
 
 ```bash
@@ -30,9 +23,13 @@ verifies the telemetry seam before it supports a new LiveKit minor.
 
 ## Monitor production LiveKit agents
 
-Open **Monitoring → Start monitoring** and choose **LiveKit**. Create a project
-API key in **Settings → API keys**. Set the API origin and key where the worker
-runs:
+Open **Agents → Connect an agent** and copy the **Monitoring** or **Both** prompt
+into the coding agent working in the repository. It installs the package,
+changes the worker, and uses the current CLI to create the key and environment
+handoff.
+
+For a manual setup, create a project API key in **Settings → API keys**. Set the
+API origin and key where the worker runs:
 
 ```bash
 export EGMA_URL=https://api.egma.ai

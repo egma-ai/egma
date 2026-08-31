@@ -262,7 +262,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       ? (() => {
           if (platformScalar !== null) {
             throw new Error(
-              `${where} has a platform value without an origin. Run the Egma wizard to repair the repository binding.`,
+              `${where} has a platform value without an origin. Repair the repository binding, then run egma validate.`,
             );
           }
           return null;
@@ -272,7 +272,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
           const origin = textAt(platformMapping, "origin");
           if (origin === null) {
             throw new Error(
-              `${where} has a platform binding without an origin. Run the Egma wizard to repair it.`,
+              `${where} has a platform binding without an origin. Repair it, then run egma validate.`,
             );
           }
           return { origin: committedOrigin(origin) };

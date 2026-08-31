@@ -471,7 +471,14 @@ describe("which egma a command talks to", () => {
   it("refuses an address that is not one, and names where it came from", () => {
     // The next thing that happens to this address is that a browser is started
     // on it, so it is checked at the edge that takes it and not after.
-    for (const given of ["javascript:alert(1)", "file:///etc/passwd", "not an address at all"]) {
+    for (const given of [
+      "javascript:alert(1)",
+      "file:///etc/passwd",
+      "not an address at all",
+      "https://example.com;touch-owned",
+      "https://exa$mple.com",
+      "https://example.com`id`",
+    ]) {
       expect(() =>
         resolvePlatformUrl({ flag: given, fallback: BUILT_IN }),
       ).toThrow(UnusableUrlError);
@@ -533,9 +540,6 @@ describe("which egma a command talks to", () => {
     const THE_SDK_CONTRACT = [
       // Egma's own code writes the two lines into the customer's `.env`.
       "src/monitoring/env-file.ts",
-      // The coding-agent skill names them in its by-hand fallback, and still
-      // never reads or writes an environment file.
-      "skills/integrate-egma/references/integrate-livekit.md",
     ];
 
     const naming: string[] = [];

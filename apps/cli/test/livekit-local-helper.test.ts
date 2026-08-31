@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const HELPER = fileURLToPath(
-  new URL("../../../skills/integrate-egma/scripts/livekit-local.mjs", import.meta.url),
+  new URL("../runtime/livekit-local.mjs", import.meta.url),
 );
 const LIVEKIT_ENV = {
   LIVEKIT_URL: "wss://example.livekit.cloud",
@@ -249,7 +249,7 @@ async function readJsonLines(file: string): Promise<Record<string, unknown>[]> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-describe.skipIf(process.platform === "win32")("the local LiveKit skill helper", () => {
+describe.skipIf(process.platform === "win32")("the local LiveKit CLI helper", () => {
   it("refuses worker paths that escape through symlinks", async () => {
     const { bin, repository, root } = await createFixture(
       "egma-livekit-helper-path-",

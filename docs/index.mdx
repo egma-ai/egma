@@ -1,69 +1,88 @@
 ---
-title: "Egma: Open-Source Simulation Testing for Voice Agents"
-description: "Test, monitor, and improve your voice agents with Egma's platform for simulation testing, production telemetry, and trace grading."
+title: "Egma: Open-source testing and monitoring for voice agents"
+description: "Test, monitor, and improve voice agents with repository-owned suites, real conversation simulations, production telemetry, and trace grading."
 ---
 
-Egma is the open-source platform purpose-built for teams shipping voice agents. It lets you simulate real conversations before they reach production, monitor real conversations through platform-specific setup, and automatically grade each completed simulation trace against the behaviors you expect.
+Egma is the open-source platform for teams that need evidence they can trust
+before and after a voice agent reaches production. It runs real conversation
+simulations from repository-owned tests, receives production conversations
+through platform-specific monitoring, and grades completed traces against the
+behaviors you expect.
 
 <CardGroup cols={2}>
   <Card title="Introduction" icon="book-open" href="/introduction">
-    Learn what Egma is, how it works, and which platforms it integrates with.
+    Learn how simulations, monitoring, and grading fit together.
   </Card>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Run your first simulation test in minutes using the Egma CLI wizard.
+    Install the public skills and let your coding agent complete the first reviewed run with promptless CLI commands.
   </Card>
-  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
-    Every command, option, and exit code the Egma CLI exposes.
+  <Card title="CLI reference" icon="terminal" href="/cli/overview">
+    Understand the skills-and-commands workflow, then read every verb and flag.
   </Card>
-  <Card title="API Reference" icon="code" href="/api/overview">
-    REST endpoints for traces, runs, grades, and platform configuration.
+  <Card title="API reference" icon="code" href="/api/overview">
+    Use the REST endpoints for projects, agents, traces, runs, and grades.
   </Card>
 </CardGroup>
 
-## Get up and running
+## Get started
 
 <Steps>
-  <Step title="Install the CLI">
-    Run the Egma wizard from your voice agent's repository. No global install required — `npx` handles it.
+  <Step title="Install the public skills">
+    Run the bare CLI from the voice-agent repository. It prints the skill
+    install command and the exact handoff for the coding agent you already use.
 
     ```bash
-    npx @egma/cli
+    npx --yes @egma/cli
     ```
   </Step>
-  <Step title="Connect your agent">
-    Egma signs this machine in with a short browser approval, then asks for your Retell or LiveKit credentials to register your agent. Egma uses the credential for discovery and seals it on the platform only when the selected connection needs it. It is never written to a repository file.
+  <Step title="Approve sign-in">
+    Your coding agent runs `egma login`. Egma opens a device-approval page, and
+    you approve the request in the browser.
 
     ```bash
-    egma connect
+    egma login
     ```
   </Step>
-  <Step title="Write tests">
-    Create a suite first. The wizard then drives your existing coding agent to
-    write its tests under `egma/tests/<suite-directory>/`.
+  <Step title="Connect and author">
+    For supported testing, the `integrate-egma` skill keeps discovery read-only,
+    resolves the exact setup from live facts, and uses named commands to connect
+    Retell or LiveKit. It lists valid personas, creates one suite, and writes the
+    smallest grounded test set.
 
     ```bash
-    egma init
+    egma personas
+    egma suite create <directory> --name <name>
+    egma validate
     ```
   </Step>
-  <Step title="Run tests">
-    Push your tests to Egma and start a run. The simulator conducts real conversations with your agent. The Expected behaviors grader returns one trace score with assertion details after each completed simulation.
+  <Step title="Publish and run">
+    For supported testing, your end-to-end prompt already asks the coding agent
+    to push the complete repository and follow one suite. A real phone run
+    includes a cost warning and waits for approval.
 
     ```bash
+    egma push
     egma run <suite-directory>
     ```
   </Step>
 </Steps>
 
+Monitoring is a separate requested outcome. A monitoring-only integration skips
+connections, suites, tests, and runs. When testing is supported, a Both
+integration finishes the reviewed run and confirms `egma monitoring status`.
+JavaScript LiveKit Both completes monitoring and reports that simulation
+testing remains unsupported.
+
 ## Key integrations
 
 <CardGroup cols={2}>
   <Card title="Retell" icon="phone" href="/integrations/retell">
-    Test a Retell voice agent in text, over a web call or down a real phone line, then monitor it with API polling.
+    Test a Retell voice agent in text, over a web call, or on a real phone line, and import completed production conversations.
   </Card>
   <Card title="Python SDK" icon="python" href="/integrations/python-sdk">
-    Add mock tools to LiveKit simulations and send production spans to Monitoring.
+    Connect LiveKit simulations to mock tools and send production spans to Monitoring.
   </Card>
   <Card title="JavaScript SDK" icon="code" href="/integrations/javascript-sdk">
-    Check the npm release, then send LiveKit Agents JS spans to Monitoring.
+    Install `@egma/livekit`, then send LiveKit Agents JS spans to Monitoring.
   </Card>
 </CardGroup>

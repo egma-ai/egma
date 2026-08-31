@@ -30,7 +30,7 @@ function platformFetch(fetchImpl: Fetch): typeof fetch {
 /** A string from the platform with no terminal control characters. */
 export function platformText(value: unknown): string {
   return typeof value === "string"
-    ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim()
+    ? value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "").trim()
     : "";
 }
 

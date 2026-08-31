@@ -1,10 +1,8 @@
 /**
- * Watching a Retell agent's production traffic, once, for both surfaces.
+ * Watching a Retell agent's production traffic.
  *
- * There is one flow here and there is no second one. The wizard is a screen
- * over it and `egma monitoring enable` is plain lines over it, which is what
- * makes the wizard passing its checks evidence that the agent-callable surface
- * works.
+ * There is one flow here. `egma monitoring enable` is a plain-line adapter
+ * over it, so tests exercise the same path a coding agent uses.
  *
  * Nothing in here draws and nothing in here reads a keystroke. The key arrives
  * through `askForKey`, the choice among several agents through `chooseAgent`,

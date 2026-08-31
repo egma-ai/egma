@@ -363,7 +363,7 @@ describe("Paper agent capability states", () => {
     expect(detail.getByText("No connections yet")).toBeDefined();
     expect(detail.getByRole("heading", { name: "Capabilities" })).toBeDefined();
     expect(detail.getByRole("link", { name: "Set up simulation" }).getAttribute("href")).toBe(
-      "/projects/prj_1/agents?sheet=connect&agent=agt_details&goal=simulation&platform=retell",
+      "/projects/prj_1/agents?sheet=connect",
     );
     expect(detail.getByRole("button", { name: "Stop monitoring" })).toBeDefined();
     expect(detail.getByRole("button", { name: "Done" })).toBeDefined();
@@ -417,7 +417,7 @@ describe("Paper agent capability states", () => {
     expect(
       detail.getByRole("link", { name: "View setup instructions" }).getAttribute("href"),
     ).toBe(
-      "/projects/prj_1/agents?sheet=connect&agent=agt_livekit&goal=monitoring&platform=livekit",
+      "/projects/prj_1/agents?sheet=connect",
     );
     expect(detail.queryByRole("button", { name: /(?:start|stop) monitoring/i })).toBeNull();
   });

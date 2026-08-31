@@ -33,8 +33,7 @@ import { normalizePlatformOrigin } from "./url.ts";
  * It is the last step of resolution and the only one nobody typed: `--url` and
  * the repository's own binding both come first, and a bound repository never
  * falls back to it. A developer with nothing configured reaches egma's own
- * platform — and the wizard says which egma that is on its first screen, before
- * it asks that address anything at all.
+ * platform, and each network command prints that address before its result.
  */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
 
@@ -544,10 +543,8 @@ export type ChosenPlatform = SelectedPlatform & {
 /**
  * Which egma, chosen without asking anybody anything.
  *
- * Separate from the read that follows it because the wizard names the address
- * on its first screen and takes the keystroke of consent there: a bare command
- * asks nothing of any address until the developer has read which address it is.
- * A verb has no screen and no keystroke to take, so it does both in one step.
+ * Separate from the read that follows it so address selection can be refused
+ * before any network work begins.
  *
  * Everything refused here is refused on what is already on this machine — a bad
  * address, an unreadable config, a bound repository pointed somewhere else — so

@@ -1,15 +1,14 @@
 /**
- * Logging in, once, for both the wizard and the headless verb.
+ * Logging in for the promptless `egma login` command.
  *
- * There is one flow here and there is no second one. The wizard is a screen
- * over it and `egma login` is plain lines over it, which is what makes the
- * wizard passing its tests evidence that the agent-callable surface works.
+ * There is one flow here. `egma login` is a plain-line adapter over it, so
+ * tests exercise the same path a coding agent uses.
  *
  * Nothing in here draws, and nothing in here reads a keystroke. What the
  * developer has to see arrives through `onPrompt` and `say`; what they may have
  * pasted back is read through `paste`, which the caller answers from wherever
  * it collects typing. A flow that asked a question directly could not be both
- * a wizard screen and a promptless command.
+ * both browser approval and a promptless command.
  */
 
 import {
@@ -38,10 +37,8 @@ export type LoginPrompt = {
 /**
  * The prompt as plain lines, one fact per line.
  *
- * Written once and read by both surfaces that print rather than draw — the
- * headless wizard and `egma login`. Two copies of these four lines would drift,
- * and a coding agent reading `browser:` from one of them and not the other is a
- * bug nobody would think to look for.
+ * Written once for `egma login`. A coding agent can read each stable fact while
+ * the developer completes the approval in a browser.
  */
 export function loginLines(prompt: LoginPrompt): readonly string[] {
   return [

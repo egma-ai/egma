@@ -1,5 +1,7 @@
 /** `egma run <suite-directory>`: run one exact current-set precondition. */
 
+import { randomUUID } from "node:crypto";
+
 import {
   RepositoryValidationError,
   folderPathsIn,
@@ -40,6 +42,9 @@ export const RUN_EXIT = {
   interrupted: 130,
 } as const;
 
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
+const UNSAFE_IDEMPOTENCY_KEY_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
 export type RunCommandOptions = FolderCommandOptions & {
   readonly suiteDirectory: string;
   /** Exact committed agent name or stable id. Omit only when one can run. */
@@ -47,10 +52,23 @@ export type RunCommandOptions = FolderCommandOptions & {
   /** Exact committed connection name or stable id under the selected agent. */
   readonly connection?: string;
   readonly name?: string;
+  /** Reuse this exact key only when retrying the same start action. */
+  readonly idempotencyKey?: string;
   readonly noFollow?: boolean;
+  /** Preserve the CLI-owned local worker when printing an uncertain-start retry. */
+  readonly workerEntrypoint?: string;
+  readonly workerDependencyManifest?: string;
+  readonly workerDispatchName?: string;
   readonly signal?: AbortSignal;
   readonly everyMs?: number;
 };
+
+export type PreparedRunCommand =
+  | { readonly kind: "stopped"; readonly code: number }
+  | {
+      readonly kind: "ready";
+      readonly run: (signal: AbortSignal) => Promise<number>;
+    };
 
 function reportTargetRefusal(options: RunCommandOptions, refusal: RefusedTarget): void {
   for (const agent of refusal.agents) {
@@ -71,8 +89,79 @@ function reportSelection(options: RunCommandOptions, selection: Selection): void
   for (const one of selection.pinned) options.out(`pin: ${one.name} ${one.versionId}`);
 }
 
-export async function runRunCommand(options: RunCommandOptions): Promise<number> {
+/** One POSIX-shell argument, including empty text and embedded apostrophes. */
+function shellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+/** The same start request, addressed by stable ids and its original key. */
+function runRecoveryCommand(
+  options: RunCommandOptions,
+  input: {
+    readonly suiteDirectory: string;
+    readonly agentId: string;
+    readonly connectionId: string;
+    readonly idempotencyKey: string;
+  },
+): string {
+  const words = [
+    "egma",
+    "run",
+    shellArgument(input.suiteDirectory),
+    "--cwd",
+    shellArgument(options.cwd),
+    "--url",
+    shellArgument(options.access.url),
+    "--agent",
+    shellArgument(input.agentId),
+    "--connection",
+    shellArgument(input.connectionId),
+  ];
+  if (options.name !== undefined) {
+    words.push("--name", shellArgument(options.name));
+  }
+  if (options.workerEntrypoint !== undefined) {
+    words.push("--worker-entrypoint", shellArgument(options.workerEntrypoint));
+  }
+  if (options.workerDependencyManifest !== undefined) {
+    words.push(
+      "--worker-dependency-manifest",
+      shellArgument(options.workerDependencyManifest),
+    );
+  }
+  if (options.workerDispatchName !== undefined) {
+    words.push(
+      "--worker-dispatch-name",
+      shellArgument(options.workerDispatchName),
+    );
+  }
+  if (options.noFollow === true) words.push("--no-follow");
+  words.push("--idempotency-key", shellArgument(input.idempotencyKey));
+  return words.join(" ");
+}
+
+/** Prove a run can start before an optional local worker does any setup. */
+export async function prepareRunCommand(
+  options: RunCommandOptions,
+): Promise<PreparedRunCommand> {
   options.out(`url: ${options.access.url}`);
+  const suppliedIdempotencyKey = options.idempotencyKey?.trim();
+  if (suppliedIdempotencyKey === "") {
+    options.out("status: invalid-idempotency-key");
+    options.fail("Give --idempotency-key one non-empty value. Nothing was started.");
+    return { kind: "stopped", code: RUN_EXIT.nothing };
+  }
+  if (
+    suppliedIdempotencyKey !== undefined &&
+    (suppliedIdempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH ||
+      UNSAFE_IDEMPOTENCY_KEY_TEXT.test(suppliedIdempotencyKey))
+  ) {
+    options.out("status: invalid-idempotency-key");
+    options.fail(
+      `Give --idempotency-key one line of at most ${String(MAX_IDEMPOTENCY_KEY_LENGTH)} characters, without control characters. Nothing was started.`,
+    );
+    return { kind: "stopped", code: RUN_EXIT.nothing };
+  }
   const paths = folderPathsIn(options.cwd);
   let config: FolderConfig;
   try {
@@ -80,7 +169,7 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   } catch {
     options.out("status: no-folder");
     options.fail(`There is no valid egma folder in ${options.cwd}. Run egma init here first.`);
-    return RUN_EXIT.nothing;
+    return { kind: "stopped", code: RUN_EXIT.nothing };
   }
   options.out(`folder: ${paths.root}`);
 
@@ -88,7 +177,7 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   if (signedIn === null) {
     options.out("status: not-signed-in");
     options.fail(notSignedInRefusal(options.access.url));
-    return RUN_EXIT.notSignedIn;
+    return { kind: "stopped", code: RUN_EXIT.notSignedIn };
   }
   const target = selectTarget(config, {
     ...(options.agent === undefined ? {} : { agent: options.agent }),
@@ -96,7 +185,7 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   });
   if (target.kind === "refused") {
     reportTargetRefusal(options, target);
-    return RUN_EXIT.nothing;
+    return { kind: "stopped", code: RUN_EXIT.nothing };
   }
   options.out(`agent: ${target.agent.id}`);
   options.out(`connection: ${target.connection.id}`);
@@ -115,99 +204,127 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
       const issues = cause instanceof RunSelectionError ? cause.issues : cause.issues;
       for (const issue of issues) options.out(`reason: ${issue}`);
       options.fail(cause.message);
-      return RUN_EXIT.nothing;
+      return { kind: "stopped", code: RUN_EXIT.nothing };
     }
-    return unreachable(options, cause);
+    return { kind: "stopped", code: unreachable(options, cause) };
   }
   reportSelection(options, selection);
 
-  let answer;
-  try {
-    answer = await startRun(
-      signedIn,
-      {
-        suiteId: selection.suiteId,
-        agentId: target.agent.id,
-        connectionId: target.connection.id,
-        expectedTestVersions: selection.pinned.map((one) => ({
-          testId: one.testId,
-          versionId: one.versionId,
-        })),
-        ...(options.name === undefined ? {} : { name: options.name }),
-      },
-      options.fetchImpl,
-    );
-  } catch (cause) {
-    return unreachable(options, cause);
-  }
-  if (answer.kind === "refused") {
-    options.out("status: refused");
-    options.out(`reason: ${answer.reason}`);
-    options.fail(answer.reason);
-    return RUN_EXIT.refused;
-  }
+  return {
+    kind: "ready",
+    run: async (signal) => {
+      const idempotencyKey = suppliedIdempotencyKey ?? `run_${randomUUID()}`;
+      options.out(`idempotency-key: ${idempotencyKey}`);
+      let answer;
+      try {
+        answer = await startRun(
+          signedIn,
+          {
+            suiteId: selection.suiteId,
+            agentId: target.agent.id,
+            connectionId: target.connection.id,
+            expectedTestVersions: selection.pinned.map((one) => ({
+              testId: one.testId,
+              versionId: one.versionId,
+            })),
+            idempotencyKey,
+            ...(options.name === undefined ? {} : { name: options.name }),
+          },
+          options.fetchImpl,
+        );
+      } catch (cause) {
+        if (
+          cause instanceof PlatformUnreachableError ||
+          cause instanceof PlatformRefusedError
+        ) {
+          options.out(
+            `recovery_command: ${runRecoveryCommand(options, {
+              suiteDirectory: selection.suiteDirectory,
+              agentId: target.agent.id,
+              connectionId: target.connection.id,
+              idempotencyKey,
+            })}`,
+          );
+        }
+        return unreachable(options, cause);
+      }
+      if (answer.kind === "refused") {
+        options.out("status: refused");
+        options.out(`reason: ${answer.reason}`);
+        options.fail(answer.reason);
+        return RUN_EXIT.refused;
+      }
 
-  const header = answer.run;
-  options.out(`run: ${header.id}`);
-  // **The lane, at the start, off the answer to the start itself.** The folder
-  // this run was resolved from stores a connection's id and its name, and a
-  // name is what somebody chose to call it — so the lane is read from the run
-  // the platform just wrote, which names the kind. A lane this build has no
-  // word for falls back to the platform's own product label rather than being
-  // called something it is not.
-  const lane = laneOfConnectionType(header.connectionType);
-  options.out(`lane: ${lane === null ? header.productLabel : LANE_NAMES[lane]}`);
-  if (lane === "phone") options.out(`note: ${PHONE_RUN_REACHES_REAL_TOOLS}`);
-  options.out(`tests: ${selection.pinned.length}`);
-  options.out(`simulations: ${header.expectedSimulationCount}`);
-  options.out(`results: ${header.resultsUrl}`);
-  if (options.noFollow === true) {
-    options.out("status: started");
-    return RUN_EXIT.done;
-  }
+      const header = answer.run;
+      options.out(`run: ${header.id}`);
+      // **The lane, at the start, off the answer to the start itself.** The folder
+      // this run was resolved from stores a connection's id and its name, and a
+      // name is what somebody chose to call it — so the lane is read from the run
+      // the platform just wrote, which names the kind. A lane this build has no
+      // word for falls back to the platform's own product label rather than being
+      // called something it is not.
+      const lane = laneOfConnectionType(header.connectionType);
+      options.out(`lane: ${lane === null ? header.productLabel : LANE_NAMES[lane]}`);
+      if (lane === "phone") options.out(`note: ${PHONE_RUN_REACHES_REAL_TOOLS}`);
+      options.out(`tests: ${selection.pinned.length}`);
+      options.out(`simulations: ${header.expectedSimulationCount}`);
+      options.out(`results: ${header.resultsUrl}`);
+      if (options.noFollow === true) {
+        options.out("status: started");
+        return RUN_EXIT.done;
+      }
 
-  let run;
-  try {
-    run = await hydrateRun(signedIn, header, options.fetchImpl);
-  } catch (cause) {
-    // The POST succeeded. Keep that fact visible even when the first bounded
-    // simulation page cannot be read and this terminal cannot follow it.
-    options.out("run-status: started");
-    return unreachable(options, cause);
-  }
-  const follower = new RunFollower(run);
-  for (const row of follower.rows) {
-    options.out(simulationLine(row));
-    const grading = gradingLine(row);
-    if (grading !== null) options.out(grading);
-  }
+      let run;
+      try {
+        run = await hydrateRun(signedIn, header, options.fetchImpl);
+      } catch (cause) {
+        // The POST succeeded. Keep that fact visible even when the first bounded
+        // simulation page cannot be read and this terminal cannot follow it.
+        options.out("run-status: started");
+        return unreachable(options, cause);
+      }
+      const follower = new RunFollower(run);
+      for (const row of follower.rows) {
+        options.out(simulationLine(row));
+        const grading = gradingLine(row);
+        if (grading !== null) options.out(grading);
+      }
 
-  let ending;
-  try {
-    ending = await followRun({
-      signedIn,
-      follower,
-      onChange: (change) => {
-        for (const line of changeLines(change)) options.out(line);
-      },
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.everyMs === undefined ? {} : { everyMs: options.everyMs }),
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    });
-  } catch (cause) {
-    return unreachable(options, cause);
-  }
-  const progress = follower.progress;
-  for (const line of progressLines(progress)) options.out(line);
-  if (ending === "interrupted") {
-    options.out("status: left-running");
-    return RUN_EXIT.interrupted;
-  }
-  options.out(`status: ${follower.runStatus}`);
-  if (progress.executionFailed > 0 || progress.gradingErrors > 0) {
-    return RUN_EXIT.operational;
-  }
-  return RUN_EXIT.done;
+      let ending;
+      try {
+        ending = await followRun({
+          signedIn,
+          follower,
+          onChange: (change) => {
+            for (const line of changeLines(change)) options.out(line);
+          },
+          signal,
+          ...(options.everyMs === undefined ? {} : { everyMs: options.everyMs }),
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        });
+      } catch (cause) {
+        return unreachable(options, cause);
+      }
+      const progress = follower.progress;
+      for (const line of progressLines(progress)) options.out(line);
+      if (ending === "interrupted") {
+        options.out("status: left-running");
+        return RUN_EXIT.interrupted;
+      }
+      options.out(`status: ${follower.runStatus}`);
+      if (progress.executionFailed > 0 || progress.gradingErrors > 0) {
+        return RUN_EXIT.operational;
+      }
+      return RUN_EXIT.done;
+    },
+  };
+}
+
+export async function runRunCommand(options: RunCommandOptions): Promise<number> {
+  const prepared = await prepareRunCommand(options);
+  return prepared.kind === "stopped"
+    ? prepared.code
+    : await prepared.run(options.signal ?? new AbortController().signal);
 }
 
 function unreachable(options: RunCommandOptions, cause: unknown): number {

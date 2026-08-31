@@ -1,5 +1,5 @@
 /**
- * `egma login`: the same flow the wizard runs, with nobody watching.
+ * `egma login`: promptless device login for a coding agent to start.
  *
  * It asks nothing. Nothing here reads standard input, so a coding agent can run
  * it, read what it prints, and act on the answer without a person relaying

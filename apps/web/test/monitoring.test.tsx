@@ -1013,7 +1013,7 @@ describe("what a quiet Monitoring page says", () => {
     expect(offered).toHaveLength(1);
     for (const one of offered) {
       expect(one.getAttribute("href")).toBe(
-        "/projects/prj_2/agents?sheet=connect&goal=monitoring",
+        "/projects/prj_2/agents?sheet=connect",
       );
     }
   });
@@ -1132,14 +1132,14 @@ describe("what a quiet Monitoring page says", () => {
  * A screen that grew a stop button would be that decision made by drift.
  */
 describe("the one monitoring action this screen carries", () => {
-  it("heads the page with it, and states the Monitoring goal in the address", async () => {
+  it("heads the page with it, and opens the shared handoff", async () => {
     stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("table", { name: LIST.tableLabel });
     const action = screen.getByRole("link", { name: LIST.monitorAgent });
     expect(action.getAttribute("href")).toBe(
-      "/projects/prj_2/agents?sheet=connect&goal=monitoring",
+      "/projects/prj_2/agents?sheet=connect",
     );
     // And the old address is not what it points at any more.
     expect(action.getAttribute("href")).not.toContain("/monitoring/start");
@@ -1153,7 +1153,7 @@ describe("the one monitoring action this screen carries", () => {
     await screen.findByRole("table", { name: LIST.tableLabel });
     expect(
       screen.getByRole("link", { name: LIST.monitorAgent }).getAttribute("href"),
-    ).toBe("/projects/prj_2/agents?sheet=connect&goal=monitoring");
+    ).toBe("/projects/prj_2/agents?sheet=connect");
   });
 
   /**

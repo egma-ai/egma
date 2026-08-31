@@ -1,14 +1,13 @@
 /**
- * Connecting a Retell voice agent to egma, once, for both surfaces.
+ * Connecting a Retell voice agent to Egma.
  *
- * There is one flow here and there is no second one. The wizard is a screen
- * over it and `egma connect` is plain lines over it, which is what makes the
- * wizard passing its checks evidence that the agent-callable surface works.
+ * There is one flow here. `egma connect` is a plain-line adapter over it, so
+ * tests exercise the same provider path a coding agent uses.
  *
  * Nothing in here draws and nothing in here reads a keystroke. The key arrives
  * through `askForKey`, the choice between several agents through `chooseAgent`,
  * and everything the developer should see goes out through `say` — so the same
- * flow runs on a screen, in a pipe, and in a check with nobody watching.
+ * flow runs in a pipe and in a check with nobody watching.
  *
  * Six things happen in order and each one can end the flow honestly: the key is
  * taken, it is checked by listing the account's **voice** agents, one agent is
@@ -38,6 +37,7 @@ import {
   type RegisterOptions,
 } from "../platform/agents.ts";
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
+import { factValueIssue, MAX_FACT_VALUE_LENGTH } from "../ui/fact-value.ts";
 import {
   confirmNumber,
   CUSTOM_LLM_HAS_NO_CONFIGURATION,
@@ -64,9 +64,9 @@ export const KEY_ASK_LINE = "Paste your Retell API key (Retell dashboard → Set
  */
 export const CUSTODY_LINE =
   "Egma uses this key now to read your Retell agents and confirm the selected setup. " +
-  "For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell. " +
-  "For Phone, Egma uses it only during setup and does not store it. " +
-  "It never lands in this repository.";
+  "Egma seals a copy on the agent so production monitoring can be enabled later without asking for the key again. " +
+  "Text and Web call also keep a sealed connection copy and use it to run each simulation through Retell. " +
+  "A Phone connection keeps no key. The key never lands in this repository.";
 
 /** The exact failure for a key Retell will not take. */
 export const INVALID_KEY_LINE =
@@ -216,7 +216,7 @@ export function registrationLine(registered: Registered): string | null {
   }
 }
 
-/** What the wizard is waiting to be given, while it still is. */
+/** The provider values registration needs before it can continue. */
 export type KeyAsk = {
   /** What is being asked for. */
   readonly asking: string;
@@ -233,6 +233,8 @@ export function keyAskLines(ask: KeyAsk): readonly string[] {
 
 /** How many times a name already held is tried again with a number on the end. */
 const NAME_ATTEMPTS = 20;
+const SAFE_PROVIDER_AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/u;
+const E164_PHONE_NUMBER = /^\+[1-9][0-9]{1,14}$/u;
 
 /**
  * Which of the two things a write turned out to be, said for each half.
@@ -256,6 +258,13 @@ export type ConnectedLane = {
   readonly connection: RegisteredConnection;
   /** Whether this connection was written or found already there. */
   readonly written: WriteResult;
+};
+
+/** One remote write receipt, delivered before the flow makes another request. */
+export type RegistrationReceiptEvent = {
+  readonly lane: Lane;
+  readonly registered: Registered;
+  readonly registration: Registration;
 };
 
 export type ConnectOutcome =
@@ -352,6 +361,10 @@ export type ConnectOptions = {
    * platform with nothing in it, and must leave the repository the same way.
    */
   readonly beforeRegistering?: () => Promise<void>;
+  /** The exact Egma name said immediately before each registration request. */
+  readonly beforeRegistrationAttempt?: (name: string) => void;
+  /** A complete remote receipt said before any later request or local write. */
+  readonly onRegistered?: (event: RegistrationReceiptEvent) => void;
   /**
    * What Egma should call the agent, when the sitting has already settled it.
    *
@@ -617,21 +630,17 @@ type Written = {
  *   account does produce. Then the name is taken and the next one is tried,
  *   exactly as before.
  *
- * **Two signals tell those apart, and a phone-only agent needs the second.** A
- * retell connection carries the vendor's own agent id and answers outright. A
- * phone connection carries a number, and Retell knows which numbers it routes to
- * the agent under test — so a number it routes here says "this is it", and a
- * number it does not says "this is somebody else" just as clearly.
+ * **The provider binding tells those apart.** Current Retell agents carry the
+ * provider's own agent id on the agent row. Older text and web-call rows carry
+ * it on their connection. An older phone-only row may carry neither; current
+ * routing can prove a positive match, but a changed route cannot prove that an
+ * old number belonged to somebody else.
  *
- * **Where neither signal answers, the next name is taken.** An agent reached
- * only by phone, with Retell unable to say which numbers it routes, is an agent
- * egma cannot identify — and the two ways of being wrong about it are not
- * equally bad. Guess "this is it" and two voice agents share one egma agent and
- * one results history, which nothing can unpick afterwards. Guess "somebody
- * else" and there is a spare agent in the project, which a developer can delete
- * in one command. So ambiguity goes to the next name, every time. An agent with
- * no living connection at all is the one case with nothing to be wrong about —
- * there is no history to split — and the chosen connection joins it.
+ * **Where neither signal answers, the write stops.** A lost registration reply
+ * can leave a real phone connection behind. Advancing to a suffixed name while
+ * Retell cannot prove the existing row's provider identity would turn that
+ * uncertain success into a duplicate agent. The record-only command can match
+ * the provider agent, lane and number without another remote write.
  */
 async function register(
   options: KeyedOptions,
@@ -641,12 +650,10 @@ async function register(
    * The numbers Retell routes to the agent under test, read at most once and
    * only when a name clash actually needs them.
    *
-   * `null` when Retell would not say. That is not a reason to refuse the
-   * registration, and it is not a reason to guess either: it means this agent
-   * cannot be identified, so the next name is taken and the developer gets a
-   * spare agent rather than a merged history. Read once and no more, because a
-   * listing that failed on the first ask is not going to answer differently on
-   * the twentieth.
+   * `null` when Retell would not say. The registration then stops rather than
+   * guessing whether a phone-only row belongs to this agent. Read once and no
+   * more, because a listing that failed on the first ask is not going to answer
+   * differently on the twentieth.
    */
   numbersOfTheAgent: () => Promise<readonly string[] | null>,
 ): Promise<Written | ConnectOutcome> {
@@ -665,6 +672,15 @@ async function register(
   for (let attempt = 1; attempt <= NAME_ATTEMPTS; attempt += 1) {
     if (options.signal.aborted) return { kind: "interrupted" };
     const name = attempt === 1 ? wanted : `${wanted}-${attempt}`;
+    if (factValueIssue(name) !== null) {
+      return {
+        kind: "failed",
+        reason:
+          `Egma needs an agent name on one line, at most ${String(MAX_FACT_VALUE_LENGTH)} characters, ` +
+          "without control characters. Nothing was registered.",
+      };
+    }
+    options.beforeRegistrationAttempt?.(name);
 
     const result = await registerAgent(
       { name, agentPlatform: "retell", connection: selected.connection },
@@ -672,12 +688,38 @@ async function register(
     );
 
     switch (result.kind) {
-      case "registered":
+      case "registered": {
+        const providerIdentities = [
+          result.registered.agent.platformAgentId,
+          (result.registered.connection.config["retellAgentId"] ?? "").trim() ||
+            null,
+        ].filter((identity): identity is string => identity !== null);
+        const requiredLaneIdentityMatches =
+          selected.lane === "phone"
+            ? result.registered.agent.platformAgentId === config.agentId
+            : (result.registered.connection.config["retellAgentId"] ?? "").trim() ===
+              config.agentId;
+        const providerIdentityMatches =
+          requiredLaneIdentityMatches &&
+          providerIdentities.length > 0 &&
+          providerIdentities.every((identity) => identity === config.agentId);
+        if (
+          result.registered.agent.agentPlatform !== "retell" ||
+          !providerIdentityMatches ||
+          !isTheSameReach(result.registered.connection, selected.connection)
+        ) {
+          return {
+            kind: "failed",
+            reason:
+              "Egma answered without a receipt for the selected Retell agent and lane. No recovery receipt was printed and nothing was recorded locally.",
+          };
+        }
         return {
           kind: "registered",
           registered: result.registered,
           registration: registrationOf(result.registered),
         };
+      }
       case "not-authenticated":
         return notSignedIn;
       case "refused":
@@ -705,25 +747,64 @@ async function register(
     }
     if (held.kind === "not-found") continue;
 
-    // A connection naming another Retell agent settles it: this is somebody
-    // else's agent under the same name, and the next name is tried.
+    // Every public provider identity must agree. One matching connection does
+    // not make a contradictory agent binding safe, and vice versa.
+    if (held.agent.agentPlatform !== "retell") continue;
     const reaches = held.connections
       .map(retellAgentOf)
       .filter((named): named is string => named !== null);
-    if (reaches.length > 0 && !reaches.includes(config.agentId)) continue;
+    const providerIdentities = [
+      ...(held.agent.platformAgentId === null
+        ? []
+        : [held.agent.platformAgentId]),
+      ...reaches,
+    ];
+    let providerIdentityProved = false;
+    if (providerIdentities.length > 0) {
+      if (providerIdentities.every((identity) => identity === config.agentId)) {
+        providerIdentityProved = true;
+      } else if (providerIdentities.every((identity) => identity !== config.agentId)) {
+        // Every public identity names somebody else, so the next name is safe.
+        continue;
+      } else {
+        return {
+          kind: "failed",
+          reason:
+            `Egma returned conflicting Retell provider identities for the existing agent named ${name}. ` +
+            "It did not create or attach another connection. Resolve that agent binding before trying again.",
+        };
+      }
+    }
 
     // Nothing here names a vendor, so the numbers do. An agent reached only by
     // phone is this one exactly when Retell routes one of its numbers to the
-    // agent under test. When it routes none of them — and when Retell would not
-    // say at all — this is somebody else's agent under the same name, and the
-    // next name is tried. Ambiguity goes that way on purpose: see above.
+    // agent under test. When it routes none of them this is somebody else's
+    // agent under the same name. When Retell will not say, stop before a
+    // suffixed retry can duplicate an earlier uncertain write.
     const dialled = held.connections
       .filter((one) => one.connectionType === "phone_number")
       .map((one) => one.config["phoneNumber"] ?? "");
-    if (reaches.length === 0 && dialled.length > 0) {
+    if (!providerIdentityProved && providerIdentities.length === 0 && dialled.length > 0) {
       const routed = await numbersOfTheAgent();
       if (options.signal.aborted) return { kind: "interrupted" };
-      if (routed === null || !dialled.some((number) => routed.includes(number))) continue;
+      providerIdentityProved =
+        routed !== null &&
+        dialled.some((number) => routed.includes(number));
+    }
+
+    if (!providerIdentityProved) {
+      const phone = selected.connection.config["phoneNumber"];
+      const recovery =
+        `egma connect record --platform retell --retell-agent ${config.agentId} ` +
+        `--lanes ${selected.lane}` +
+        (phone === undefined ? "" : ` --phone-number ${phone}`) +
+        ` --url "${options.platform.url}"`;
+      return {
+        kind: "failed",
+        reason:
+          `Egma could not prove which Retell agent owns the existing agent named ${name}. ` +
+          `It did not create another agent or connection. Run ${recovery} to look for an equivalent earlier remote write, or resolve the old name before registering again.`,
+      };
     }
 
     // The same reach, already attached. Nothing is written and both halves
@@ -742,6 +823,14 @@ async function register(
     const added = await addConnection(found.agent.id, selected.connection, platform);
     switch (added.kind) {
       case "added":
+        if (!isTheSameReach(added.connection, selected.connection)) {
+          return {
+            kind: "failed",
+            reason:
+              `Egma answered without a receipt for the selected ${LANE_NAMES[selected.lane]} connection. ` +
+              "No recovery receipt was printed and nothing was recorded locally.",
+          };
+        }
         return {
           kind: "registered",
           registered: {
@@ -866,6 +955,14 @@ async function attachLane(
   if (options.signal.aborted) return { kind: "interrupted" };
   switch (added.kind) {
     case "added":
+      if (!isTheSameReach(added.connection, selected.connection)) {
+        return {
+          kind: "failed",
+          reason:
+            `Egma answered without a receipt for the selected ${LANE_NAMES[selected.lane]} connection. ` +
+            "No recovery receipt was printed and nothing was recorded locally.",
+        };
+      }
       return { kind: "attached", connection: added.connection, written: "created" };
     case "not-authenticated":
       return notSignedIn;
@@ -940,6 +1037,14 @@ async function pickNumber(
     }
   }
 
+  if (!E164_PHONE_NUMBER.test(wanted)) {
+    return {
+      kind: "failed",
+      reason:
+        "Retell returned a phone number that is not safe E.164 text. Nothing was registered.",
+    };
+  }
+
   const confirmed = await confirmNumber(key, wanted, options.retell ?? {});
   if (options.signal.aborted) return { kind: "interrupted" };
 
@@ -998,8 +1103,7 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   }
 
   // Confirm the settled agent before the next provider read. The read gives a
-  // terminal renderer time to paint this line; saying it only after every
-  // registration step can let the next wizard screen replace it first.
+  // caller the settled fact before the next provider request begins.
   options.say(`Retell agent ${defaultAgentName(chosen.name)}`, "action");
 
   const pulled = await pullAgent(key, chosen, options.retell ?? {});
@@ -1021,6 +1125,13 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   }
 
   const config = pulled.config;
+  if (!SAFE_PROVIDER_AGENT_ID.test(config.agentId)) {
+    return {
+      kind: "failed",
+      reason:
+        "Retell returned an agent identifier with unsupported characters. Nothing was registered.",
+    };
+  }
 
   // The agent is settled, so the one question can be asked: how should Egma
   // test it. Three lanes, several pickable at once, and each pick is one
@@ -1080,6 +1191,11 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   await options.beforeRegistering?.();
   const written = await register(keyed, config, first, numbersOfTheAgent);
   if (written.kind !== "registered") return written;
+  options.onRegistered?.({
+    lane: first.lane,
+    registered: written.registered,
+    registration: written.registration,
+  });
 
   const connections: ConnectedLane[] = [
     {
@@ -1091,6 +1207,15 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   for (const selected of selections.slice(1)) {
     const attached = await attachLane(options, written.registered.agent.id, selected);
     if (attached.kind !== "attached") return attached;
+    options.onRegistered?.({
+      lane: selected.lane,
+      registered: {
+        result: attached.written === "created" ? "connection_added" : "reused",
+        agent: written.registered.agent,
+        connection: attached.connection,
+      },
+      registration: { agent: "reused", connection: attached.written },
+    });
     connections.push({
       lane: selected.lane,
       connection: attached.connection,

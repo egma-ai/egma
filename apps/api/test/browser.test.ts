@@ -2912,101 +2912,82 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "registers an agent, and gives egma a way to reach it",
+    "offers three coding-agent setup prompts, then reads the API-seeded agent",
     async () => {
       // A project nobody has put anything in says it is empty, which is a
       // different sentence from a page that failed to load.
       await walk.goto(at("agents"));
       await saysWithin(walk, "No agents in this project yet");
 
-      /*
-       * **One panel does both halves, and opening it is not a navigation.**
-       * The agent and its first way in used to be two pages with a forward
-       * between them, and an agent that never reached the second one sat in
-       * the list unreachable. Now the control changes query state on the
-       * address the person is already at (founder ruling, 2026-08-24) — it no
-       * longer sends the browser to `/agents/new`, which is why this used to
-       * wait for that address and time out.
-       *
-       * `/agents/new` is still an address and still opens this panel; the
-       * copied-link table below is where that promise is checked, because that
-       * is what a link in the CLI or the documentation actually does.
-       */
+      /* The web surface offers three outcomes for a coding agent. It performs
+       * no provider discovery or setup write. */
       await walk.getByRole("link", { name: "Connect an agent" }).first().click();
       await walk.waitForURL(
         new RegExp(`/projects/${second}/agents\\?sheet=connect$`),
       );
-      await reactHasTakenOver(walk, "form");
+      const handoff = walk.getByRole("dialog", { name: "Connect an agent" });
+      await handoff.waitFor();
+      expect(
+        await handoff.getByRole("heading", { level: 3 }).allInnerTexts(),
+      ).toEqual(["Simulation", "Monitoring", "Both"]);
+      expect(
+        await handoff.getByRole("button", { name: /^Copy .* prompt$/u }).allInnerTexts(),
+      ).toEqual(["Copy", "Copy", "Copy"]);
+      const prompts = await handoff.innerText();
+      expect(prompts).toContain("simulation testing for this repository's voice agent end to end");
+      expect(prompts).toContain("production monitoring for this repository's voice agent end to end");
+      expect(prompts).toContain("simulation testing and production monitoring");
+      expect(prompts).toContain("npx --yes @egma/cli");
+      expect(prompts).toContain(`Use ${origin} as the Egma platform URL`);
+      expect(prompts).toContain("Use existing credentials");
+      expect(prompts).toContain("an unsafe conflict");
+      expect(prompts).toContain("real phone run that may cost money");
+      expect(await handoff.locator("input, select, textarea").count()).toBe(0);
+      expect(
+        (
+          await instance.database.sql<{ id: string }>(
+            `select id from agent where project_id = '${second}'`,
+          )
+        ).rows,
+        "opening the handoff writes no agent",
+      ).toEqual([]);
 
-      /*
-       * **The job comes first.** This one agent will run simulations and pull
-       * Retell production calls, so the browser states that goal before it
-       * chooses the provider. The provider then owns every question that
-       * follows; the browser never invents an Egma-only agent name.
-       */
-      await walk.getByRole("radio", { name: /^Set up both/u }).click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-      await walk.getByRole("radio", { name: "Retell" }).click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-      /* **One key discovers the account.** It is supplied once, then the
-       * person explicitly asks Egma to find the provider's real agents. */
-      const discoveryResponse = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/v1/agents:discover",
-      );
-      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
-      await walk.getByRole("button", { name: "Find agents" }).click();
-      const discovered = await discoveryResponse;
-      expect(discovered.status(), await discovered.text()).toBe(200);
-      // Retell supplies both the agent name and its available phone route.
-      // The person selects those real account records; Egma does not ask them
-      // to type either record a second time.
-      await walk
-        .getByRole("radio", { name: /^The Support line/u })
-        .click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-      await walk.waitForSelector("#retell-phone-number");
-      expect(await walk.inputValue("#retell-phone-number")).toBe(
-        `phone:${BROWSER_RETELL_NUMBER}`,
-      );
-      /*
-       * **One write, both halves.** `registerAgent` carries the connection, so
-       * there is no window in which the agent exists and nothing can reach it.
-       */
-      const connectionResponse = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/v1/agents",
-      );
-      await walk.getByRole("button", { name: "Set up both" }).click();
-      const connected = await connectionResponse;
-      expect(connected.status(), await connected.text()).toBe(201);
+      /* A browser test cannot run the coding agent. Seed the downstream API
+       * state directly, then return to the browser to prove only the handoff
+       * and the UI that reads a completed setup. CLI acceptance checks cover
+       * the ordered command writes separately. */
+      const cookie = (await walk.context().cookies(origin))
+        .map((one) => `${one.name}=${one.value}`)
+        .join("; ");
+      const connected = await fetch(`${origin}/v1/agents`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          projectId: second,
+          name: "The Support line",
+          agentPlatform: "retell",
+          connection: {
+            agentPlatform: "retell",
+            connectionType: "phone_number",
+            accessVariant: "phone_number.public_e164",
+            modality: "voice",
+            config: { phoneNumber: BROWSER_RETELL_NUMBER },
+            platformAgentId: BROWSER_RETELL_AGENT,
+            pullProductionCalls: true,
+            credentials: { apiKey: BROWSER_RETELL_KEY },
+          },
+        }),
+      });
+      expect(connected.status, await connected.clone().text()).toBe(201);
 
-      /*
-       * **The panel closes onto the list, because the row is the agent.** The
-       * agent page is retired (founder ruling, 2026-08-24): everything it held
-       * is on the row behind the panel, so a save that navigated would be
-       * taking somebody away from what they just made.
-       *
-       * **What is waited for is the outcome, not a navigation.** Closing is a
-       * query-state change on the address the panel was opened over, so there
-       * is no load to wait for: the panel goes, the row arrives, and the
-       * address settles back to the bare list. Waiting on any one of the three
-       * alone would pass while the other two had not happened.
-       */
-      await expect
-        .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
-        .toBe(0);
-      await expect
-        .poll(() => walk.url(), { timeout: 30_000 })
-        .toMatch(new RegExp(`/projects/${second}/agents$`));
+      await handoff.getByRole("button", { name: "Close" }).last().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Active");
 
-      // The selected discovery candidate goes through the generic connection
-      // write. The stored connection is only the public phone destination; the
-      // Retell key and agent id do not enter it.
+      // The API-seeded connection stores only the public phone destination;
+      // the Retell key and agent id do not enter it.
       const stored = await instance.database.sql<{
         id: string;
         name: string;
@@ -3163,72 +3144,49 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "connects the exact deployed LiveKit agent, then gives monitoring instructions",
+    "keeps an old LiveKit link on the three prompts, then reads the registered agent",
     async () => {
-      await walk.goto(at("agents"));
-      await walk.getByRole("link", { name: "Connect an agent" }).first().click();
-      await reactHasTakenOver(walk, "form");
-
-      await walk.getByRole("radio", { name: /^Set up both/u }).click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-      await walk.getByRole("radio", { name: "LiveKit" }).click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-
-      // How the agent is tested is asked before anything is pasted, because it
-      // is the choice a person understands and it decides which credentials
-      // the next screen asks for. This walk is the voice one.
-      await walk.getByRole("radio", { name: /^Voice/u }).click();
-      await walk.getByRole("button", { name: "Continue" }).click();
-      await walk
-        .getByRole("heading", {
-          name: "Connect LiveKit Voice for simulations",
-        })
-        .waitFor();
-
       const deployedName = "appointment-scheduling-langsmith";
-      await walk.fill("#livekit-agent-name", deployedName);
-      await walk.fill("#config-url", "wss://browser-test.livekit.cloud");
-      await walk.getByLabel("API key*").fill("browser-livekit-api-key");
-      await walk
-        .getByLabel("API secret*")
-        .fill("browser-livekit-api-secret");
-
-      const connectionResponse = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/v1/agents",
+      await walk.goto(`${at("agents", "new")}?goal=monitoring&platform=livekit`);
+      const sheet = walk.getByRole("dialog", { name: "Connect an agent" });
+      await sheet.waitFor();
+      expect(
+        await sheet.getByRole("heading", { level: 3 }).allInnerTexts(),
+        "an old narrowed link still offers all three current outcomes",
+      ).toEqual(["Simulation", "Monitoring", "Both"]);
+      expect(await sheet.getByText(/monitor_livekit\(ctx\)/u).count()).toBe(0);
+      expect(await sheet.getByText(/monitorLiveKit\(ctx\)/u).count()).toBe(0);
+      expect(await sheet.getByText(/npm install @egma\/livekit/u).count()).toBe(
+        0,
       );
-      await walk
-        .getByRole("button", { name: "Continue to monitoring" })
-        .click();
-      const connected = await connectionResponse;
-      expect(connected.status(), await connected.text()).toBe(201);
 
-      const sheet = walk.getByRole("dialog", { name: "Set up an agent" });
-      await sheet
-        .getByRole("heading", {
-          name: "Add monitoring to your LiveKit agent",
-        })
-        .waitFor();
-      expect(await sheet.innerText()).toContain("monitor_livekit(ctx)");
-      expect(
-        await sheet.getByRole("tab", { name: "Python" }).getAttribute(
-          "aria-selected",
-        ),
-      ).toBe("true");
-      await sheet.getByRole("tab", { name: "JavaScript" }).click();
-      const javascriptInstructions = await sheet.innerText();
-      expect(javascriptInstructions).toContain("npm install @egma/livekit");
-      expect(javascriptInstructions).toContain("monitorLiveKit(ctx)");
-      expect(javascriptInstructions).not.toContain("monitor_livekit(ctx)");
-      expect(
-        await sheet.getByRole("button", { name: /start monitoring/iu }).count(),
-        "LiveKit monitoring is configured in customer code, not toggled here",
-      ).toBe(0);
-      expect(
-        await sheet.getByRole("button", { name: /stop monitoring/iu }).count(),
-      ).toBe(0);
-
+      const cookie = (await walk.context().cookies(origin))
+        .map((one) => `${one.name}=${one.value}`)
+        .join("; ");
+      const connected = await fetch(`${origin}/v1/agents`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          projectId: second,
+          name: deployedName,
+          agentPlatform: "livekit",
+          connection: {
+            agentPlatform: "livekit",
+            connectionType: "livekit_room",
+            accessVariant: "livekit_room.project_credentials",
+            modality: "voice",
+            config: {
+              agentName: deployedName,
+              url: "wss://browser-test.livekit.cloud",
+            },
+            credentials: {
+              apiKey: "browser-livekit-api-key",
+              apiSecret: "browser-livekit-api-secret",
+            },
+          },
+        }),
+      });
+      expect(connected.status, await connected.clone().text()).toBe(201);
       const stored = await instance.database.sql<{
         agent_name: string;
         agent_platform: string;
@@ -3257,10 +3215,9 @@ describe("the complete product, walked in order in a second project", () => {
         },
       ]);
 
-      await sheet.getByRole("button", { name: "Return to agents" }).click();
-      await expect
-        .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
-        .toBe(0);
+      await sheet.getByRole("button", { name: "Close" }).last().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      await walk.goto(at("agents"));
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .filter({ hasText: deployedName })
@@ -3855,8 +3812,6 @@ describe("the complete product, walked in order in a second project", () => {
     readonly says: string;
     /** A route that opens a named sheet reads that sheet, not the page behind it. */
     readonly dialog?: string;
-    /** A goal-carrying deep link can also promise which choice is selected. */
-    readonly selectedRadio?: string;
     /**
      * Where this address ends up, when that is not itself.
      *
@@ -3899,9 +3854,9 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Register an agent",
         address: at("agents", "new"),
-        // The deep link opens the same goal-first setup sheet as the list.
-        dialog: "Set up an agent",
-        says: "What do you want Egma to do?",
+        // The deep link opens the same coding-agent handoff as the list.
+        dialog: "Connect an agent",
+        says: "Copy one prompt into the coding agent",
       },
       /*
        * **A retired address, kept in the table on purpose.** The agent page is
@@ -3921,10 +3876,9 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Add a connection",
         address: `${agentAddress}/connections/new`,
-        // Adding a connection uses the same goal-first state machine for this
-        // existing agent.
-        dialog: "Set up an agent",
-        says: "What do you want Egma to do?",
+        // Adding a connection now hands the repository work to a coding agent.
+        dialog: "Connect an agent",
+        says: "Copy one prompt into the coding agent",
       },
       {
         what: "one connection",
@@ -4005,20 +3959,19 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("monitoring", "start"),
         /*
          * **The retired Start-monitoring address, now a forwarding deep link.**
-         * The full page is gone: Agents owns one goal-first setup flow, and
-         * this address carries the Monitoring goal into that flow.
+         * The full page is gone: Agents owns one coding-agent handoff, and
+         * this address carries an old Monitoring link into that sheet.
          *
          * The phrase is the open sheet's own, so the walk cannot pass on the
          * Agents list behind it. The redirect target is exact because the
-         * query is the durable setup state a copied link must keep.
+         * query is kept so the old copied address still lands safely.
          *
          * The Traces list itself is not here: this walk opens it many times
          * already, under `monitoringAt`, and against its own states.
          */
-        lands: `${at("agents")}?sheet=connect&goal=monitoring`,
-        dialog: "Set up an agent",
-        says: "What do you want Egma to do?",
-        selectedRadio: "Monitor production",
+        lands: `${at("agents")}?sheet=connect`,
+        dialog: "Connect an agent",
+        says: "Copy one prompt into the coding agent",
       },
       {
         what: "Settings",
@@ -4062,16 +4015,6 @@ describe("the complete product, walked in order in a second project", () => {
     await expect
       .poll(() => surface.innerText().catch(() => ""), { timeout: 30_000 })
       .toContain(route.says);
-    const selectedRadio = route.selectedRadio;
-    if (selectedRadio !== undefined) {
-      await expect
-        .poll(() =>
-          surface
-            .getByRole("radio", { name: selectedRadio })
-            .isChecked(),
-        )
-        .toBe(true);
-    }
   }
 
   /**
@@ -4816,7 +4759,7 @@ describe("the complete product, walked in order in a second project", () => {
      * than survive it.
      */
     it(
-      "uses the settled compact tokens on the shell, a list and a form",
+      "uses the settled compact tokens on the shell, a list and an editor",
       async () => {
         await walk.goto(at("agents"));
         await walk.locator("table tbody tr").first().waitFor({ timeout: 30_000 });
@@ -4834,23 +4777,16 @@ describe("the complete product, walked in order in a second project", () => {
         expect(row).toBeGreaterThanOrEqual(tokens.row);
         expect(row).toBeLessThanOrEqual(tokens.row + tokens.control);
 
-        // A form's controls are the same height as the ones in a toolbar, which
-        // is what stops an editor from becoming a different product.
-        await walk.goto(at("agents", "new"));
-        await reactHasTakenOver(walk, "form");
-        await walk.getByRole("radio", { name: /^Run simulations/u }).click();
-        await walk.getByRole("button", { name: "Continue" }).click();
-        await walk.getByRole("radio", { name: "Retell" }).click();
-        await walk.getByRole("button", { name: "Continue" }).click();
-        const field = Math.round(await heightOf(walk, "#retell-api-key"));
-        expect(field).toBe(tokens.control);
-
-        // The tests grid draws no form of its own — its cells are the form —
-        // so the paired reading is the suite sheet's own field.
+        // An editor's controls are the same height as the ones in a toolbar,
+        // which stops the editor from becoming a different product. Agent
+        // setup is now a copy-only handoff, so the suite sheet supplies the
+        // representative editable field.
         await walk.goto(at("tests"));
         await reactHasTakenOver(walk, "main");
         await walk.getByRole("button", { name: "Create suite" }).click();
-        expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(field);
+        expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(
+          tokens.control,
+        );
 
         // And a transcript is dense: its turns are lines rather than cards.
         await walk.goto(runAddress);

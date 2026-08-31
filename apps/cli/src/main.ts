@@ -1,95 +1,58 @@
-/**
- * What `egma` does with the words after it.
- *
- * A bare invocation runs the wizard. Everything else is a flag on the same
- * walk, because the wizard is a skin over the same code and never a second path
- * through it.
- */
+/** The promptless Egma CLI and its small coding-agent handoff. */
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
 import {
-  discoverCodingAgents,
-  supportedCodingAgentId,
-  SUPPORTED_CODING_AGENT_IDS,
-  type DrivenAgentLaunch,
-} from "./acp/coding-agents.ts";
-import {
   AGENT_VARIABLE,
   argumentRefusal,
   KEY_VARIABLES,
-  NUMBER_VARIABLE,
   LANES_VARIABLE,
+  NUMBER_VARIABLE,
   refusedArgumentIn,
   runConnectCommand,
 } from "./commands/connect.ts";
 import type { FolderCommandOptions } from "./commands/folder-verbs.ts";
 import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
+import { runLiveKitContractCommand } from "./commands/livekit.ts";
 import {
   MONITORING_ACTIONS,
   runMonitoringCommand,
   unknownActionRefusal,
   type MonitoringAction,
 } from "./commands/monitoring.ts";
+import { runPersonasCommand } from "./commands/personas.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
-import { runRunCommand } from "./commands/run.ts";
-import { runSuiteCreateCommand } from "./commands/suite.ts";
+import { runWithOptionalLocalLiveKitWorker } from "./commands/run-local-worker.ts";
+import { prepareRunCommand } from "./commands/run.ts";
 import {
   isSelfHostInvocation,
   runSelfHostCommand,
 } from "./commands/self-host.ts";
+import { runSetupCommand } from "./commands/setup.ts";
+import { runSuiteCreateCommand } from "./commands/suite.ts";
+import { runValidateCommand } from "./commands/validate.ts";
 import type { PlatformBinding } from "./folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
   choosePlatform,
   credentialsFileIn,
+  DEFAULT_PLATFORM_URL,
   KEYS_UNUSABLE,
   KeysUnusableError,
   RepositoryPlatformConfigError,
+  selectPlatform,
   UnboundPlatformIdentifiersError,
   UnusableUrlError,
-  type ChosenPlatform,
   type PlatformAccess,
 } from "./platform/credentials.ts";
 import { PlatformUnreachableError } from "./platform/device-flow.ts";
 import { RETELL_API } from "./retell/client.ts";
-import { HeadlessUI } from "./ui/headless-ui.ts";
-import { walkExitCode } from "./wizard/exit-code.ts";
-import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { WizardPlatform } from "./wizard/login-step.ts";
-import type { StopReason } from "./wizard/stop.ts";
-import type { WizardCodingAgent } from "./wizard/wizard-flow.ts";
 
-/**
- * The wizard's machinery arrives through a dynamic import, and the verbs never
- * ask for it.
- *
- * A terminal renderer and a protocol client are the two most expensive things
- * this package loads, and a headless verb uses neither — it prints lines and
- * talks to egma over HTTP. Loading them anyway put a quarter of a second in
- * front of every `egma login`, `egma pull` and `egma push`, which is time a
- * coding agent driving the product pays on every single call.
- */
-async function wizardMachinery(): Promise<{
-  readonly startTui: typeof import("./ui/tui/start-tui.ts").startTui;
-  readonly runWizard: typeof import("./wizard/wizard-flow.ts").runWizard;
-}> {
-  const [{ startTui }, { runWizard }] = await Promise.all([
-    import("./ui/tui/start-tui.ts"),
-    import("./wizard/wizard-flow.ts"),
-  ]);
-  return { startTui, runWizard };
-}
-
-/**
- * The verbs. A bare `egma` runs the wizard; naming one runs it headlessly,
- * because a verb is what a coding agent types and a coding agent has no
- * keystroke to give.
- */
+/** Named commands are promptless and print stable fact lines for coding agents. */
 export const VERBS = [
   "login",
   "connect",
@@ -98,76 +61,53 @@ export const VERBS = [
   "push",
   "run",
   "suite",
+  "personas",
+  "validate",
   "monitoring",
+  "livekit",
 ] as const;
 
-/**
- * The Retell the CLI talks to, for a check that stands one in.
- *
- * It is read here rather than deep in the client so that there is one place
- * where "which Retell" is decided, exactly as there is one for which egma.
- */
 export const RETELL_URL_VARIABLE = "EGMA_RETELL_URL";
-
-/** The test cases a headless walk would have been pointed at. */
-export const EXISTING_TESTS_VARIABLE = "EGMA_EXISTING_TESTS";
 
 export type Verb = (typeof VERBS)[number];
 
 export type Invocation = {
   readonly help: boolean;
   readonly version: boolean;
-  /** The verb that was named, or `null` for the wizard. */
   readonly verb: Verb | null;
-  /** The developer has said, in the command, to run with nobody watching. */
-  readonly headless: boolean;
-  readonly drivenAgentId: string;
-  /**
-   * The developer said which coding agent this is, rather than taking the
-   * default. It matters for one thing: what egma calls the agent it drove, and
-   * therefore where it would put a skill for it.
-   */
-  readonly drivenAgentNamed: boolean;
   readonly cwd: string | null;
-  /** `--url`: which egma to talk to, when it is not egma's own. */
   readonly url: string | null;
-  /** `--force`: do the work again even though it has been done. */
   readonly force: boolean;
-  /** `--no-follow`: with run, start it and return without waiting. */
   readonly noFollow: boolean;
-  /** `--retell-agent`: which agent, when the account holds several. */
   readonly retellAgentId: string | null;
-  /** `--lanes`: which ways egma should test the agent — several, comma separated. */
   readonly lanes: string | null;
-  /** `--phone-number`: which number to dial, when several reach the agent. */
   readonly phoneNumber: string | null;
-  /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
   readonly repoPrompt: string | null;
-  /** `--existing-tests`: the test cases the developer already had written down. */
-  readonly existingTests: string | null;
-  /** `--agent`: the configured voice agent to use for run or monitoring. */
+  readonly showContext: boolean;
+  readonly modality: string | null;
+  readonly accessVariant: string | null;
+  readonly livekitUrl: string | null;
+  readonly dispatchName: string | null;
+  readonly tokenEndpoint: string | null;
+  readonly metadata: string | null;
   readonly agentName: string | null;
-  /** `--connection`: the configured connection to use for a run. */
   readonly connectionName: string | null;
-  /** The only suite subcommand this CLI exposes. */
+  readonly connectAction: string | null;
   readonly suiteAction: string | null;
-  /** Which monitoring control or record-only recovery was requested. */
   readonly monitoringAction: string | null;
-  /** `--platform`: which platform runs this agent, when Egma cannot tell. */
   readonly platformWord: string | null;
-  /** `--platform-agent`: which agent on the account to watch. */
   readonly platformAgentId: string | null;
-  /** `--monitoring-key-id`: non-secret proof for LiveKit record recovery. */
   readonly monitoringKeyId: string | null;
-  /** A direct child under `egma/tests`, for suite create or run. */
   readonly suiteDirectory: string | null;
-  /** Mutable suite display name on create, or optional run name. */
   readonly name: string | null;
-  /**
-   * A test seam, not product surface: `-- <command>` starts a scripted agent in
-   * place of a real one. It is not documented and it is not stable.
-   */
-  readonly drivenAgentCommand: readonly string[];
+  readonly workerEntrypoint: string | null;
+  readonly workerDependencyManifest: string | null;
+  readonly workerDispatchName: string | null;
+  readonly receiptProjectId: string | null;
+  readonly receiptAgentId: string | null;
+  readonly receiptConnectionId: string | null;
+  readonly idempotencyKey: string | null;
+  readonly idempotencyKeyProvided: boolean;
   readonly unknown: readonly string[];
 };
 
@@ -175,13 +115,11 @@ function isVerb(argument: string): argument is Verb {
   return (VERBS as readonly string[]).includes(argument);
 }
 
+/** Parse without a framework so every accepted word is visible in this file. */
 export function parseArgs(argv: readonly string[]): Invocation {
   let help = false;
   let version = false;
   let verb: Verb | null = null;
-  let headless = false;
-  let drivenAgentId = "claude";
-  let drivenAgentNamed = false;
   let cwd: string | null = null;
   let url: string | null = null;
   let force = false;
@@ -190,9 +128,16 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let lanes: string | null = null;
   let phoneNumber: string | null = null;
   let repoPrompt: string | null = null;
-  let existingTests: string | null = null;
+  let showContext = false;
+  let modality: string | null = null;
+  let accessVariant: string | null = null;
+  let livekitUrl: string | null = null;
+  let dispatchName: string | null = null;
+  let tokenEndpoint: string | null = null;
+  let metadata: string | null = null;
   let agentName: string | null = null;
   let connectionName: string | null = null;
+  let connectAction: string | null = null;
   let suiteAction: string | null = null;
   let monitoringAction: string | null = null;
   let platformWord: string | null = null;
@@ -200,25 +145,20 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let monitoringKeyId: string | null = null;
   let suiteDirectory: string | null = null;
   let name: string | null = null;
-  let drivenAgentCommand: string[] = [];
+  let workerEntrypoint: string | null = null;
+  let workerDependencyManifest: string | null = null;
+  let workerDispatchName: string | null = null;
+  let receiptProjectId: string | null = null;
+  let receiptAgentId: string | null = null;
+  let receiptConnectionId: string | null = null;
+  let idempotencyKey: string | null = null;
+  let idempotencyKeyProvided = false;
   const unknown: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] as string;
-    if (argument === "--") {
-      drivenAgentCommand = argv.slice(index + 1) as string[];
-      break;
-    }
     if (argument === "-h" || argument === "--help") help = true;
     else if (argument === "-v" || argument === "--version") version = true;
-    else if (argument === "--headless") headless = true;
-    else if (argument === "--coding-agent") {
-      const named = argv[(index += 1)];
-      if (named !== undefined) {
-        drivenAgentId = named;
-        drivenAgentNamed = true;
-      }
-    }
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
     else if (argument === "--url") url = argv[(index += 1)] ?? null;
     else if (argument === "--force") force = true;
@@ -227,36 +167,63 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--lanes") lanes = argv[(index += 1)] ?? null;
     else if (argument === "--phone-number") phoneNumber = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
-    else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
+    else if (argument === "--show-context") showContext = true;
+    else if (argument === "--modality") modality = argv[(index += 1)] ?? null;
+    else if (argument === "--access-variant") accessVariant = argv[(index += 1)] ?? null;
+    else if (argument === "--livekit-url") livekitUrl = argv[(index += 1)] ?? null;
+    else if (argument === "--dispatch-name") dispatchName = argv[(index += 1)] ?? null;
+    else if (argument === "--token-endpoint") tokenEndpoint = argv[(index += 1)] ?? null;
+    else if (argument === "--metadata") metadata = argv[(index += 1)] ?? null;
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
     else if (argument === "--name") name = argv[(index += 1)] ?? null;
     else if (argument === "--platform") platformWord = argv[(index += 1)] ?? null;
     else if (argument === "--platform-agent") platformAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--project-id") {
+      const value = argv[index + 1];
+      receiptProjectId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptProjectId !== "") index += 1;
+    } else if (argument === "--agent-id") {
+      const value = argv[index + 1];
+      receiptAgentId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptAgentId !== "") index += 1;
+    } else if (argument === "--connection-id") {
+      const value = argv[index + 1];
+      receiptConnectionId = value === undefined || value.startsWith("-") ? "" : value;
+      if (receiptConnectionId !== "") index += 1;
+    }
     else if (argument === "--monitoring-key-id") {
       monitoringKeyId = argv[(index += 1)] ?? null;
-    }
-    else if (verb === null && isVerb(argument)) verb = argument;
+    } else if (argument === "--worker-entrypoint") {
+      workerEntrypoint = argv[(index += 1)] ?? null;
+    } else if (argument === "--worker-dependency-manifest") {
+      workerDependencyManifest = argv[(index += 1)] ?? null;
+    } else if (argument === "--worker-dispatch-name") {
+      workerDispatchName = argv[(index += 1)] ?? null;
+    } else if (argument === "--idempotency-key") {
+      idempotencyKeyProvided = true;
+      const value = argv[index + 1];
+      if (value !== undefined && !value.startsWith("-")) {
+        idempotencyKey = value;
+        index += 1;
+      }
+    } else if (verb === null && isVerb(argument)) verb = argument;
+    else if (verb === "connect" && connectAction === null) connectAction = argument;
     else if (verb === "suite" && suiteAction === null) suiteAction = argument;
     else if (verb === "monitoring" && monitoringAction === null) {
       monitoringAction = argument;
-    }
-    else if (
+    } else if (
       suiteDirectory === null &&
       (verb === "run" || (verb === "suite" && suiteAction === "create"))
     ) {
       suiteDirectory = argument;
-    }
-    else unknown.push(argument);
+    } else unknown.push(argument);
   }
 
   return {
     help,
     version,
     verb,
-    headless,
-    drivenAgentId,
-    drivenAgentNamed,
     cwd,
     url,
     force,
@@ -265,9 +232,16 @@ export function parseArgs(argv: readonly string[]): Invocation {
     lanes,
     phoneNumber,
     repoPrompt,
-    existingTests,
+    showContext,
+    modality,
+    accessVariant,
+    livekitUrl,
+    dispatchName,
+    tokenEndpoint,
+    metadata,
     agentName,
     connectionName,
+    connectAction,
     suiteAction,
     monitoringAction,
     platformWord,
@@ -275,226 +249,120 @@ export function parseArgs(argv: readonly string[]): Invocation {
     monitoringKeyId,
     suiteDirectory,
     name,
-    drivenAgentCommand,
+    workerEntrypoint,
+    workerDependencyManifest,
+    workerDispatchName,
+    receiptProjectId,
+    receiptAgentId,
+    receiptConnectionId,
+    idempotencyKey,
+    idempotencyKeyProvided,
     unknown,
   };
 }
 
 export function helpText(): string {
   return [
-    "Egma — take a voice agent to graded results.",
+    "Egma — take a voice agent to reviewed, graded results.",
+    "",
+    "The bare command prints the public skill install command and the exact",
+    "handoff for your coding agent. The coding agent runs login and every later",
+    "step. Egma does not start or control it.",
     "",
     "Usage:",
-    "  egma [options]           The wizard.",
-    "  egma login [options]     Sign this machine in. No questions, plain lines.",
-    "  egma connect [options]   Register your voice agent and the ways to test it.",
-    "                           The key comes in on standard input or from the",
-    "                           environment, never as an argument.",
-    "  egma init [options]      Make the egma folder this repository's tests",
-    "                           live in. Talks to nobody, unless --url names an",
-    "                           Egma platform URL to bind this repository to. Safe to run",
-    "                           again.",
-    "  egma pull [options]      Write Egma's current test versions, and the mock",
-    "                           tools it answers with, into it.",
-    "  egma push [options]      Upload what is in it. Refuses, naming names,",
-    "                           when Egma has moved on since your last pull.",
+    "  egma [options]                         Print the coding-agent handoff.",
+    "  egma login [options]                   Sign this machine in.",
+    "  egma connect [options]                 Register a Retell or LiveKit agent.",
+    "  egma connect record [selector]         Recover a repository record.",
+    "  egma init [options]                    Create the repository egma/ folder.",
+    "  egma personas                          List project personas for test files.",
     "  egma suite create <directory> --name <name>",
-    "                           Create the platform suite, then its local manifest.",
-    "  egma run <suite-directory> [options]",
-    "                           Run the complete suite after an exact sync check.",
-    "  egma monitoring enable [options]",
-    "                           Start watching this agent's production traffic.",
-    "                           On Retell the account key comes in on standard",
-    "                           input, never as an argument. On LiveKit Egma",
-    "                           mints a project key and writes the two lines the",
-    "                           Egma SDK reads into .env automatically when Git",
-    "                           ignores it, printing them either way.",
-    "  egma monitoring disable  Turn the switch off. Everything stored stays",
-    "                           stored: the conversations, the platform binding",
-    "                           and the sealed key.",
-    "  egma monitoring status   Print the switch, the binding, the key hint, and",
-    "                           when a production conversation last arrived. It",
-    "                           is where arrivals are read: enable asks once and",
-    "                           does not wait.",
-    "  egma monitoring record --agent <id> [--monitoring-key-id <id>]",
-    "                           Recover the repository record after remote",
-    "                           monitoring succeeded. LiveKit needs the",
-    "                           non-secret worker-key id from the receipt.",
+    "                                         Create a suite and local manifest.",
+    "  egma validate                          Check the complete local repository.",
+    "  egma pull                              Pull tests and mock tools.",
+    "  egma push                              Upload the complete local repository.",
+    "  egma run <suite-directory> [options]   Run and follow one complete suite.",
+    "  egma monitoring <enable|disable|status|record> [options]",
+    "                                         Manage production monitoring.",
+    "  egma livekit                          Print the current worker source contract.",
+    "  egma self-host up                      Start a local Egma platform.",
     "",
-    "In a platform workspace — the directory your Egma deployment lives in,",
-    "which is never your agent repository:",
-    "",
-    "  egma self-host up               Start the whole platform: API, web,",
-    "                                  both stores, simulator, grader, LiveKit,",
-    "                                  its SIP gateway and their Redis. Prints",
-    "                                  the address an agent repository uses.",
-    "                                  Model-provider keys and the optional",
-    "                                  EGMA_PHONE_* carrier route come from",
-    "                                  the workspace .env file. Internal",
-    "                                  credentials are generated automatically.",
-    "",
-    "Options:",
-    "  --coding-agent <id>  Use one installed coding agent without asking.",
-    `                       ${SUPPORTED_CODING_AGENT_IDS.join(", ")}`,
-    "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      Which Egma platform this one command talks to. It is the only",
-    "                       way to name one, so a command that should reach that",
-    "                       platform carries it. With init and with the wizard, Egma",
-    "                       records the normalized URL in egma/config.yaml, and every",
-    "                       later command in this repository needs no address at all.",
-    "  --force              With login: sign in again even when this machine",
-    "                       already holds a key.",
-    "  --no-follow          With run: start the run and return at once, without",
-    "                       waiting for execution or grading. The run carries on on Egma.",
-    "  --retell-agent <id>  With connect: which agent, when the Retell account",
-    "                       holds more than one.",
-    "  --lanes <list>       With connect and a headless wizard: how Egma should",
-    "                       test the selected Retell agent. Any of text,",
-    "                       web-call and phone, separated by commas — several",
-    "                       lanes land as connections on one Egma agent in one",
-    "                       pass. Egma creates nothing when none is said.",
-    "  --phone-number <e164>",
-    "                       With the phone lane: which of the agent's numbers to",
-    "                       dial, when Retell routes more than one to it.",
-    "  --repo-prompt <path> With connect: the prompt file in this repository, so",
-    "                       Egma can say whether it and Retell have drifted apart.",
-    "  --existing-tests <path>",
-    "                       With the wizard: test cases you already have written",
-    "                       down, inside this folder. They are turned into test",
-    "                       files before Egma writes any of its own.",
-    "  --agent <name-or-id> With run and ordinary monitoring actions: which",
-    "                       configured voice agent to use. With monitoring",
-    "                       record: the stable Egma agent id from the receipt.",
-    "  --connection <name-or-id>",
-    "                       With run: which configured connection under that",
-    "                       agent to use when it has more than one.",
-    "  --name <name>        With suite create: the suite display name. With run:",
-    "                       an optional name for this run. With monitoring",
-    "                       enable: what to call the agent Egma writes.",
-    "  --platform <retell|livekit>",
-    "                       With monitoring enable: which platform runs this",
-    "                       agent. Left out, Egma reads it from the agent's own",
-    "                       binding, or from the connections that reach it, and",
-    "                       refuses when it cannot tell.",
-    "  --platform-agent <id>",
-    "                       With monitoring enable on Retell: which agent on the",
-    "                       account to watch, when it holds more than one.",
-    "  --monitoring-key-id <id>",
-    "                       With monitoring record on LiveKit: the non-secret",
-    "                       worker-key id from the failed setup receipt.",
-    "  --headless           Run with no terminal and no keystroke: plain lines,",
-    "                       and the task taken as already agreed to.",
-    "  -h, --help           Print this.",
+    "Common options:",
+    "  --cwd <path>         Repository root. Default: this folder.",
+    "  --url <address>      Egma platform for this command.",
+    "  --force              With login: sign in again.",
+    "  -h, --help           Print this help.",
     "  -v, --version        Print the version.",
     "",
-    "Environment:",
-    "  EGMA_HOME            The folder Egma keeps this machine's keys in, one",
-    "                       for each platform origin.",
-    "                       Default: ~/.egma",
-    `  ${KEY_VARIABLES[0]}  Your Retell key, for egma connect. ${KEY_VARIABLES[1]}`,
-    "                       is read too, so an environment that already has one",
-    "                       needs nothing new.",
-    `  ${AGENT_VARIABLE} Which Retell agent, same as --retell-agent.`,
-    `  ${LANES_VARIABLE}            Which lanes to test over, same as --lanes.`,
-    `  ${NUMBER_VARIABLE}     Which number to dial, same as --phone-number.`,
-    `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
-    `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
+    "Retell connect:",
+    "  --platform retell              Select Retell. It is the default.",
+    "  --retell-agent <id>            Select an exact Retell agent.",
+    "  --lanes <list>                 text, web-call, phone, or a comma list.",
+    "  --phone-number <e164>          Select the real number for phone runs.",
+    "  --repo-prompt <path>           Compare a local prompt with Retell.",
+    "  --show-context                 Print provider prompt and tools as JSON.",
     "",
-    "When Egma cannot use this machine's keys — the file is damaged, or another",
-    `Egma process is holding it — every command prints status: ${KEYS_UNUSABLE} with the`,
-    "reason, changes nothing, and answers 1.",
+    "LiveKit connect:",
+    "  --platform livekit             Select LiveKit.",
+    "  --name <name>                  Name the Egma agent.",
+    "  --modality <chat|voice>        Select a catalog modality.",
+    "  --access-variant <id>          Select a catalog connection method.",
+    "  --livekit-url <wss-url>        LiveKit project URL.",
+    "  --dispatch-name <name>         Exact registered worker name.",
+    "  --token-endpoint <https-url>   Customer token endpoint, when selected.",
+    "  --metadata <json>              Optional room metadata object.",
     "",
-    "What egma login prints, one fact per line:",
-    "  url, code, approve_url, browser, waiting, status, credentials",
+    "Connect recovery (no remote write):",
+    "  record --project-id <id> --agent-id <id> --connection-id <id>",
+    "                                 Record one complete stable receipt.",
+    "  record --platform retell --retell-agent <id> --lanes <one>",
+    "                                 Find the equivalent Retell target; phone also",
+    "                                 needs --phone-number.",
+    "  record --platform livekit --livekit-url <url>",
+    "         (--dispatch-name <name> | --token-endpoint <url>)",
+    "                                 Find the equivalent LiveKit target.",
+    "  --metadata <json>              Require approved room metadata; omit only",
+    "                                 when setup had no metadata.",
+    "  --name <registration-name>     Prefer that matching Egma agent.",
+    "  --connection-id <id>           Choose one listed public-identity match.",
     "",
-    "What egma login answers with:",
-    "  0 signed in   2 denied   3 the code ran out",
-    "  4 Egma did not answer, or refused   130 stopped part way",
+    "Run options:",
+    "  --agent <name-or-id>                 Select a configured agent.",
+    "  --connection <name-or-id>            Select its configured connection.",
+    "  --name <name>                        Optional run name.",
+    "  --idempotency-key <value>            Reuse one start after an unclear reply.",
+    "  --no-follow                          Return after the run starts.",
+    "  --worker-entrypoint <path>           Start this local LiveKit worker.",
+    "  --worker-dependency-manifest <path>  Its dependency manifest.",
+    "  --worker-dispatch-name <name>        Its exact registered worker name.",
     "",
-    "What egma connect prints, one fact per line:",
-    "  url, retell_agents, retell_agent, retell_agent_id, retell_response_engine,",
-    "  prompt_characters, tools, lane_option, retell_number, lanes,",
-    "  lane_connection, phone_number,",
-    "  agent_id, agent_name, connection_id, connection_name, agent_platform,",
-    "  connection_type, access_variant, product_label, connection_modality,",
-    "  registration, agent_registration,",
-    "  connection_registration, drift, grounded_in, status",
+    "Secrets:",
+    `  ${KEY_VARIABLES[0]} or ${KEY_VARIABLES[1]}   Retell API key. Standard input also works.`,
+    "  EGMA_LIVEKIT_API_KEY                 LiveKit project API key.",
+    "  EGMA_LIVEKIT_API_SECRET              LiveKit project API secret.",
+    "  EGMA_LIVEKIT_TOKEN_HEADERS           Token endpoint headers as JSON.",
+    "  LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET",
+    "                                       Local worker runtime credentials.",
+    "  EGMA_HOME                            Egma credentials folder.",
+    `  ${AGENT_VARIABLE}              Same as --retell-agent.`,
+    `  ${LANES_VARIABLE}                     Same as --lanes.`,
+    `  ${NUMBER_VARIABLE}              Same as --phone-number.`,
+    `  ${RETELL_URL_VARIABLE}               Retell API URL. Default: ${RETELL_API}`,
     "",
-    "  registration says which of three things Egma did: created, reused (this",
-    "  voice agent was already registered and already tested this way, so",
-    "  nothing was written), or connection_added (the same agent gained another",
-    "  way of being reached). The two that are not created also print a note:",
-    "  line saying so plainly. agent_registration and connection_registration",
-    "  say the same thing for each half, as created or reused.",
+    "Login facts and exit codes:",
+    "  code, approve_url, browser, waiting, status, credentials",
+    "  0 signed in   2 denied   3 expired",
+    "  4 Egma did not answer, or refused   130 interrupted",
     "",
-    "What egma connect answers with:",
-    "  0 connected   2 the key was refused   3 no agents on that account",
-    "  4 Retell or Egma did not answer, or refused",
-    "  5 a choice only you can make was not made: which agent, text or phone, or",
-    "    which number   6 no key given   7 not signed in to Egma",
-    "  8 Retell routes no number to that agent   130 stopped part way",
+    "Connect exit codes:",
+    "  0 connected   2 the key was refused   3 no provider agents",
+    "  4 provider or Egma refused   5 a required choice is missing",
+    "  6 provider credentials are missing   7 not signed in",
+    "  8 no routed Retell number   9 repository record failed   130 interrupted",
     "",
-    "What egma init, suite create, pull and push print, one fact per line:",
-    "  url and folder, then each suite, test, and Mock Tool the complete",
-    "  repository operation handled. A pull names every local draft or deleted",
-    "  remote resource it kept, with the reason. An atomic push refusal writes",
-    "  no platform resource.",
-    "  init adds a platform: line whenever this repository is bound, whether",
-    "  this run bound it or found it already bound.",
-    "",
-    "What egma init, pull and push answer with:",
-    "  0 done   1 no egma folder here   2 not signed in",
-    "  4 Egma did not answer, or refused",
-    "  5 atomic push conflict: pull and inspect first",
-    "  6 Egma turned a test or a mock tool away at its door",
-    "  130 stopped part way",
-    "",
-    "What egma run prints, one fact per line:",
-    "  url, folder, suite, directory, agent, connection, one pin: line per test,",
-    "  run, tests, simulations, results, then one simulation: line per change,",
-    "  one grading: line per grading-state change, first-result: once, then",
-    "  execution and grading progress counts. Scores are on the result page.",
-    "",
-    "What egma monitoring prints, one fact per line:",
-    "  url, agent_name, platform, then either the agent it is now watching",
-    "  (agent_id, platform_agent_id, agent_registration, pull_production_calls,",
-    "  first_conversation) or, on LiveKit, what it wired (monitoring_key_id,",
-    "  api_key, env_file, one",
-    "  env: line per environment line). status and disable print pull_production_calls,",
-    "  agent_platform, platform_agent_id, monitoring_key and last_received_at.",
-    "  A refusal adds refusal: with the reason and one reason: line per sentence.",
-    "",
-    "What egma monitoring answers with:",
-    "  0 done   1 nothing here to act on   2 the Retell key was refused",
-    "  3 no voice agents on that account",
-    "  4 Egma did not answer, or refused",
-    "  5 a choice only you can make was not made: which platform, or which agent",
-    "  6 no key given   7 not signed in to Egma",
-    "  8 Egma would not start watching, and said which rule refused it",
-    "  9 remote monitoring is ready, but its repository record did not finish",
-    "  130 stopped part way",
-    "",
-    "What egma run answers with:",
-    "  0 execution and grading finished without an operational error",
-    "  1 nothing here to run   2 not signed in",
-    "  4 Egma did not answer, or refused",
-    "  5 Egma would not start the run, and said why",
-    "  6 execution or grading had an operational error   130 stopped part way",
-    "",
-    "The wizard signs this machine in before it looks for supported coding agents.",
-    "Its first generated suite has four tests. Run the wizard again to add another target or suite.",
-    "egma/config.yaml requires format 3 with each nested connection's modality; there is no legacy reader.",
-  ].join("\n");
-}
-
-/** What a developer is told when the wizard has no terminal to run in. */
-export function noTerminalRefusal(): string {
-  return [
-    "Egma's wizard needs a terminal it can draw on and read one keystroke from, and this is not one. Nothing was started.",
-    "",
-    "That keystroke is how you agree to Egma driving your coding agent, so Egma will not drive it without one.",
-    "",
-    "Run egma --headless to say here and now that you agree, and to get plain lines instead of a wizard. Run egma --help for the rest.",
+    "Every named command asks no questions, prints one fact per line, and uses",
+    "its exit code as the branch. Credentials never belong in command arguments.",
+    `An unusable credentials file prints status: ${KEYS_UNUSABLE} and changes nothing.`,
   ].join("\n");
 }
 
@@ -503,40 +371,11 @@ export function version(): string {
   return (JSON.parse(manifest) as { version?: string }).version ?? "0.0.0";
 }
 
-function commandedLaunchFrom(invocation: Invocation): DrivenAgentLaunch | null {
-  const [command, ...args] = invocation.drivenAgentCommand;
-  if (command === undefined) return null;
-  // egma was told a command, not an agent, so the command is all it can
-  // honestly call the thing — unless the developer also said which supported
-  // agent it stands in for. This is an internal scripted-agent seam.
-  const supported = supportedCodingAgentId(invocation.drivenAgentId);
-  return {
-    id: invocation.drivenAgentNamed && supported !== null ? supported : "named-command",
-    name: path.basename(command),
-    command,
-    args,
-    env: {},
-  };
-}
-
-/** Where Retell is for this run, or `undefined` for Retell's own address. */
 function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefined {
   const named = env[RETELL_URL_VARIABLE]?.trim();
   return named === undefined || named === "" ? undefined : { url: named };
 }
 
-/**
- * egma declining to talk to an address, in the one shape every command answers
- * it in.
- *
- * Two kinds, and the difference is whether anything is worth retrying.
- * `unreachable` is nobody answering; `refused` is egma declining to send this
- * repository's identifiers to the address on offer. `null` is anything else,
- * which is not this function's to explain.
- *
- * Address-selection refusals happen before network work. Transport failures
- * come from the operation the developer asked for.
- */
 function platformRefusal(error: unknown): "refused" | "unreachable" | null {
   if (
     error instanceof BoundPlatformAddressError ||
@@ -545,26 +384,9 @@ function platformRefusal(error: unknown): "refused" | "unreachable" | null {
   ) {
     return "refused";
   }
-  if (error instanceof PlatformUnreachableError) {
-    return "unreachable";
-  }
-  return null;
+  return error instanceof PlatformUnreachableError ? "unreachable" : null;
 }
 
-/**
- * Says the refusal both ways — machine-readable, and to a person — and answers 4.
- *
- * A refusal that teaches something is more than one line now: the one that
- * keeps a bound repository where it belongs ends with every line a developer
- * deletes to move it. Those lines go to the error stream, whole, where every
- * other block egma teaches with already goes — the refusal of a piped wizard
- * and the refusal of a key in an argument are both written that way.
- *
- * What goes on the output stream is the sentence alone. That stream is one fact
- * per line, which is what makes it readable by the thing that started the
- * command, and a `reason:` running to eight lines would break that reading to
- * repeat what is already on the other stream.
- */
 function sayPlatformRefusal(status: "refused" | "unreachable", message: string): void {
   const sentence = message.split("\n")[0] as string;
   process.stdout.write(`status: ${status}\nreason: ${sentence}\n`);
@@ -572,182 +394,78 @@ function sayPlatformRefusal(status: "refused" | "unreachable", message: string):
   process.exitCode = 4;
 }
 
-/**
- * What a headless walk would have been told, for the one question it cannot
- * ask: the key, which arrives from the environment because a run with nobody
- * watching has nobody to type it.
- *
- * Standard input is deliberately not read here. The wizard's own walk may still
- * be reading it for keystrokes, and a flag that says "nobody is watching" must
- * not change where a secret comes from.
- */
-/** The answers a run with nobody watching can be given in advance. */
-type Held = "retell-key" | "retell-agent" | "lanes" | "phone-number" | "existing-tests";
-
-function headlessAnswers(
-  invocation: Invocation,
-  env: NodeJS.ProcessEnv,
-): Partial<Record<Held, string>> {
-  const answers: Partial<Record<Held, string>> = {};
-  for (const variable of KEY_VARIABLES) {
-    const held = env[variable];
-    if (typeof held === "string" && held.trim() !== "") {
-      answers["retell-key"] = held;
-      break;
-    }
-  }
-  const named = (invocation.retellAgentId ?? env[AGENT_VARIABLE] ?? "").trim();
-  if (named !== "") answers["retell-agent"] = named;
-
-  // Which lanes to test over is knowledge, not consent: a run with nobody
-  // watching says it in the command or egma creates nothing at all. Left out
-  // deliberately means left out — egma never picks a lane for anybody, because
-  // one of them dials a real telephone.
-  const ways = (invocation.lanes ?? env[LANES_VARIABLE] ?? "").trim();
-  if (ways !== "") answers["lanes"] = ways;
-  const dialling = (invocation.phoneNumber ?? env[NUMBER_VARIABLE] ?? "").trim();
-  if (dialling !== "") answers["phone-number"] = dialling;
-
-  // Prior work is knowledge and not consent, so a run with nobody watching is
-  // pointed at it in the command or it has none — exactly as the pointer to a
-  // repository's prompts is.
-  const material = (invocation.existingTests ?? env[EXISTING_TESTS_VARIABLE] ?? "").trim();
-  if (material !== "") answers["existing-tests"] = material;
-  return answers;
+function commandOptions(invocation: Invocation, access: PlatformAccess): FolderCommandOptions {
+  return {
+    access,
+    cwd: path.resolve(invocation.cwd ?? process.cwd()),
+    out: (line) => void process.stdout.write(`${line}\n`),
+    fail: (line) => void process.stderr.write(`${line}\n`),
+  };
 }
 
-async function runHeadless(
-  invocation: Invocation,
-  codingAgent: WizardCodingAgent,
-  cwd: string,
-  platform: WizardPlatform,
-): Promise<number> {
-  const controller = new AbortController();
-  const stop = (reason: StopReason): void => controller.abort(reason);
-  const onSignal = (): void => stop("interrupt");
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-
-  const { runWizard } = await wizardMachinery();
-  const ui = new HeadlessUI({
-    write: (line) => process.stdout.write(`${line}\n`),
-    answers: headlessAnswers(invocation, process.env),
-  });
-  try {
-    const report = await runWizard({
-      ui,
-      codingAgent,
-      cwd,
-      signal: controller.signal,
-      platform,
-      retell: retellReach(process.env),
-    });
-    const notice = buildExitNotice(report);
-    if (notice !== null) process.stdout.write(`${notice}\n\n`);
-    process.stdout.write(`${exitLines(report).join("\n")}\n`);
-    return walkExitCode(report);
-  } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
-  }
-}
-
-async function runInteractiveWizard(
-  codingAgent: WizardCodingAgent,
-  cwd: string,
-  platform: WizardPlatform,
-): Promise<number> {
-  const { startTui, runWizard } = await wizardMachinery();
-  const controller = new AbortController();
-  const tui = startTui({ stop: (reason) => controller.abort(reason) });
-
-  // A signal can arrive when the terminal cannot deliver a keystroke, so the
-  // same teardown is wired to both.
-  const onSignal = (): void => controller.abort("interrupt");
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-
-  try {
-    const report = await runWizard({
-      ui: tui.ui,
-      codingAgent,
-      cwd,
-      signal: controller.signal,
-      platform,
-      retell: retellReach(process.env),
-    });
-    tui.close(report);
-    return walkExitCode(report);
-  } catch (error) {
-    // A platform refusal is not the walk failing. It is egma declining to talk
-    // to an address, and it is answered in plain lines with a number of its own
-    // — the same ones every verb answers with. So the screen comes down leaving
-    // nothing behind, and the sentence is written once, by the caller.
-    if (platformRefusal(error) !== null) {
-      tui.close(null);
-      throw error;
-    }
-    const reason = error instanceof Error ? error.message : String(error);
-    tui.close({ kind: "failed", reason });
-    return 1;
-  } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
-  }
-}
-
-/**
- * The folder verbs: no terminal needed, no keystroke taken, no question asked.
- *
- * One runner for the three of them, because what they share is everything a
- * caller sees — where they work, where they print, and that a signal stops them
- * rather than leaving half a folder behind.
- */
 async function runFolderVerb(
-  verb: "init" | "pull" | "push" | "run" | "suite",
+  verb: "init" | "pull" | "push" | "run" | "suite" | "personas" | "validate",
   invocation: Invocation,
   access: PlatformAccess,
-  /** For `init`: the selected platform URL to commit, when `--url` named one. */
   binding: PlatformBinding | null = null,
 ): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-
-  const options: FolderCommandOptions = {
-    access,
-    cwd: path.resolve(invocation.cwd ?? process.cwd()),
-    out: (line) => void process.stdout.write(`${line}\n`),
-    fail: (line) => void process.stderr.write(`${line}\n`),
-  };
+  const options = commandOptions(invocation, access);
 
   try {
-    if (verb === "init") {
-      return await runInitCommand({
-        ...options,
-        binding,
-      });
-    }
-    if (verb === "run") {
-      return await runRunCommand({
-        ...options,
-        suiteDirectory: invocation.suiteDirectory ?? "",
-        ...(invocation.agentName === null ? {} : { agent: invocation.agentName }),
-        ...(invocation.connectionName === null
-          ? {}
-          : { connection: invocation.connectionName }),
-        ...(invocation.name === null ? {} : { name: invocation.name }),
-        noFollow: invocation.noFollow,
-        signal: controller.signal,
-      });
-    }
+    if (verb === "init") return await runInitCommand({ ...options, binding });
+    if (verb === "personas") return await runPersonasCommand(options);
+    if (verb === "validate") return await runValidateCommand(options);
     if (verb === "suite") {
       return await runSuiteCreateCommand({
         ...options,
         directory: invocation.suiteDirectory ?? "",
         name: invocation.name ?? "",
       });
+    }
+    if (verb === "run") {
+      return await runWithOptionalLocalLiveKitWorker(
+        {
+          cwd: options.cwd,
+          workerEntrypoint: invocation.workerEntrypoint,
+          workerDependencyManifest: invocation.workerDependencyManifest,
+          workerDispatchName: invocation.workerDispatchName,
+          noFollow: invocation.noFollow,
+          signal: controller.signal,
+          env: process.env,
+          out: options.out,
+          fail: options.fail,
+        },
+        async () =>
+          await prepareRunCommand({
+            ...options,
+            suiteDirectory: invocation.suiteDirectory ?? "",
+            ...(invocation.agentName === null ? {} : { agent: invocation.agentName }),
+            ...(invocation.connectionName === null
+              ? {}
+              : { connection: invocation.connectionName }),
+            ...(invocation.name === null ? {} : { name: invocation.name }),
+            ...(invocation.idempotencyKey === null
+              ? {}
+              : { idempotencyKey: invocation.idempotencyKey }),
+            ...(invocation.workerEntrypoint === null
+              ? {}
+              : { workerEntrypoint: invocation.workerEntrypoint }),
+            ...(invocation.workerDependencyManifest === null
+              ? {}
+              : {
+                  workerDependencyManifest:
+                    invocation.workerDependencyManifest,
+                }),
+            ...(invocation.workerDispatchName === null
+              ? {}
+              : { workerDispatchName: invocation.workerDispatchName }),
+            noFollow: invocation.noFollow,
+          }),
+      );
     }
     return verb === "pull" ? await runPullCommand(options) : await runPushCommand(options);
   } finally {
@@ -756,13 +474,11 @@ async function runFolderVerb(
   }
 }
 
-/** The login verb: no terminal needed, no keystroke taken, no question asked. */
 async function runLogin(invocation: Invocation, access: PlatformAccess): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-
   try {
     return await runLoginCommand({
       access,
@@ -778,10 +494,6 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
   }
 }
 
-/**
- * The monitoring verb: no terminal, no keystroke, no question — and the Retell
- * key on standard input, never in an argument.
- */
 async function runMonitoring(
   invocation: Invocation,
   access: PlatformAccess,
@@ -791,7 +503,6 @@ async function runMonitoring(
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-
   try {
     return await runMonitoringCommand({
       access,
@@ -813,16 +524,11 @@ async function runMonitoring(
   }
 }
 
-/** The connect verb: a key from a pipe or the environment, and plain lines. */
-async function runConnect(
-  invocation: Invocation,
-  access: PlatformAccess,
-): Promise<number> {
+async function runConnect(invocation: Invocation, access: PlatformAccess): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-
   try {
     return await runConnectCommand({
       access,
@@ -831,6 +537,19 @@ async function runConnect(
       lanes: invocation.lanes,
       phoneNumber: invocation.phoneNumber,
       repoPrompt: invocation.repoPrompt,
+      platform: invocation.platformWord,
+      action: invocation.connectAction,
+      projectId: invocation.receiptProjectId,
+      receiptAgentId: invocation.receiptAgentId,
+      receiptConnectionId: invocation.receiptConnectionId,
+      showContext: invocation.showContext,
+      modality: invocation.modality,
+      accessVariant: invocation.accessVariant,
+      livekitUrl: invocation.livekitUrl,
+      dispatchName: invocation.dispatchName,
+      tokenEndpoint: invocation.tokenEndpoint,
+      metadata: invocation.metadata,
+      name: invocation.name,
       env: process.env,
       signal: controller.signal,
       stdin: process.stdin,
@@ -844,18 +563,61 @@ async function runConnect(
   }
 }
 
+function invalidInvocation(invocation: Invocation): string | null {
+  if (
+    invocation.verb === "init" &&
+    (invocation.agentName !== null || invocation.connectionName !== null)
+  ) {
+    return "Egma does not use --agent or --connection with init. Run egma connect to add them.";
+  }
+  if (
+    invocation.verb === "monitoring" &&
+    !(MONITORING_ACTIONS as readonly string[]).includes(invocation.monitoringAction ?? "")
+  ) {
+    return unknownActionRefusal(invocation.monitoringAction ?? "");
+  }
+  if (
+    invocation.verb === "connect" &&
+    invocation.connectAction !== null &&
+    invocation.connectAction !== "record"
+  ) {
+    return "Egma supports `egma connect record` only for remote registration recovery.";
+  }
+  if (
+    (invocation.verb !== "connect" || invocation.connectAction !== "record") &&
+    (invocation.receiptProjectId !== null ||
+      invocation.receiptAgentId !== null ||
+      invocation.receiptConnectionId !== null)
+  ) {
+    return "Use --project-id, --agent-id, and --connection-id with egma connect record.";
+  }
+  if (invocation.verb === "suite" && invocation.suiteAction !== "create") {
+    return "Egma supports `egma suite create <directory> --name <name>`.";
+  }
+  if (invocation.verb === "suite" && invocation.suiteDirectory === null) {
+    return "Name the local directory: egma suite create <directory> --name <name>.";
+  }
+  if (invocation.verb === "suite" && invocation.name === null) {
+    return "Name the suite: egma suite create <directory> --name <name>.";
+  }
+  if (invocation.verb === "run" && invocation.suiteDirectory === null) {
+    return "Name one local suite directory: egma run <suite-directory>.";
+  }
+  if (
+    invocation.verb === "run" &&
+    invocation.idempotencyKeyProvided &&
+    (invocation.idempotencyKey === null || invocation.idempotencyKey.trim() === "")
+  ) {
+    return "Give --idempotency-key one non-empty value.";
+  }
+  if (invocation.unknown.length > 0) {
+    const named = (invocation.unknown[0] as string).split("=")[0] as string;
+    return `Egma does not know the option ${named}. Run egma --help to see the ones it does.`;
+  }
+  return null;
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
-  // The platform operator's half of the CLI, and the one thing here that never
-  // reads a repository or resolves a platform binding: `self-host` operates a
-  // deployment, and a deployment is not something an agent repository points
-  // at.
-  //
-  // **It is settled before the repository's own secret-argument refusal**, and
-  // that ordering is not tidiness. Both halves refuse a secret in an argument,
-  // and the repository's refusal talks about a Retell key and `egma connect`.
-  // Answering a platform-workspace command with advice about a different
-  // product, at the exact moment somebody is holding a credential, sends them
-  // to the wrong place while the thing they typed is still in their history.
   if (isSelfHostInvocation(argv)) {
     const controller = new AbortController();
     const onSignal = (): void => controller.abort("interrupt");
@@ -879,8 +641,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  // Before anything is parsed or printed: an argument that would have carried
-  // a secret is refused by name, and its value is never repeated back.
   const leaked = refusedArgumentIn(argv);
   if (leaked !== null) {
     process.stderr.write(`${argumentRefusal(leaked)}\n`);
@@ -889,7 +649,6 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
 
   const invocation = parseArgs(argv);
-
   if (invocation.help) {
     process.stdout.write(`${helpText()}\n`);
     return;
@@ -898,131 +657,57 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.stdout.write(`${version()}\n`);
     return;
   }
-  if (
-    invocation.verb === "init" &&
-    (invocation.agentName !== null || invocation.connectionName !== null)
-  ) {
-    const named = [
-      ...(invocation.agentName === null ? [] : ["--agent"]),
-      ...(invocation.connectionName === null ? [] : ["--connection"]),
-    ].join(" and ");
-    process.stderr.write(
-      `Egma does not use ${named} with init. Run the wizard or egma connect to add voice agents and connections.\n`,
-    );
+
+  const invalid = invalidInvocation(invocation);
+  if (invalid !== null) {
+    process.stderr.write(`${invalid}\n`);
     process.exitCode = 1;
     return;
   }
-  if (
-    invocation.verb === "monitoring" &&
-    !(MONITORING_ACTIONS as readonly string[]).includes(invocation.monitoringAction ?? "")
-  ) {
-    process.stderr.write(
-      `${unknownActionRefusal(invocation.monitoringAction ?? "")}\n`,
-    );
-    process.exitCode = 1;
-    return;
-  }
-  if (invocation.verb === "suite" && invocation.suiteAction !== "create") {
-    process.stderr.write(
-      "Egma supports `egma suite create <directory> --name <name>`. Suite deletion is an explicit browser or API action.\n",
-    );
-    process.exitCode = 1;
-    return;
-  }
-  if (invocation.verb === "suite" && invocation.suiteDirectory === null) {
-    process.stderr.write(
-      "Name the local directory: egma suite create <directory> --name <name>.\n",
-    );
-    process.exitCode = 1;
-    return;
-  }
-  if (invocation.verb === "suite" && invocation.name === null) {
-    process.stderr.write(
-      "Name the suite: egma suite create <directory> --name <name>.\n",
-    );
-    process.exitCode = 1;
-    return;
-  }
-  if (invocation.verb === "run" && invocation.suiteDirectory === null) {
-    process.stderr.write("Name one local suite directory: egma run <suite-directory>.\n");
-    process.exitCode = 1;
-    return;
-  }
-  if (invocation.unknown.length > 0) {
-    // Only the name is said back. Something written as `--thing=value` may be
-    // carrying anything, and a refusal is no place to print it.
-    const named = (invocation.unknown[0] as string).split("=")[0] as string;
-    process.stderr.write(
-      `Egma does not know the option ${named}. Run egma --help to see the ones it does.\n`,
-    );
-    process.exitCode = 1;
+
+  if (invocation.verb === null) {
+    let platformUrl: string | null = null;
+    if (invocation.url !== null) {
+      try {
+        platformUrl = selectPlatform({
+          flag: invocation.url,
+          binding: null,
+          fallback: DEFAULT_PLATFORM_URL,
+        }).url;
+      } catch (error) {
+        if (!(error instanceof UnusableUrlError)) throw error;
+        process.stderr.write(`${error.message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+    process.exitCode = runSetupCommand({
+      platformUrl,
+      out: (line) => process.stdout.write(`${line}\n`),
+    });
     return;
   }
 
   const cwd = path.resolve(invocation.cwd ?? process.cwd());
-
-  // `init` with no address named is only a local folder write. It never
-  // selects a platform, signs in, or sends an identifier anywhere, so it is
-  // settled here rather than below and works with the network cable out.
-  //
-  // `init --url` is the one exception. It falls through to the ordinary
-  // resolution below and commits the selected URL.
-  // Sending it through the same path as every other verb is what makes a bound
-  // repository refuse a second, different address here exactly as it does
-  // everywhere else.
   if (invocation.verb === "init" && invocation.url === null) {
     process.exitCode = await runFolderVerb(invocation.verb, invocation, {
-      // Nothing was asked of any address, so there is no platform to name.
-      // Empty rather than a placeholder address: a real-looking one here would
-      // be a lie the next reader has to disprove.
       url: "",
       credentialsFile: credentialsFileIn(process.env),
     });
     return;
   }
 
-  // The wizard's remaining work, held as one closure. The requested coding
-  // agent is described here but discovered later, inside the walk, after this
-  // CLI has been authorized.
-  let theWizard: ((platform: WizardPlatform) => Promise<number>) | null = null;
-  if (invocation.verb === null) {
-    // Consent is checked before a network read. A piped bare command cannot
-    // start either the wizard or platform selection.
-    const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
-    if (!invocation.headless && !drawable) {
-      process.stderr.write(`${noTerminalRefusal()}\n`);
-      process.exitCode = 1;
-      return;
-    }
-
-    const commanded = commandedLaunchFrom(invocation);
-    const codingAgent: WizardCodingAgent =
-      commanded !== null
-        ? { kind: "selected", launch: commanded }
-        : {
-            kind: "discover",
-            discover: () => discoverCodingAgents(),
-            requestedId: invocation.drivenAgentNamed ? invocation.drivenAgentId : null,
-            selection: invocation.headless ? "headless" : "interactive",
-          };
-    if (invocation.headless) {
-      theWizard = (platform) => runHeadless(invocation, codingAgent, cwd, platform);
-    } else {
-      theWizard = (platform) => runInteractiveWizard(codingAgent, cwd, platform);
-    }
+  if (invocation.verb === "livekit") {
+    process.exitCode = runLiveKitContractCommand({
+      out: (line) => process.stdout.write(`${line}\n`),
+    });
+    return;
   }
 
-  // Which egma, chosen once for every path below out of what is already on this
-  // machine, and refused here when the address a developer named is not one. A
-  // bad address is turned away before anything is started on it rather than
-  // after, and nothing has been asked of any address yet.
-  let chosen: ChosenPlatform;
-  let access: PlatformAccess | null = null;
+  let access: PlatformAccess;
   try {
-    chosen = await choosePlatform({ env: process.env, flag: invocation.url, cwd });
-    if (invocation.verb !== null) {
-      access = { url: chosen.url, credentialsFile: chosen.credentialsFile };
-    }
+    const chosen = await choosePlatform({ env: process.env, flag: invocation.url, cwd });
+    access = { url: chosen.url, credentialsFile: chosen.credentialsFile };
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
@@ -1038,54 +723,29 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
 
   try {
-    // A verb needs no terminal and takes no keystroke: it drives no coding
-    // agent, so there is nothing for a keystroke to agree to.
-    if (access !== null) {
-      if (invocation.verb === "login") {
-        process.exitCode = await runLogin(invocation, access);
-        return;
-      }
-      if (invocation.verb === "connect") {
-        process.exitCode = await runConnect(invocation, access);
-        return;
-      }
-      if (invocation.verb === "monitoring") {
-        process.exitCode = await runMonitoring(
-          invocation,
-          access,
-          invocation.monitoringAction as MonitoringAction,
-        );
-        return;
-      }
-      // Only `init --url` reaches here: the flagless form was answered above.
-      if (invocation.verb === "init") {
-        process.exitCode = await runFolderVerb(invocation.verb, invocation, access, {
-          origin: access.url,
-        });
-        return;
-      }
-      if (
-        invocation.verb === "pull" ||
-        invocation.verb === "push" ||
-        invocation.verb === "run" ||
-        invocation.verb === "suite"
-      ) {
-        process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
-        return;
-      }
+    if (invocation.verb === "login") {
+      process.exitCode = await runLogin(invocation, access);
+      return;
     }
-
-    // Every verb has returned by now, so what is left is the bare command, and
-    // the walk it needs was built above. It is handed the selected address and
-    // starts login only after the developer has read that address and pressed
-    // the key that agrees to the rest.
-    if (theWizard !== null) {
-      const selected = chosen;
-      process.exitCode = await theWizard({
-        url: selected.url,
-        credentialsFile: selected.credentialsFile,
+    if (invocation.verb === "connect") {
+      process.exitCode = await runConnect(invocation, access);
+      return;
+    }
+    if (invocation.verb === "monitoring") {
+      process.exitCode = await runMonitoring(
+        invocation,
+        access,
+        invocation.monitoringAction as MonitoringAction,
+      );
+      return;
+    }
+    if (invocation.verb === "init") {
+      process.exitCode = await runFolderVerb(invocation.verb, invocation, access, {
+        origin: access.url,
       });
+      return;
     }
+    process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
   } catch (error) {
     const status = platformRefusal(error);
     if (status !== null) {
@@ -1093,11 +753,6 @@ export async function main(argv: readonly string[]): Promise<void> {
       return;
     }
     if (!(error instanceof KeysUnusableError)) throw error;
-    // Whatever is wrong with this machine's keys file, egma decided not to
-    // write over it — and a decision is a sentence, not a stack trace. Every
-    // verb can hit this and none of them owns it, so it is caught in the one
-    // place they all pass through, and it answers the same way everywhere
-    // rather than borrowing a number that means something else per verb.
     process.stdout.write(`status: ${KEYS_UNUSABLE}\nreason: ${error.message}\n`);
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

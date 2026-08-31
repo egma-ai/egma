@@ -168,11 +168,13 @@ async function followedRun(input: {
   readonly stop?: AbortController;
   readonly agent?: string;
   readonly connection?: string;
+  readonly idempotencyKey?: string;
   /** The lane the platform says the started run is over. */
   readonly connectionType?: string;
 }): Promise<{
   readonly code: number;
   readonly lines: readonly string[];
+  readonly linesWhenStarted: readonly string[];
   readonly startedWith: Readonly<Record<string, unknown>> | null;
 }> {
   const status = input.status ?? "completed";
@@ -181,6 +183,7 @@ async function followedRun(input: {
   const lines: string[] = [];
   let moved = false;
   let startedWith: Readonly<Record<string, unknown>> | null = null;
+  let linesWhenStarted: readonly string[] = [];
   const fetchImpl: typeof fetch = async (request, init) => {
     const url = String(request);
     if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
@@ -194,6 +197,7 @@ async function followedRun(input: {
       );
     }
     if (url === `${URL}/v1/runs` && init?.method === "POST") {
+      linesWhenStarted = [...lines];
       startedWith = JSON.parse(String(init.body)) as Readonly<Record<string, unknown>>;
       return new JsonResponse(
         JSON.stringify(
@@ -281,13 +285,16 @@ async function followedRun(input: {
     suiteDirectory: "release",
     ...(input.agent === undefined ? {} : { agent: input.agent }),
     ...(input.connection === undefined ? {} : { connection: input.connection }),
+    ...(input.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: input.idempotencyKey }),
     out: (line) => lines.push(line),
     fail: (line) => lines.push(`stderr: ${line}`),
     everyMs: 0,
     ...(input.stop === undefined ? {} : { signal: input.stop.signal }),
     fetchImpl,
   });
-  return { code, lines, startedWith };
+  return { code, lines, linesWhenStarted, startedWith };
 }
 
 async function writeTargets(agents: readonly FolderAgent[]): Promise<void> {
@@ -300,6 +307,119 @@ async function writeTargets(agents: readonly FolderAgent[]): Promise<void> {
 }
 
 describe("runRunCommand operational exit behavior", () => {
+  it("prints a generated retry key before starting and reuses an explicit key exactly", async () => {
+    const generated = await followedRun({});
+    const generatedLine = generated.lines.find((line) =>
+      line.startsWith("idempotency-key: "),
+    );
+    expect(generatedLine).toMatch(/^idempotency-key: run_[0-9a-f-]+$/u);
+    expect(generated.linesWhenStarted).toContain(generatedLine);
+    expect(generated.startedWith?.idempotencyKey).toBe(
+      generatedLine?.slice("idempotency-key: ".length),
+    );
+
+    const retried = await followedRun({ idempotencyKey: "retry_release_01" });
+    expect(retried.linesWhenStarted).toContain(
+      "idempotency-key: retry_release_01",
+    );
+    expect(retried.startedWith?.idempotencyKey).toBe("retry_release_01");
+  });
+
+  it("prints the complete safe retry command when a start result is unknown", async () => {
+    const lines: string[] = [];
+    const fetchImpl: typeof fetch = async (request, init) => {
+      const url = String(request);
+      if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
+        return new JsonResponse(
+          JSON.stringify({ id: SUITE_ID, projectId: PROJECT_ID, name: "Release" }),
+        );
+      }
+      if (url.startsWith(`${URL}/v1/tests?`)) {
+        return new JsonResponse(
+          JSON.stringify({ tests: [platformTest()], nextPageToken: null }),
+        );
+      }
+      if (url === `${URL}/v1/runs` && init?.method === "POST") {
+        throw new Error("the response was lost");
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+
+    const code = await runRunCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      name: "Tonight's release",
+      idempotencyKey: "retry_release_01",
+      noFollow: true,
+      out: (line) => lines.push(line),
+      fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl,
+    });
+
+    expect(code).toBe(4);
+    expect(lines).toContain(
+      `recovery_command: egma run 'release' --cwd '${workspace.dir}' ` +
+        `--url '${URL}' --agent 'agt_one' --connection 'con_one' ` +
+        `--name 'Tonight'"'"'s release' --no-follow ` +
+        `--idempotency-key 'retry_release_01'`,
+    );
+    expect(lines).toContain("status: unreachable");
+  });
+
+  it("refuses a blank retry key before any platform request", async () => {
+    const lines: string[] = [];
+    let requests = 0;
+    const code = await runRunCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      idempotencyKey: " \t ",
+      out: (line) => lines.push(line),
+      fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl: async () => {
+        requests += 1;
+        throw new Error("the platform must not be called");
+      },
+    });
+
+    expect(code).toBe(1);
+    expect(requests).toBe(0);
+    expect(lines).toContain("status: invalid-idempotency-key");
+    expect(lines).toContain(
+      "stderr: Give --idempotency-key one non-empty value. Nothing was started.",
+    );
+  });
+
+  it.each([
+    ["a line break", "retry_release_01\nstatus: started"],
+    ["a terminal control", "retry_release_01\u001b[2J"],
+    ["a Unicode line separator", "retry_release_01\u2028status: started"],
+    ["more than 200 characters", "a".repeat(201)],
+  ])("refuses a retry key with %s before any platform request", async (_case, key) => {
+    const lines: string[] = [];
+    let requests = 0;
+    const code = await runRunCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile },
+      cwd: workspace.dir,
+      suiteDirectory: "release",
+      idempotencyKey: key,
+      out: (line) => lines.push(line),
+      fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl: async () => {
+        requests += 1;
+        throw new Error("the platform must not be called");
+      },
+    });
+
+    expect(code).toBe(1);
+    expect(requests).toBe(0);
+    expect(lines).toContain("status: invalid-idempotency-key");
+    expect(lines).toContain(
+      "stderr: Give --idempotency-key one line of at most 200 characters, without control characters. Nothing was started.",
+    );
+  });
+
   it("selects configured agents and connections by exact name or stable id", async () => {
     await writeTargets([
       {

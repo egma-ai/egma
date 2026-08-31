@@ -37,6 +37,12 @@
       "skillPath": "skills/engineering/domain-modeling/SKILL.md",
       "computedHash": "363cb0f53b0b431e7c00086ad1f823500b7e1b70b5616ee969c979f0934e9e6e"
     },
+    "egma": {
+      "source": "egma-ai/egma",
+      "sourceType": "github",
+      "skillPath": "skills/egma/SKILL.md",
+      "computedHash": "576bbaf6db5444ecea35d30334dd31c89aaa83557ce37e2405d98fc12c1da893"
+    },
     "grill-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -72,6 +78,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "66e8a50c83c3c724fcfe0769701b665c56cec220cc4f49cc1aee8bdfc07de94a"
+    },
+    "integrate-egma": {
+      "source": "egma-ai/egma",
+      "sourceType": "github",
+      "skillPath": "skills/integrate-egma/SKILL.md",
+      "computedHash": "0acd7f402a25e7653181386102b12f72ab3784c9fba73052a900e0933710277c"
     },
     "prototype": {
       "source": "mattpocock/skills",
@@ -138,6 +150,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/wayfinder/SKILL.md",
       "computedHash": "f343ecf46157cb645a5494644418308ad95391e9fc696faa47ae5a412bf5f6e4"
+    },
+    "write-egma-tests": {
+      "source": "egma-ai/egma",
+      "sourceType": "github",
+      "skillPath": "skills/write-egma-tests/SKILL.md",
+      "computedHash": "506cf279c23a95313c832e87f8c819e765a562f31837fa288b274dfeaf736daf"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",

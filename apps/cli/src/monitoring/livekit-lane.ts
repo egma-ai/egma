@@ -31,7 +31,7 @@ import {
   type MintedKey,
 } from "../platform/api-keys.ts";
 import { readAgentMonitoring } from "../platform/monitoring.ts";
-import { envLines, exportLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
+import { envLines, writeEnvFile, type EnvWrite } from "./env-file.ts";
 
 /** The platform binding written on a LiveKit monitoring agent. */
 const LIVEKIT = "livekit";
@@ -69,15 +69,8 @@ export type LiveKitWired = {
   /** The agent's row in the roster, and whether this run wrote it. */
   readonly agent: RegisteredAgent;
   readonly created: boolean;
-  /** What became of the repository's `.env`. */
-  readonly env: EnvWrite;
-  /**
-   * The two lines, for wherever this worker really runs.
-   *
-   * They carry the minted secret, so they are the one thing here a caller must
-   * put in front of the developer and nowhere else.
-   */
-  readonly lines: readonly string[];
+  /** The safe ignored file that received the minted secret. */
+  readonly env: Extract<EnvWrite, { readonly kind: "written" }>;
   /** The non-secret stable id used to prove this exact key during recovery. */
   readonly keyId: string;
   /** Enough to tell the minted key from another, and not enough to be one. */
@@ -212,6 +205,12 @@ async function theAgent(
             reason:
               `Agent ${read.monitoring.agentId} is archived and cannot be enabled for monitoring. ` +
               "Restore it, then run enable again. No key was created and no environment file was changed.",
+            };
+        }
+        if (read.monitoring.agentPlatform !== LIVEKIT) {
+          return {
+            kind: "refused",
+            reason: `Agent ${read.monitoring.agentId} is not bound to LiveKit. No key was created and no environment file was changed.`,
           };
         }
         return {
@@ -220,6 +219,8 @@ async function theAgent(
             id: read.monitoring.agentId,
             name: read.monitoring.agentName,
             projectId: read.monitoring.projectId,
+            agentPlatform: LIVEKIT,
+            platformAgentId: read.monitoring.platformAgentId,
           },
           created: false,
         };
@@ -310,12 +311,12 @@ async function theAgent(
 }
 
 /**
- * Mint the key, write the two lines, and answer with them either way.
+ * Mint the key and write it into a safe ignored environment file.
  *
  * The order is the point: the agent exists first, because the key is minted for
- * the project that agent lands in; then the key; then the file. A `.env` Egma
- * will not write is not a failure — the lines it would have held come back and
- * a caller prints them, which is the answer a deployment needs anyway.
+ * the project that agent lands in; then the key; then the file. If Egma cannot
+ * write the file safely, it revokes the fresh key. The secret never enters the
+ * coding-agent transcript.
  */
 export async function wireLiveKitMonitoring(
   options: LiveKitOptions,
@@ -539,21 +540,23 @@ export async function wireLiveKitMonitoring(
 
   const values = { url: options.platform.url, key: key.secret };
   const env = await writeEnvFile(options.cwd, values);
-  if (env.kind === "written") {
-    options.say(
-      `Wrote ${envLines(values).length} lines into ${env.file}${env.replaced ? ", replacing what was there" : ""}.`,
-      "action",
-    );
-  } else {
-    options.say(env.reason);
+  if (env.kind === "refused") {
+    const keyRevoked = await rollbackUncommittedKey(key.id, options.platform);
+    return {
+      kind: "failed",
+      reason: `${env.reason} ${cleanupResult(keyRevoked, key.id)}`,
+    };
   }
+  options.say(
+    `Wrote ${envLines(values).length} lines into ${env.file}${env.replaced ? ", replacing what was there" : ""}.`,
+    "action",
+  );
 
   return {
     kind: "wired",
     agent,
     created,
     env,
-    lines: exportLines(values),
     keyId: key.id,
     keyLooksLike: key.looksLike,
   };

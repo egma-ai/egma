@@ -47,5 +47,11 @@ export async function readProject(
       "Egma answered without the project identity and name. Check that this Egma instance is up to date.",
     );
   }
+  if (id !== projectId) {
+    throw new PlatformRefusedError(
+      response.status,
+      "Egma answered with a different project ID. Check that this Egma instance is up to date.",
+    );
+  }
   return { id, name };
 }

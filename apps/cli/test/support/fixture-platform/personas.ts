@@ -23,7 +23,7 @@ export type PersonaControls = {
  * readable from every one of them. A fixture project that answered with none
  * would be a project the real platform cannot produce — which is exactly the
  * shape a test must not teach. `clear()` exists so a test can ask for the
- * impossible on purpose and prove the wizard stops rather than writes a folder
+ * impossible on purpose and prove validation stops rather than writes a folder
  * that cannot be pushed.
  *
  * **Nothing here says which persona is the project's default.** There is no

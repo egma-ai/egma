@@ -190,16 +190,17 @@ checked over the exact bytes Retell sent.
 
 ## Production Monitoring
 
-Open **Monitoring → Start monitoring** inside a project. The required steps
-depend on the agent platform.
+Open **Agents → Connect an agent** inside a project. Copy the **Monitoring** or
+**Both** prompt into the coding agent that is working in the voice-agent
+repository. The prompt includes this self-hosted platform address. The coding
+agent uses existing credentials, runs browser login when needed, and completes
+the Retell or LiveKit setup through the current CLI.
 
-- **Retell:** enter a Retell API key, select the matching Retell agent, and
-  start monitoring.
-- **LiveKit:** install the [Python SDK](/integrations/python-sdk) or
-  [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
-  `EGMA_URL` to the API address and `EGMA_API_KEY` to a project key, then call
-  the language's monitoring helper before `AgentSession.start`. For JavaScript,
-  complete the npm availability check on the linked setup page first.
+For a manual LiveKit setup, install the [Python SDK](/integrations/python-sdk)
+or [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
+`EGMA_URL` to the API address and `EGMA_API_KEY` to a project key. Call
+`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+`AgentSession.start`.
 
 ```bash
 export EGMA_URL=http://localhost:3100

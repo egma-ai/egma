@@ -8,7 +8,7 @@
  * free of imports and of anything an old Node cannot run.
  */
 
-/** The oldest Node the wizard and the agent adapters both run on. */
+/** The oldest Node the CLI runs on. */
 export const LOWEST_NODE_MAJOR = 22;
 
 /**

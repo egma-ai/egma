@@ -1,16 +1,17 @@
 /**
- * `egma connect`: the same flow the wizard runs, with nobody watching.
+ * `egma connect`: promptless provider registration for coding agents.
  *
  * It asks nothing. What it prints is one fact per line, `name: value`, in a
  * shape that does not move, and the exit code is the branch — so a coding agent
  * can run it, read the answer, and act on it without a person relaying
  * anything.
  *
- * The key comes in on standard input or out of the environment, and **never**
- * as a command argument. Arguments are readable by every process on the machine
- * through the process table and are kept by shell history; an argument named
- * for a key is therefore refused outright rather than accepted with a warning
- * nobody reads.
+ * Provider secrets never come in as command arguments. Retell's key comes in
+ * on standard input or out of the environment; LiveKit's several credential
+ * fields come only from named environment variables. Arguments are readable by
+ * every process on the machine through the process table and are kept by shell
+ * history, so an argument named for a secret is refused outright rather than
+ * accepted with a warning nobody reads.
  */
 
 import {
@@ -18,6 +19,10 @@ import {
   folderPathsIn,
   recordRegisteredTarget,
 } from "../folder/egma-folder.ts";
+import {
+  runLiveKitConnectCommand,
+  runConnectRecordCommand,
+} from "./connect-livekit.ts";
 import { readCredentials, type PlatformAccess } from "../platform/credentials.ts";
 import { readProject } from "../platform/projects.ts";
 import { RetellKey } from "../retell/key.ts";
@@ -36,8 +41,10 @@ import {
   type ConnectOptions,
   type ConnectOutcome,
   type Lane,
+  type RegistrationReceiptEvent,
 } from "../retell/connect.ts";
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
+import { oneLineFactText } from "../ui/fact-value.ts";
 
 /** What each ending means to whoever ran the command. */
 export const CONNECT_EXIT = {
@@ -65,12 +72,14 @@ export const CONNECT_EXIT = {
    * was, and the lines above it list what there was to choose from.
    */
   unchosen: 5,
-  /** No key was given at all. */
+  /** No required provider credential was given at all. */
   noKey: 6,
   /** This machine holds no egma key, so there is nowhere to register. */
   notSignedIn: 7,
   /** Retell routes no number to the chosen agent, so the phone reaches nothing. */
   noNumbers: 8,
+  /** Remote registration finished, but its repository record did not. */
+  repositoryRecordFailed: 9,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
@@ -124,10 +133,31 @@ export function lanesIn(
 }
 
 /** Argument names that would put a secret in the process table. */
-const REFUSED_ARGUMENTS = ["--key", "--api-key", "--retell-key", "--retell-api-key"];
+const REFUSED_ARGUMENTS = [
+  "--key",
+  "--api-key",
+  "--retell-key",
+  "--retell-api-key",
+  "--livekit-api-key",
+  "--livekit-api-secret",
+  "--livekit-token-headers",
+] as const;
+
+const LIVEKIT_REFUSED_ARGUMENTS = [
+  "--livekit-api-key",
+  "--livekit-api-secret",
+  "--livekit-token-headers",
+] as const;
 
 /** What a developer is told when they tried to pass the key as an argument. */
 export function argumentRefusal(argument: string): string {
+  if ((LIVEKIT_REFUSED_ARGUMENTS as readonly string[]).includes(argument)) {
+    return [
+      `Egma will not take a LiveKit secret in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
+      "",
+      "Set EGMA_LIVEKIT_API_KEY and EGMA_LIVEKIT_API_SECRET for project credentials, or EGMA_LIVEKIT_TOKEN_HEADERS for a customer token endpoint, in the environment of this one command.",
+    ].join("\n");
+  }
   return [
     `Egma will not take a key in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
     "",
@@ -152,6 +182,24 @@ export type ConnectCommandOptions = {
   readonly phoneNumber: string | null;
   /** `--repo-prompt`: the file to compare what the provider runs against. */
   readonly repoPrompt: string | null;
+  /** `--platform`; omitted retains the original Retell command. */
+  readonly platform?: string | null;
+  /** The promptless connect subcommand. Only `record` exists. */
+  readonly action?: string | null;
+  /** Stable ids from a LiveKit registration receipt. */
+  readonly projectId?: string | null;
+  readonly receiptAgentId?: string | null;
+  readonly receiptConnectionId?: string | null;
+  /** `--show-context`; Retell prompt and tools as one-line JSON facts. */
+  readonly showContext?: boolean;
+  /** LiveKit inputs, selected from and checked against the platform catalog. */
+  readonly modality?: string | null;
+  readonly accessVariant?: string | null;
+  readonly livekitUrl?: string | null;
+  readonly dispatchName?: string | null;
+  readonly tokenEndpoint?: string | null;
+  readonly metadata?: string | null;
+  readonly name?: string | null;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   readonly out: (line: string) => void;
@@ -168,7 +216,7 @@ export type ConnectCommandOptions = {
 export function refusedArgumentIn(argv: readonly string[]): string | null {
   for (const argument of argv) {
     const name = argument.split("=")[0] ?? argument;
-    if (REFUSED_ARGUMENTS.includes(name)) return name;
+    if ((REFUSED_ARGUMENTS as readonly string[]).includes(name)) return name;
   }
   return null;
 }
@@ -234,11 +282,119 @@ function driftLine(outcome: Extract<ConnectOutcome, { kind: "connected" }>): str
   }
 }
 
+/** Print a Retell receipt before the flow can make another remote request. */
+function sayRetellReceipt(
+  event: RegistrationReceiptEvent,
+  out: (line: string) => void,
+): void {
+  const { registered, registration } = event;
+  out("receipt: retell-registration");
+  out(`project_id: ${registered.agent.projectId}`);
+  out(`agent_id: ${registered.agent.id}`);
+  out(`agent_name: ${registered.agent.name}`);
+  out(`connection_id: ${registered.connection.id}`);
+  out(`connection_name: ${registered.connection.name}`);
+  out(`connection_type: ${registered.connection.connectionType}`);
+  out(`connection_modality: ${registered.connection.modality}`);
+  out(`retell_lane: ${event.lane}`);
+  out(`registration: ${registered.result}`);
+  out(`agent_registration: ${registration.agent}`);
+  out(`connection_registration: ${registration.connection}`);
+}
+
+function retellRecoveryCommand(
+  access: PlatformAccess,
+  event: RegistrationReceiptEvent,
+): string {
+  return (
+    `egma connect record --platform retell --project-id ${event.registered.agent.projectId} ` +
+    `--agent-id ${event.registered.agent.id} ` +
+    `--connection-id ${event.registered.connection.id} --url "${access.url}"`
+  );
+}
+
 export async function runConnectCommand(options: ConnectCommandOptions): Promise<number> {
   const refused = refusedArgumentIn(options.argv ?? []);
   if (refused !== null) {
     options.fail(argumentRefusal(refused));
     return CONNECT_EXIT.noKey;
+  }
+
+  const action = (options.action ?? "").trim().toLowerCase();
+  const namedPlatform = (options.platform ?? "").trim().toLowerCase();
+  if (action === "record") {
+    if (
+      namedPlatform !== "" &&
+      namedPlatform !== "livekit" &&
+      namedPlatform !== "retell"
+    ) {
+      options.out("platform_option: retell");
+      options.out("platform_option: livekit");
+      options.out("status: unsupported-platform");
+      options.fail(
+        "Egma connect record recovers a Retell or LiveKit registration. Choose one of the platform_option lines. Nothing was written.",
+      );
+      return CONNECT_EXIT.unchosen;
+    }
+    return await runConnectRecordCommand({
+      access: options.access,
+      cwd: options.cwd,
+      platform: namedPlatform === "retell" ? "retell" : "livekit",
+      name: options.name ?? null,
+      projectId: options.projectId ?? null,
+      agentId: options.receiptAgentId ?? null,
+      connectionId: options.receiptConnectionId ?? null,
+      livekitUrl: options.livekitUrl ?? null,
+      dispatchName: options.dispatchName ?? null,
+      modality: options.modality ?? null,
+      accessVariant: options.accessVariant ?? null,
+      metadata: options.metadata ?? null,
+      retellAgentId: options.agentId,
+      lanes: options.lanes,
+      phoneNumber: options.phoneNumber,
+      tokenEndpoint: options.tokenEndpoint ?? null,
+      signal: options.signal,
+      out: options.out,
+      fail: options.fail,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+  }
+  if (action !== "") {
+    options.out("action_option: record");
+    options.out("status: unsupported-action");
+    options.fail(
+      `Egma connect does not know action ${action}. Use egma connect record with a complete receipt or provider-public selector. Nothing was written.`,
+    );
+    return CONNECT_EXIT.unchosen;
+  }
+
+  const platform = namedPlatform === "" ? "retell" : namedPlatform;
+  if (platform === "livekit") {
+    return await runLiveKitConnectCommand({
+      access: options.access,
+      cwd: options.cwd,
+      name: options.name ?? null,
+      modality: options.modality ?? null,
+      accessVariant: options.accessVariant ?? null,
+      livekitUrl: options.livekitUrl ?? null,
+      dispatchName: options.dispatchName ?? null,
+      tokenEndpoint: options.tokenEndpoint ?? null,
+      metadata: options.metadata ?? null,
+      env: options.env,
+      signal: options.signal,
+      out: options.out,
+      fail: options.fail,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+  }
+  if (platform !== "" && platform !== "retell") {
+    options.out("platform_option: retell");
+    options.out("platform_option: livekit");
+    options.out("status: unsupported-platform");
+    options.fail(
+      `Egma connect does not know platform ${platform}. Choose one of the platform_option lines. Nothing was written.`,
+    );
+    return CONNECT_EXIT.unchosen;
   }
 
   // Said before anything is read, because a word egma does not know is the
@@ -269,12 +425,12 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
 
   // A binding written before the key was even read would leave an egma folder
   // behind every time this command ends at "no key given" — which is the same
-  // wart the wizard used to have, and it belongs here for the same reason it
+  // historical provider wart, and it belongs here for the same reason it
   // belonged there. So the binding is written from inside the flow, at the one
   // moment after which this repository owns something only this platform can
   // resolve.
   const binding: { refused: Error | null } = { refused: null };
-
+  const registrationReceipts: RegistrationReceiptEvent[] = [];
   const attempt = connect({
     platform: { url: held.url, key: held.key },
     cwd: options.cwd,
@@ -296,8 +452,13 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
         throw cause;
       }
     },
+    beforeRegistrationAttempt: (name) => options.out(`registration_name: ${name}`),
+    onRegistered: (event) => {
+      registrationReceipts.push(event);
+      sayRetellReceipt(event, options.out);
+    },
     askForKey: () => {
-      // The same two lines the wizard's screen draws, so a coding agent reading
+      // Stable choice lines let a coding agent read
       // this is told exactly what a person is told. There is nobody to ask
       // twice, so the second ask answers with nothing and the flow ends.
       if (asked) return Promise.resolve(null);
@@ -314,7 +475,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       const wanted = (options.agentId ?? options.env[AGENT_VARIABLE] ?? "").trim();
       return Promise.resolve(wanted === "" ? null : wanted);
     },
-    // The same question the wizard's screen asks, and the same two lines, so a
+    // The same stable choice lines are printed each time, so a
     // coding agent reading this is told exactly what a person is told. There is
     // nobody here to answer it, so it is answered in the command or not at all
     // — and not at all creates nothing, which is the point.
@@ -345,31 +506,81 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     return CONNECT_EXIT.unreachable;
   }
 
+  if (outcome.kind !== "connected") {
+    for (const receipt of registrationReceipts) {
+      options.out(`recovery_command: ${retellRecoveryCommand(options.access, receipt)}`);
+    }
+  }
+
   switch (outcome.kind) {
     case "connected": {
       const { registered, config } = outcome;
       // The repository target is separate from its suites. Suites are created
       // through their own platform-backed command and live in manifests.
       const paths = folderPathsIn(options.cwd);
-      const project = await readProject(
-        { url: held.url, key: held.key },
-        registered.agent.projectId,
-        options.fetchImpl,
-      );
-      await recordRegisteredTarget(paths.config, {
-        project,
-        agent: { name: registered.agent.name, id: registered.agent.id },
-        connection: {
-          name: registered.connection.name,
-          id: registered.connection.id,
-          modality: registered.connection.modality,
-        },
-      });
+      try {
+        const project = await readProject(
+          { url: held.url, key: held.key },
+          registered.agent.projectId,
+          options.fetchImpl,
+          options.signal,
+        );
+        for (const connected of outcome.connections) {
+          await recordRegisteredTarget(paths.config, {
+            project,
+            agent: { name: registered.agent.name, id: registered.agent.id },
+            connection: {
+              name: connected.connection.name,
+              id: connected.connection.id,
+              modality: connected.connection.modality,
+            },
+          });
+        }
+      } catch (cause) {
+        const receipt: RegistrationReceiptEvent = {
+          lane: outcome.lanes[0]!,
+          registered,
+          registration: outcome.registration,
+        };
+        const detail = oneLineFactText(
+          cause instanceof Error ? cause.message : String(cause),
+          "unknown repository error",
+        );
+        const reason =
+          `Egma finished remote Retell registration for agent ${receipt.registered.agent.id}, but ` +
+          `could not record every connection in this repository: ` +
+          `${detail}. The remote registration remains active. ` +
+          "Fix the repository or Egma connection, then run every recovery_command. They do not repeat remote registration.";
+        for (const connected of outcome.connections) {
+          options.out(
+            `recovery_command: ${retellRecoveryCommand(options.access, {
+              lane: connected.lane,
+              registered: {
+                result: connected.written === "created" ? "connection_added" : "reused",
+                agent: registered.agent,
+                connection: connected.connection,
+              },
+              registration: {
+                agent: "reused",
+                connection: connected.written,
+              },
+            })}`,
+          );
+        }
+        options.out("status: repository-record-failed");
+        options.out(`reason: ${reason}`);
+        options.fail(reason);
+        return CONNECT_EXIT.repositoryRecordFailed;
+      }
       options.out(`retell_agents: ${outcome.onTheAccount}`);
       options.out(`retell_agent_id: ${config.agentId}`);
       options.out(`retell_response_engine: ${config.engine}`);
       options.out(`prompt_characters: ${config.prompt === null ? 0 : config.prompt.length}`);
       options.out(`tools: ${config.tools.length}`);
+      if (options.showContext === true) {
+        options.out(`provider_prompt: ${JSON.stringify(config.prompt)}`);
+        options.out(`provider_tools: ${JSON.stringify(config.tools)}`);
+      }
       options.out(`lanes: ${outcome.lanes.join(",")}`);
       for (const one of outcome.connections) {
         options.out(
@@ -402,7 +613,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       if (already !== null) options.out(`note: ${already}`);
       options.out(driftLine(outcome));
       // Which half the tests will be written from, said the same way the
-      // wizard says it, so neither surface can promise the other's answer.
+      // provider says it, so this command does not promise another answer.
       options.out("grounded_in: retell");
       if (outcome.drift === "differs") options.out(`note: ${DRIFT_LINE}`);
       options.out("status: connected");

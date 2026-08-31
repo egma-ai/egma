@@ -1,18 +1,18 @@
 /**
- * Own the repository's temporary LiveKit worker for one wizard run.
+ * Own the repository's temporary LiveKit worker for one followed run.
  *
- * The public `integrate-egma` skill ships the cross-platform helper. This
- * module supplies its secrets through the child environment, waits for its
- * explicit registration marker, relays redacted output to the wizard log, and
- * tears down the complete process group when the run ends.
+ * The CLI package ships the cross-platform helper as runtime code. This module
+ * supplies its secrets through the child environment, waits for its explicit
+ * registration marker, relays redacted output to the caller, and tears down
+ * the complete process group when the run ends.
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import type { ConnectionCredentials } from "../platform/connection-credentials.ts";
-import { publicSkillDirectory } from "../skills/index.ts";
 
 export const LIVEKIT_WORKER_READY_MARK = "egma:livekit-worker ready";
 
@@ -24,7 +24,7 @@ export type LocalLiveKitWorkerEnding =
   | { readonly kind: "failed"; readonly reason: string };
 
 export type LocalLiveKitWorker = {
-  /** Settles if the helper exits before the wizard finishes the run. */
+  /** Settles if the helper exits before the CLI finishes the run. */
   readonly ended: Promise<LocalLiveKitWorkerEnding>;
   /** Stop the worker and every runtime process below it. Safe to call twice. */
   stop(): Promise<void>;
@@ -141,11 +141,7 @@ function redact(chunk: string, secrets: readonly string[]): string {
 }
 
 function helperInPackage(): string {
-  return path.join(
-    publicSkillDirectory("integrate-egma"),
-    "scripts",
-    "livekit-local.mjs",
-  );
+  return fileURLToPath(new URL("../../runtime/livekit-local.mjs", import.meta.url));
 }
 
 /** Start the helper and return only after it confirms worker registration. */

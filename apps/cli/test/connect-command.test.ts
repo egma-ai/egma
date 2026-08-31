@@ -16,23 +16,24 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { CONNECT_EXIT } from "../src/commands/connect.ts";
+import {
+  CONNECT_EXIT,
+  runConnectCommand,
+  type ConnectCommandOptions,
+} from "../src/commands/connect.ts";
 import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
+import { addConnection, readAgent } from "../src/platform/agents.ts";
+import { ConnectionCredentials } from "../src/platform/connection-credentials.ts";
+import { readProject } from "../src/platform/projects.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { gradeEveryRun } from "./support/grading.ts";
 import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
+const LIVEKIT_API_KEY = "APIhx4bmvHnLcWXYZ";
+const LIVEKIT_API_SECRET = "livekit-secret-E5F6G7H8QRST";
 const PROMPT = "You answer the order line.\nNever quote a price.\n";
-const GENERATED_TEST_NAMES = [
-  "price-question",
-  "opening-hours",
-  "order-status",
-  "refund-policy",
-] as const;
-
 const DIALLED = "+14155550111";
 
 const ONE_AGENT: FakeRetellScript = {
@@ -58,23 +59,6 @@ const ONE_AGENT: FakeRetellScript = {
 const VOICE_AGENT: FakeRetellScript = {
   ...ONE_AGENT,
   agents: ONE_AGENT.agents.map((agent) => ({ ...agent, channel: "voice" as const })),
-};
-
-/** A voice agent whose brain is a custom LLM, out of text mode's reach. */
-const CUSTOM_LLM_VOICE_AGENT: FakeRetellScript = {
-  keys: [KEY],
-  agents: [
-    {
-      agent_id: "agent_0001",
-      agent_name: "order-line",
-      channel: "voice",
-      voice_id: "11labs-Adrian",
-      response_engine: {
-        type: "custom-llm",
-        llm_websocket_url: "wss://example.invalid/llm",
-      },
-    },
-  ],
 };
 
 const TWO_AGENTS: FakeRetellScript = {
@@ -159,6 +143,190 @@ function facts(stdout: string): Record<string, string> {
   return read;
 }
 
+async function runDirect(
+  overrides: Partial<ConnectCommandOptions>,
+  fetchImpl: typeof fetch,
+): Promise<{ readonly code: number; readonly out: string[]; readonly fail: string[] }> {
+  const out: string[] = [];
+  const fail: string[] = [];
+  const code = await runConnectCommand({
+    access: { url: platform.url, credentialsFile: workspace.credentialsFile },
+    cwd: workspace.dir,
+    agentId: null,
+    lanes: "phone",
+    phoneNumber: DIALLED,
+    repoPrompt: null,
+    platform: "retell",
+    action: null,
+    showContext: false,
+    env: { EGMA_RETELL_API_KEY: KEY },
+    signal: new AbortController().signal,
+    retell: retell === undefined ? undefined : { url: retell.url },
+    out: (line) => out.push(line),
+    fail: (line) => fail.push(line),
+    fetchImpl,
+    ...overrides,
+  });
+  return { code, out, fail };
+}
+
+/** Put one same-name Retell row on Egma without a connection or provider binding. */
+async function createEmptyRetellAgent(): Promise<{ readonly id: string }> {
+  const created = await fetch(`${platform.url}/v1/agents`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${platform.device.keys[0] ?? ""}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "order-line", agentPlatform: "retell" }),
+  });
+  expect(created.status).toBe(201);
+  const body = await created.json() as {
+    readonly agent: { readonly id: string };
+  };
+  return body.agent;
+}
+
+describe("platform receipts used by connect", () => {
+  it("refuses a project read whose receipt names a different project ID", async () => {
+    const wrongProject: typeof fetch = async () => new Response(
+      JSON.stringify({ id: "prj_answered", name: "Other project" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+    await expect(
+      readProject(
+        { url: platform.url, key: platform.device.mint() },
+        "prj_requested",
+        wrongProject,
+      ),
+    ).rejects.toThrow("different project ID");
+  });
+
+  it("refuses an agent read whose receipt names a different agent ID", async () => {
+    const wrongAgent: typeof fetch = async () => new Response(
+      JSON.stringify({
+        agent: {
+          id: "agt_answered",
+          name: "front-desk",
+          projectId: "prj_safe",
+          agentPlatform: "livekit",
+          platformAgentId: null,
+        },
+        connections: [],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+    const result = await readAgent("agt_requested", {
+      url: platform.url,
+      key: platform.device.mint(),
+      fetchImpl: wrongAgent,
+    });
+
+    expect(result).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining("different agent ID"),
+    });
+  });
+
+  it("refuses an agent read without a connection list", async () => {
+    const missingConnections: typeof fetch = async () => new Response(
+      JSON.stringify({
+        agent: {
+          id: "agt_requested",
+          name: "front-desk",
+          projectId: "prj_safe",
+          agentPlatform: "livekit",
+          platformAgentId: null,
+        },
+        connections: null,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+    const result = await readAgent("agt_requested", {
+      url: platform.url,
+      key: platform.device.mint(),
+      fetchImpl: missingConnections,
+    });
+
+    expect(result).toEqual({
+      kind: "refused",
+      reason: expect.stringContaining("complete connection list"),
+    });
+  });
+
+  it.each([
+    {
+      field: "agent",
+      agentId: "agt_safe;touch_owned",
+      projectId: "prj_safe",
+      connectionId: "con_safe",
+    },
+    {
+      field: "project",
+      agentId: "agt_safe",
+      projectId: "prj unsafe",
+      connectionId: "con_safe",
+    },
+    {
+      field: "connection",
+      agentId: "agt_safe",
+      projectId: "prj_safe",
+      connectionId: "con_$(touch_owned)",
+    },
+  ])("prints no recovery command for an unsafe platform $field ID", async ({
+    agentId,
+    projectId,
+    connectionId,
+  }) => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const unsafeReceipt: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            result: "created",
+            agent: {
+              id: agentId,
+              name: "order-line",
+              projectId,
+              agentPlatform: "retell",
+              platformAgentId: "agent_0001",
+            },
+            connection: {
+              id: connectionId,
+              name: "retell_text_mode-1",
+              agentPlatform: "retell",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
+              modality: "chat",
+              productLabel: "Retell text mode",
+              credentialsHint: "safe",
+              config: { retellAgentId: "agent_0001" },
+            },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (requested.pathname.endsWith("/connections") && init?.method === "POST") {
+        throw new TypeError("the later lane did not answer");
+      }
+      return await fetch(input, init);
+    };
+
+    const result = await runDirect(
+      { lanes: "text,web-call", phoneNumber: null },
+      unsafeReceipt,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt: retell-registration");
+    expect(result.out.some((line) => line.startsWith("recovery_command:"))).toBe(false);
+  });
+});
+
 describe("egma connect", () => {
   it("takes the key on standard input and registers the agent, asking nothing", async () => {
     retell = await startFakeRetell(ONE_AGENT);
@@ -174,6 +342,8 @@ describe("egma connect", () => {
     expect(said.retell_response_engine).toBe("retell-llm");
     expect(said.prompt_characters).toBe(String(PROMPT.length));
     expect(said.tools).toBe("1");
+    expect(said.provider_prompt).toBeUndefined();
+    expect(said.provider_tools).toBeUndefined();
     expect(said.agent_name).toBe("order-line");
     expect(said.agent_id).toMatch(/^agt_/u);
     expect(said.connection_id).toMatch(/^con_/u);
@@ -191,15 +361,14 @@ describe("egma connect", () => {
     expect(said.status).toBe("connected");
 
     // The custody sentence is said before the key is asked for, on this
-    // surface as much as on the wizard's.
+    // surface as much as on any other provider path.
     expect(result.stdout).toContain(
-      "note: Egma uses this key now to read your Retell agents and confirm the selected setup. For Text and Web call, Egma stores it encrypted and uses it to run each simulation through Retell. For Phone, Egma uses it only during setup and does not store it. It never lands in this repository.",
+      "note: Egma uses this key now to read your Retell agents and confirm the selected setup. Egma seals a copy on the agent so production monitoring can be enabled later without asking for the key again. Text and Web call also keep a sealed connection copy and use it to run each simulation through Retell. A Phone connection keeps no key. The key never lands in this repository.",
     );
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.sealed).toEqual([KEY]);
-    // The same four things the wizard's own walk writes, so a repository
-    // connected by the verb and one connected by the wizard hold one file.
+    // The complete registration facts land in one repository file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
       format: 3,
       platform: { origin: platform.url },
@@ -221,6 +390,175 @@ describe("egma connect", () => {
         },
       ],
     });
+  });
+
+  it("shows the Retell prompt and tools as credential-free one-line JSON only when asked", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const result = await egma(["connect", "--show-context"], { stdin: `${KEY}\n` });
+
+    expect(result.code).toBe(CONNECT_EXIT.connected);
+    const said = facts(result.stdout);
+    expect(said.provider_prompt).toBe(JSON.stringify(PROMPT));
+    expect(JSON.parse(said.provider_prompt ?? "null")).toBe(PROMPT);
+    expect(JSON.parse(said.provider_tools ?? "null")).toEqual([{ type: "end_call" }]);
+    expect(result.stdout.match(/^provider_prompt: .*$/gmu)).toHaveLength(1);
+    expect(result.stdout.match(/^provider_tools: .*$/gmu)).toHaveLength(1);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(KEY);
+  });
+
+  it("registers LiveKit from flags and env through the built command", async () => {
+    const result = await egma(
+      [
+        "connect",
+        "--platform",
+        "livekit",
+        "--name",
+        "front-desk",
+        "--modality",
+        "chat",
+        "--livekit-url",
+        "wss://acme.livekit.cloud",
+        "--dispatch-name",
+        "receptionist",
+        "--metadata",
+        '{"tenant":"acme"}',
+      ],
+      {
+        env: {
+          EGMA_LIVEKIT_API_KEY: LIVEKIT_API_KEY,
+          EGMA_LIVEKIT_API_SECRET: LIVEKIT_API_SECRET,
+        },
+      },
+    );
+
+    expect(result.code, result.stderr).toBe(CONNECT_EXIT.connected);
+    const said = facts(result.stdout);
+    expect(said.agent_name).toBe("front-desk");
+    expect(said.agent_platform).toBe("livekit");
+    expect(said.access_variant).toBe("livekit_room.project_credentials");
+    expect(said.connection_modality).toBe("chat");
+    expect(said.status).toBe("connected");
+    expect(result.stdout).toContain("modality_option: chat");
+    expect(result.stdout).toContain(
+      "access_variant_option: livekit_room.project_credentials " +
+        "LiveKit project credentials [Recommended]",
+    );
+    expect(`${result.stdout}${result.stderr}`).not.toContain(LIVEKIT_API_KEY);
+    expect(`${result.stdout}${result.stderr}`).not.toContain(LIVEKIT_API_SECRET);
+    expect(platform.registered.sealed).toEqual([LIVEKIT_API_KEY, LIVEKIT_API_SECRET]);
+
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.platform).toEqual({ origin: platform.url });
+    expect(config.agents).toEqual([
+      {
+        id: said.agent_id,
+        name: "front-desk",
+        connections: [
+          {
+            id: said.connection_id,
+            name: said.connection_name,
+            modality: "chat",
+          },
+        ],
+      },
+    ]);
+
+    const recovered = await egma([
+      "connect",
+      "record",
+      "--project-id",
+      said.project_id ?? "",
+      "--agent-id",
+      said.agent_id ?? "",
+      "--connection-id",
+      said.connection_id ?? "",
+    ]);
+    expect(recovered.code, recovered.stderr).toBe(CONNECT_EXIT.connected);
+    expect(facts(recovered.stdout).status).toBe("recorded");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+  });
+
+  it("recovers a lost reused LiveKit response by public worker identity", async () => {
+    const seeded = await makeWorkspace({ "package.json": MANIFEST });
+    await seeded.signIn(platform.url, platform.device.mint());
+    const liveKit = {
+      platform: "livekit",
+      lanes: null,
+      modality: "chat",
+      accessVariant: "livekit_room.project_credentials",
+      livekitUrl: "https://acme.livekit.cloud",
+      dispatchName: "receptionist",
+      env: {
+        EGMA_LIVEKIT_API_KEY: LIVEKIT_API_KEY,
+        EGMA_LIVEKIT_API_SECRET: LIVEKIT_API_SECRET,
+      },
+    } as const;
+
+    try {
+      const seededResult = await runDirect(
+        {
+          ...liveKit,
+          access: { url: platform.url, credentialsFile: seeded.credentialsFile },
+          cwd: seeded.dir,
+          name: "existing-front-desk",
+        },
+        fetch,
+      );
+      expect(seededResult.code, seededResult.fail.join("\n")).toBe(CONNECT_EXIT.connected);
+
+      let loseRegistrationResponse = true;
+      const uncertain: typeof fetch = async (input, init) => {
+        const requested = new globalThis.URL(String(input));
+        if (
+          requested.pathname === "/v1/agents" &&
+          init?.method === "POST" &&
+          loseRegistrationResponse
+        ) {
+          loseRegistrationResponse = false;
+          await fetch(input, init);
+          throw new TypeError("the reused registration response was lost");
+        }
+        return await fetch(input, init);
+      };
+
+      const uncertainResult = await runDirect(
+        { ...liveKit, name: "new-attempted-name" },
+        uncertain,
+      );
+      expect(uncertainResult.code).toBe(CONNECT_EXIT.unreachable);
+      expect(uncertainResult.out).toContain("registration_name: new-attempted-name");
+      expect(uncertainResult.out).not.toContain("receipt: livekit-registration");
+      expect(platform.registered.agents).toHaveLength(1);
+      expect(platform.registered.connections).toHaveLength(1);
+
+      const recovered = await egma([
+        "connect",
+        "record",
+        "--platform",
+        "livekit",
+        "--name",
+        "new-attempted-name",
+        "--livekit-url",
+        "wss://ACME.livekit.cloud:443",
+        "--dispatch-name",
+        "receptionist",
+        "--modality",
+        "chat",
+      ]);
+      expect(recovered.code, recovered.stderr).toBe(CONNECT_EXIT.connected);
+      const said = facts(recovered.stdout);
+      expect(said.status).toBe("recorded");
+      expect(said.agent_name).toBe("existing-front-desk");
+      expect(platform.registered.agents).toHaveLength(1);
+      expect(platform.registered.connections).toHaveLength(1);
+      const config = await readConfig(folderPathsIn(workspace.dir).config);
+      expect(config.agents[0]?.name).toBe("existing-front-desk");
+      expect(config.agents[0]?.connections).toHaveLength(1);
+    } finally {
+      await seeded.remove();
+    }
   });
 
   it("takes the key from the environment, under either name", async () => {
@@ -418,8 +756,8 @@ describe("egma connect", () => {
 /**
  * The choice, on the surface a coding agent drives.
  *
- * The wizard has a screen for it; this has a flag, an environment variable, and
- * an exit code for the case nobody said. What must not exist on either surface
+ * This has a flag, an environment variable, and an exit code for the case
+ * nobody said. What must not exist on the surface
  * is a default — egma picking one of the two would be egma deciding whether to
  * dial somebody's telephone.
  */
@@ -561,138 +899,431 @@ describe("which connection egma creates", () => {
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
   });
-});
 
-describe("the whole walk, headless", () => {
-  it("prints the compatible Retell reach and stops before writing on a custom-LLM mismatch", async () => {
-    // Text mode reaches a voice agent's words and tools through Retell, and
-    // a custom LLM keeps both on its own socket. So text is offered — every
-    // voice agent has it — but the engine is refused at the door, with phone
-    // named as the way that does reach it.
-    retell = await startFakeRetell(CUSTOM_LLM_VOICE_AGENT);
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:found framework retell-sdk\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
+  it("refuses to replace a Retell agent binding while adding a connection", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const connected = await egma(["connect", "--lanes", "phone"], { stdin: KEY });
+    expect(connected.code, connected.stderr).toBe(CONNECT_EXIT.connected);
+    const agent = platform.registered.agents[0];
+    expect(agent?.platformAgentId).toBe("agent_0001");
+    const sealedBefore = [...platform.registered.sealed];
 
-    const result = await egma(
-      [
-        "--headless",
-        "--lanes",
-        "text",
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        new URL("./support/fake-agent.ts", import.meta.url).pathname,
-        script,
-      ],
-      { env: { EGMA_RETELL_API_KEY: KEY } },
+    const result = await addConnection(
+      agent?.id ?? "",
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550999" },
+        agentPlatformSelection: {
+          platformAgentId: "agent_0002",
+          credentials: ConnectionCredentials.hold({ apiKey: KEY }),
+        },
+      },
+      { url: platform.url, key: platform.device.mint() },
     );
 
-    expect(result.code).toBe(1);
-    // A voice agent offers every lane; the engine, not the lane, is what fails.
-    expect(result.stdout).toContain("lane_option: text");
-    expect(result.stdout).toContain("lane_option: phone");
-    expect(result.stdout).toContain("Egma could not finish: ");
-    expect(result.stdout).toContain("custom LLM");
-    expect(result.stdout).toContain("Choose --lanes phone");
-    expect(result.stdout).toContain("Nothing was written.");
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
-      code: "ENOENT",
+    expect(result).toEqual({
+      kind: "refused",
+      reason:
+        "order-line is Retell agent agent_0001. Register agent_0002 as its own agent.",
     });
+    expect(agent?.platformAgentId).toBe("agent_0001");
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.sealed).toEqual(sealedBefore);
   });
 
-  it("finds the agent, connects it, and leaves one line behind", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
-    await writeFile(path.join(workspace.dir, "prompt.md"), "Always quote a price.\n", "utf8");
+  it("recovers a lost phone-registration response by exact name without a duplicate", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    let loseRegistrationResponse = true;
+    const uncertain: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname === "/v1/agents" &&
+        init?.method === "POST" &&
+        loseRegistrationResponse
+      ) {
+        loseRegistrationResponse = false;
+        await fetch(input, init);
+        throw new TypeError("the registration response was lost");
+      }
+      return await fetch(input, init);
+    };
 
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "egma:found framework retell-sdk\n" },
-        { kind: "say", text: "egma:found prompts prompt.md\n" },
-        { kind: "stop", reason: "end_turn" },
-      ],
-      // The walk carries on past connect into writing tests, so the same
-      // scripted agent has to answer that task too.
-      stepsByTask: [
+    const first = await runDirect({}, uncertain);
+    expect(first.code).toBe(CONNECT_EXIT.unreachable);
+    expect(first.out).toContain("registration_name: order-line");
+    expect(first.out).not.toContain("receipt: retell-registration");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+
+    const recovered = await egma([
+      "connect",
+      "record",
+      "--platform",
+      "retell",
+      "--name",
+      "order-line",
+      "--retell-agent",
+      "agent_0001",
+      "--lanes",
+      "phone",
+      "--phone-number",
+      DIALLED,
+    ]);
+    expect(recovered.code, recovered.stderr).toBe(CONNECT_EXIT.connected);
+    expect(facts(recovered.stdout).status).toBe("recorded");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.name).toBe("order-line");
+    expect(config.agents[0]?.connections).toHaveLength(1);
+  });
+
+  it("prints no-remote-write recovery when a later Retell lane fails", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const laterLaneUnavailable: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname.includes("/connections") && init?.method === "POST") {
+        throw new TypeError("the later lane did not answer");
+      }
+      return await fetch(input, init);
+    };
+
+    const partial = await runDirect(
+      { lanes: "text,web-call", phoneNumber: null },
+      laterLaneUnavailable,
+    );
+
+    expect(partial.code).toBe(CONNECT_EXIT.unreachable);
+    expect(partial.out.filter((line) => line === "receipt: retell-registration")).toHaveLength(1);
+    const said = facts(partial.out.join("\n"));
+    const projectId = said.project_id ?? "";
+    const agentId = said.agent_id ?? "";
+    const connectionId = said.connection_id ?? "";
+    expect(partial.out).toContain(
+      `recovery_command: egma connect record --platform retell ` +
+        `--project-id ${projectId} --agent-id ${agentId} ` +
+        `--connection-id ${connectionId} --url "${platform.url}"`,
+    );
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).resolves.toMatchObject({
+      agents: [],
+    });
+
+    const recovered = await runDirect(
+      {
+        action: "record",
+        lanes: null,
+        phoneNumber: null,
+        projectId,
+        receiptAgentId: agentId,
+        receiptConnectionId: connectionId,
+      },
+      fetch,
+    );
+
+    expect(recovered.code, recovered.fail.join("\n")).toBe(CONNECT_EXIT.connected);
+    expect(recovered.out).toContain("status: recorded");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+    const config = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents[0]?.connections).toHaveLength(1);
+  });
+
+  it("refuses name-only recovery before it can record an unrelated agent", async () => {
+    const result = await egma([
+      "connect",
+      "record",
+      "--platform",
+      "retell",
+      "--name",
+      "order-line",
+    ]);
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(facts(result.stdout).status).toBe("invalid-selector");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("keeps provider line separators out of registration facts", async () => {
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      agents: ONE_AGENT.agents.map((agent) => ({
+        ...agent,
+        agent_name: "order\u2028status: forged",
+      })),
+    });
+
+    const result = await egma(["connect"], { stdin: KEY });
+
+    expect(result.code, result.stderr).toBe(CONNECT_EXIT.connected);
+    expect(result.stdout).not.toContain("\u2028");
+    expect(result.stdout.split("\n")).not.toContain("status: forged");
+    expect(result.stdout).toContain("registration_name: orderstatus: forged");
+  });
+
+  it("refuses a provider agent id that could change a recovery command", async () => {
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      agents: ONE_AGENT.agents.map((agent) => ({
+        ...agent,
+        agent_id: "agent_0001;touch-owned",
+      })),
+    });
+
+    const result = await egma(["connect", "--lanes", "text"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.stderr).toContain("agent identifier with unsupported characters");
+    expect(result.stdout).not.toContain("recovery_command:");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("refuses a provider phone number that could change a recovery command", async () => {
+    retell = await startFakeRetell({
+      ...VOICE_AGENT,
+      numbers: [
         {
-          contains: "Write 4 tests",
-          steps: [
-            { kind: "say", text: "egma:plan price-question\n" },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/price-question.md",
-              content:
-                "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/opening-hours.md",
-              content:
-                "---\nformat: 4\nname: opening-hours\n---\n## Scenario\nSomebody asks when the workshop opens.\n## Expected behaviors\n1. The agent gives the opening hours.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/order-status.md",
-              content:
-                "---\nformat: 4\nname: order-status\n---\n## Scenario\nSomebody asks about an existing order.\n## Expected behaviors\n1. The agent asks for the order number.\n",
-            },
-            {
-              kind: "write-file",
-              path: "egma/tests/order-line-tests/refund-policy.md",
-              content:
-                "---\nformat: 4\nname: refund-policy\n---\n## Scenario\nSomebody asks for a refund.\n## Expected behaviors\n1. The agent explains the refund policy.\n",
-            },
-            { kind: "say", text: "egma:wrote price-question\n" },
-            { kind: "stop", reason: "end_turn" },
-          ],
+          phone_number: "+14155550111;touch-owned",
+          nickname: "unsafe",
+          inbound_agents: [{ agent_id: "agent_0001" }],
         },
       ],
     });
 
-    // The walk ends in a run, and a trace result ends when grading is terminal. Nothing
-    // here conducts a simulation, so the fixture is given the one thing a
-    // platform with a simulator attached has.
-    const grading = gradeEveryRun(platform);
-    const result = await egma(
-      [
-        "--headless",
-        "--cwd",
-        workspace.dir,
-        "--",
-        process.execPath,
-        new URL("./support/fake-agent.ts", import.meta.url).pathname,
-        script,
-      ],
-      { env: { EGMA_RETELL_API_KEY: KEY } },
-    );
-    grading.stop();
+    const result = await egma(["connect", "--lanes", "phone"], { stdin: KEY });
 
-    expect(result.code).toBe(0);
-    // The drift the coding agent's answer made checkable, said once.
-    expect(result.stdout).toContain(DRIFT_LINE);
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.stderr).toContain("not safe E.164 text");
+    expect(result.stdout).not.toContain("recovery_command:");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("prints no receipt when Retell's agent binding contradicts its connection", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const wrongTarget: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            result: "created",
+            agent: {
+              id: "agt_wrong_target",
+              name: "order-line",
+              projectId: "prj_wrong_target",
+              agentPlatform: "retell",
+              platformAgentId: "agent_other",
+            },
+            connection: {
+              id: "con_wrong_target",
+              name: "retell_text_mode-1",
+              agentPlatform: "retell",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
+              modality: "chat",
+              productLabel: "Retell text mode",
+              credentialsHint: "safe",
+              config: { retellAgentId: "agent_0001" },
+            },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      return await fetch(input, init);
+    };
+
+    const result = await runDirect(
+      { lanes: "text", phoneNumber: null },
+      wrongTarget,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt: retell-registration");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("requires the agent binding to prove a phone registration receipt", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    const missingPhoneBinding: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            result: "created",
+            agent: {
+              id: "agt_wrong_phone_binding",
+              name: "order-line",
+              projectId: "prj_wrong_phone_binding",
+              agentPlatform: "retell",
+              platformAgentId: null,
+            },
+            connection: {
+              id: "con_wrong_phone_binding",
+              name: "phone_number-1",
+              agentPlatform: "retell",
+              connectionType: "phone_number",
+              accessVariant: "phone_number.public_e164",
+              modality: "voice",
+              productLabel: "Phone number",
+              credentialsHint: null,
+              config: {
+                phoneNumber: DIALLED,
+                retellAgentId: "agent_0001",
+              },
+            },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      return await fetch(input, init);
+    };
+
+    const result = await runDirect({}, missingPhoneBinding);
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt: retell-registration");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("does not attach to an unbound same-name Retell row", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    await createEmptyRetellAgent();
+
+    const result = await runDirect(
+      { lanes: "text", phoneNumber: null },
+      fetch,
+    );
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.fail.join("\n")).toContain(
+      "could not prove which Retell agent owns the existing agent named order-line",
+    );
+    expect(result.fail.join("\n")).toContain(
+      "egma connect record --platform retell --retell-agent agent_0001 --lanes text",
+    );
     expect(platform.registered.agents).toHaveLength(1);
-    expect(platform.registered.connections[0]?.name).toBe("retell_text_mode-1");
+    expect(platform.registered.agents[0]?.name).toBe("order-line");
+    expect(platform.registered.connections).toHaveLength(0);
+  });
 
-    // And the walk did not stop at connecting: the test the coding agent wrote
-    // is a file in the repository and a version on egma.
-    expect(result.stdout).toContain("test: price-question no persona named");
-    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual(
-      [...GENERATED_TEST_NAMES].sort(),
+  it("does not create a suffixed Retell agent when a name-taken lookup loses its list", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    await createEmptyRetellAgent();
+    const missingList: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (requested.pathname === "/v1/agents" && init?.method === "GET") {
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return await fetch(input, init);
+    };
+
+    const result = await runDirect(
+      { lanes: "text", phoneNumber: null },
+      missingList,
     );
-    // And it did not stop at pushing either: the run is going, and the line
-    // left behind says where to watch it.
-    expect(result.stdout).toContain("✓ Your first run is live");
-    expect(result.stdout).toContain(
-      `${platform.url}/projects/${platform.projectId}/runs/${platform.running.runs[0]?.id ?? ""}`,
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.fail.join("\n")).toContain("without an agent list");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(0);
+  });
+
+  it("prints no receipt when add-connection answers with another Retell lane", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    await createEmptyRetellAgent();
+    platform.registered.agents[0]!.platformAgentId = "agent_0001";
+    const wrongAddedLane: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname.endsWith("/connections") &&
+        init?.method === "POST"
+      ) {
+        return new Response(
+          JSON.stringify({
+            connection: {
+              id: "con_wrong_lane",
+              name: "retell_web_call-1",
+              agentPlatform: "retell",
+              connectionType: "retell_web_call",
+              accessVariant: "retell_web_call.api_key",
+              modality: "voice",
+              productLabel: "Retell web call",
+              credentialsHint: "safe",
+              config: { retellAgentId: "agent_0001" },
+            },
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        );
+      }
+      return await fetch(input, init);
+    };
+
+    const result = await runDirect(
+      { lanes: "text", phoneNumber: null },
+      wrongAddedLane,
     );
-    expect(result.stdout).toContain(
-      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
+
+    expect(result.code).toBe(CONNECT_EXIT.unreachable);
+    expect(result.out).not.toContain("receipt: retell-registration");
+    expect(result.fail.join("\n")).toContain(
+      "without a receipt for the selected Text connection",
     );
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(0);
+  });
+
+  it("does not create a second Retell agent when phone routing changes after a lost response", async () => {
+    retell = await startFakeRetell(VOICE_AGENT);
+    let loseRegistrationResponse = true;
+    const uncertain: typeof fetch = async (input, init) => {
+      const requested = new globalThis.URL(String(input));
+      if (
+        requested.pathname === "/v1/agents" &&
+        init?.method === "POST" &&
+        loseRegistrationResponse
+      ) {
+        loseRegistrationResponse = false;
+        await fetch(input, init);
+        throw new TypeError("the phone registration response was lost");
+      }
+      return await fetch(input, init);
+    };
+
+    const first = await runDirect({}, uncertain);
+    expect(first.code).toBe(CONNECT_EXIT.unreachable);
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
+
+    await retell.close();
+    const movedNumber = "+14155550222";
+    retell = await startFakeRetell({
+      ...VOICE_AGENT,
+      numbers: [
+        {
+          phone_number: movedNumber,
+          nickname: "moved order line",
+          inbound_agents: [{ agent_id: "agent_0001" }],
+        },
+      ],
+    });
+
+    const retried = await egma(
+      ["connect", "--lanes", "phone", "--phone-number", movedNumber],
+      { stdin: KEY },
+    );
+
+    expect(retried.code, retried.stderr).toBe(CONNECT_EXIT.connected);
+    expect(facts(retried.stdout).agent_name).toBe("order-line");
+    expect(facts(retried.stdout).agent_registration).toBe("reused");
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(2);
   });
 });

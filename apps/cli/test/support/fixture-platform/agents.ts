@@ -41,7 +41,7 @@
 
 import { isIP } from "node:net";
 
-import { connectionOptionMetadata } from "@egma/db";
+import { AgentAlreadyBoundError, connectionOptionMetadata } from "@egma/db";
 import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
 import type { FixtureAnswer, RouteGroup } from "./server.ts";
 
@@ -1313,6 +1313,40 @@ export function agentRoutes(options: {
     return body;
   };
 
+  /** The provider id a Retell phone write proves before it takes custody. */
+  const selectedPlatformAgentId = (
+    body: Record<string, unknown>,
+  ): string | null => {
+    const selection = body["agentPlatformSelection"];
+    if (typeof selection !== "object" || selection === null) return null;
+    const value = (selection as Record<string, unknown>)["platformAgentId"];
+    return typeof value === "string" && value.trim() !== ""
+      ? value.trim()
+      : null;
+  };
+
+  /** Match production's one-Egma-agent-to-one-Retell-agent binding guard. */
+  const boundElsewhere = (
+    known: StoredAgent,
+    selectedAgentId: string | null,
+  ): void => {
+    if (
+      selectedAgentId === null ||
+      known.platformAgentId === null ||
+      known.platformAgentId === selectedAgentId
+    ) {
+      return;
+    }
+    throw new Refusal(
+      new AgentAlreadyBoundError(
+        known.name,
+        known.platformAgentId,
+        selectedAgentId,
+      ).message,
+      { status: 422, code: "unprocessable" },
+    );
+  };
+
   /**
    * A connection payload the registry will take, checked whole.
    *
@@ -1599,6 +1633,11 @@ export function agentRoutes(options: {
             // Both rows or neither: a connection payload the registry turns
             // away leaves no agent behind, so nothing is kept until both are.
             const agent: StoredAgent = blankAgent(projectId, name, boundTo);
+            const selectedAgentId =
+              envelope === undefined ? null : selectedPlatformAgentId(envelope);
+            if (boundTo === "retell" && selectedAgentId !== null) {
+              agent.platformAgentId = selectedAgentId;
+            }
 
             if (inline === undefined) {
               agents.push(agent);
@@ -1716,17 +1755,24 @@ export function agentRoutes(options: {
             (held) => held.id === request.params["agentId"],
           );
           if (agent === undefined) return noSuchAgent;
-          return answering(() => ({
-            status: 201,
-            body: {
-              connection: connectionOut(
-                writeConnection(
-                  agent,
-                  admitConnection(connectionIn(request.body ?? {})),
-                ),
-              ),
-            },
-          }));
+          return answering(() => {
+            const envelope = connectionIn(request.body ?? {});
+            const selectedAgentId = selectedPlatformAgentId(envelope);
+            const admitted = admitConnection(envelope);
+            if (agent.agentPlatform === "retell") {
+              boundElsewhere(agent, selectedAgentId);
+            }
+            const written = writeConnection(agent, admitted);
+            if (agent.agentPlatform === "retell" && selectedAgentId !== null) {
+              agent.platformAgentId = selectedAgentId;
+            }
+            return {
+              status: 201,
+              body: {
+                connection: connectionOut(written),
+              },
+            };
+          });
         },
       },
     ],
