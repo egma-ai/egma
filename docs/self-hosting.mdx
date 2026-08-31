@@ -190,16 +190,19 @@ checked over the exact bytes Retell sent.
 
 ## Production Monitoring
 
-Open **Agents → Connect an agent** inside a project. Copy the **Monitoring** or
-**Both** prompt into the coding agent that is working in the voice-agent
-repository. The prompt includes this self-hosted platform address. The coding
-agent uses existing credentials, runs browser login when needed, and completes
-the Retell or LiveKit setup through the current CLI.
+Open **Agents → Connect an agent** inside a project. Choose **Monitoring** or
+**Both**, and then choose the agent platform.
+
+- **Retell:** enter a Retell API key, choose the matching Retell agent, and
+  start monitoring.
+- **LiveKit:** follow the guided worker instructions. Use this self-hosted API
+address for `EGMA_URL` and a project API key for `EGMA_API_KEY`.
 
 For a manual LiveKit setup, install the [Python SDK](/integrations/python-sdk)
 or [JavaScript SDK](/integrations/javascript-sdk) in the agent process. Set
 `EGMA_URL` to the API address and `EGMA_API_KEY` to a project key. Call
-`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript before
+`monitor_livekit(ctx)` in Python or `monitorLiveKit(ctx)` in JavaScript as the
+first statement of the job entrypoint, before `ctx.connect` and
 `AgentSession.start`.
 
 ```bash
@@ -232,31 +235,24 @@ The API applies database migrations during boot. Internal credentials and
 Docker volumes are preserved for normal upgrades from this baseline forward.
 Deployment credentials continue to come from the current `.env` file.
 
-### The SDK and this checkout move together
+### Keep the SDK and this checkout current
 
-Your simulator is built from this repository. The Egma Python SDK that runs
-inside a customer's LiveKit worker comes from PyPI and upgrades on its own
-schedule, so the two can drift apart in either direction.
+Your simulator is built from this repository. The Egma Python SDK in a
+customer's LiveKit worker is an unpinned source dependency. A lockfile can keep
+an older resolved commit, so refresh that dependency when you update Egma.
 
-Mock tools on every dispatch path need `egma>=0.2.0` in the worker **and** a
-simulator from this baseline or newer.
+Older workers looked for Egma in dispatch metadata. The current simulator
+writes nothing there, so such a worker never finds Egma and its real tools can
+run inside a simulation. Update the unpinned SDK dependency and its lockfile;
+do not repair this by pinning an older SDK release.
 
-A worker on an SDK below `0.2.0` looked for Egma in its dispatch metadata. The
-simulator writes nothing there any more — that channel is the customer's, whole
-— so such a worker never finds Egma at all. It is inert inside a real
-simulation: its real tools run against a live caller, and the simulation's
-coverage stamp is three empty lists. Nothing on Egma's side says why — from
-here it looks the same as a worker carrying no Egma SDK at all — so the worker's
-own debug log is where that shows. Raising its pin to `0.2.0` is the one fix,
-and it is the half you do not control.
-
-Upgrading the worker first loses nothing. The `egma-sim-` room-name prefix and
-the `egma-persona` participant identity are frozen contracts, so a `0.2.0`
-worker reads the same two strings whichever simulator it meets.
+The `egma-sim-` room-name prefix and the `egma-persona` participant identity
+are frozen contracts, so updating the worker first does not break an older
+simulator.
 
 An out-of-date worker does not fail loudly. The coverage stamp on the run is
-where it shows, so pull this repository on your own schedule rather than waiting
-for a run to complain.
+where it shows, so refresh the source dependency on your own schedule rather
+than waiting for a run to complain.
 
 <Warning>
   There is no in-place self-host upgrade from a build before the current
