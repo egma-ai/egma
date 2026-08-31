@@ -875,9 +875,16 @@ export async function finishMockedWorld(
 
   if (state.tempMockAgentVersion !== null) {
     const temporary = state.tempMockAgentVersion;
-    const deleted = await deleteAgentVersion(key, input.agentId, temporary, reach);
+    const deleted = await deleteAgentVersion(
+      key,
+      input.agentId,
+      temporary,
+      reach,
+    );
     if (deleted.kind !== "deleted" && deleted.kind !== "gone") {
-      unfinished.push(sentenceOf(deleted, `deleting temporary version ${temporary}`));
+      unfinished.push(
+        sentenceOf(deleted, `deleting temporary version ${temporary}`),
+      );
       // Nothing below this line runs. The pin is what keeps real callers off
       // the copy, and the copy is still there.
       return { state, unfinished, leftAlone };

@@ -47,9 +47,16 @@ import { platformEvent, safeExceptionType } from "./platform-log.ts";
  * ## Teardown, and the sweep that is the same act
  *
  * A run's own teardown and the next run's sweep call one function with one
- * order: delete the draft, then restore the pin. The sweep settles the worlds
- * of runs that have **finished**, and never one that could still be conducting
- * — two runs of one agent at once must not tear each other's world down.
+ * order: delete the draft, prove it is gone, then restore the pin. The sweep
+ * settles the worlds of runs that have **finished**, and never one that could
+ * still be conducting — two runs of one agent at once must not tear each
+ * other's world down.
+ *
+ * **The proof is why an unsettled world is answered rather than assumed.** A
+ * delete's own answer cannot say a version is gone: a request Retell has no
+ * route for answers 404 exactly as an absent version does. So the versions are
+ * read back, and a read that cannot say leaves the world unsettled — which the
+ * build path below refuses to branch over.
  *
  * A run stuck `pending` long past any plausible build is the one exception, and
  * it is the crash case: its process died between minting a version and making
