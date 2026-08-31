@@ -30,6 +30,7 @@ import {
 import type { Answer, Refusal } from "@/lib/api.ts";
 import {
   modalityLabel,
+  type ListedConnection,
   type ListedAgentWithConnections,
 } from "@/lib/agents.ts";
 import {
@@ -101,6 +102,27 @@ type RetellSaveProgress = {
   readonly completedLanes: number;
   readonly landed: ConnectSheetResult;
 };
+
+/** Whether a read-back connection is the exact lane this setup tried to save. */
+function sameConnection(
+  stored: ListedConnection,
+  requested: ConnectionBody,
+): boolean {
+  const requestedConfig = requested.config ?? {};
+  const storedEntries = Object.entries(stored.config);
+  const requestedEntries = Object.entries(requestedConfig);
+  return (
+    stored.agentPlatform === requested.agentPlatform &&
+    stored.connectionType === requested.connectionType &&
+    stored.accessVariant === requested.accessVariant &&
+    stored.modality === requested.modality &&
+    storedEntries.length === requestedEntries.length &&
+    requestedEntries.every(
+      ([key, value]) =>
+        typeof value === "string" && stored.config[key] === value,
+    )
+  );
+}
 
 type ConnectAgentSheetProps = {
   readonly projectId: string;
@@ -295,6 +317,25 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     };
   }, [agentId, knownAttempt, listedKnown, projectId]);
 
+  /*
+   * An existing agent keeps the provider it was registered on. Capability
+   * links carry that provider for a fast path, but the saved agent is the
+   * authority when a copied or stale link disagrees.
+   */
+  useEffect(() => {
+    if (
+      agentId === undefined ||
+      agentId === NEW_AGENT ||
+      knownStatus !== "ready" ||
+      known === null ||
+      platform === known.agentPlatform
+    ) {
+      return;
+    }
+    setPlatform(known.agentPlatform);
+    setStep(firstStep(initialGoal, known.agentPlatform));
+  }, [agentId, initialGoal, known, knownStatus, platform]);
+
   useEffect(() => {
     let current = true;
     setCatalog(null);
@@ -459,6 +500,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   function choosePlatform(next: AgentSetupPlatform): void {
+    if (known !== null && next !== known.agentPlatform) return;
     if (next !== platform) clearProviderAnswers();
     setPlatform(next);
   }
@@ -704,22 +746,51 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         : null;
     let landed: ConnectSheetResult | null = saved?.landed ?? null;
     const firstUnsavedLane = saved?.completedLanes ?? 0;
+    let retryConnections: readonly ListedConnection[] = [];
+    let retryPullEnabled = false;
+    if (saved !== null && landed !== null) {
+      setSaving(true);
+      setRefused(null);
+      const answer = await platformAnswer(
+        getAgent(
+          { agentId: landed.agentId, projectId },
+          { client: platformClient },
+        ),
+      );
+      setSaving(false);
+      if (!finishAnswer(answer)) return;
+      retryConnections = answer.value.connections;
+      retryPullEnabled = answer.value.agent.pullProductionCalls;
+    }
     for (const [index, lane] of lanesToSave.entries()) {
       if (index < firstUnsavedLane) continue;
       const candidate = retellCandidateForLane(selectedRoutes, lane, retellRoute);
       if (candidate === undefined) return;
       const option = optionNamed(catalog, candidate);
       if (option === undefined) return;
-      const result = await saveConnection(
-        selectedRetellAgent.name,
-        connectionBody(
-          option,
-          candidate,
-          // Production pull rides on the voice connection, and only once.
-          plan?.pullWithConnection === true && lane === "phone",
-        ),
-        landed?.agentId,
+      const pullsProduction =
+        plan?.pullWithConnection === true && lane === "phone";
+      const body = connectionBody(option, candidate, pullsProduction);
+      /*
+       * A provider write can commit while its HTTP response is lost. On a
+       * retry, read the landed agent first and accept the exact lane already
+       * there instead of issuing the non-idempotent POST a second time.
+       */
+      const committed = retryConnections.find((one) =>
+        sameConnection(one, body),
       );
+      const result =
+        committed !== undefined && (!pullsProduction || retryPullEnabled)
+          ? {
+              agentId: landed?.agentId ?? committed.agentId,
+              connectionId: committed.id,
+              created: landed?.created ?? false,
+            }
+          : await saveConnection(
+              selectedRetellAgent.name,
+              body,
+              landed?.agentId,
+            );
       if (result === null) return;
       landed = {
         ...result,
@@ -950,8 +1021,12 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 choosePlatform(value as AgentSetupPlatform)
               }
             >
-              <ChoiceCard compact value="retell" title="Retell" />
-              <ChoiceCard compact value="livekit" title="LiveKit" />
+              {known === null || known.agentPlatform === "retell" ? (
+                <ChoiceCard compact value="retell" title="Retell" />
+              ) : null}
+              {known === null || known.agentPlatform === "livekit" ? (
+                <ChoiceCard compact value="livekit" title="LiveKit" />
+              ) : null}
             </RadioGroup>
           </div>
         );

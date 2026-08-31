@@ -1417,7 +1417,7 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
   });
 
-  it("honors the provider lane carried by a capability link", async () => {
+  it("uses an existing agent's saved provider when a copied link disagrees", async () => {
     routed.search =
       "?sheet=connect&agent=agt_1&goal=monitoring&platform=livekit";
     sheetAnswers({
@@ -1429,13 +1429,47 @@ describe("goal-first agent setup", () => {
     render(<AgentsPage />);
 
     expect(
-      await screen.findByRole("heading", {
+      await screen.findByLabelText("Retell API key*"),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("heading", {
         name: "Add monitoring to your LiveKit agent",
       }),
-    ).toBeDefined();
-    expect(screen.queryByText("LiveKit · Monitoring")).toBeNull();
-    expect(screen.queryByLabelText("Retell API key*")).toBeNull();
+    ).toBeNull();
   });
+
+  it.each([
+    ["Retell", "retell", "LiveKit"],
+    ["LiveKit", "livekit", "Retell"],
+  ] as const)(
+    "offers only %s when an existing agent chooses a setup goal",
+    async (shown, agentPlatform, hidden) => {
+      routed.search = "?sheet=connect&agent=agt_1";
+      sheetAnswers({
+        "/v1/agents/agt_1": {
+          status: 200,
+          body: {
+            agent: { ...AGENT, agentPlatform },
+            connections: [],
+          },
+        },
+      });
+      render(<AgentsPage />);
+
+      fireEvent.click(
+        await screen.findByRole("radio", { name: /^Run simulations/ }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+      expect(
+        await screen.findByRole("heading", {
+          name: "Choose your agent platform",
+        }),
+      ).toBeDefined();
+      expect(screen.getByRole("radio", { name: shown })).toBeDefined();
+      expect(screen.queryByRole("radio", { name: hidden })).toBeNull();
+    },
+  );
 
   it("waits for an existing agent's saved setup and retries a failed read", async () => {
     routed.search =
@@ -1927,6 +1961,27 @@ describe("goal-first agent setup", () => {
           },
         },
       ],
+      "/v1/agents/agt_multi": {
+        status: 200,
+        body: {
+          agent: {
+            ...AGENT,
+            id: "agt_multi",
+            platformAgentId: "agent_voice_1",
+          },
+          connections: [
+            {
+              ...CONNECTION,
+              id: "con_text",
+              agentId: "agt_multi",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
+              modality: "chat",
+              config: { retellAgentId: "agent_voice_1" },
+            },
+          ],
+        },
+      },
     });
     render(<RegisterAgentPage />);
     await choose("Run simulations", "Retell");
@@ -1973,6 +2028,112 @@ describe("goal-first agent setup", () => {
       ),
     ).toHaveLength(1);
     expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+  });
+
+  it("reads back a committed Retell lane instead of duplicating it after a lost response", async () => {
+    sheetAnswers({
+      "/v1/connection-options": {
+        status: 200,
+        body: {
+          items: [
+            ...TYPES.items,
+            {
+              ...TYPES.items[1],
+              connectionType: "retell_web_call",
+              accessVariant: "retell_web_call.api_key",
+              modality: "voice",
+              productLabel: "Retell web call",
+            },
+          ],
+        },
+      },
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: {
+              ...AGENT,
+              id: "agt_lost_response",
+              name: "Front desk",
+              platformAgentId: "agent_voice_1",
+            },
+            connection: {
+              ...CONNECTION,
+              id: "con_text",
+              connectionType: "retell_text_mode",
+            },
+          },
+        },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+      "/v1/agents/agt_lost_response/connections": {
+        status: 503,
+        body: {
+          error: "response_lost",
+          message: "The connection may have been saved. Try again.",
+        },
+      },
+      "/v1/agents/agt_lost_response": {
+        status: 200,
+        body: {
+          agent: {
+            ...AGENT,
+            id: "agt_lost_response",
+            platformAgentId: "agent_voice_1",
+          },
+          connections: [
+            {
+              ...CONNECTION,
+              id: "con_text",
+              agentId: "agt_lost_response",
+              connectionType: "retell_text_mode",
+              accessVariant: "retell_text_mode.api_key",
+              modality: "chat",
+              config: { retellAgentId: "agent_voice_1" },
+            },
+            {
+              ...CONNECTION,
+              id: "con_web_committed",
+              agentId: "agt_lost_response",
+              connectionType: "retell_web_call",
+              accessVariant: "retell_web_call.api_key",
+              modality: "voice",
+              config: { retellAgentId: "agent_voice_1" },
+            },
+          ],
+        },
+      },
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    fireEvent.click(screen.getByLabelText("Text"));
+    fireEvent.click(screen.getByLabelText("Web call"));
+    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
+
+    expect(
+      await screen.findByText("The connection may have been saved. Try again."),
+    ).toBeDefined();
+    expect(
+      sent.filter(
+        (call) => call.method === "POST" && call.url.includes("/connections"),
+      ),
+    ).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+    expect(
+      sent.filter(
+        (call) => call.method === "POST" && call.url.includes("/connections"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("takes a Simulation voice agent to the phone picker only when Phone call is picked", async () => {
