@@ -471,7 +471,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     livekitAgentName !== "" ||
     Object.values(livekitConfig).some((value) => value !== "") ||
     Object.values(livekitCredentials).some((value) => value !== "");
-  useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
+  const savedLiveKitConnection = platform === "livekit" && completed !== null;
+  useUnsavedChanges(
+    !savedLiveKitConnection && changed && !saving && !discovering,
+    saving || discovering,
+  );
 
   function transition(next: AgentSetupStep): void {
     setRefused(null);

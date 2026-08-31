@@ -3120,6 +3120,9 @@ describe("goal-first agent setup", () => {
     expect(document.body.textContent).toContain(
       "await mockable(agent, ctx, session)",
     );
+    const leaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(leaving);
+    expect(leaving.defaultPrevented).toBe(false);
     expect(screen.queryByText("Close", { selector: "button" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Return to agents" }));
