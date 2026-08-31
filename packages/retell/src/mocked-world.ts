@@ -567,6 +567,15 @@ export async function buildMockedWorld(
   // deliberately not the run's serving version: an agent whose tagged number
   // serves 105 while its `latest` number serves 110 would otherwise have its
   // second number quietly moved back five versions for the length of a run.
+  //
+  // **This `latest` is not the serving read's, and it is not a leftover.** The
+  // serving read above asks for `latest_published`, because a run must never be
+  // conducted against a draft. This read asks the opposite question — *where
+  // does this number send a real caller right now* — and the honest answer to
+  // that includes a draft, because a draft is where the number really goes.
+  // Moving this to the published pointer would take a customer's live number
+  // off the version it reaches today, which is a change to their production
+  // routing that egma has no business making for the length of a test run.
   const pinning = decisions.filter((decision) => decision.pin);
   if (pinning.length > 0) {
     const newest = await resolveAgentVersion(key, agentId, "latest", reach);
