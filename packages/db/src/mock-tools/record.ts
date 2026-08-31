@@ -53,23 +53,8 @@ export type MockEngineNote = {
   readonly toolPrint?: string;
 };
 
-/** One number Egma pinned, and everything it takes to put it back. */
-export type MockNumberNote = {
-  /** E.164, exactly as the platform holds it. */
-  readonly number: string;
-  /**
-   * Where this agent's binding pointed before Egma touched it, verbatim — a
-   * version number, `latest`, a tag's name, or null where the platform held
-   * none at all.
-   */
-  readonly was: string | number | null;
-  /** The numeric version Egma pinned it to for the length of the run. */
-  readonly pinnedTo: number;
-};
-
 export type MockMetadata = {
   readonly engine: MockEngineNote;
-  readonly numbers: readonly MockNumberNote[];
   /**
    * Whether the temporary version was deleted **and the deletion proved**.
    *
@@ -98,13 +83,11 @@ export function mockMetadataFrom(
   const row = value as Record<string, unknown>;
 
   const engine = row["engine"];
-  const numbers = row["numbers"];
   const gone = row["temporary_version_gone"];
   if (
     typeof engine !== "object" ||
     engine === null ||
     Array.isArray(engine) ||
-    !Array.isArray(numbers) ||
     (gone !== undefined && gone !== null && typeof gone !== "boolean")
   ) {
     throw malformed();
@@ -129,21 +112,6 @@ export function mockMetadataFrom(
       ...(typeof print === "string" ? { toolPrint: print } : {}),
     },
     ...(gone === true ? { temporaryVersionGone: true } : {}),
-    numbers: numbers.map((entry) => {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        throw malformed();
-      }
-      const one = entry as Record<string, unknown>;
-      const was = one["was"];
-      if (
-        typeof one["number"] !== "string" ||
-        typeof one["pinned_to"] !== "number" ||
-        (was !== null && typeof was !== "string" && typeof was !== "number")
-      ) {
-        throw malformed();
-      }
-      return { number: one["number"], was, pinnedTo: one["pinned_to"] };
-    }),
   };
 }
 
@@ -166,7 +134,7 @@ export function mockMetadataAsRead(
 ): MockMetadata | null {
   if (metadata === null) return null;
   const { toolPrint: _print, ...engine } = metadata.engine;
-  return { engine, numbers: metadata.numbers };
+  return { engine };
 }
 
 /** The note as a row stores it. Copied, so no caller holds the stored value. */
@@ -183,11 +151,6 @@ export function mockMetadataRow(
         ? {}
         : { tool_print: metadata.engine.toolPrint }),
     },
-    numbers: metadata.numbers.map((one) => ({
-      number: one.number,
-      was: one.was,
-      pinned_to: one.pinnedTo,
-    })),
     // The row's own spelling again. Written only when true, so a note from
     // before this fact existed reads back exactly as it was written.
     ...(metadata.temporaryVersionGone === true

@@ -269,7 +269,6 @@ describe("what the tick discovers", () => {
         number: "+12567332874",
         label: "After hours",
         verdicts: ["environment-tag"],
-        pin: false,
       },
     ]);
   });
@@ -359,7 +358,7 @@ describe("the refusals the enable-time read carries", () => {
     return found.body as {
       mockable: boolean;
       refusal: { reason: string; message: string } | null;
-      numbers: { number: string; pin: boolean }[];
+      numbers: { number: string; verdicts: string[] }[];
       tools: { name: string; coverage: string }[];
     };
   }
@@ -375,16 +374,16 @@ describe("the refusals the enable-time read carries", () => {
   });
 
   it("shows the `latest`-riding number rather than refusing for it", async () => {
-    // The per-number checkbox is gone: pinning and restoring is one of the
-    // four promises the single consent screen makes, so the read shows the
-    // number the promise is about and refuses nothing for it.
+    // Egma writes to no phone number, so a number following Retell's latest
+    // pointer stops nothing. It is read and shown as what it is, and what that
+    // means for a mocked run is the developer's to decide.
     const { key, agentId } = await anAgent("mock_tools_pin_shown", {
       numbers: numbered(RIDES_LATEST),
     });
     const found = await discovered(key, agentId);
     expect(found.mockable).toBe(true);
     expect(found.refusal).toBeNull();
-    expect(found.numbers.some((one) => one.pin)).toBe(true);
+    expect(found.numbers.map((one) => one.verdicts)).toEqual([["hijackable"]]);
   });
 
   it("reads the account for an agent whose only connection is a phone number", async () => {

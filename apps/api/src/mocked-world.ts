@@ -47,10 +47,12 @@ import { platformEvent, safeExceptionType } from "./platform-log.ts";
  * ## Teardown, and the sweep that is the same act
  *
  * A run's own teardown and the next run's sweep call one function with one
- * order: delete the draft, prove it is gone, then restore the pin. The sweep
- * settles the worlds of runs that have **finished**, and never one that could
- * still be conducting — two runs of one agent at once must not tear each
- * other's world down.
+ * order: delete the draft, then prove it is gone. There is nothing else to give
+ * back — Egma writes to no customer's number bindings — so a world is settled
+ * exactly when its temporary version is proved deleted. The sweep settles the
+ * worlds of runs that have **finished**, and never one that could still be
+ * conducting: two runs of one agent at once must not tear each other's world
+ * down.
  *
  * **The proof is why an unsettled world is answered rather than assumed.** A
  * delete's own answer cannot say a version is gone: a request Retell has no
@@ -454,25 +456,7 @@ async function settleTheseMockCleanups(
       reachOf(reach),
     ).catch((cause: unknown) => ({
       unfinished: [`the teardown threw (${safeExceptionType(cause)})`],
-      leftAlone: [] as readonly string[],
     }));
-
-    if (settled.leftAlone.length > 0) {
-      // Not a debt: a binding that has moved since this run pinned it is a
-      // binding Egma must not touch. Recorded so the decision is visible.
-      log.error(
-        platformEvent(
-          "egma.mock_tools.restore_left_alone",
-          "a restore was not made because the binding had moved since",
-          {
-            "egma.agent_id": agentId,
-            "egma.run_id": held.runId,
-            "error.type": "mock_tools_restore_left_alone",
-          },
-        ),
-        settled.leftAlone.join("; "),
-      );
-    }
 
     if (settled.unfinished.length > 0) {
       log.error(

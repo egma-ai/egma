@@ -9,11 +9,9 @@ import {
   listAgentVersions,
   listRoutedNumbers,
   numbersRouting,
-  pinNumberBinding,
   readEngineConfiguration,
   resolveAgentVersion,
   resolveServingAgentVersion,
-  restoreNumberBinding,
   writeEngineTools,
   type RetellCredential,
 } from "../src/index.ts";
@@ -320,9 +318,11 @@ describe("branching, writing and deleting a version", () => {
         },
         REACH(fetchImpl),
       );
-      // The stand-in answers no version of its own, and that is not a
-      // mismatch — it is Retell saying nothing, which no caller may read as
-      // "it wrote somewhere else".
+      // The stand-in answers no version of its own, and the client hands that
+      // back as null rather than inventing the one it asked for. What a null
+      // is worth is the caller's to judge, and the builder refuses it: see
+      // `mocked-world.ts`, where an answer that names no version cannot be
+      // told from one that minted a version nothing can delete.
       expect(written).toEqual({ kind: "written", version: null });
     }
 
@@ -717,141 +717,5 @@ describe("discovering the numbers that route to an agent", () => {
       "environment-tag",
       "environment-tag",
     ]);
-  });
-});
-
-describe("pinning and restoring a binding", () => {
-  it("pins only this agent's entry, keeping every other field verbatim", async () => {
-    const listing = retell(accountWithTwoPagesOfNumbers());
-    const listed = await listRoutedNumbers(key, REACH(listing.fetchImpl));
-    if (listed.kind !== "numbers") throw new Error("expected numbers");
-    const overflow = numbersRouting(listed.numbers, AGENT)[1]!;
-
-    const { fetchImpl, seen } = retell([() => json({ ok: true })]);
-    const pinned = await pinNumberBinding(
-      key,
-      {
-        number: overflow.number,
-        agentId: AGENT,
-        version: 106,
-        bindings: overflow.bindings,
-      },
-      REACH(fetchImpl),
-    );
-
-    expect(pinned).toEqual({ kind: "written" });
-    expect(seen[0]?.method).toBe("PATCH");
-    expect(seen[0]?.url).toBe(
-      "https://retell.invalid/update-phone-number/%2B14155550199",
-    );
-    expect(seen[0]?.body).toEqual({
-      inbound_agents: [
-        { agent_id: "agent_other", agent_version: "latest_published" },
-        {
-          agent_id: AGENT,
-          agent_version: 106,
-          weight: 2,
-          a_field_egma_has_never_heard_of: "keep me",
-        },
-      ],
-    });
-  });
-
-  it("reads the number first and puts back only what it still pinned", async () => {
-    // The number as it stands now: this agent's entry still points where the
-    // run pinned it, so the recorded `was` goes back — onto the array read
-    // now, so a sibling agent's entry survives whatever it has become since.
-    const { fetchImpl, seen } = retell([
-      () =>
-        json({
-          phone_number: "+14155550199",
-          nickname: "Overflow",
-          inbound_agents: [
-            { agent_id: "agent_other", agent_version: "latest_published" },
-            {
-              agent_id: AGENT,
-              agent_version: 106,
-              weight: 2,
-              a_field_egma_has_never_heard_of: "keep me",
-            },
-          ],
-        }),
-      () => json({ ok: true }),
-    ]);
-
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-
-    expect(restored).toEqual({ kind: "restored" });
-    expect(seen[0]?.method).toBe("GET");
-    expect(seen[1]?.method).toBe("PATCH");
-    expect(seen[1]?.body).toEqual({
-      inbound_agents: [
-        { agent_id: "agent_other", agent_version: "latest_published" },
-        {
-          agent_id: AGENT,
-          agent_version: "latest",
-          weight: 2,
-          a_field_egma_has_never_heard_of: "keep me",
-        },
-      ],
-    });
-  });
-
-  it("writes nothing when the binding has moved, and says why", async () => {
-    // Race rule two. A teardown that failed once retries later, and by then
-    // the number may point somewhere else — the customer rebound it, or a
-    // newer run pinned it. Writing the recorded value back then would undo a
-    // deliberate change, and in the worst case would put `latest` onto a newer
-    // run's temporary copy.
-    const { fetchImpl, seen } = retell([
-      () =>
-        json({
-          phone_number: "+14155550199",
-          nickname: "Overflow",
-          inbound_agents: [{ agent_id: AGENT, agent_version: 112 }],
-        }),
-    ]);
-
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-
-    expect(restored.kind).toBe("left-alone");
-    if (restored.kind !== "left-alone") throw new Error("expected left-alone");
-    expect(restored.reason).toContain("no longer points at version 106");
-    // One request, and it was the read. Nothing was written.
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.method).toBe("GET");
-  });
-
-  it("leaves a number that is no longer on the account alone", async () => {
-    const { fetchImpl, seen } = retell([() => json({ error: "gone" }, 404)]);
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: null },
-      REACH(fetchImpl),
-    );
-    expect(restored.kind).toBe("left-alone");
-    expect(seen).toHaveLength(1);
-  });
-
-  it("reports a refused restore instead of throwing, and quotes no key", async () => {
-    const { fetchImpl } = retell([() => json({ error: "boom" }, 500)]);
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-    expect(restored).toEqual({
-      kind: "refused",
-      reason: "Retell is unavailable. Try again.",
-    });
-    expect(JSON.stringify(restored)).not.toContain(KEY);
   });
 });

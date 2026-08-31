@@ -561,6 +561,34 @@ describe("the run-start read", () => {
     }
   });
 
+  it("reads no phone numbers at the connect door, which pins no version", async () => {
+    // Registering a connection conducts nothing and names no version, so the
+    // customer's bindings decide nothing there — and a door that read them
+    // would refuse a registration when that listing failed, in a sentence
+    // about a run that does not exist.
+    const { fetchImpl, asked } = retell({ numbersStatus: 503 });
+    const world = await readTextModeWorld(
+      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+      fetchImpl,
+      undefined,
+      false,
+    );
+
+    expect(world.kind, JSON.stringify(world)).toBe("world");
+    expect(world.kind === "world" ? world.agentVersion : null).toBe(
+      SERVING_VERSION,
+    );
+    expect(asked.some((url) => url.includes("/v2/list-phone-numbers"))).toBe(
+      false,
+    );
+    // It asks the published pointer directly, and reads that version's engine.
+    expect(
+      asked
+        .filter((url) => url.includes("/get-agent/"))
+        .map((url) => new URL(url).searchParams.get("version")),
+    ).toEqual(["latest_published"]);
+  });
+
   it("fails the run when it cannot read the numbers that decide the version", async () => {
     // No fallback. A reference Egma could not work out is a run testing
     // whichever version a guess landed on.

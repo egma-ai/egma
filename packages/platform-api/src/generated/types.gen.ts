@@ -779,7 +779,6 @@ export type DiscoverMockToolsResponses = {
             number: string;
             label: string;
             verdicts: Array<'numeric' | 'environment-tag' | 'latest-published' | 'hijackable'>;
-            pin: boolean;
         }>;
         seeded: Array<string>;
     };
@@ -4357,11 +4356,6 @@ export type GetRunResponses = {
                 engineId: string;
                 version: number | null;
             };
-            numbers: Array<{
-                number: string;
-                was: string | number | null;
-                pinnedTo: number;
-            }>;
         } | null;
         connectionSnapshot: {
             agentPlatform: string | null;

@@ -370,7 +370,7 @@ const RIDES_LATEST = [{ agent_id: AGENT, agent_version: "latest", weight: 3 }];
 const RIDES_TAG = [{ agent_id: AGENT, agent_version: "prod" }];
 
 describe("the binding verdicts, for every number routing to the agent", () => {
-  it("pins `latest` and an unset binding, and lets the other three through", () => {
+  it("reads every binding's verdict, and skips a number that is not this agent's", () => {
     const decisions = bindingDecisionsFor(
       [
         {
@@ -427,19 +427,21 @@ describe("the binding verdicts, for every number routing to the agent", () => {
       AGENT,
     );
 
-    expect(decisions.map((one) => [one.label, one.pin])).toEqual([
-      ["numeric", false],
-      ["tag", false],
-      ["published", false],
-      ["latest", true],
-      ["unset", true],
+    // Read, and acted on nowhere: Egma writes to none of these numbers. What
+    // the verdict decides is the version a run is conducted against.
+    expect(decisions.map((one) => [one.label, one.verdicts])).toEqual([
+      ["numeric", ["numeric"]],
+      ["tag", ["environment-tag"]],
+      ["published", ["latest-published"]],
+      ["latest", ["hijackable"]],
+      ["unset", ["hijackable"]],
     ]);
     // The sixth number routes to somebody else and is not this agent's
     // business at all.
     expect(decisions.some((one) => one.number === "+15550000006")).toBe(false);
   });
 
-  it("pins a shared number when any one of this agent's entries rides latest", () => {
+  it("keeps every one of this agent's entries on a shared number", () => {
     const [decision] = bindingDecisionsFor(
       [
         {
@@ -459,11 +461,9 @@ describe("the binding verdicts, for every number routing to the agent", () => {
       AGENT,
     );
 
-    expect(decision?.pin).toBe(true);
     expect(decision?.verdicts).toEqual(["numeric", "hijackable"]);
-    // The whole array rides along, the other agent's entry included: the write
-    // that puts it back replaces the array, so a decision that dropped an entry
-    // would delete somebody's routing.
+    // The whole array rides along, the other agent's entry included, so a
+    // reader of the screen sees the number as Retell really holds it.
     expect(decision?.bindings).toHaveLength(3);
     // But the reading of what runs against the number is this agent's entries
     // only.
@@ -471,9 +471,10 @@ describe("the binding verdicts, for every number routing to the agent", () => {
   });
 
   it("resolves the version from this agent's binding, never a sibling agent's", () => {
-    // A number two agents share: the other agent pins it to 7, this agent
-    // rides `latest`. The version this run tests must be this agent's `latest`,
-    // not the stranger's 7 — a version no traffic to this agent ever reaches.
+    // A number two agents share: the other agent is bound to 7, this agent
+    // rides `latest`. The version this run tests must follow this agent's own
+    // binding, not the stranger's 7 — a version no traffic to this agent ever
+    // reaches.
     const decisions = bindingDecisionsFor(
       [
         {
@@ -745,172 +746,6 @@ describe("the write that must edit rather than mint", () => {
   });
 });
 
-describe("the pin, and the routing it promises to put back", () => {
-  it("pins a number riding `latest`, and puts every byte of it back", async () => {
-    const original = [
-      { agent_id: AGENT, agent_version: "latest", weight: 3, a_field_egma_never_read: "keep me" },
-      { agent_id: OTHER_AGENT, agent_version: 7 },
-    ];
-    const retell = account({ numbers: { "+12567332874": original } });
-    const kept = recorder();
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind, JSON.stringify(built)).toBe("built");
-    if (built.kind !== "built") return;
-
-    // During the run the number is on a real numeric version, so a caller
-    // ringing mid-run reaches the real agent with real tools.
-    expect(retell.bindingsOf("+12567332874")).toEqual([
-      { agent_id: AGENT, agent_version: 105, weight: 3, a_field_egma_never_read: "keep me" },
-      { agent_id: OTHER_AGENT, agent_version: 7 },
-    ]);
-    // The note says where the binding pointed and what Egma pinned it to —
-    // the two values a restore reads before it decides to write.
-    expect(built.state.mockMetadata?.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
-
-    const finished = await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(finished.unfinished).toEqual([]);
-    // Restored, not reconstructed: the field Egma never read is still there.
-    expect(retell.bindingsOf("+12567332874")).toEqual(original);
-    expect(mockRunIsSettled(finished.state)).toBe(true);
-  });
-
-  it("never touches a tag assignment", async () => {
-    const retell = account({
-      numbers: { "+12567332874": RIDES_TAG },
-      tags: { prod: 105 },
-    });
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "prod", target: TARGET, record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: async () => undefined },
-      REACH(retell.fetchImpl),
-    );
-
-    // Not one write to the number, in either direction. A tagged number was
-    // never pinned, so putting it "back" would be Egma editing a binding it
-    // had no business in.
-    expect(
-      retell.seen.filter((one) => one.url.includes("/update-phone-number/")),
-    ).toEqual([]);
-    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
-  });
-
-  it("pins to what that number reaches now, not to the version the run tests", async () => {
-    // The customer's tagged number serves 105. A second number rides `latest`,
-    // which is 110 today. Pinning the second number to 105 would quietly move
-    // its callers back five versions for the length of a run.
-    const retell = account({
-      alsoVersions: [110],
-      tags: { prod: 105 },
-      numbers: {
-        "+12567332874": RIDES_TAG,
-        "+12567332875": RIDES_LATEST,
-      },
-    });
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, target: TARGET, record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(built.kind, JSON.stringify(built)).toBe("built");
-    if (built.kind !== "built") return;
-    // The run tests what a real caller reaches, worked out from the numbers.
-    expect(built.agentVersion).toBe(105);
-    // And the pin preserves the other number's behaviour exactly.
-    expect(retell.bindingsOf("+12567332875")[0]?.["agent_version"]).toBe(110);
-    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
-  });
-
-  it("pins only the hijackable entry, and leaves a numeric sibling alone", async () => {
-    // Weighted routing: this agent has both a numeric entry (105) and a
-    // hijackable one (latest) on one number. Pinning the whole array to
-    // `latest`'s resolved version would move the 105 sibling — the exact
-    // hijack this pin exists to stop, by Egma's own hand.
-    const mixed = [
-      { agent_id: AGENT, agent_version: 105, weight: 1 },
-      { agent_id: AGENT, agent_version: "latest", weight: 4 },
-      { agent_id: OTHER_AGENT, agent_version: 9 },
-    ];
-    const retell = account({
-      alsoVersions: [112],
-      numbers: { "+12567332874": mixed },
-    });
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind, JSON.stringify(built)).toBe("built");
-    if (built.kind !== "built") return;
-
-    // Only the hijackable entry moved to what `latest` reaches now; the numeric
-    // sibling kept its 105, and the other agent kept its 9.
-    expect(retell.bindingsOf("+12567332874")).toEqual([
-      { agent_id: AGENT, agent_version: 105, weight: 1 },
-      { agent_id: AGENT, agent_version: 112, weight: 4 },
-      { agent_id: OTHER_AGENT, agent_version: 9 },
-    ]);
-
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: async () => undefined },
-      REACH(retell.fetchImpl),
-    );
-    // And the whole array is restored, byte for byte.
-    expect(retell.bindingsOf("+12567332874")).toEqual(mixed);
-  });
-
-  it("records the pin it is about to make before it makes it", async () => {
-    const retell = account({ numbers: { "+12567332874": RIDES_LATEST } });
-    const kept = recorder();
-    await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-
-    // The very first record is written before a single request goes out, and
-    // it already owes a cleanup: a crash anywhere after it is a run the next
-    // claim finds by one indexed query.
-    const first = kept.written[0];
-    expect(first?.tempMockAgentVersion).toBeNull();
-    expect(first?.tempMockAgentVersionCleanup).toBe(false);
-
-    // And the pin is written down before it is made, so a crash between the
-    // two leaves a restore that finds the binding untouched and leaves it
-    // alone, rather than a pin nobody knows about.
-    const beforeThePin = kept.written.find(
-      (one) => (one.mockMetadata?.numbers.length ?? 0) > 0,
-    );
-    expect(beforeThePin?.tempMockAgentVersion).toBeNull();
-    expect(beforeThePin?.mockMetadata?.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
-  });
-});
-
 describe("the fork guard", () => {
   it("refuses a branch that still shares the serving engine version, before any write", async () => {
     const retell = account({ branching: "share" });
@@ -1056,62 +891,6 @@ describe("the custom-LLM refusal", () => {
 });
 
 describe("the teardown, and the sweep that finishes it", () => {
-  it("deletes the draft before it restores a pin", async () => {
-    const retell = account({ numbers: { "+12567332874": RIDES_LATEST } });
-    const kept = recorder();
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-
-    const before = retell.seen.length;
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    const during = retell.seen.slice(before);
-
-    const deleteAt = during.findIndex((one) => one.method === "DELETE");
-    const restoreAt = during.findIndex((one) => one.url.includes("/update-phone-number/"));
-    expect(deleteAt).toBeGreaterThanOrEqual(0);
-    expect(restoreAt).toBeGreaterThanOrEqual(0);
-    // The reverse order is lethal: restoring `latest` while the draft exists
-    // makes the draft *be* latest.
-    expect(deleteAt).toBeLessThan(restoreAt);
-  });
-
-  it("does not restore a pin when the delete failed", async () => {
-    const retell = account({
-      numbers: { "+12567332874": RIDES_LATEST },
-      refuse: { "/delete-agent-version/": 500 },
-    });
-    const kept = recorder();
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-
-    const finished = await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(finished.unfinished[0]).toContain("deleting temporary version 106");
-    // Still pinned, and still owed. A number left on `latest` beside a live
-    // draft is the one state that hurts a customer.
-    expect(retell.bindingsOf("+12567332874")[0]?.["agent_version"]).toBe(105);
-    expect(finished.state.mockMetadata?.numbers).toHaveLength(1);
-    expect(mockRunIsSettled(finished.state)).toBe(false);
-  });
-
   it("sweeps what a crashed run left, from that run's own recorded bindings", async () => {
     // A run that branched, pinned, and then died: its record is all that is
     // left of it, and it is enough.
@@ -1146,7 +925,6 @@ describe("the teardown, and the sweep that finishes it", () => {
       tempMockAgentVersionCleanup: false,
       mockMetadata: {
         engine: { type: "conversation-flow", engineId: FLOW, version: 999 },
-        numbers: [],
       },
     };
 
@@ -1195,10 +973,11 @@ describe("the proof that the delete happened", () => {
 
     expect(mockRunIsSettled(finished.state)).toBe(false);
     expect(finished.unfinished.join(" ")).toContain("still hold it");
-    // The draft is what it says: still there.
+    // The draft is what it says: still there, and the record keeps saying so.
     expect(retell.versions.has(106)).toBe(true);
-    // And the pin stands, which is what keeps real callers off it.
-    expect(retell.bindingsOf("+12567332874")[0]?.["agent_version"]).toBe(105);
+    expect(finished.state.mockMetadata?.temporaryVersionGone).toBeUndefined();
+    // The customer's number was never touched, before or after.
+    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_LATEST);
   });
 
   it("does not record the account put back when a 204 delete left the version standing", async () => {
@@ -1248,17 +1027,17 @@ describe("the proof that the delete happened", () => {
   });
 
   it("never deletes a version twice once the read-back proved it gone", async () => {
-    // A teardown can finish the delete, prove it, and still fail a restore —
-    // and the next sweep retries the whole function. Retell hands the next
-    // branch the lowest free number, so a second delete can land on somebody
-    // else's draft: the customer's own, made while Egma still owed a restore.
-    // Read live on every request, so the pin lands during the build and only
-    // the restore afterwards fails.
+    // A teardown can finish the delete, prove it, and still leave the world
+    // unsettled on something else — here the serving version's own read-back,
+    // which the note promises and which runs before the delete. The next sweep
+    // retries the whole function, and Retell hands the next branch the lowest
+    // free number: a second delete can land on somebody else's draft, made in
+    // the window while this world stayed unsettled.
+    //
+    // The refusal map is read live on every request, so the build runs clean
+    // and only the teardown afterwards meets a wall.
     const refuse: Record<string, number> = {};
-    const retell = account({
-      numbers: { "+12567332874": RIDES_LATEST },
-      refuse,
-    });
+    const retell = account({ refuse });
     const kept = recorder();
     const built = await buildMockedWorld(
       key,
@@ -1267,22 +1046,23 @@ describe("the proof that the delete happened", () => {
     );
     expect(built.kind, JSON.stringify(built)).toBe("built");
     if (built.kind !== "built") return;
-    refuse["/update-phone-number/"] = 500;
+    refuse["/get-conversation-flow/"] = 500;
 
     const first = await finishMockedWorld(
       key,
       { agentId: AGENT, state: built.state, record: kept.record },
       REACH(retell.fetchImpl),
     );
-    // The copy is gone, and the restore is not: the world still owes something.
+    // The copy is gone; the promise about the serving version could not be
+    // kept, so the world is not settled.
     expect(retell.versions.has(106)).toBe(false);
-    expect(first.unfinished.join(" ")).toContain("restoring +12567332874");
+    expect(first.unfinished.join(" ")).toContain("never moved");
     expect(mockRunIsSettled(first.state)).toBe(false);
     // The version number stays — it is what this run branched — and the note
     // beside it says it is no longer standing.
     expect(first.state.tempMockAgentVersion).toBe(106);
     expect(first.state.mockMetadata?.temporaryVersionGone).toBe(true);
-    // Recorded, so the next process reads it rather than re-learning it.
+    // Recorded once, so the next process reads it rather than re-learning it.
     expect(kept.last().mockMetadata?.temporaryVersionGone).toBe(true);
 
     // The customer branches their own draft in the window, and Retell gives it
@@ -1299,6 +1079,7 @@ describe("the proof that the delete happened", () => {
     });
 
     const before = retell.seen.length;
+    const writes = kept.written.length;
     const second = await finishMockedWorld(
       key,
       { agentId: AGENT, state: first.state, record: kept.record },
@@ -1306,10 +1087,17 @@ describe("the proof that the delete happened", () => {
     );
     const during = retell.seen.slice(before);
 
-    // Not one delete. The sweep goes straight to the restore it still owes.
+    // Not one delete: the customer's draft is untouched.
     expect(during.filter((one) => one.method === "DELETE")).toEqual([]);
     expect(retell.versions.has(106)).toBe(true);
-    expect(second.unfinished.join(" ")).toContain("restoring +12567332874");
+    // The same debt is still reported.
+    expect(second.unfinished.join(" ")).toContain("never moved");
+    expect(mockRunIsSettled(second.state)).toBe(false);
+    // **And nothing was written down.** Nothing about what Egma owes moved on
+    // this pass, and a finished run's header refuses a write that moves
+    // neither the note nor the cleanup flag — so a record here would come back
+    // as a database error standing in for the real sentence above.
+    expect(kept.written.length).toBe(writes);
   });
 
   it("deletes the version with the version in the query string", async () => {

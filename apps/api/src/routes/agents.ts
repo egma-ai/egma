@@ -1861,7 +1861,6 @@ export async function agentRoutes(
         number: number.number,
         label: number.label,
         verdicts: number.verdicts,
-        pin: number.pin,
       })),
       seeded: seededNames,
     });

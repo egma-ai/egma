@@ -38,11 +38,11 @@ import { Failure, Loading } from "@/ui/page-state.tsx";
  * **One consent, and only for the web-call lane.** Turning mocks on for a web
  * call is standing permission for Egma to write to the customer's Retell
  * account at the start of every run, so it goes through one screen carrying the
- * four promises and one button. There is **no per-number checkbox**: pinning a
- * `latest`-riding number and putting it back is one of those four promises, so
- * one informed yes is the whole ceremony. **The text lane shows no consent at
- * all** — it writes nothing to the customer's account, and arrives with mocks
- * already on.
+ * four promises and one button. There is **no per-number checkbox**, because
+ * Egma writes to no phone number at all — there is nothing about one to consent
+ * to. One informed yes is the whole ceremony. **The text lane shows no consent
+ * at all** — it writes nothing to the customer's account, and arrives with
+ * mocks already on.
  *
  * **The consent flow mints the web-call connection when the agent has none**,
  * so the feature can never refuse a person with a step the product cannot
@@ -141,11 +141,25 @@ function laneOf(connectionType: string): LaneType | null {
   return connectionType in LANES ? (connectionType as LaneType) : null;
 }
 
-/** The four promises, in the words the spec settled. One screen, one button. */
+/**
+ * The promises, in the words the spec settled. One screen, one button.
+ *
+ * The pin-and-restore promise that stood third is gone with the pinning itself
+ * (developer ruling, 2026-08-31): Egma writes nothing to a customer's phone
+ * numbers, so there is no promise to make about them. Its place is taken by the
+ * one thing that is now true and was not said — Egma touches nothing but its
+ * own copy.
+ *
+ * **What a number bound to Latest Created means for a mocked run is not said
+ * here yet.** A temporary draft is the latest *created* version, so such a
+ * number reaches it mid-run; that is a fact for a developer to act on rather
+ * than a promise Egma makes, and where it belongs is being settled with the
+ * connect flow's redesign.
+ */
 export const CONSENT_PROMISES: readonly string[] = [
   "Create a temporary version of this agent in Retell when a run starts, with every tool it can intercept pointed at Egma, and delete that temporary version when the run ends.",
   "Never modify the version your agent serves. Egma reads it back during every run to prove it did not move.",
-  "Pin a phone number that follows Retell's latest pointer to the version it already reaches, for the length of each run, and put the binding back exactly as it was.",
+  "Never change your phone numbers, your tags, or any version you made. The temporary version is the only thing Egma writes.",
   "Never dial your published number for a mocked run. A real caller during a run reaches your real agent with your real tools.",
 ];
 
@@ -582,13 +596,13 @@ function LanesSection({
  * The one consent screen: four promises and one button.
  *
  * Each promise is one this product keeps somewhere in code — the temporary
- * version and its deletion, the serving version proven unmoved, the
- * pin-and-restore, the published number never dialled. They are here rather
- * than in a help line because a help line says what to write in a field, and
- * this is what Egma will do to somebody's Retell account.
+ * version and its deletion, the serving version proven unmoved, nothing of the
+ * customer's ever written, the published number never dialled. They are here
+ * rather than in a help line because a help line says what to write in a field,
+ * and this is what Egma will do to somebody's Retell account.
  *
- * **There is no second checkbox.** Pinning a `latest`-riding number is one of
- * the four promises, so one informed yes is the whole ceremony.
+ * **There is no second checkbox**, and nothing here asks about a phone number:
+ * Egma writes to none of them, so there is nothing to ask consent for.
  */
 function ConsentScreen({
   mints,
@@ -706,15 +720,16 @@ function WarningsSection({
 }
 
 /**
- * The numbers routing to this agent, what each one is bound to, and the one
- * question that needs an answer.
+ * The numbers routing to this agent, and what each one is bound to.
+ *
+ * A reading and nothing more. Egma writes to none of these, so there is no
+ * column here saying what it will do to them.
  */
 function NumbersSection({
   numbers,
 }: {
   readonly numbers: readonly DiscoveredNumber[];
 }) {
-  const toPin = numbers.filter((number) => number.pin);
   return (
     <section
       aria-labelledby="mock-tools-numbers-heading"
@@ -733,33 +748,11 @@ function NumbersSection({
               <span className="font-mono text-sm text-foreground">
                 {number.number}
               </span>
-              <span className="text-sm text-faint">
-                {bindingText(number)}
-              </span>
-            </span>
-            <span
-              className={
-                number.pin
-                  ? "flex-none text-sm text-warning"
-                  : "flex-none text-sm text-faint"
-              }
-            >
-              {number.pin ? "Needs a pin" : "Untouched"}
+              <span className="text-sm text-faint">{bindingText(number)}</span>
             </span>
           </li>
         ))}
       </ul>
-      {toPin.length === 0 ? null : (
-        // **No second checkbox.** Pinning a `latest`-riding number and putting
-        // it back is one of the four promises the one consent screen makes, so
-        // this says which numbers the promise is about and nothing is asked
-        // twice.
-        <p className="m-0 border border-border p-4 text-sm text-faint" role="note">
-          {toPin.length === 1 ? "This number is" : "These numbers are"} pinned
-          during each mocked run and restored afterwards, so a real caller
-          mid-run always reaches the real agent.
-        </p>
-      )}
     </section>
   );
 }

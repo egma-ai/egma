@@ -1,5 +1,6 @@
 import {
   bindingDecisionsFor,
+  LATEST_PUBLISHED,
   listRoutedNumbers,
   readEngineConfiguration,
   resolveServingAgentVersion,
@@ -7,6 +8,7 @@ import {
   type AgentVersion,
   type Fetch as ProviderFetch,
   type RetellCredential,
+  type VersionReference,
 } from "@egma/retell";
 
 /**
@@ -50,7 +52,13 @@ import {
  * version, which is a result nobody can tie to an agent.
  */
 
-/** How long the two run-start reads may take together. */
+/**
+ * How long one lane's run-start reads may take together.
+ *
+ * Up to three requests on the text-mode lane — the account's numbers, the
+ * version, and that version's engine — and two on the web-call lane, which
+ * needs no engine read.
+ */
 const READ_TIMEOUT_MILLISECONDS = 15_000;
 
 /**
@@ -131,42 +139,58 @@ type LaneReach = {
  * it, and the credential is used and never returned, logged, or quoted — the
  * shared client owns that discipline.
  *
- * **Two requests, and the first one is what stops a screen and a run
- * disagreeing.** The account's numbers are read, and this agent's own bindings
- * decide the reference — a number bound to a version, a number riding an
- * environment tag, and `latest_published` only where no binding names anything.
- * That is the same reference `versionReferenceIn` gives the enable-time screen
- * and the mocked builder, resolved through the same verb. Asking for the
- * published pointer here regardless would have let a screen call an agent
- * mockable, on the strength of a number bound to version 5, while the run
- * refused it for publishing nothing — two surfaces reading one account and
- * telling a developer two different things about it.
+ * **Which reference, and who asks for it.** A run resolves what this agent's
+ * own number bindings name — a bound version, an environment tag, and
+ * `latest_published` only where no binding names anything — which is the same
+ * reference `versionReferenceIn` gives the enable-time screen and the mocked
+ * builder, resolved through the same verb. Asking for the published pointer
+ * regardless would let a screen call an agent mockable on the strength of a
+ * number bound to version 5 while the run refused it for publishing nothing:
+ * one account, two answers.
+ *
+ * **The connect door asks for less, and that is deliberate.** Registering a
+ * connection conducts nothing: it is asking whether this lane can reach this
+ * agent at all. It has no version to pin, so it has no business reading the
+ * customer's phone numbers — and a door that failed on a numbers listing would
+ * refuse a registration for something no registration depends on, in a sentence
+ * about a run that does not exist. `bindings` is what separates the two.
  */
 async function readServingVersion(
   lane: LaneReach,
+  /**
+   * Whether the agent's number bindings decide the version.
+   *
+   * True for a run start, which is conducted against one version and must
+   * agree with every other surface about which. False for the connect door,
+   * which pins nothing and asks only whether this lane can reach the agent.
+   */
+  bindings: boolean,
 ): Promise<
   | { readonly kind: "serving"; readonly agentVersion: AgentVersion }
   | Exclude<PlatformWorldRead, { readonly kind: "world" }>
 > {
-  const listed = await listRoutedNumbers(lane.key, lane.reach);
-  if (listed.kind === "invalid-key") {
-    return {
-      kind: "refused",
-      message:
-        "Retell rejected this connection's stored API key, so Egma could not " +
-        "read which version of the agent is serving. Update the connection " +
-        "before starting another run.",
-    };
+  let reference: VersionReference = LATEST_PUBLISHED;
+  if (bindings) {
+    const listed = await listRoutedNumbers(lane.key, lane.reach);
+    if (listed.kind === "invalid-key") {
+      return {
+        kind: "refused",
+        message:
+          "Retell rejected this connection's stored API key, so Egma could " +
+          "not read which version of the agent is serving. Update the " +
+          "connection before starting another run.",
+      };
+    }
+    // No fallback. A run whose reference Egma could not work out is a run that
+    // would test whichever version a guess landed on, and the whole of this
+    // file exists so that a result names an agent a reader can go back to.
+    if (listed.kind !== "numbers") {
+      return unavailable("this agent's phone numbers");
+    }
+    reference = versionReferenceIn(
+      bindingDecisionsFor(listed.numbers, lane.agentId),
+    );
   }
-  // No fallback. A run whose reference Egma could not work out is a run that
-  // would test whichever version a guess landed on, and the whole of this file
-  // exists so that a result names an agent a reader can go back to.
-  if (listed.kind !== "numbers") {
-    return unavailable("this agent's phone numbers");
-  }
-  const reference = versionReferenceIn(
-    bindingDecisionsFor(listed.numbers, lane.agentId),
-  );
 
   const resolved = await resolveServingAgentVersion(
     lane.key,
@@ -265,7 +289,7 @@ export async function readWebCallWorld(
   );
   if ("kind" in lane) return lane;
 
-  const serving = await readServingVersion(lane);
+  const serving = await readServingVersion(lane, true);
   if (serving.kind !== "serving") return serving;
   return { kind: "world", agentVersion: serving.agentVersion.version };
 }
@@ -275,6 +299,13 @@ export async function readWebCallWorld(
  *
  * The second read is a gate and not a stamp: what comes back decides whether
  * text mode can reach this agent at all, and nothing of it is kept.
+ *
+ * **Two callers, one of which conducts nothing.** A run start passes
+ * `bindings: true`, because the version it lands on has to be the one every
+ * other surface would name. The connect door passes false: it is asking whether
+ * this lane can reach this agent at all, it pins no version, and reading the
+ * customer's phone numbers to answer that would let a registration fail on
+ * something no registration depends on.
  */
 export async function readTextModeWorld(
   input: {
@@ -283,6 +314,7 @@ export async function readTextModeWorld(
   },
   fetchImpl: ProviderFetch = fetch,
   timeoutMilliseconds = READ_TIMEOUT_MILLISECONDS,
+  bindings = true,
 ): Promise<PlatformWorldRead> {
   const lane = laneReach(
     input,
@@ -293,7 +325,7 @@ export async function readTextModeWorld(
   if ("kind" in lane) return lane;
   const { key, agentId, reach } = lane;
 
-  const serving = await readServingVersion(lane);
+  const serving = await readServingVersion(lane, bindings);
   if (serving.kind !== "serving") return serving;
 
   const { agentVersion } = serving;

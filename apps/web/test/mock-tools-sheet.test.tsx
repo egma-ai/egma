@@ -160,7 +160,7 @@ function discovery(
   over: Partial<{
     mockable: boolean;
     refusal: { reason: string; message: string } | null;
-    numbers: { number: string; label: string; verdicts: string[]; pin: boolean }[];
+    numbers: { number: string; label: string; verdicts: string[] }[];
     seeded: string[];
   }> = {},
 ) {
@@ -176,7 +176,6 @@ function discovery(
         number: "+12567332874",
         label: "After hours",
         verdicts: ["environment-tag"],
-        pin: false,
       },
     ],
     seeded: [],
@@ -376,7 +375,7 @@ describe("the mock-tools panel", () => {
     expect(
       screen.getByText(/Never modify the version your agent serves/u),
     ).toBeDefined();
-    expect(screen.getByText(/put the binding back exactly as it was/u)).toBeDefined();
+    expect(screen.getByText(/Never change your phone numbers, your tags, or any version you made/u)).toBeDefined();
     expect(
       screen.getByText(/Never dial your published number for a mocked run/u),
     ).toBeDefined();

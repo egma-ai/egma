@@ -34,7 +34,6 @@ afterEach(async () => {
 
 const RETELL_AGENT = "agent_b0e2e9cb267c47e7e7026cd8e8";
 const KEY = "retell-secret-A1B2C3D4WXYZ";
-const PINNED_NUMBER = "+15550100";
 
 /**
  * A Retell that only ever has to answer the delete a teardown might send, and
@@ -70,47 +69,26 @@ const RETELL: typeof fetch = (async (input: string | URL | Request, init?: Reque
 }) as typeof fetch;
 
 /**
- * The same account with one pinned number on it, and a count of every binding
- * it was asked to write.
+ * The same account, with a count of every delete it was asked to make.
  *
- * A restore is the one write a duplicated settle must not make twice: the
- * second one would be putting a `latest` binding back that somebody else has
- * already put back, over an account that may since have grown a newer run's
- * temporary version.
+ * A delete is the one write a duplicated settle must not make twice: Retell
+ * hands the next branch the lowest free number, so by the time a second settle
+ * arrives the number this run branched can belong to somebody else's draft.
  */
-function anAccountHoldingAPin(): {
+function anAccountCountingDeletes(): {
   readonly fetchImpl: typeof fetch;
-  readonly restores: { count: number };
+  readonly deletes: { count: number };
 } {
-  const restores = { count: 0 };
-  let bindings: readonly Record<string, unknown>[] = [
-    { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
-  ];
+  const deletes = { count: 0 };
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
     const method = init?.method ?? "GET";
-    const path = new URL(url).pathname;
-    const json = (value: unknown) =>
-      new Response(JSON.stringify(value), { status: 200 });
-    if (method === "GET" && path.startsWith("/get-phone-number/")) {
-      return json({
-        phone_number: PINNED_NUMBER,
-        nickname: "Front desk",
-        inbound_agents: bindings,
-      });
-    }
-    if (method === "PATCH" && path.startsWith("/update-phone-number/")) {
-      restores.count += 1;
-      bindings = (init?.body === undefined
-        ? []
-        : (JSON.parse(String(init.body)) as Record<string, unknown>)[
-            "inbound_agents"
-          ]) as readonly Record<string, unknown>[];
-      return json({ phone_number: PINNED_NUMBER });
+    if (method === "DELETE") {
+      deletes.count += 1;
+      return new Response(JSON.stringify({ deleted: true }), { status: 200 });
     }
     return RETELL(input as string, init);
   }) as typeof fetch;
-  return { fetchImpl, restores };
+  return { fetchImpl, deletes };
 }
 
 const SWEEP_LOG = { error: () => undefined };
@@ -196,8 +174,6 @@ async function seedRun(
   copy: { readonly version: number | null } | null,
   minutesOld: number,
   status: "pending" | "completed" = "pending",
-  /** The numbers this run's note says it pinned, if it pinned any. */
-  numbers: readonly Record<string, unknown>[] = [],
   /** What this run's note says the serving version's tools looked like. */
   toolPrint?: string,
 ): Promise<{ runId: string; simulationId: string }> {
@@ -249,7 +225,6 @@ async function seedRun(
           version: 105,
           ...(toolPrint === undefined ? {} : { tool_print: toolPrint }),
         },
-        numbers,
       }),
     ],
   );
@@ -437,7 +412,6 @@ describe("a teardown resumed from the note alone", () => {
       BRANCHED,
       20,
       "completed",
-      [],
       canonicalJson(TOOLS),
     );
     const auth = contextFor(ready.ada, "member");
@@ -460,7 +434,6 @@ describe("a teardown resumed from the note alone", () => {
       BRANCHED,
       20,
       "completed",
-      [],
       canonicalJson(TOOLS),
     );
     const auth = contextFor(ready.ada, "member");
@@ -498,17 +471,15 @@ describe("a teardown resumed from the note alone", () => {
  * of them meeting is ordinary, not exotic. They take turns behind the agent's
  * mocked-world fence, and the one that arrives second re-reads the cleanup flag
  * inside it: a run somebody else has already put back is not in its list, so it
- * writes nothing. Without that re-read the second one would restore a `latest`
- * binding a moment after the first did — over an account that by then may hold
- * a newer run's temporary version, which is the hijack itself.
+ * asks Retell for nothing. Without that re-read the second one would delete a
+ * version number a moment after the first did — and Retell gives the next
+ * branch the lowest free number, so by then it can be somebody else's draft.
  */
 describe("a settle that arrives after somebody else settled the run", () => {
-  const PINNED = [{ number: PINNED_NUMBER, was: "latest", pinned_to: 105 }];
-
-  it("restores nothing, and still answers settled", async () => {
+  it("deletes nothing a second time, and still answers settled", async () => {
     const ready = await aTickedAgent("sweep_settles_once");
-    const account = anAccountHoldingAPin();
-    const { runId } = await seedRun(ready, BRANCHED, 20, "completed", PINNED);
+    const account = anAccountCountingDeletes();
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
     const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
 
@@ -517,15 +488,15 @@ describe("a settle that arrives after somebody else settled the run", () => {
 
     expect(first).toEqual({ kind: "settled" });
     expect(second).toEqual({ kind: "settled" });
-    // One restore, not two. The second settle found the flag already true.
-    expect(account.restores.count).toBe(1);
+    // One delete, not two. The second settle found the flag already true.
+    expect(account.deletes.count).toBe(1);
     expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
   });
 
   it("settles once when two of them run at the same time", async () => {
     const ready = await aTickedAgent("sweep_settles_once_racing");
-    const account = anAccountHoldingAPin();
-    const { runId } = await seedRun(ready, BRANCHED, 20, "completed", PINNED);
+    const account = anAccountCountingDeletes();
+    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
     const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
 
@@ -538,7 +509,7 @@ describe("a settle that arrives after somebody else settled the run", () => {
     ]);
 
     expect(both).toEqual([{ kind: "settled" }, { kind: "settled" }]);
-    expect(account.restores.count).toBe(1);
+    expect(account.deletes.count).toBe(1);
     expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
   });
 });

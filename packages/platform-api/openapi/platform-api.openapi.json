@@ -2967,16 +2967,12 @@
                                 "hijackable"
                               ]
                             }
-                          },
-                          "pin": {
-                            "type": "boolean"
                           }
                         },
                         "required": [
                           "number",
                           "label",
-                          "verdicts",
-                          "pin"
+                          "verdicts"
                         ],
                         "additionalProperties": false
                       }
@@ -15750,44 +15746,10 @@
                                 "version"
                               ],
                               "additionalProperties": false
-                            },
-                            "numbers": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "number": {
-                                    "type": "string"
-                                  },
-                                  "was": {
-                                    "oneOf": [
-                                      {
-                                        "type": "string"
-                                      },
-                                      {
-                                        "type": "integer"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ]
-                                  },
-                                  "pinnedTo": {
-                                    "type": "integer"
-                                  }
-                                },
-                                "required": [
-                                  "number",
-                                  "was",
-                                  "pinnedTo"
-                                ],
-                                "additionalProperties": false
-                              }
                             }
                           },
                           "required": [
-                            "engine",
-                            "numbers"
+                            "engine"
                           ],
                           "additionalProperties": false
                         },

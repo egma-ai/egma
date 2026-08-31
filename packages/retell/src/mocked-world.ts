@@ -2,56 +2,66 @@
  * The temporary world one run builds on a Retell account, and unbuilds.
  *
  * Everything here is the **order** — the part that cannot be got wrong twice.
- * The verbs it is written out of are the ones beside it: number reads and
- * binding writes in `numbers.ts`, version reads and writes in `versions.ts`,
- * the pure transform in `mock-draft.ts`. Nothing new reaches Retell from here;
- * what is new is the sequence, the guards between its steps, and the record it
- * leaves behind so that somebody else can finish what a crashed run started.
+ * The verbs it is written out of are the ones beside it: number reads in
+ * `numbers.ts`, version reads and writes in `versions.ts`, the pure transform
+ * in `mock-draft.ts`. Nothing new reaches Retell from here; what is new is the
+ * sequence, the guards between its steps, and the record it leaves behind so
+ * that somebody else can finish what a crashed run started.
+ *
+ * ## Egma writes to exactly one thing
+ *
+ * **One temporary agent version, made by this run and deleted by it.** Nothing
+ * here touches the customer's phone numbers, their tags, or any version they
+ * made. Egma used to pin a number riding `latest` for the length of a run and
+ * put it back afterwards; that is gone (developer ruling, 2026-08-31). Retell's
+ * own picker offers Latest Created and Latest Published beside real tags, tags
+ * are movable, and an unassigned tag resolves to latest without saying so —
+ * too many edges for egma to be editing somebody's inbound routing across them.
+ *
+ * So the hazard the pin covered is now **said** rather than acted on: a
+ * temporary draft is the latest *created* version, and a number or tag pointing
+ * at Latest Created reaches it while a mocked run is in flight. The mock-tools
+ * screen says that where mocking is turned on, and the developer decides.
  *
  * ## The order, and why each step is where it is
  *
- * 1. **Sweep** — `finishMockedWorld` over what a previous run recorded, deletes
- *    before restores. Run before anything new is made, so litter never becomes
- *    a hazard.
- * 2. **Verdicts** — every number routing to the agent, judged by
- *    `bindingVerdictOf`. Re-read every run, because a customer can rebind
- *    between two of them.
- * 3. **Capture** — the serving version, the serving engine configuration, and
- *    every touched number's bindings **verbatim**, written down before
- *    anything is changed. A teardown restores what is here rather than
- *    rebuilding it out of the two fields egma happened to read.
+ * 1. **Sweep** — `finishMockedWorld` over what a previous run recorded. Run
+ *    before anything new is made, so litter never becomes a hazard.
+ * 2. **Bindings** — every number routing to the agent, read by
+ *    `bindingDecisionsFor`. Re-read every run, because a customer can rebind
+ *    between two of them, and read to choose the version this run tests.
+ * 3. **Capture** — the serving version and the serving engine configuration,
+ *    written down before anything is changed. The verify step compares against
+ *    what is here rather than against what egma remembers sending.
  * 4. **Branch** — Retell forks the engine itself.
  * 5. **Fork guard** — the branch's engine reference must differ from the
  *    serving version's. A branch that still shares the serving engine version
  *    is refused **before the swap**, because writing mocked tools onto a shared
  *    engine version is writing them onto production.
  * 6. **Swap** — the transform's tools, onto the draft's engine version, naming
- *    that version explicitly.
+ *    that version explicitly, and Retell must answer that it wrote that version
+ *    and no other.
  * 7. **Verify** — read the serving version's tools back and compare them to the
  *    capture. A difference means the swap landed somewhere it should not have;
  *    the capture is written back and the run fails loudly.
- * 8. **Teardown** — `finishMockedWorld` again: **delete the copy first, prove
- *    the delete, then restore any pin**, and **never restore blind** — a
- *    restore reads where the number points now and writes only where it still
- *    points at what this run pinned it to. The reverse order is lethal:
- *    restoring `latest` while the copy exists makes the copy *be* latest. The
- *    proof is a read of the agent's versions, because the delete's own answer
- *    cannot be one: a malformed delete and a version that was never there both
- *    answer 404.
+ * 8. **Teardown** — `finishMockedWorld` again: delete the copy, and **prove the
+ *    delete**. The proof is a read of the agent's versions, because the
+ *    delete's own answer cannot be one: a malformed delete and a version that
+ *    was never there both answer 404.
  *
  * ## The record is an obligation, not a report
  *
  * `record` is called at every point where what egma owes the account changes,
  * and each call replaces the whole record. What is written is always the
  * **outstanding** obligation: a `tempMockAgentVersion` that is not null is a
- * version that must be deleted, and a number in the note is a binding that must
- * be put back. Teardown clears each one as it lands, and flips the cleanup flag
- * to true only once the account owes nothing.
+ * version that must be deleted. The teardown flips the cleanup flag to true
+ * only once the account owes nothing, and writes the note's proof of deletion
+ * the moment it has one — so a sweep that comes later never deletes twice.
  *
- * That is also why an intent is written **before** the write it describes. A
- * crash between "egma says it pinned this number" and the pin itself leaves a
- * restore that writes the bindings back exactly as they already are — a no-op.
- * The other order would leave a real pin that nothing knows to undo.
+ * That is also why the intent is written **before** the write it describes. A
+ * crash between "egma says it will branch" and the branch itself leaves a
+ * record of a debt that turns out not to exist, and a sweep answers that
+ * harmlessly. The other order would leave a real draft nothing knows to delete.
  *
  * ## One mocked world per agent at a time
  *
@@ -59,24 +69,12 @@
  * plane refuses the second run rather than queueing it (`claimMockDraftFor`,
  * under an advisory lock keyed on the agent).
  *
- * The reason is this teardown. Delete-before-restore protects a run from **its
- * own** draft and can see no other. Let run one pin a number riding `latest` to
- * numeric version V and record the verbatim `latest` it owes back. Run two then
- * starts, reads that number as *numeric* — a safe verdict, no pin needed — and
- * branches its own draft. Run one finishes, deletes its draft, and restores
- * `latest` exactly as promised. But run two's draft still exists and, being the
- * most recently minted version, is what `latest` now resolves to: every real
- * caller reaches a mocked agent. The restore was correct and the outcome is the
- * exact hijack this whole design exists to prevent.
- *
- * No ordering inside one lifecycle can fix that, because the hazard is a
- * relationship between two of them. So the overlap is what is forbidden, and
- * the run that arrives second is refused before it writes anything.
- *
- * The sweep is the one thing that still crosses runs, and deliberately: it
- * settles only worlds whose runs have **finished or died**, and it runs before
- * the sweeping run branches — so a restore it performs can never resolve
- * `latest` onto a draft that does not exist yet.
+ * Two drafts at once on one agent is two runs each conducted against a version
+ * the other could be deleting, and a sweep that cannot tell whose litter it is
+ * looking at. The version numbers are the account's, not a run's: Retell hands
+ * the next branch the lowest free number, so run one's number can be run two's
+ * draft the moment run one deletes. Refusing the overlap is what keeps every
+ * delete in this file a delete of something this run made.
  *
  * ## One draft per run, and the fallback if that ever stops being true
  *
@@ -97,7 +95,7 @@
  * simulation's identifier into the URL at transform time rather than as a
  * variable, and branch one draft per simulation instead of one per run. Every
  * step above keeps its exact shape and its exact order — capture, branch, fork
- * guard, swap, verify, delete-before-restore — with `buildMockedWorld` called
+ * guard, swap, verify, delete and prove — with `buildMockedWorld` called
  * once per simulation instead of once per run, and the record growing a list of
  * temporary versions where it holds one. It is written down here rather than
  * built, because building it would be paying for a branch nobody expects to
@@ -113,8 +111,6 @@ import {
   bindingVerdictOf,
   listRoutedNumbers,
   numbersRouting,
-  pinNumberBinding,
-  restoreNumberBinding,
   type BindingVerdict,
   type NumberBinding,
   type RoutedNumber,
@@ -127,7 +123,6 @@ import {
   engineTypeOf,
   listAgentVersions,
   readEngineConfiguration,
-  resolveAgentVersion,
   resolveServingAgentVersion,
   writeEngineTools,
   LATEST_PUBLISHED,
@@ -137,13 +132,16 @@ import {
 } from "./versions.ts";
 
 /**
- * What one number means for a run that is about to mint a version, and what
- * egma will do about it.
+ * What one number routing to this agent is bound to.
+ *
+ * **A reading, never an instruction.** Egma writes to no customer's number
+ * bindings (developer ruling, 2026-08-31), so nothing here says what egma will
+ * do about a number — it says what the number names, which is how the version a
+ * run tests is chosen and what a screen shows a developer so they can decide
+ * for themselves.
  *
  * A number can carry several entries for one agent under weighted routing, so
- * every entry's verdict is kept and the decision is taken over all of them: one
- * hijackable entry is enough to need a pin, because one entry is enough to send
- * a real caller to the draft.
+ * every entry's verdict is kept.
  */
 export type BindingDecision = {
   /** E.164, exactly as Retell holds it. */
@@ -152,8 +150,6 @@ export type BindingDecision = {
   readonly label: string;
   /** Every verdict this agent's entries on this number produced, in order. */
   readonly verdicts: readonly BindingVerdict[];
-  /** Whether egma must pin this number for the run and restore it after. */
-  readonly pin: boolean;
   /**
    * **This agent's** entries on the number, in order — the ones the verdicts
    * were read from. What runs against the number is decided from these, and
@@ -162,20 +158,16 @@ export type BindingDecision = {
    * version nobody's traffic to this agent ever reaches.
    */
   readonly ownBindings: readonly NumberBinding[];
-  /**
-   * Every binding the number carries, verbatim — **other agents' included**.
-   * This is the whole array a restore writes back, so it must never lose an
-   * entry; the reading of *this* agent's version is `ownBindings` above.
-   */
+  /** Every binding the number carries, verbatim — other agents' included. */
   readonly bindings: readonly NumberBinding[];
 };
 
 /**
- * Every number routing to one agent, judged.
+ * Every number routing to one agent, read.
  *
  * Read at tick time and again at every run start, and the same function does
- * both: a screen that explains what ticking will do and a run that is about to
- * do it must not be able to disagree about which numbers need a pin.
+ * both: a screen that explains what a mocked run would do and a run that is
+ * about to do it must not be able to disagree about which version it lands on.
  */
 export function bindingDecisionsFor(
   numbers: readonly RoutedNumber[],
@@ -183,32 +175,15 @@ export function bindingDecisionsFor(
 ): readonly BindingDecision[] {
   return numbersRouting(numbers, agentId).map((number) => {
     const mine = bindingsFor(number, agentId);
-    const verdicts = mine.map(bindingVerdictOf);
     return {
       number: number.number,
       label: number.label,
-      verdicts,
-      pin: verdicts.includes("hijackable"),
+      verdicts: mine.map(bindingVerdictOf),
       ownBindings: mine,
       bindings: number.bindings,
     };
   });
 }
-
-/** One number Egma pinned, and everything it takes to put it back. */
-export type MockNumberNote = {
-  readonly number: string;
-  /**
-   * Where this agent's binding pointed before Egma touched it, verbatim.
-   *
-   * Under weighted routing an agent can carry several entries on one number,
-   * and only the hijackable ones are pinned — `latest` or unset by definition
-   * of the verdict — so one value puts every one of them back.
-   */
-  readonly was: string | number | null;
-  /** The numeric version Egma pinned it to for the length of the run. */
-  readonly pinnedTo: number;
-};
 
 /** The serving engine capture the verify step compares against. */
 export type MockEngineNote = {
@@ -233,20 +208,18 @@ export type MockEngineNote = {
 /** The put-it-back note, and nothing else lives in it. */
 export type MockMetadataRecord = {
   readonly engine: MockEngineNote;
-  readonly numbers: readonly MockNumberNote[];
   /**
    * Whether the temporary version has been deleted **and the deletion proved**.
    *
    * The one fact that must outlive the teardown that learned it. A teardown can
-   * finish the delete, prove it against the version listing, and then fail a
-   * restore — which leaves the world unsettled and the next sweep retrying it.
-   * Without this, that sweep would see a version number on the record and
-   * delete it again.
+   * finish the delete and prove it against the version listing, and still leave
+   * the world unsettled on something else — the serving version's own read-back
+   * failing, say — which the next sweep retries. Without this, that sweep would
+   * see a version number on the record and delete it a second time.
    *
    * **A second delete of the same number is not harmless.** Retell hands the
    * next branch the lowest free number, so the number this run branched can
-   * belong to somebody else's draft by then — the customer's own, made in the
-   * window while Egma still owed a restore. The version number itself stays on
+   * belong to somebody else's draft by then. The version number itself stays on
    * the record, because a reader months later still deserves to know what a run
    * branched; this is what says it is no longer standing.
    *
@@ -366,21 +339,12 @@ export type BuiltMockedWorld =
       readonly state: MockRunRecord | null;
     };
 
-/** What a teardown or a sweep could not finish, and what it chose not to do. */
+/** What a teardown or a sweep could not finish. */
 export type FinishedMockedWorld = {
   /** What is still owed. Nothing is owed once the cleanup flag stands true. */
   readonly state: MockRunRecord;
   /** Each step that did not land, in the words a log should carry. */
   readonly unfinished: readonly string[];
-  /**
-   * Each restore that was deliberately not made, and why.
-   *
-   * Not a debt: a binding that has moved since this run pinned it is a binding
-   * egma must not touch, so nothing is owed and nothing is retried. It is
-   * reported so a reader can see the decision rather than infer it from
-   * silence.
-   */
-  readonly leftAlone: readonly string[];
 };
 
 /** The sentence a failure of any verb is reported as. */
@@ -435,7 +399,6 @@ function stateOf(
   engine: EngineReference,
   /** What that engine declared when this run captured it. */
   capturedPrint: string,
-  numbers: readonly MockNumberNote[],
 ): MockRunRecord {
   return {
     tempMockAgentVersion,
@@ -450,7 +413,6 @@ function stateOf(
         version: engine.version,
         toolPrint: capturedPrint,
       },
-      numbers: numbers.map((one) => ({ ...one })),
     },
   };
 }
@@ -569,79 +531,10 @@ export async function buildMockedWorld(
   const mocked = mockedToolsFor(captured.engine, build.target);
   const { coverage } = mocked;
 
-  // 3c. Written down before a single write goes out, and — where a pin is
-  // coming — written with the pin egma is **about to** make already noted. See
-  // the note at the top of this file: a claimed pin that never happened is a
-  // restore that finds the binding untouched and leaves it alone, and an
-  // unclaimed pin that did happen is a number nobody puts back.
-  let numbers: MockNumberNote[] = [];
-  let state = stateOf(null, servingEngine, before, numbers);
+  // 3c. Written down before a single write goes out. The record is an
+  // obligation, and from this line on egma owes the account a deletion.
+  let state = stateOf(null, servingEngine, before);
   await record(state);
-
-  // 3d. The pins themselves. A number already pinned, riding a tag, or riding
-  // the published pointer is passed over and never touched — the tag assignment
-  // in particular is the customer's and egma has no business in it.
-  //
-  // **A pin preserves today's behaviour and never changes it**, so the version
-  // it pins to is the one that binding resolves to *now* — which for `latest`
-  // and for an unset binding is whatever `latest` names at this moment. It is
-  // deliberately not the run's serving version: an agent whose tagged number
-  // serves 105 while its `latest` number serves 110 would otherwise have its
-  // second number quietly moved back five versions for the length of a run.
-  //
-  // **This `latest` is not the serving read's, and it is not a leftover.** The
-  // serving read above asks for `latest_published`, because a run must never be
-  // conducted against a draft. This read asks the opposite question — *where
-  // does this number send a real caller right now* — and the honest answer to
-  // that includes a draft, because a draft is where the number really goes.
-  // Moving this to the published pointer would take a customer's live number
-  // off the version it reaches today, which is a change to their production
-  // routing that egma has no business making for the length of a test run.
-  const pinning = decisions.filter((decision) => decision.pin);
-  if (pinning.length > 0) {
-    const newest = await resolveAgentVersion(key, agentId, "latest", reach);
-    if (newest.kind !== "version") {
-      return {
-        kind: "refused",
-        reason: sentenceOf(
-          newest,
-          "resolving the version a number riding `latest` reaches right now",
-        ),
-        state,
-      };
-    }
-    const pinVersion = newest.agentVersion.version;
-    numbers = pinning.map((decision) => ({
-      number: decision.number,
-      was: hijackableBindingOf(decision),
-      pinnedTo: pinVersion,
-    }));
-    state = stateOf(null, servingEngine, before, numbers);
-    await record(state);
-
-    for (const decision of pinning) {
-      const pinned = await pinNumberBinding(
-        key,
-        {
-          number: decision.number,
-          agentId,
-          version: pinVersion,
-          bindings: decision.bindings,
-        },
-        reach,
-      );
-      if (pinned.kind !== "written") {
-        return {
-          kind: "refused",
-          reason: sentenceOf(
-            pinned,
-            `pinning ${decision.number} to version ${pinVersion}`,
-          ),
-          state,
-        };
-      }
-    }
-  }
 
   // 4. Branch. Retell forks the engine document itself, which is why this is a
   // branch and not a hand-copied twin.
@@ -657,7 +550,7 @@ export async function buildMockedWorld(
     };
   }
   const draft = branched.agentVersion;
-  state = stateOf(draft.version, servingEngine, before, numbers);
+  state = stateOf(draft.version, servingEngine, before);
   await record(state);
 
   // 5. **The fork guard**, before any write.
@@ -732,19 +625,27 @@ export async function buildMockedWorld(
   // tears the world down, which deletes the agent version this branched; if a
   // stray engine version really was minted, the run's failure is what makes a
   // person look at it while it is still one version rather than a hundred.
-  if (
-    written.version !== null &&
-    written.version !== draft.engine.version
-  ) {
+  //
+  // A **null** answer is refused with the rest. Retell's schema documents the
+  // field, so an answer without it is Retell contradicting itself, and the one
+  // reading of that contradiction egma may not take is the optimistic one:
+  // there is no endpoint that removes a stray engine version, so "probably
+  // fine" would be litter nobody can clear.
+  if (written.version !== draft.engine.version) {
     return {
       kind: "refused",
       reason:
         `Egma wrote the mocked tools onto ${draft.engine.type} ` +
         `${draft.engine.engineId} v${String(draft.engine.version)}, and Retell ` +
-        `answered that it wrote v${String(written.version)} instead. That is a ` +
-        "new engine version rather than an edit of the copy, and Retell has no " +
-        "endpoint that deletes one — so Egma stopped rather than leave behind " +
-        "something nothing can clean up.",
+        (written.version === null
+          ? "did not say which version it wrote. Egma cannot tell an edit of " +
+            "the copy from a new engine version, and Retell has no endpoint " +
+            "that deletes one"
+          : `answered that it wrote v${String(written.version)} instead. That ` +
+            "is a new engine version rather than an edit of the copy, and " +
+            "Retell has no endpoint that deletes one") +
+        " — so Egma stopped rather than leave behind something nothing can " +
+        "clean up.",
       state,
     };
   }
@@ -801,23 +702,6 @@ export async function buildMockedWorld(
 }
 
 /**
- * Where this agent's hijackable entries on one number point right now.
- *
- * Every hijackable entry is `latest`, `""` or unset by the verdict's own
- * definition, so one value is the honest answer for all of them — and it is
- * read off the first rather than invented, because `null` and `"latest"` are
- * different bytes and a restore writes back what was there.
- */
-function hijackableBindingOf(
-  decision: BindingDecision,
-): string | number | null {
-  for (const binding of decision.ownBindings) {
-    if (bindingVerdictOf(binding) === "hijackable") return binding.agentVersion;
-  }
-  return null;
-}
-
-/**
  * The captured tools, in the shape a write of them takes.
  *
  * The transform's own body shape with nothing swapped: the same keys, so a
@@ -840,29 +724,23 @@ function toolsWriteOf(
 }
 
 /**
- * Put the account back: **delete the copy, prove it, then restore any pin.**
+ * Put the account back: **delete the copy, and prove it.**
  *
  * One function, two callers. A run's own teardown calls it when every
  * simulation is terminal; the next run's claim calls it over whatever a crashed
  * run left recorded. They are the same act, and writing them twice would be two
  * chances to get the order wrong.
  *
- * The order is the safety property. Restoring a `latest` binding while the copy
- * still exists makes the copy *be* latest, and every real caller reaches the
- * mocked agent until the delete lands. In this order every failure is benign: a
- * failed delete leaves a real version pinned with a stray copy, and a failed
- * restore leaves a real version pinned. The next sweep finishes either.
+ * There is one thing to give back, because there is one thing egma made: the
+ * temporary version. Nothing here writes to a number, a tag, or a version the
+ * customer made, so a failure leaves exactly one thing outstanding and the next
+ * sweep retries exactly that.
  *
  * **The delete is proved and never assumed.** A 404 to egma's own delete is not
  * evidence the version is gone — a request Retell has no route for answers the
  * same way, which is exactly how a teardown that deleted nothing reported an
  * account put back for a week. So the agent's versions are read back, from the
  * current listing endpoint, and "gone" counts only when that read agrees.
- *
- * **A restore never writes blind.** It reads where the number points now and
- * writes only where it still points at what this run's own note says it pinned
- * — so a retry that arrives after the customer rebound the number, or after a
- * newer run pinned it, does nothing and says why.
  *
  * Each landing is recorded as it happens, so a crash halfway through leaves a
  * record of exactly what is still owed rather than a record of what was owed
@@ -878,8 +756,15 @@ export async function finishMockedWorld(
   reach: RetellReach = {},
 ): Promise<FinishedMockedWorld> {
   const unfinished: string[] = [];
-  const leftAlone: string[] = [];
   let state = input.state;
+  /**
+   * Whether **this call** is the one that proved the delete.
+   *
+   * Apart from `alreadyGone` below, which says a previous call proved it. The
+   * two are what keep a repeat sweep from writing a record that changes
+   * nothing — see the record at the foot of this function.
+   */
+  let provedNow = false;
 
   // **The promise, proved again before anything is undone.** A run's own build
   // read the serving version back and compared it to the capture, but that
@@ -936,11 +821,10 @@ export async function finishMockedWorld(
 
   // **A delete already proved is never made twice.** A teardown can finish the
   // delete, prove it against the version listing, and still leave the world
-  // unsettled on a restore that failed — and the next sweep retries the whole
-  // of this function. Retell hands the next branch the lowest free number, so
-  // by then this run's number can belong to somebody else's draft: the
-  // customer's own, made in the window while Egma still owed a restore. The
-  // note is what carries the proof across those two calls.
+  // unsettled on something after it — and the next sweep retries the whole of
+  // this function. Retell hands the next branch the lowest free number, so by
+  // then this run's number can belong to somebody else's draft. The note is
+  // what carries the proof across those two calls.
   const alreadyGone = state.mockMetadata?.temporaryVersionGone === true;
 
   if (state.tempMockAgentVersion !== null && !alreadyGone) {
@@ -955,9 +839,9 @@ export async function finishMockedWorld(
       unfinished.push(
         sentenceOf(deleted, `deleting temporary version ${temporary}`),
       );
-      // Nothing below this line runs. The pin is what keeps real callers off
-      // the copy, and the copy is still there.
-      return { state, unfinished, leftAlone };
+      // Nothing below this line runs: the copy is still there, and the record
+      // must keep saying so.
+      return { state, unfinished };
     }
 
     // **The proof, and the reason this whole function stopped trusting a status
@@ -983,7 +867,7 @@ export async function finishMockedWorld(
           "proof: a request Retell has no route for answers exactly the same " +
           "way. Egma left the account as it stands and says so.",
       );
-      return { state, unfinished, leftAlone };
+      return { state, unfinished };
     }
     if (listed.kind !== "versions") {
       unfinished.push(
@@ -993,16 +877,15 @@ export async function finishMockedWorld(
             `version ${temporary} is gone`,
         ),
       );
-      return { state, unfinished, leftAlone };
+      return { state, unfinished };
     }
     if (listed.versions.some((one) => one.version === temporary)) {
       unfinished.push(
         `Retell accepted the delete of temporary version ${temporary} and its ` +
-          "versions still hold it. Egma did not restore anything on the " +
-          "strength of a delete that did not happen; the pin is what keeps " +
-          "real callers off that version, and it stays.",
+          "versions still hold it, so the account is not back as Egma found " +
+          "it and Egma will not say that it is.",
       );
-      return { state, unfinished, leftAlone };
+      return { state, unfinished };
     }
     // **Proven absent, and written down before anything else can fail.** The
     // version number stays on the record — it is what this run branched, and a
@@ -1012,66 +895,33 @@ export async function finishMockedWorld(
     // must never be attempted again whatever happens next.
     const metadata = state.mockMetadata;
     if (metadata !== null) {
-      state = { ...state, mockMetadata: { ...metadata, temporaryVersionGone: true } };
-    }
-  }
-
-  const notes = state.mockMetadata?.numbers ?? [];
-  const outstanding: MockNumberNote[] = [];
-  for (const note of notes) {
-    const restored = await restoreNumberBinding(
-      key,
-      {
-        number: note.number,
-        agentId: input.agentId,
-        pinnedTo: note.pinnedTo,
-        was: note.was,
-      },
-      reach,
-    );
-    if (restored.kind === "left-alone") {
-      leftAlone.push(restored.reason);
-      continue;
-    }
-    if (restored.kind !== "restored") {
-      unfinished.push(
-        sentenceOf(restored, `restoring ${note.number}'s routing`),
-      );
-      outstanding.push(note);
-      continue;
+      state = {
+        ...state,
+        mockMetadata: { ...metadata, temporaryVersionGone: true },
+      };
+      provedNow = true;
     }
   }
 
   if (unfinished.length > 0) {
-    // Only the notes that still owe a write survive, so a retry does not walk
-    // past the numbers already settled.
-    const metadata = state.mockMetadata;
-    const settledSome = outstanding.length < notes.length;
-    state = {
-      ...state,
-      mockMetadata:
-        metadata === null ? null : { ...metadata, numbers: outstanding },
-    };
-    // Recorded where what egma owes actually moved — the record is an
-    // obligation, and a write that changes nothing is not a change in it. Two
-    // things can have moved: a number was put back, or the copy was deleted and
-    // proved gone. **The second matters most on this path**, because it is the
-    // one a retry must not undo by deleting a number Retell has since given to
-    // somebody else's draft.
-    //
-    // Both live in the note, which is one of the two columns a finished run's
-    // header still admits a write to — the version number beside it is frozen,
-    // and deliberately: it is what this run branched, and that never changes.
-    const provedGone = metadata?.temporaryVersionGone === true;
-    if (settledSome || provedGone) await input.record(state);
-    return { state, unfinished, leftAlone };
+    // **Recorded only where what egma owes actually moved.** The one thing that
+    // can move on this path is the delete being proved, and it moves once — so
+    // a later sweep that reads the flag already stored writes nothing. That is
+    // not tidiness: a finished run's header admits a write only where the note
+    // or the cleanup flag changed, and a write that changes neither is rejected
+    // by the store. The rejection would then stand in for the real failure and
+    // a reader would be told about a database error instead of about the
+    // account.
+    if (provedNow) await input.record(state);
+    return { state, unfinished };
   }
 
-  // Nothing left: the copy is gone, every pin is settled one way or the other,
-  // and the account is as it was found.
+  // Nothing left: the copy is gone and proved gone, and the account is as it
+  // was found. Egma never touched the customer's number bindings, so there is
+  // nothing else it could owe.
   state = { ...state, tempMockAgentVersionCleanup: true };
   await input.record(state);
-  return { state, unfinished, leftAlone };
+  return { state, unfinished };
 }
 
 /** A record that owes the account nothing, and can be forgotten. */

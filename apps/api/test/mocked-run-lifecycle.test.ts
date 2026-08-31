@@ -451,19 +451,20 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(header.body.agentVersion).toBe(105);
     expect(header.body.tempMockAgentVersion).toBe(106);
     expect(header.body.tempMockAgentVersionCleanup).toBe(false);
-    const world = header.body.mockMetadata as {
-      numbers: { number: string; was: string | number | null; pinnedTo: number }[];
-    };
-    // The put-it-back note: where the binding pointed, and what Egma pinned it
-    // to. A restore reads the number again and writes only where it still
-    // points at `pinnedTo`.
-    expect(world.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
+    // The note names the engine this run's tools were read from, and claims
+    // nothing about anything of the customer's — because Egma touched none of
+    // it.
+    expect(header.body.mockMetadata).toEqual({
+      engine: {
+        type: "conversation-flow",
+        engineId: FLOW,
+        version: 105,
+      },
+    });
 
     // The account, as it stands mid-run: the temporary version points at Egma,
-    // the serving version is exactly as it was, and the number that rode
-    // `latest` is pinned to a real version so a caller reaches the real agent.
+    // the serving version is exactly as it was, and the number that rides
+    // `latest` is exactly as the customer left it.
     const draftTools = (ready.state.engines.get(106)?.["tools"] ??
       []) as Record<string, unknown>[];
     expect(String(draftTools[0]?.["url"])).toContain(
@@ -475,7 +476,7 @@ describe("one mocked run, from the tick to the teardown", () => {
       []) as Record<string, unknown>[];
     expect(servingTools[0]?.["url"]).toBe(LIVE_TOOL_URL);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The claim hands the simulation the temporary version and its variables.
@@ -720,7 +721,7 @@ describe("a second mocked run on an agent already holding its world", () => {
     // The first run holds the world: its draft exists and the number is pinned.
     expect(ready.state.versions.has(106)).toBe(true);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     const before = {
@@ -807,14 +808,14 @@ describe("a second mocked run on an agent already holding its world", () => {
  * A finished run never blocks a claim — its litter is the next run's sweep to
  * clear — so the two really do arrive at once every time a suite is started
  * again as soon as the last one ends. Without one fence over both, the first
- * run's restore is still in flight while the second branches its copy, and the
- * restore then writes `latest` onto that copy: real callers reach a mocked
- * agent. Nothing downstream catches it, because the number still points exactly
- * where the first run's note says it pinned it — the second run pinned it to
- * the same version.
+ * run's delete is still in flight while the second branches its copy, and
+ * Retell hands the next branch the lowest free number: the number the first
+ * run is in the middle of deleting is the number the second is given. One
+ * teardown would then delete the other run's live copy, and nothing downstream
+ * could tell whose version it had been.
  */
 describe("a teardown that is in flight when the next run starts", () => {
-  it("never restores a binding while a temporary version stands", async () => {
+  it("makes the next run wait for it, and touches no binding either way", async () => {
     const ready = await aTickedAgent("mocked_run_teardown_meets_claim");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
@@ -870,21 +871,13 @@ describe("a teardown that is in flight when the next run starts", () => {
     release();
     const [, answered] = await Promise.all([landing, second]);
 
-    // The whole point: every write of this number's binding happened over an
-    // account holding no temporary version but the serving one.
-    for (const write of ready.state.writes) {
-      expect(write.versionsStanding).toEqual([105]);
-    }
-    // Put back once, to exactly what it was.
-    expect(
-      ready.state.writes.filter((write) =>
-        JSON.stringify(write.wrote).includes("latest"),
-      ),
-    ).toHaveLength(1);
-    // And it stands pinned again now — the second run's own pin, to a real
-    // serving version, which is what keeps real callers off its copy.
+    // **Not one write to a number, by either run.** Egma edits no customer's
+    // inbound routing, so the number stands exactly as the customer left it
+    // through both runs — during the first, during its teardown, and during
+    // the second's build.
+    expect(ready.state.writes).toEqual([]);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The second run got its turn: the agent was clean by the time it had the
@@ -933,7 +926,7 @@ describe("a mocked run after a predecessor's teardown failed", () => {
     await report(simulationId, "completed");
     expect(ready.state.versions.has(106)).toBe(true);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The next run is refused with the debt named, **before branching
@@ -950,7 +943,7 @@ describe("a mocked run after a predecessor's teardown failed", () => {
     expect(String(second.body.message)).toContain("could not be fully given back");
     expect([...ready.state.versions].sort()).toEqual([105, 106]);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The account honours deletes again, and the cleanup retries on the

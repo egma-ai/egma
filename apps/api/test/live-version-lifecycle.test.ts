@@ -238,6 +238,32 @@ live("the corrected version lifecycle, on the live agent", () => {
         `v${String(draftEngine.version)}`,
     );
 
+    // **The one word this ticket turned on, read off a real account while the
+    // draft stands.** `latest` means the newest version *created*, so it now
+    // reaches this proof's own draft — strictly above the published version it
+    // was branched from — while `latest_published` cannot reach it at all.
+    // Equal would mean the published pointer had found a draft, which is the
+    // accident that pointer exists to make impossible.
+    const whileStanding = await resolveAgentVersion(key, agentId, "latest");
+    expect(whileStanding.kind).toBe("version");
+    if (whileStanding.kind !== "version") return;
+    expect(whileStanding.agentVersion.version).toBe(draft.version);
+    expect(whileStanding.agentVersion.version).toBeGreaterThan(servingVersion);
+    expect(whileStanding.agentVersion.published).toBe(false);
+
+    const publishedStanding = await resolveServingAgentVersion(
+      key,
+      agentId,
+      LATEST_PUBLISHED,
+    );
+    expect(publishedStanding.kind).toBe("version");
+    expect(
+      publishedStanding.kind === "version"
+        ? publishedStanding.agentVersion.version
+        : null,
+      "latest_published reached a draft",
+    ).toBe(servingVersion);
+
     // ── 4. Write the mock tools onto the branch's flow, naming its version. ──
     const draftConfiguration = await readEngineConfiguration(key, draftEngine);
     expect(draftConfiguration.kind, JSON.stringify(draftConfiguration)).toBe(
@@ -378,39 +404,6 @@ live("the corrected version lifecycle, on the live agent", () => {
     );
   }, 120_000);
 
-  it("resolves latest and latest_published to different versions while a draft stands", async () => {
-    // The one word this ticket turned on, read off a real account. `latest`
-    // means the newest version *created* — so the moment any draft exists,
-    // anybody's, it is not the version real callers reach. What a run must ask
-    // for is the published pointer, and the two are asserted apart here rather
-    // than assumed apart from the documentation.
-    //
-    // The refusal an agent with nothing published earns is proven in
-    // `packages/retell/test/live-fork.test.ts`, against a scratch agent that
-    // suite creates and destroys — never against this one, which is serving.
-    const serving = await resolveServingAgentVersion(
-      key,
-      agentId,
-      LATEST_PUBLISHED,
-    );
-    expect(serving.kind).toBe("version");
-    if (serving.kind !== "version") return;
-    expect(serving.agentVersion.published).toBe(true);
-
-    // And `latest` is a different answer whenever a draft stands: the one word
-    // that decided which agent a production run graded.
-    const newest = await resolveAgentVersion(key, agentId, "latest");
-    expect(newest.kind).toBe("version");
-    if (newest.kind !== "version") return;
-    console.log(
-      `[live lifecycle] latest = ${newest.agentVersion.version} ` +
-        `(published: ${String(newest.agentVersion.published)}), ` +
-        `latest_published = ${serving.agentVersion.version}`,
-    );
-    expect(newest.agentVersion.version).toBeGreaterThanOrEqual(
-      serving.agentVersion.version,
-    );
-  }, 60_000);
 });
 
 describe("the live lifecycle proof's own gate", () => {

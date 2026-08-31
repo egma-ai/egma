@@ -765,9 +765,8 @@ export const agentOperations = {
                     "hijackable",
                   ],
                 }),
-                pin: { type: "boolean" },
               },
-              required: ["number", "label", "verdicts", "pin"],
+              required: ["number", "label", "verdicts"],
               additionalProperties: false,
             }),
             /** The tool names seeded by this request. Empty on a read. */
