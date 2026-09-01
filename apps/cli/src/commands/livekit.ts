@@ -29,9 +29,19 @@ export function runLiveKitContractCommand(
     "python_monitoring_position: first statement in the job entrypoint; before ctx.connect and AgentSession.start",
   );
   options.out("javascript: node-22-or-newer");
-  options.out("javascript_testing: unsupported");
+  options.out("javascript_testing: supported");
+  options.out("javascript_testing_package: @egma/livekit");
   options.out(
-    "javascript_testing_reason: LiveKit Agents JS has process-wide mocks without session isolation",
+    'javascript_testing_import: import { mockable } from "@egma/livekit"',
+  );
+  options.out(
+    "javascript_testing_call: await mockable(agent, ctx, session)",
+  );
+  options.out(
+    "javascript_testing_position: after the initial agent and AgentSession exist; before AgentSession.start",
+  );
+  options.out(
+    "javascript_testing_process_rule: call mockable once; Egma permits one active mockable AgentSession in each LiveKit job process",
   );
   options.out("javascript_monitoring: supported");
   options.out("javascript_monitoring_package: @egma/livekit");

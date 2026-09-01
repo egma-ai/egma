@@ -13,13 +13,11 @@ production behavior.
   handoff printed by the monitoring command.
 - Both needs both hooks in the order reported by the current CLI contract.
 
-Python workers support testing and monitoring. JavaScript workers built with
-`@livekit/agents` support monitoring through `@egma/livekit`, but they do not
-yet support Egma simulation testing because their process-wide mocks are not
-isolated between sessions. For a JavaScript Testing request, report that
-boundary and stop before remote testing setup. For a JavaScript Both request,
-complete monitoring, report that testing remains unsupported, and do not claim
-that Both completed.
+Python and JavaScript workers support testing and monitoring. For JavaScript
+workers built with `@livekit/agents`, the SDK guards LiveKit's process-wide
+mock table by permitting one active `mockable` session in each job process.
+Apply the testing call exactly once in the job entrypoint and let session close
+or job shutdown own cleanup.
 
 If several job entrypoints or workers remain credible, show the evidence and
 ask which one to change. Do not guess a file or combine one worker's dispatch

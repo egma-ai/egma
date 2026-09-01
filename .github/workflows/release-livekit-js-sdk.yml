@@ -2,13 +2,12 @@ name: Release LiveKit JavaScript SDK
 
 # Publishing is one deliberate tag push. Merging does not publish.
 #
-#   git tag livekit-js-sdk-v0.1.0
-#   git push origin livekit-js-sdk-v0.1.0
+#   git tag livekit-js-sdk-v0.2.0
+#   git push origin livekit-js-sdk-v0.2.0
 #
 # npm must trust this repository, workflow, and @egma/livekit package. GitHub
 # then supplies one short-lived OIDC credential. No long-lived npm token is
-# stored in this repository. An @egma npm owner must bootstrap the first
-# package version before npm can attach trusted-publisher settings to it.
+# stored in this repository.
 
 on:
   push:
@@ -20,8 +19,46 @@ permissions:
   id-token: write
 
 jobs:
+  compatibility:
+    name: LiveKit JS ${{ matrix.livekit }} compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        livekit: ["1.5.0", "1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build and pack the SDK
+        id: pack
+        run: |
+          pnpm --filter @egma/livekit build
+          dir="$(mktemp -d)"
+          pnpm --config.node-linker=hoisted \
+            --filter @egma/livekit \
+            pack --pack-destination "$dir"
+          tarball="$(find "$dir" -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the packed SDK with LiveKit ${{ matrix.livekit }}
+        run: >-
+          node sdks/livekit-js/test/verify-packed-compatibility.mjs
+          "${{ steps.pack.outputs.tarball }}"
+          "${{ matrix.livekit }}"
+
   release:
     name: Verify and publish
+    needs: compatibility
     runs-on: ubuntu-latest
     steps:
       # This workflow holds npm publishing authority, so every action is pinned
@@ -116,7 +153,7 @@ jobs:
             "zod@^4.1.8" \
             --no-audit --no-fund
           node --input-type=module -e \
-            'import { monitorLiveKit } from "@egma/livekit"; if (typeof monitorLiveKit !== "function") process.exit(1); delete process.env.EGMA_URL; delete process.env.EGMA_API_KEY; monitorLiveKit({ job: { room: { name: "egma-sim-release-smoke" } } });'
+            'import { mockable, monitorLiveKit } from "@egma/livekit"; if (typeof mockable !== "function" || typeof monitorLiveKit !== "function") process.exit(1); delete process.env.EGMA_URL; delete process.env.EGMA_API_KEY; monitorLiveKit({ job: { room: { name: "egma-sim-release-smoke" } } });'
 
       - name: Restore the publishing toolchain
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

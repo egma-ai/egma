@@ -1,15 +1,16 @@
 ---
 title: "Egma JavaScript SDK for LiveKit"
 sidebarTitle: "JavaScript SDK"
-description: "Send production spans from a LiveKit Agents JS worker to Egma Monitoring."
+description: "Use Egma mock tools and production monitoring in LiveKit Agents JS workers."
 ---
 
-The `@egma/livekit` package sends production LiveKit spans to Egma
-Monitoring. Its public entry is `monitorLiveKit(ctx)`.
+The `@egma/livekit` package has two independent helpers:
 
-This first JavaScript release is for production monitoring. It does not supply
-Python's `mockable` entry for simulation tools. See
-[Current testing boundary](#current-testing-boundary).
+- `await mockable(agent, ctx, session)` lets Egma answer selected tools during
+  a simulation.
+- `monitorLiveKit(ctx)` sends production LiveKit spans to Egma Monitoring.
+
+Calling one helper does not enable the other.
 
 ## Install
 
@@ -17,9 +18,91 @@ Python's `mockable` entry for simulation tools. See
 npm install @egma/livekit
 ```
 
-The package requires Node.js 22 or newer and
-`@livekit/agents>=1.7.1 <1.8`. The LiveKit range is narrow on purpose. Egma
-verifies the telemetry seam before it supports a new LiveKit minor.
+The package needs Node.js 22 or newer.
+
+| Helper | Supported `@livekit/agents` versions |
+|---|---|
+| `mockable` | `>=1.5.0 <2` |
+| `monitorLiveKit` | `>=1.5.5 <2` |
+
+LiveKit `1.5.0` is the first stable JavaScript release with its public mock-tool
+hook. LiveKit `1.5.5` is the first release with the public telemetry bridge
+needed to keep LiveKit Cloud and Egma export active together. `1.6.4` is tested
+for Rentlyx compatibility, but it is not the minimum.
+
+The upper bound is LiveKit's next major release, not its next minor release.
+Egma treats the public LiveKit v1 APIs as one compatible line. Its test matrix
+pins the exact minimum, each available minor boundary, and the latest tested v1
+release.
+
+## Use mock tools in simulations
+
+Create the agent and session, then call `mockable` once before `session.start`:
+
+```typescript
+import { mockable } from "@egma/livekit";
+import { type JobContext, voice } from "@livekit/agents";
+
+export async function entrypoint(ctx: JobContext) {
+  const isEgmaChat =
+    ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
+  const agent = voice.Agent.create({
+    instructions: "Help the caller.",
+    tools: [checkCalendar, bookAppointment],
+  });
+  const session = new voice.AgentSession({ stt, llm, tts });
+
+  await mockable(agent, ctx, session);
+  await session.start({
+    agent,
+    room: ctx.room,
+    ...(isEgmaChat
+      ? {
+          inputOptions: { audioEnabled: false },
+          outputOptions: {
+            audioEnabled: false,
+            syncTranscription: false,
+          },
+        }
+      : {}),
+  });
+}
+```
+
+The `egma-sim-chat-` branch keeps chat simulations on LiveKit's text path.
+Keep independent audio publishers off in that branch too. Other room names use
+the worker's normal voice settings.
+
+In a simulation, `mockable`:
+
+1. Connects the worker to the room if it is not connected.
+2. Finds the one Egma participant.
+3. Reports the agent's real tool names and schemas.
+4. Installs LiveKit mock couriers only for the names Egma covers.
+5. Follows later agent handoffs in the same session.
+6. Removes all mock state when the session closes or the job stops.
+
+Tools without a mock keep their real implementation. If Egma becomes
+unreachable during a tool call, that real implementation runs. If Egma receives
+the call and refuses it, the model sees a `ToolError`; the SDK does not hide an
+explicit refusal by causing a real side effect.
+
+### Production safety and process isolation
+
+The first check reads only `ctx.job.room.name`. Every Egma simulation room
+starts with `egma-sim-`. In any other room, `mockable` returns before it
+connects, sends a message, or changes a tool.
+
+LiveKit Agents runs each normal job in its own child process. Its JavaScript
+mock table is process-wide, so Egma permits one active mockable session in that
+job process. A second overlapping session gets a direct error instead of
+sharing or replacing the first session's mock state. Separate calls run in
+separate child processes and do not share it.
+
+Egma joins the simulation room as `egma-persona` or
+`egma-persona-<simulation id>`. The room name and participant forms are fixed,
+published protocol values. Refuse the reserved `egma-sim-` prefix in any system
+that mints your production room names.
 
 ## Monitor production LiveKit agents
 
@@ -27,7 +110,7 @@ Open **Agents → Connect an agent**, choose **Monitoring** or **Both**, and the
 choose **LiveKit**. The guided flow shows the JavaScript package, hook, and
 environment values that the worker needs.
 
-For a manual setup, create a project API key in **Settings → API keys**. Set the
+For manual setup, create a project API key in **Settings → API keys**. Set the
 API origin and key where the worker runs:
 
 ```bash
@@ -38,15 +121,14 @@ export EGMA_API_KEY=egma_sk_...
 For self-hosted Egma, use the published API address that the agent process can
 reach, such as `http://localhost:3100` when the worker runs on the same host.
 
-For a customer-hosted worker, use your normal deployment secret store. For a
-LiveKit Cloud deployment, put the values in a gitignored secrets file and run:
+For a LiveKit Cloud deployment, put the values in a gitignored secrets file and
+run:
 
 ```bash
 lk agent update-secrets --secrets-file=.env.monitoring
 ```
 
-Call `monitorLiveKit` as the first statement of the job entrypoint, before
-`AgentSession.start`:
+Call `monitorLiveKit` before `AgentSession.start`:
 
 ```typescript
 import { monitorLiveKit } from "@egma/livekit";
@@ -64,8 +146,7 @@ export async function entrypoint(ctx: JobContext) {
 }
 ```
 
-You can pass configuration directly when your deployment does not use
-environment variables:
+You can pass configuration directly:
 
 ```typescript
 monitorLiveKit(ctx, {
@@ -74,59 +155,16 @@ monitorLiveKit(ctx, {
 });
 ```
 
-If your process already exports OpenTelemetry spans, build that provider around
-LiveKit's mutable fan-out and pass the same provider and registrar to Egma:
-
-```typescript
-import { telemetry } from "@livekit/agents";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-
-const fanout = new telemetry.FanoutSpanProcessor();
-const provider = new NodeTracerProvider({
-  spanProcessors: [yourExistingProcessor, fanout],
-});
-provider.register();
-
-monitorLiveKit(ctx, {
-  existingTelemetry: {
-    provider,
-    registerSpanProcessor: (processor) => fanout.add(processor),
-  },
-});
-```
-
-OpenTelemetry JS 2.x cannot add a processor to an already-built provider. The
-registrar must add to the fan-out inside the exact provider you pass.
-
 The helper adds an OTLP/HTTP protobuf batch exporter and flushes its last batch
-when the job stops. It also leaves a fan-out point for LiveKit Cloud
-observability. It keeps compatible telemetry through `existingTelemetry`. If
-another integration installed a provider without that mutable seam, the helper
-stops with a safe setup error instead of replacing it.
+when the job stops. It keeps LiveKit Cloud observability active. If another
+integration installed a provider without a safe way to add a processor, setup
+stops with a direct error instead of replacing it.
 
-After you deploy the code and secrets, the first production conversation
-appears under **Monitoring** when the worker sends its spans. Egma cannot see a
-DNS, firewall, or network failure inside the worker. If nothing appears, check
-the worker logs and confirm that it can reach `EGMA_URL`.
+After deployment, the first production conversation appears under
+**Monitoring** when the worker sends its spans. Egma cannot see a DNS, firewall,
+or network failure inside the worker. If nothing appears, check the worker logs
+and confirm it can reach `EGMA_URL`.
 
-## How simulations stay separate
-
-Every room Egma creates for a simulation starts with `egma-sim-`. The helper
-reads that room name before it reads configuration. It does not export those
-spans through production Monitoring because the simulation keeps its own trace.
-
-The room name is the only signal. Egma does not write into your dispatch
-metadata. Refuse the `egma-sim-` prefix wherever your own system creates
-production room names.
-
-## Current testing boundary
-
-`@egma/livekit` does not yet provide `mockable`. LiveKit Agents JS 1.7 stores
-test mocks in one module-wide table keyed by the agent constructor, not by
-session. Repeated or overlapping sessions in one job can replace each other's
-mocks, and nested cleanup can restore stale mocks. Egma keeps JavaScript
-simulation testing blocked instead of claiming session isolation that this
-upstream hook does not provide.
-
-Use the [Python SDK](/integrations/python-sdk) when a LiveKit worker needs Egma
-mock tools today.
+`monitorLiveKit` also reads the room name first. It returns in an
+`egma-sim-` room so that simulation spans do not also appear as a production
+conversation.

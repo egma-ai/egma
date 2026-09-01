@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   ProxyTracerProvider,
   trace,
+  type Attributes,
   type TracerProvider,
 } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
@@ -13,6 +14,7 @@ import {
 import {
   BatchSpanProcessor,
   NodeTracerProvider,
+  type SpanExporter,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
@@ -22,6 +24,35 @@ const TRACE_PATH = "/v1/traces";
 const SIMULATION_ROOM_PREFIX = "egma-sim-";
 const PROJECT_KEY_PATTERN = /^egma_sk_[A-Za-z0-9_-]{43}$/u;
 const UNCONFIGURED_TRACER_PROVIDER = new ProxyTracerProvider().getDelegate();
+
+type CloudSpanProcessorOptions = {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+  readonly exporter?: SpanExporter;
+};
+
+type CreateCloudSpanProcessor = (
+  options: CloudSpanProcessorOptions,
+) => SpanProcessor;
+
+type MutableFanoutSpanProcessor = SpanProcessor & {
+  add(processor: SpanProcessor): void;
+};
+
+type SharedLiveKitTelemetry = {
+  readonly FanoutSpanProcessor: new () => MutableFanoutSpanProcessor;
+  readonly tracer: typeof telemetry.tracer & {
+    getProvider(): TracerProvider;
+  };
+  readonly setTracerProvider: (
+    provider: TracerProvider,
+    options?: {
+      readonly metadata?: Attributes;
+      readonly registerSpanProcessor?: (processor: SpanProcessor) => void;
+      readonly createCloudSpanProcessor?: CreateCloudSpanProcessor;
+    },
+  ) => void;
+};
 
 type MonitoringState = {
   readonly endpoint: string;
@@ -52,7 +83,7 @@ export type MonitorLiveKitOptions = {
 export type ExistingTelemetry = {
   readonly provider: TracerProvider;
   readonly registerSpanProcessor: (processor: SpanProcessor) => void;
-  readonly createCloudSpanProcessor?: telemetry.SetTracerProviderOptions["createCloudSpanProcessor"];
+  readonly createCloudSpanProcessor?: CreateCloudSpanProcessor;
 };
 
 /**
@@ -74,6 +105,13 @@ export function monitorLiveKit(
     return;
   }
 
+  const sharedTelemetry = sharedLiveKitTelemetry();
+  if (sharedTelemetry === undefined) {
+    throw new Error(
+      "LiveKit production monitoring requires a supported @livekit/agents version (>=1.5.5 <2) that exposes the shared telemetry seam Egma needs.",
+    );
+  }
+
   const addShutdownCallback = contextShutdownCallback(ctx);
   const endpoint = traceEndpoint(setting(options.endpoint, "EGMA_URL"));
   const apiKey = projectKey(setting(options.apiKey, "EGMA_API_KEY"));
@@ -86,6 +124,7 @@ export function monitorLiveKit(
       apiKeyDigest,
       roomName,
       jobAgentName(ctx),
+      sharedTelemetry,
       options.existingTelemetry,
     );
   } else if (
@@ -109,6 +148,22 @@ export function monitorLiveKit(
   }
 
   registerShutdownFlush(ctx, addShutdownCallback, state.processor);
+}
+
+function sharedLiveKitTelemetry(): SharedLiveKitTelemetry | undefined {
+  const candidate = telemetry as unknown as {
+    readonly FanoutSpanProcessor?: unknown;
+    readonly setTracerProvider?: unknown;
+    readonly tracer?: { readonly getProvider?: unknown };
+  };
+  if (
+    typeof candidate.FanoutSpanProcessor !== "function" ||
+    typeof candidate.setTracerProvider !== "function" ||
+    typeof candidate.tracer?.getProvider !== "function"
+  ) {
+    return undefined;
+  }
+  return telemetry as unknown as SharedLiveKitTelemetry;
 }
 
 function jobRoomName(ctx: JobContext): string {
@@ -196,10 +251,11 @@ function configureMonitoring(
   apiKeyDigest: Buffer,
   roomName: string,
   agentName: string,
+  sharedTelemetry: SharedLiveKitTelemetry,
   suppliedTelemetry: ExistingTelemetry | undefined,
 ): MonitoringState {
   const existingTelemetry = compatibleExistingTelemetry(
-    telemetry.tracer.getProvider(),
+    sharedTelemetry.tracer.getProvider(),
     trace.getTracerProvider(),
     suppliedTelemetry,
   );
@@ -211,9 +267,11 @@ function configureMonitoring(
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     processor = new BatchSpanProcessor(exporter);
-    const ownedFanout = new telemetry.FanoutSpanProcessor();
+    const ownedFanout = new sharedTelemetry.FanoutSpanProcessor();
     let provider: TracerProvider;
     let registerSpanProcessor: (added: SpanProcessor) => void;
+    let createCloudSpanProcessor =
+      existingTelemetry?.createCloudSpanProcessor;
 
     if (existingTelemetry === undefined) {
       const ownedProvider = new NodeTracerProvider({
@@ -225,12 +283,16 @@ function configureMonitoring(
       ownedProvider.register();
       provider = ownedProvider;
       registerSpanProcessor = (added) => ownedFanout.add(added);
+      createCloudSpanProcessor = ({ url, headers, exporter }) =>
+        new BatchSpanProcessor(
+          exporter ?? new OTLPTraceExporter({ url, headers }),
+        );
     } else {
       provider = existingTelemetry.provider;
       registerSpanProcessor = existingTelemetry.registerSpanProcessor;
       registerSpanProcessor(processor);
     }
-    telemetry.setTracerProvider(provider, {
+    sharedTelemetry.setTracerProvider(provider, {
       metadata: {
         "session.id": roomName,
         ...(agentName === ""
@@ -238,11 +300,10 @@ function configureMonitoring(
           : { [telemetry.traceTypes.ATTR_AGENT_NAME]: agentName }),
       },
       registerSpanProcessor,
-      ...(existingTelemetry?.createCloudSpanProcessor === undefined
+      ...(createCloudSpanProcessor === undefined
         ? {}
         : {
-            createCloudSpanProcessor:
-              existingTelemetry.createCloudSpanProcessor,
+            createCloudSpanProcessor,
           }),
     });
 

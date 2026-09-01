@@ -148,11 +148,11 @@ describe("the public skill source", () => {
       /The CLI owns the repository binding, agent and connection records, suite\s+manifest, and all stable IDs/u,
     );
 
-    expect(onboarding).toMatch(
-      /When Both supports testing, create the simulation connection first, then enable\s+monitoring on that recorded agent/u,
+    expect(liveKitWorker).toMatch(
+      /Python and JavaScript workers support testing and monitoring/u,
     );
     expect(onboarding).toMatch(
-      /For JavaScript Both, skip simulation setup,\s+complete monitoring, and finish at `unsupported-capability`/u,
+      /For Both, create the simulation connection first, then enable\s+monitoring on\s+that recorded agent/u,
     );
     expect(onboarding).toMatch(
       /both to `monitoring-setup` after execution and grading are terminal/u,
@@ -220,13 +220,13 @@ describe("the public skill source", () => {
     );
     expect(liveKitWorker).toContain("`@livekit/agents`");
     expect(liveKitWorker).toMatch(
-      /JavaScript workers[\s\S]*support monitoring through `@egma\/livekit`/u,
+      /Python and JavaScript workers support testing and monitoring/u,
     );
     expect(liveKitWorker).toMatch(
-      /JavaScript Testing request[\s\S]*stop before remote testing setup/u,
+      /process-wide\s+mock table[\s\S]*one active `mockable` session in each job process/u,
     );
     expect(liveKitWorker).toMatch(
-      /JavaScript Both request[\s\S]*do not claim\s+that Both completed/u,
+      /session close\s+or job shutdown own cleanup/u,
     );
     expect(liveKitWorker).toMatch(
       /For JavaScript, add the latest `@egma\/livekit` package with the repository's\s+package manager/u,

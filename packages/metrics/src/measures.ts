@@ -75,8 +75,16 @@
  * measured at version 5 and the same one at version 6 give different samples,
  * and fewer of them: a turn the agent never began answering now takes none,
  * for the same reason a speechless one never did on voice.
+ *
+ * **7** makes a framework's silent tool turn part of the wait rather than the
+ * answer when that framework also records speech. LiveKit can open one agent
+ * turn to choose and run a tool, then a second agent turn to speak the answer.
+ * Version 6 stopped at the first turn and could drop the measurement when that
+ * bookkeeping overlapped the human turn. Version 7 continues to the first
+ * speech before the next human turn. The agent-turn fallback remains only for
+ * a trace whose framework recorded no speaking spans at all.
  */
-export const MEASURE_CATALOG_VERSION = 6;
+export const MEASURE_CATALOG_VERSION = 7;
 
 /**
  * How a metric series can be reduced to one observed number.

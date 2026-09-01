@@ -95,6 +95,23 @@ const SPANS_TABLE = "spans";
 const TURNS_TABLE = "turns";
 
 /**
+ * LiveKit's agent-activity bookkeeping that its JavaScript SDK starts as
+ * independent OpenTelemetry roots around one `agent_session`.
+ *
+ * Exact and closed on purpose. A future LiveKit name remains visible until we
+ * understand it; silently classifying an unknown trace as lifecycle evidence
+ * would be the read path deleting a customer's only sign of a changed emitter.
+ */
+const LIVEKIT_LIFECYCLE_SPAN_NAMES = [
+  "start_agent_activity",
+  "resume_agent_activity",
+  "pause_agent_activity",
+  "drain_agent_activity",
+  "on_enter",
+  "on_exit",
+] as const;
+
+/**
  * The outer of the two payload keys reaching the block walks — the egma-owned
  * corner of an otherwise vendor-owned document.
  *
@@ -711,9 +728,37 @@ export async function listTraces(
   // its spans did.
   const after =
     cursor === undefined
+      ? undefined
+      : `(${TRACE_POSITION}, trace_id) < ` +
+        `({cursor_started_at:Int64}, {cursor_trace_id:String})`;
+
+  // LiveKit JavaScript emits successful start/drain activity trees under
+  // their own wire trace ids. They remain immutable evidence and a direct
+  // detail read can still open them; they are omitted only from the production
+  // transcript list.
+  //
+  // This belongs in HAVING because the decision is about every span in one
+  // trace. It runs in the list's existing grouped scan, after the WHERE clause
+  // has used the month, time min-max and tenancy primary-key indexes, and
+  // before ORDER BY/LIMIT so an omitted group never consumes a page slot.
+  // Exact names, all-LiveKit provenance, no root and no error make this fail
+  // open: anything new, mixed or failed stays visible.
+  const visibleProductionTracePredicate =
+    source === "production"
+      ? `not (
+         countIf(${SPANS_TABLE}.agent_platform = 'livekit') = count()
+         and countIf(${SPANS_TABLE}.name in {livekit_lifecycle_names:Array(String)}) = count()
+         and countIf(${SPANS_TABLE}.kind = 'root') = 0
+         and countIf(${SPANS_TABLE}.status = 'error') = 0
+       )`
+      : undefined;
+  const groupedPredicates = [visibleProductionTracePredicate, after].filter(
+    (predicate): predicate is string => predicate !== undefined,
+  );
+  const having =
+    groupedPredicates.length === 0
       ? ""
-      : `having (${TRACE_POSITION}, trace_id) < ` +
-        `({cursor_started_at:Int64}, {cursor_trace_id:String}) `;
+      : `having ${groupedPredicates.join("\n       and ")} `;
 
   // One row more than the page, so that whether there is a next page is a fact
   // rather than a guess. A cursor handed out for an empty next page is a caller
@@ -727,11 +772,14 @@ export async function listTraces(
        and started_at >= ${asDateTime64(window.from)}
        and started_at < ${asDateTime64(window.to)}${narrowing}
      group by trace_id
-     ${after}order by ${TRACE_POSITION} desc, trace_id desc
+     ${having}order by ${TRACE_POSITION} desc, trace_id desc
      limit ${limit + 1}`,
     {
       ...tenancy.parameters,
       ...(source === undefined ? {} : { source }),
+      ...(source === "production"
+        ? { livekit_lifecycle_names: LIVEKIT_LIFECYCLE_SPAN_NAMES }
+        : {}),
       ...(cursor === undefined
         ? {}
         : {
