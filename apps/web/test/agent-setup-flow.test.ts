@@ -279,7 +279,7 @@ describe("the goal-first agent setup plan", () => {
     expect(stepAfterPlatform("simulation", "retell")).toBe("retell-key");
     expect(stepAfterPlatform("monitoring", "retell")).toBe("retell-key");
     expect(stepAfterPlatform("simulation", "livekit")).toBe(
-      "livekit-language",
+      "livekit-modality",
     );
     expect(stepAfterPlatform("both", "livekit")).toBe(
       "livekit-monitoring",
@@ -330,11 +330,10 @@ describe("the goal-first agent setup plan", () => {
   });
 
   /**
-   * Language is known before any LiveKit simulation connection is written.
-   * Both asks on Monitoring first, so JavaScript finishes without creating a
-   * connection that would falsely claim session-isolated testing.
+   * A room connection has no worker-language field. Both learns the language
+   * on Monitoring; Simulation waits until the source-instruction screen.
    */
-  it("captures the LiveKit language before simulation and never crosses a saved connection on Back", () => {
+  it("keeps language out of the room connection steps and never crosses a saved connection on Back", () => {
     const simulation = agentSetupPlan("simulation", "livekit");
     const both = agentSetupPlan("both", "livekit");
 
@@ -345,9 +344,6 @@ describe("the goal-first agent setup plan", () => {
 
     expect(
       previousAgentSetupStep({ step: "livekit-modality", goal: "simulation" }),
-    ).toBe("livekit-language");
-    expect(
-      previousAgentSetupStep({ step: "livekit-language", goal: "simulation" }),
     ).toBe("platform");
     expect(
       previousAgentSetupStep({ step: "livekit-modality", goal: "both" }),

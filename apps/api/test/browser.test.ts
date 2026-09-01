@@ -3166,7 +3166,7 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "captures LiveKit Monitoring language before it connects the exact Python agent",
+    "captures LiveKit Monitoring language before it connects the exact JavaScript agent",
     async () => {
       await walk.goto(at("agents"));
       await walk.getByRole("link", { name: "Connect an agent" }).first().click();
@@ -3186,25 +3186,21 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await sheet.innerText()).toContain(
         "What language is your LiveKit worker?",
       );
-      expect(await sheet.innerText()).not.toContain("monitor_livekit(ctx)");
+      expect(await sheet.innerText()).toContain("monitor_livekit(ctx)");
       expect(
         await sheet.getByRole("tab", { name: "Python" }).getAttribute(
           "aria-selected",
         ),
-      ).toBe("false");
+      ).toBe("true");
 
       // The switch shows both monitoring contracts before any simulation
-      // connection exists. JavaScript says plainly why Both ends here; Python
-      // can continue into the session-isolated testing path.
+      // connection exists. The selected language then drives the testing
+      // instructions after the same language-neutral room connection is saved.
       await sheet.getByRole("tab", { name: "JavaScript" }).click();
       const javascriptInstructions = await sheet.innerText();
       expect(javascriptInstructions).toContain("npm install @egma/livekit");
       expect(javascriptInstructions).toContain("monitorLiveKit(ctx)");
-      expect(javascriptInstructions).toContain("Testing remains unsupported");
-      await sheet.getByRole("tab", { name: "Python" }).click();
-      const pythonInstructions = await sheet.innerText();
-      expect(pythonInstructions).toContain("monitor_livekit(ctx)");
-      expect(pythonInstructions).not.toContain("monitorLiveKit(ctx)");
+      expect(javascriptInstructions).not.toMatch(/unsupported/i);
       await sheet
         .getByRole("button", { name: "Continue to simulation" })
         .click();
@@ -3247,6 +3243,11 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await sheet.innerText()).toContain(
         "await mockable(agent, ctx, session)",
       );
+      expect(await sheet.innerText()).toContain(
+        'import { mockable } from "@egma/livekit"',
+      );
+      expect(await sheet.innerText()).toContain("npm install @egma/livekit");
+      expect(await sheet.innerText()).not.toContain("from egma import mockable");
       expect(
         await sheet.getByRole("button", { name: /start monitoring/iu }).count(),
         "LiveKit monitoring is configured in customer code, not toggled here",

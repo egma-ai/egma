@@ -176,7 +176,7 @@ const MODALITY_CHOICES: Readonly<
   voice: {
     title: "Voice",
     description:
-      "Egma speaks to the agent in the room, the way a person reaches it. Your Python worker needs the Egma testing hook, which Egma shows you next.",
+      "Egma speaks to the agent in the room, the way a person reaches it. Your worker needs the Egma testing hook, which Egma shows you next.",
   },
   chat: {
     title: "Chat",
@@ -276,20 +276,13 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const [mockRead, setMockRead] = useState<MockToolsRead>({ status: "loading" });
   /** The connection the mock question is about, once it has been written. */
   const [mockTarget, setMockTarget] = useState<ConnectSheetResult | null>(null);
-  /**
-   * Whether runs over the new connection answer the agent's tools themselves.
-   *
-   * **Off unless it is turned on.** Mocking changes what a run is: the agent
-   * reaches Egma's test data instead of the customer's own backend, and for a
-   * web call it also means a temporary version on their Retell account. That is
-   * an explicit yes, never a default somebody discovers afterwards.
-   */
-
   const [discovering, setDiscovering] = useState(false);
 
-  const [livekitLanguage, setLivekitLanguage] = useState<
-    LiveKitWorkerLanguage | ""
-  >("");
+  // This chooses which source instructions are visible. It is never written
+  // to the connection, and Python is the first documentation view rather than
+  // an unanswered setup question.
+  const [livekitLanguage, setLivekitLanguage] =
+    useState<LiveKitWorkerLanguage>("python");
   const [livekitModality, setLivekitModality] = useState<"chat" | "voice" | "">(
     "",
   );
@@ -318,7 +311,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setLane("");
-    setLivekitLanguage("");
+    setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -579,7 +572,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgentId("");
     setRetellRoute("");
     setLane("");
-    setLivekitLanguage("");
+    setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
     setLivekitAgentName("");
@@ -1184,14 +1177,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-phone":
         await finishRetellLanes();
         return;
-      case "livekit-language":
-        if (livekitLanguage === "") return;
-        if (livekitLanguage === "javascript") {
-          leave();
-          return;
-        }
-        transition("livekit-modality");
-        return;
       case "livekit-modality":
         if (livekitModality !== "") transition("livekit-simulation");
         return;
@@ -1210,15 +1195,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         return;
       }
       case "livekit-monitoring":
-        if (livekitLanguage === "") return;
-        // Both starts with Monitoring so the language is known before any
-        // simulation connection can be written. JavaScript finishes here;
-        // Python continues into the supported, session-isolated test setup.
-        if (
-          goal === "both" &&
-          livekitLanguage === "python" &&
-          completed === null
-        ) {
+        // Monitoring needs a language-specific source hook. Both carries that
+        // instruction choice forward; it is never part of the room connection.
+        if (goal === "both" && completed === null) {
           transition("livekit-modality");
           return;
         }
@@ -1529,40 +1508,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             </Help>
           </div>
         );
-      case "livekit-language":
-        return (
-          <div className="flex flex-col gap-5">
-            <StepIntro title="What language is your LiveKit worker?" />
-            <RadioGroup
-              className="gap-4"
-              aria-label="LiveKit worker language"
-              value={livekitLanguage}
-              onValueChange={(value) =>
-                setLivekitLanguage(value as LiveKitWorkerLanguage)
-              }
-            >
-              <ChoiceCard
-                compact
-                value="python"
-                title="Python"
-                description="Simulation testing and production monitoring are supported."
-              />
-              <ChoiceCard
-                compact
-                value="javascript"
-                title="JavaScript"
-                description="Production monitoring is supported. Simulation testing is not supported yet."
-              />
-            </RadioGroup>
-            {livekitLanguage === "javascript" ? (
-              <Help>
-                Egma cannot set up JavaScript testing yet because it cannot
-                isolate each test run from other LiveKit sessions. Use the
-                Monitoring goal to add JavaScript monitoring.
-              </Help>
-            ) : null}
-          </div>
-        );
       case "livekit-modality":
         return (
           <div className="flex flex-col gap-5">
@@ -1591,7 +1536,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         );
       case "livekit-testing":
         return livekitModality === "" ? null : (
-          <LiveKitTestingInstructions modality={livekitModality} />
+          <LiveKitTestingInstructions
+            language={livekitLanguage}
+            modality={livekitModality}
+            onLanguageChange={setLivekitLanguage}
+          />
         );
       case "livekit-simulation":
         return (
@@ -1619,20 +1568,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         );
       case "livekit-monitoring":
         return (
-          <div className="flex flex-col gap-5">
-            <LiveKitMonitoringInstructions
-              projectId={projectId}
-              language={livekitLanguage}
-              onLanguageChange={setLivekitLanguage}
-            />
-            {goal === "both" && livekitLanguage === "javascript" ? (
-              <Help>
-                Monitoring is supported for JavaScript and finishes here.
-                Testing remains unsupported because Egma cannot isolate each
-                JavaScript test run from other LiveKit sessions.
-              </Help>
-            ) : null}
-          </div>
+          <LiveKitMonitoringInstructions
+            projectId={projectId}
+            language={livekitLanguage}
+            onLanguageChange={setLivekitLanguage}
+          />
         );
     }
   }
@@ -1643,11 +1583,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     step === "retell-agent" ||
     step === "livekit-modality"
       ? "Continue"
-      : step === "livekit-language"
-        ? livekitLanguage === "javascript"
-          ? "Return to agents"
-          : "Continue"
-        : step === "retell-lanes"
+      : step === "retell-lanes"
           ? lane === "phone"
             ? "Continue"
             : saving
@@ -1676,9 +1612,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                       ? "Continue to testing"
                       : "Continue"
                   : step === "livekit-monitoring" && goal === "both"
-                    ? livekitLanguage === "javascript"
-                      ? "Finish monitoring"
-                      : "Continue to simulation"
+                    ? "Continue to simulation"
                     : "Return to agents";
 
   const primaryDisabled =
@@ -1694,10 +1628,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       (lane === "" || (lane !== "phone" && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
-    (step === "livekit-language" && livekitLanguage === "") ||
     (step === "livekit-modality" && livekitModality === "") ||
-    (step === "livekit-simulation" && completed === null && !livekitReady) ||
-    (step === "livekit-monitoring" && livekitLanguage === "");
+    (step === "livekit-simulation" && completed === null && !livekitReady);
 
   const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
   const usable =

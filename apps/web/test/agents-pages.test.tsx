@@ -1217,15 +1217,8 @@ describe("goal-first agent setup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   }
 
-  /** Choose the supported testing language, then the simulation modality. */
+  /** Choose the simulation modality before any connection detail. */
   async function chooseLiveKitModality(name: "Chat" | "Voice"): Promise<void> {
-    expect(
-      await screen.findByRole("heading", {
-        name: "What language is your LiveKit worker?",
-      }),
-    ).toBeDefined();
-    fireEvent.click(screen.getByRole("radio", { name: /^Python/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(
       await screen.findByRole("heading", {
         name: "How do you want to test this agent?",
@@ -2852,6 +2845,7 @@ describe("goal-first agent setup", () => {
         name: "Add simulation testing to your LiveKit agent",
       }),
     ).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain(
       "await mockable(agent, ctx, session)",
     );
@@ -2891,27 +2885,22 @@ describe("goal-first agent setup", () => {
    * screen before the question has been answered would be asking for the
    * wrong values half the time.
    */
-  it("asks for the LiveKit worker language and modality before any credential box", async () => {
+  it("asks for modality, but not worker language, before connection details", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
     await choose("Run simulations", "LiveKit");
 
     expect(
       await screen.findByRole("heading", {
-        name: "What language is your LiveKit worker?",
-      }),
-    ).toBeDefined();
-    expect(screen.getByRole("radio", { name: /^Python/ })).toBeDefined();
-    expect(screen.getByRole("radio", { name: /^JavaScript/ })).toBeDefined();
-    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
-
-    fireEvent.click(screen.getByRole("radio", { name: /^Python/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", {
         name: "How do you want to test this agent?",
       }),
     ).toBeDefined();
+    expect(
+      screen.queryByText("What language is your LiveKit worker?"),
+    ).toBeNull();
+    expect(screen.queryByRole("radio", { name: /^Python/ })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /^JavaScript/ })).toBeNull();
+    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
     expect(
       screen.getAllByRole("radio").map((choice) => choice.textContent),
     ).toEqual([
@@ -2927,30 +2916,87 @@ describe("goal-first agent setup", () => {
     expect(sent).toEqual([]);
   });
 
-  it("does not create a simulation connection for a JavaScript LiveKit worker", async () => {
-    sheetAnswers();
+  it("creates a simulation connection for a JavaScript LiveKit worker", async () => {
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: liveKitAgent,
+            connection: liveKitConnection,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            agents: [{ ...liveKitAgent, connections: [liveKitConnection] }],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
     render(<RegisterAgentPage />);
     await choose("Run simulations", "LiveKit");
 
     fireEvent.click(
-      await screen.findByRole("radio", { name: /^JavaScript/ }),
+      await screen.findByRole("radio", { name: /^Voice/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await fillLiveKitSimulation();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to testing" }),
     );
 
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+      ).toBe(true);
+    });
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add simulation testing to your LiveKit agent",
+      }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
+    expect(document.body.textContent).toContain("npm install @egma/livekit");
     expect(document.body.textContent).toContain(
+      "LiveKit Agents 1.5.0 or newer in the 1.x line",
+    );
+    expect(document.body.textContent).toContain(
+      'import { mockable } from "@egma/livekit"',
+    );
+    expect(document.body.textContent).toContain(
+      "await mockable(agent, ctx, session)",
+    );
+    expect(document.body.textContent).not.toContain(
       "Egma cannot set up JavaScript testing yet",
     );
-    expect(document.body.textContent).toContain(
-      "cannot isolate each test run from other LiveKit sessions",
-    );
-    expect(
-      screen.getByRole("button", { name: "Return to agents" }),
-    ).toBeDefined();
-    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
-    expect(sent).toEqual([]);
+    expect(document.body.textContent).not.toContain("pip install");
+    expect(document.body.textContent).not.toContain("from egma import mockable");
 
-    fireEvent.click(screen.getByRole("button", { name: "Return to agents" }));
-    expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
-    expect(sent).toEqual([]);
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    expect(registration?.body).toEqual({
+      name: "front-desk",
+      agentPlatform: "livekit",
+      connection: {
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+        modality: "voice",
+        config: {
+          url: "wss://rooms.example.test",
+          agentName: "front-desk",
+        },
+        credentials: {
+          apiKey: "livekit-key",
+          apiSecret: "livekit-secret",
+        },
+      },
+    });
   });
 
   it("saves a LiveKit chat connection and offers no way in but project credentials", async () => {
@@ -3042,6 +3088,7 @@ describe("goal-first agent setup", () => {
         name: "Add simulation testing to your LiveKit agent",
       }),
     ).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain(
       "await mockable(agent, ctx, session)",
     );
@@ -3271,14 +3318,12 @@ describe("goal-first agent setup", () => {
     expect(
       screen.getByText("What language is your LiveKit worker?"),
     ).toBeDefined();
-    expect(document.body.textContent).not.toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
     expect(
       (screen.getByRole("button", {
         name: "Return to agents",
       }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
+    ).toBe(false);
 
     const copy = document.body.textContent ?? "";
     expect(copy).toContain("monitor_livekit(ctx)");
@@ -3328,8 +3373,6 @@ describe("goal-first agent setup", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeDefined();
-    expect(document.body.textContent).not.toContain("monitor_livekit(ctx)");
-    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
     expect(document.body.textContent).toContain("monitor_livekit(ctx)");
     fireEvent.click(
       screen.getByRole("button", { name: "Continue to simulation" }),
@@ -3368,8 +3411,27 @@ describe("goal-first agent setup", () => {
     ).toBe(false);
   });
 
-  it("finishes JavaScript Monitoring for Both and leaves Testing unsupported", async () => {
-    sheetAnswers();
+  it("continues from JavaScript Monitoring into simulation setup for Both", async () => {
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: liveKitAgent,
+            connection: liveKitConnection,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            agents: [{ ...liveKitAgent, connections: [liveKitConnection] }],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
     render(<RegisterAgentPage />);
     await choose("Set up both", "LiveKit");
 
@@ -3378,27 +3440,55 @@ describe("goal-first agent setup", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeDefined();
-    expect(screen.queryByText("Install the Egma SDK")).toBeNull();
+    expect(screen.getByText("Install the Egma SDK")).toBeDefined();
+    expect(document.body.textContent).toContain("monitor_livekit(ctx)");
+    expect(document.body.textContent).not.toContain("monitorLiveKit(ctx)");
 
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
 
     const shown = document.body.textContent ?? "";
     expect(shown).toContain("npm install @egma/livekit");
     expect(shown).toContain("monitorLiveKit(ctx)");
-    expect(shown).toContain("Monitoring is supported for JavaScript");
-    expect(shown).toContain("Testing remains unsupported");
+    expect(shown).toContain(
+      "LiveKit Agents 1.5.5 or newer in the 1.x line",
+    );
+    expect(shown).not.toMatch(/unsupported/i);
     expect(
-      screen.getByRole("button", { name: "Finish monitoring" }),
+      screen.getByRole("button", { name: "Continue to simulation" }),
     ).toBeDefined();
     expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
     expect(sent).toEqual([]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Finish monitoring" }));
-    expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
-    expect(sent).toEqual([]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to simulation" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /^Voice/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await fillLiveKitSimulation();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to testing" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add simulation testing to your LiveKit agent",
+      }),
+    ).toBeDefined();
+    expect(document.body.textContent).toContain(
+      'import { mockable } from "@egma/livekit"',
+    );
+    expect(document.body.textContent).not.toContain("from egma import mockable");
+    expect(
+      sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+    ).toBe(true);
+    expect(
+      sent.some((call) => call.url.startsWith("/v1/monitoring/")),
+    ).toBe(false);
   });
 
-  it("protects a Python LiveKit draft after going back and choosing JavaScript", async () => {
+  it("keeps a LiveKit room draft when the worker language changes", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
     await choose("Set up both", "LiveKit");
@@ -3415,17 +3505,37 @@ describe("goal-first agent setup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Finish monitoring" }),
+      screen.getByRole("button", { name: "Continue to simulation" }),
     );
 
-    const warning = await screen.findByRole("dialog", {
-      name: "Leave without saving?",
-    });
-    fireEvent.click(
-      within(warning).getByRole("button", { name: "Keep editing" }),
-    );
     expect(
-      screen.getByRole("button", { name: "Finish monitoring" }),
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect LiveKit Voice for simulations",
+      }),
+    ).toBeDefined();
+    expect(
+      (screen.getByLabelText("LiveKit agent name*") as HTMLInputElement).value,
+    ).toBe("front-desk");
+    expect(
+      (screen.getByLabelText("WebSocket URL*") as HTMLInputElement).value,
+    ).toBe("wss://rooms.example.test");
+    expect(
+      (screen.getByLabelText("API key*") as HTMLInputElement).value,
+    ).toBe("livekit-key");
+    expect(
+      (screen.getByLabelText("API secret*") as HTMLInputElement).value,
+    ).toBe("livekit-secret");
+    expect(
+      screen.queryByRole("dialog", { name: "Leave without saving?" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Continue to testing" }),
     ).toBeDefined();
     expect(routed.replace).not.toHaveBeenCalled();
     expect(sent).toEqual([]);
@@ -3484,10 +3594,6 @@ describe("goal-first agent setup", () => {
     });
     render(<RegisterAgentPage />);
     await choose("Run simulations", "LiveKit");
-    fireEvent.click(
-      await screen.findByRole("radio", { name: /^Python/ }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(
       await screen.findByText("Egma could not describe the connection options."),

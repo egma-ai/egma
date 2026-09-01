@@ -9,7 +9,7 @@ import type { LiveKitWorkerLanguage } from "../lib/agent-setup-flow.ts";
 afterEach(cleanup);
 
 function MonitoringInstructions() {
-  const [language, setLanguage] = useState<LiveKitWorkerLanguage | "">("");
+  const [language, setLanguage] = useState<LiveKitWorkerLanguage>("python");
   return (
     <LiveKitMonitoringInstructions
       projectId="prj_1"
@@ -28,19 +28,17 @@ describe("LiveKit monitoring instructions", () => {
         name: "Add monitoring to your LiveKit agent",
       }),
     ).toBeTruthy();
-    expect(screen.queryByText("Install the Egma SDK")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Copy / })).toBeNull();
-    expect(screen.queryByRole("link", { name: "API keys" })).toBeNull();
+    expect(screen.getByText("Install the Egma SDK")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(3);
+    expect(screen.getByRole("link", { name: "API keys" })).toBeTruthy();
     expect(
       screen.getByRole("tab", { name: "Python" }).getAttribute("aria-selected"),
-    ).toBe("false");
+    ).toBe("true");
     expect(
       screen
         .getByRole("tab", { name: "JavaScript" })
         .getAttribute("aria-selected"),
     ).toBe("false");
-
-    fireEvent.click(screen.getByRole("tab", { name: "Python" }));
 
     expect(screen.getByText("Install the Egma SDK")).toBeTruthy();
     expect(
@@ -101,6 +99,9 @@ describe("LiveKit monitoring instructions", () => {
     ).toBe("true");
     expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(3);
     expect(copy).toContain("npm install @egma/livekit");
+    expect(copy).toContain(
+      "LiveKit Agents 1.5.5 or newer in the 1.x line",
+    );
     expect(copy).toContain(
       'import { monitorLiveKit } from "@egma/livekit"',
     );

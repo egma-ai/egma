@@ -88,8 +88,8 @@ const PLANS: Readonly<
     both: {
       goal: "both",
       platform: "livekit",
-      // Python continues into simulation setup; JavaScript finishes after
-      // monitoring because its test runs cannot yet be isolated.
+      // Both languages continue into simulation setup after the customer has
+      // the matching production-monitoring instructions.
       mayWriteConnection: true,
       pullWithConnection: false,
       monitoringInstructions: true,
@@ -260,7 +260,6 @@ export type AgentSetupStep =
   | "retell-lanes"
   | "retell-mocks"
   | "retell-phone"
-  | "livekit-language"
   | "livekit-modality"
   | "livekit-simulation"
   | "livekit-testing"
@@ -269,25 +268,22 @@ export type AgentSetupStep =
 /**
  * Provider capability decides the first provider-specific screen.
  *
- * LiveKit Simulation asks for the worker language, then the modality, before
- * credentials. Monitoring and Both start with monitoring instructions, where
- * the language choice decides whether Both can continue into Simulation.
+ * LiveKit Simulation asks only what changes its connection: the modality.
+ * Monitoring and Both start with instructions whose language toggle changes
+ * the source hook, not the room connection.
  */
 export function stepAfterPlatform(
   goal: AgentSetupGoal,
   platform: AgentSetupPlatform,
 ): AgentSetupStep {
   if (platform === "retell") return "retell-key";
-  // Monitoring asks for the worker language on its own instruction screen.
-  // Both starts there too, so JavaScript can finish Monitoring without first
-  // creating a simulation connection that the JavaScript SDK cannot isolate.
-  return goal === "simulation" ? "livekit-language" : "livekit-monitoring";
+  return goal === "simulation" ? "livekit-modality" : "livekit-monitoring";
 }
 
 /**
  * What follows a saved LiveKit simulation connection.
  *
- * Every Python worker needs the testing hook. Chat adds silent room handling.
+ * Every worker needs the testing hook. Chat adds silent room handling.
  * This is a screen and not a recorded state: Egma cannot see the source change
  * from the web application, so the sheet claims no completion for it.
  */
@@ -301,7 +297,7 @@ export function stepAfterLiveKitCredentials(
 export function stepAfterLiveKitTesting(
   _plan: AgentSetupPlan,
 ): AgentSetupStep | null {
-  // A Both flow completes Monitoring before it starts Python simulation setup.
+  // A Both flow completes Monitoring before it starts simulation setup.
   return null;
 }
 
@@ -345,13 +341,11 @@ export function previousAgentSetupStep({
     case "platform":
       return "goal";
     case "retell-key":
-    case "livekit-language":
       return "platform";
     case "livekit-modality":
-      // Both has already shown Monitoring and captured Python before it can
-      // enter simulation setup. Simulation-only captured Python on the
-      // language screen.
-      return goal === "both" ? "livekit-monitoring" : "livekit-language";
+      // Both has already shown Monitoring. Simulation entered here directly,
+      // because language changes source instructions rather than a connection.
+      return goal === "both" ? "livekit-monitoring" : "platform";
     case "retell-agent":
       return "retell-key";
     case "retell-lanes":
