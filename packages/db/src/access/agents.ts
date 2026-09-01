@@ -1582,7 +1582,16 @@ export async function archiveAgent(
   return db().transaction(async (tx): Promise<ArchivedAgent | undefined> => {
     const [archived] = await tx
       .update(agent)
-      .set({ archivedAt: now, updatedAt: now })
+      /*
+       * Archiving releases the production watch the way it releases the
+       * agent's name: the one-watcher claim belongs to the living. Without
+       * this, the archived row keeps `agent_pulled_platform_agent_unique`
+       * held and keeps being polled, and the next agent bound to the same
+       * platform agent is refused by a row no screen can show. The sealed
+       * key and the monitoring history stay, exactly as stopping leaves
+       * them.
+       */
+      .set({ archivedAt: now, updatedAt: now, pullProductionCalls: false })
       .where(
         theAgent(auth, id),
       )

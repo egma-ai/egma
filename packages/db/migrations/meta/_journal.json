@@ -43,6 +43,13 @@
       "when": 1787993150870,
       "tag": "0005_simulation_execution_failure",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788222232543,
+      "tag": "0006_archived_agents_release_pull",
+      "breakpoints": true
     }
   ]
 }
