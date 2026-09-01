@@ -962,6 +962,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       retryConnections = answer.value.connections;
       retryPullEnabled = answer.value.agent.pullProductionCalls;
     }
+    // **One lane, walked by a loop that can carry several.** The setup flow
+    // picks exactly one lane now, so `requestedLanes` always holds one entry.
+    // The loop stays because everything inside it is the recovery path — the
+    // committed-connection read-back, the landed-agent carry, the progress
+    // record a lost response is resumed from — and that machinery answers the
+    // same questions for one lane as for three. Rewriting it into a straight
+    // line would be rewriting the part that is hard to get right in order to
+    // delete an `index` that costs nothing.
     for (const [index, { body, pullsProduction }] of requestedLanes.entries()) {
       if (readReusedLanding && landed !== null) {
         setSaving(true);
@@ -1097,7 +1105,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       ),
     );
     setSaving(false);
-    if (!finishAnswer(answer)) return;
+    if (!finishAnswer(answer)) {
+      // **The control goes back to what the server holds.** The refusal is
+      // rendered above, and a switch left reading ON over a connection that is
+      // still off would be the screen disagreeing with the account — the one
+      // thing a state this file draws must never do.
+      setMockTools(false);
+      return;
+    }
     onConnected(target);
   }
 

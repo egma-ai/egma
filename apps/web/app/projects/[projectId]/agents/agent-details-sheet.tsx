@@ -31,21 +31,6 @@ export type MonitoringCapability =
   | "Not configured"
   | "Configured via code";
 /**
- * Whether any of this agent's lanes runs its simulations with mocked tools.
- *
- * **Never "every simulation": the switch is per connection.** A text lane can
- * be mocked while the phone lane beside it reaches the customer's real backend,
- * so an agent-wide claim would be false for the phone lane every time. This
- * word summarises the lanes; the mock-tools surface shows each one.
- *
- * `Not available` is the honest third state rather than a fourth word for off:
- * mocking is a Retell seam, and a LiveKit agent's tools already run in the
- * customer's own process where the Egma SDK stands in front of them. Saying
- * "Off" there would offer a switch that has nothing to switch.
- */
-export type MockToolsCapability = "On" | "Off" | "Not available";
-
-/**
  * The provider that owns this agent's setup flow.
  *
  * A live connection is stronger evidence than an older declaration on the
@@ -95,11 +80,9 @@ export function monitoringCapabilityOf(
 }
 
 function stateClass(
-  state: SimulationCapability | MonitoringCapability | MockToolsCapability,
+  state: SimulationCapability | MonitoringCapability,
 ): string {
-  if (state === "Configured" || state === "Active" || state === "On") {
-    return "text-success";
-  }
+  if (state === "Configured" || state === "Active") return "text-success";
   if (state === "Stopped" || state === "Configured via code") return "text-warning";
   return "text-faint";
 }
@@ -107,7 +90,7 @@ function stateClass(
 export function CapabilityState({
   state,
 }: {
-  readonly state: SimulationCapability | MonitoringCapability | MockToolsCapability;
+  readonly state: SimulationCapability | MonitoringCapability;
 }) {
   return <span className={stateClass(state)}>{state}</span>;
 }

@@ -286,6 +286,38 @@ const TYPES = {
     {
       agentPlatform: "retell",
       agentPlatformLabel: "Retell",
+      connectionType: "retell_web_call",
+      accessVariant: "retell_web_call.api_key",
+      accessVariantLabel: "Retell API key",
+      modality: "voice",
+      productLabel: "Retell web call",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "retellAgentId",
+          label: "Retell agent ID",
+          kind: "text",
+          required: true,
+          help: "The voice agent's own identifier in Retell.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialFields: [
+        {
+          field: "apiKey",
+          label: "Retell API key",
+          kind: "secret",
+          required: true,
+          help: "Copied from your Retell dashboard.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "retell",
+      agentPlatformLabel: "Retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       accessVariantLabel: "Public E.164 number",
@@ -1910,6 +1942,9 @@ describe("goal-first agent setup", () => {
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
         TEXT_LANE_SAVED,
+        // Closing the sheet reloads the list, so the queue has to answer it.
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
       ],
       "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
     });
@@ -1947,6 +1982,9 @@ describe("goal-first agent setup", () => {
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
         TEXT_LANE_SAVED,
+        // Closing the sheet reloads the list, so the queue has to answer it.
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
       ],
       "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
       "/v1/agents/agt_1/connections/con_1": {
@@ -1974,6 +2012,123 @@ describe("goal-first agent setup", () => {
     expect(patched?.body).toEqual({ mockToolsEnabled: true });
   });
 
+  it("puts the switch back when the platform refuses to turn mocks on", async () => {
+    // A switch reading ON over a connection the server still holds `false`
+    // would be the screen disagreeing with the account.
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        TEXT_LANE_SAVED,
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
+      "/v1/agents/agt_1/connections/con_1": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message: "This agent holds no platform key, so Egma cannot branch a temporary copy.",
+        },
+      },
+    });
+    await reachMockQuestion();
+
+    const toggle = await screen.findByRole("switch", {
+      name: "Mock tools on runs",
+    });
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set up simulation" }));
+
+    // The refusal is said, and the control is back where the server is.
+    expect(
+      await screen.findByText(/cannot branch a temporary copy/),
+    ).toBeDefined();
+    await waitFor(() => {
+      expect(
+        screen
+          .getByRole("switch", { name: "Mock tools on runs" })
+          .getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+    // And the connection stands at false, which is what it was written as.
+    const registration = sent.find(
+      (call) => call.url === "/v1/agents?projectId=prj_1",
+    );
+    expect(
+      (registration?.body as { connection?: { mockToolsEnabled?: boolean } })
+        ?.connection?.mockToolsEnabled,
+    ).toBe(false);
+  });
+
+  it("shows the Latest Created note on a web call, only while mocks are on", async () => {
+    // The web-call lane branches a draft, and a draft **is** the latest
+    // created version — so a number or a tag pointing there reaches Egma's
+    // copy mid-run. The note says exactly that, and only while the switch that
+    // makes it true is on.
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: {
+              ...AGENT,
+              name: "Front desk",
+              platformAgentId: "agent_voice_1",
+            },
+            connection: { ...CONNECTION, connectionType: "retell_web_call" },
+          },
+        },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+      ],
+      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+    fireEvent.click(
+      screen.getByRole("radio", { name: new RegExp("^Web call") }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: "Mock this agent's tools?" }),
+    ).toBeDefined();
+
+    // Off: no draft is made, so there is nothing to warn about.
+    const toggle = await screen.findByRole("switch", {
+      name: "Mock tools on runs",
+    });
+    expect(
+      screen.queryByText(/Mocked runs create a temporary draft version/),
+    ).toBeNull();
+
+    fireEvent.click(toggle);
+    const note = await screen.findByText(
+      /Mocked runs create a temporary draft version/,
+    );
+    // Verbatim, because the words are the whole of what this note is.
+    expect(note.textContent?.replace(/\s+/gu, " ").trim()).toBe(
+      "Mocked runs create a temporary draft version on this agent and delete " +
+        "it after each run. A draft counts as Latest Created — make sure no " +
+        "phone number or tag sends real callers to Latest Created. Leaving a " +
+        "number's version unset also means Latest Created.",
+    );
+
+    // And it leaves again with the switch.
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(
+        screen.queryByText(/Mocked runs create a temporary draft version/),
+      ).toBeNull();
+    });
+  });
+
   it("says why mocks are refused, and still finishes the connection", async () => {
     // Every reason discovery refuses is a fact no answer here can change, so
     // the switch goes with the list — and the connection, already written with
@@ -1983,6 +2138,9 @@ describe("goal-first agent setup", () => {
       "/v1/agents": [
         { status: 200, body: { agents: [], nextPageToken: null } },
         TEXT_LANE_SAVED,
+        // Closing the sheet reloads the list, so the queue has to answer it.
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
       ],
       "/v1/agents/agt_1/mock-tools:discover": {
         status: 200,
@@ -2132,6 +2290,83 @@ describe("goal-first agent setup", () => {
         mockToolsEnabled: false,
       },
     });
+  });
+
+  it("reads back a committed Retell lane instead of duplicating it after a lost response", async () => {
+    // The write commits and its answer never arrives. A retry must find the
+    // connection that is already there rather than posting a second
+    // non-idempotent request — the recovery path the save loop exists for,
+    // now walked with one lane.
+    routed.search = "?sheet=connect&agent=agt_1";
+    const emptyKnownAgent = {
+      status: 200,
+      body: {
+        agent: { ...AGENT, platformAgentId: "agent_voice_1" },
+        connections: [],
+      },
+    };
+    const committedTextAgent = {
+      status: 200,
+      body: {
+        agent: { ...AGENT, platformAgentId: "agent_voice_1" },
+        connections: [
+          {
+            ...CONNECTION,
+            id: "con_text_committed",
+            agentId: "agt_1",
+            connectionType: "retell_text_mode",
+            accessVariant: "retell_text_mode.api_key",
+            modality: "chat",
+            config: { retellAgentId: "agent_voice_1" },
+          },
+        ],
+      },
+    };
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: voiceWithTextMode },
+      "/v1/agents/agt_1": [
+        emptyKnownAgent,
+        emptyKnownAgent,
+        committedTextAgent,
+        committedTextAgent,
+        committedTextAgent,
+        committedTextAgent,
+      ],
+      "/v1/agents/agt_1/connections": {
+        status: 503,
+        body: {
+          error: "response_lost",
+          message: "The connection may have been saved. Try again.",
+        },
+      },
+      "/v1/agents/agt_1/mock-tools:discover": MOCK_TOOLS_FOUND,
+    });
+    render(<AgentsPage />);
+    await choose("Run simulations", "Retell");
+    await findRetellAgents();
+    await pickRetellAgent("Front desk");
+
+    fireEvent.click(screen.getByRole("radio", { name: new RegExp("^Text") }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      await screen.findByText("The connection may have been saved. Try again."),
+    ).toBeDefined();
+    const posts = () =>
+      sent.filter(
+        (call) => call.method === "POST" && call.url.includes("/connections"),
+      );
+    expect(posts()).toHaveLength(1);
+
+    // The retry reads the account back and finds the connection it already
+    // wrote, so it sends **no second POST**. That is the whole property: a
+    // lost answer must never become a duplicate non-idempotent write.
+    const before = sent.length;
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => {
+      expect(sent.length).toBeGreaterThan(before);
+    });
+    expect(posts()).toHaveLength(1);
   });
 
   it("keeps a committed phone lane through Close and resumes monitoring after reopen", async () => {

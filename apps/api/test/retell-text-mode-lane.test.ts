@@ -213,7 +213,12 @@ function retell(plan: RetellPlan = {}): {
 /** A customer with a suite, a persona and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
-  connection: typeof TEXT_MODE | typeof RETELL_CHAT,
+  connection:
+    | typeof TEXT_MODE
+    | typeof RETELL_CHAT
+    | ((typeof TEXT_MODE | typeof RETELL_CHAT) & {
+        readonly mockToolsEnabled: boolean;
+      }),
   plan: RetellPlan = {},
   /** A trace store, for the one test that lands a terminal report. */
   traceStore = false,
@@ -1133,9 +1138,12 @@ describe("what a version-pinned run's landing records", () => {
 
 describe("the work order a version-pinned run hands over", () => {
   it("carries the version, this simulation's variables, and what the run resolved", async () => {
+    // Mocks are off on every lane unless the door that made the connection
+    // said otherwise, so this one says so — the text lane used to be the one
+    // exception and is not any more.
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "text_mode_claim",
-      TEXT_MODE,
+      { ...TEXT_MODE, mockToolsEnabled: true },
     );
 
     // One answer per class of tool the agent has.

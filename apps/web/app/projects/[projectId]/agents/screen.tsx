@@ -162,7 +162,6 @@ export function AgentsScreen({
   const [archiving, setArchiving] = useState<ListedAgentWithConnections | null>(null);
   /** The agent whose name is being changed, in the sheet that changes it. */
   const [renaming, setRenaming] = useState<ListedAgentWithConnections | null>(null);
-  /** The agent whose mocked world is being explained and ticked. */
   /** A Retell write whose answer may have been lost, kept across sheet Close. */
   const [retellRecovery, setRetellRecovery] =
     useState<RetellRecovery | null>(null);
@@ -659,10 +658,7 @@ export function AgentsScreen({
         />
       ) : null}
 
-      {detailsAgent === null ||
-      renaming !== null ||
-      archiving !== null ||
-      (
+      {detailsAgent === null || renaming !== null || archiving !== null ? null : (
         <AgentDetailsSheet
           agent={detailsAgent}
           home={home}
@@ -680,8 +676,6 @@ export function AgentsScreen({
           returnFocusTo={returnDetailsFocusTo}
         />
       )}
-
-
 
       {detailsReadState === null || renaming !== null || archiving !== null ? null : (
         <AgentDetailsReadStateSheet
