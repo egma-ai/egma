@@ -108,18 +108,23 @@ describe("the goal-first agent setup plan", () => {
     expect(agentSetupPlan("simulation", "retell")).toMatchObject({
       mayWriteConnection: true,
       pullWithConnection: false,
+      pullWithoutConnection: false,
       asksHowToTest: true,
     });
-    // Monitoring and Both need the voice connection for production pull, so
-    // they skip the one question exactly as they do today.
+    // Monitoring saves nothing but the pull switch — no route and no phone
+    // number — so it skips the one question and every connection write.
     expect(agentSetupPlan("monitoring", "retell")).toMatchObject({
-      mayWriteConnection: true,
-      pullWithConnection: true,
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: true,
       asksHowToTest: false,
     });
+    // Both saves the phone lane for simulation and starts pulling on that
+    // same save, so it skips the question and keeps the number chooser.
     expect(agentSetupPlan("both", "retell")).toMatchObject({
       mayWriteConnection: true,
       pullWithConnection: true,
+      pullWithoutConnection: false,
       asksHowToTest: false,
     });
     expect(agentSetupPlan("simulation", "livekit")).toMatchObject({
@@ -137,15 +142,23 @@ describe("the goal-first agent setup plan", () => {
   });
 
   it("keeps every voice agent visible, including one with no routed number", () => {
-    const plan = agentSetupPlan("simulation", "retell");
-
-    expect(retellAgentsForPlan(plan, [VOICE, UNROUTED_VOICE])).toEqual([
-      VOICE,
-      UNROUTED_VOICE,
-    ]);
+    expect(
+      retellAgentsForPlan(agentSetupPlan("simulation", "retell"), [
+        VOICE,
+        UNROUTED_VOICE,
+      ]),
+    ).toEqual([VOICE, UNROUTED_VOICE]);
+    // Monitoring writes no connection, and its picker still lists every
+    // voice agent: the pull switch is what it is there to flip.
+    expect(
+      retellAgentsForPlan(agentSetupPlan("monitoring", "retell"), [
+        VOICE,
+        UNROUTED_VOICE,
+      ]),
+    ).toEqual([VOICE, UNROUTED_VOICE]);
   });
 
-  it("lets simulations use non-phone routes but requires a phone for production pull", () => {
+  it("requires a phone only for Both, which saves the lane — never for Monitoring", () => {
     const withoutPhone = {
       ...VOICE_WITH_ROUTES,
       connectionCandidates: VOICE_WITH_ROUTES.connectionCandidates.filter(
@@ -159,12 +172,14 @@ describe("the goal-first agent setup plan", () => {
         withoutPhone,
       ),
     ).toBe(true);
+    // Pull selects calls by platform agent id, so a monitoring-only plan
+    // takes a voice agent with no routed number as it takes any other.
     expect(
       retellAgentCanEnterPlan(
         agentSetupPlan("monitoring", "retell"),
         withoutPhone,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       retellAgentCanEnterPlan(agentSetupPlan("both", "retell"), withoutPhone),
     ).toBe(false);
@@ -287,15 +302,16 @@ describe("the goal-first agent setup plan", () => {
     expect(stepAfterPlatform("monitoring", "livekit")).toBe(
       "livekit-monitoring",
     );
-    // The one question leads for a simulation. Monitoring and Both go straight
-    // to the number chooser, which is the connection production pull needs —
-    // so a monitoring-goal web user never sees the test question.
+    // The one question leads for a simulation. Both goes straight to the
+    // number chooser its phone lane needs. Monitoring finishes on the agent
+    // choice itself: the pull switch needs no provider route, so there is
+    // nothing after the pick but the switch.
     expect(stepAfterRetellAgent(agentSetupPlan("simulation", "retell"))).toBe(
       "retell-lanes",
     );
-    expect(stepAfterRetellAgent(agentSetupPlan("monitoring", "retell"))).toBe(
-      "retell-phone",
-    );
+    expect(
+      stepAfterRetellAgent(agentSetupPlan("monitoring", "retell")),
+    ).toBeNull();
     expect(stepAfterRetellAgent(agentSetupPlan("both", "retell"))).toBe(
       "retell-phone",
     );
