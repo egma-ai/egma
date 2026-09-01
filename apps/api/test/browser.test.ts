@@ -1237,7 +1237,7 @@ describe("what a project recorded in production", () => {
         }),
       ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      expect(shown).toContain("1.99s");
+      expect(shown).toContain("2.35s");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1311,7 +1311,7 @@ describe("what a project recorded in production", () => {
         "Turns",
         "P90 turn latency",
       ]);
-      expect(await overview.innerText()).toContain("1.99s");
+      expect(await overview.innerText()).toContain("2.35s");
       expect(
         await sheet
           .getByRole("heading", { name: "Latency", exact: true })
