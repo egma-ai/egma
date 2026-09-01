@@ -247,11 +247,12 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
       (metric) => metric.measure === "turn_response_latency",
     );
 
-    // This production capture has no Egma timing span. Both endpoints derive
-    // the series from the same recognised framework spans, then use the shared
-    // nearest-rank percentile.
+    // This production capture has no Egma timing span. Its three spoken
+    // answers waited 2346.236638, 1808.245039, and 1994.917806 ms. Both
+    // endpoints derive that series from the same recognised framework spans,
+    // then use the shared nearest-rank percentile.
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(1994.917806);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(2346.236638);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });

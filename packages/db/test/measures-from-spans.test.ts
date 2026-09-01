@@ -644,6 +644,34 @@ describe("measures derived from a recognised framework's own spans", () => {
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400, 600]);
   });
 
+  it("waits through silent agent tool work for the spoken response", async () => {
+    const trace = await aLiveKitCall([
+      { who: "human", from: 0, to: 1_000 },
+      // LiveKit opens an agent turn while the model chooses and runs a tool.
+      // That work can overlap the end of the human turn and says nothing.
+      { who: "agent", from: 900, to: 1_200 },
+      { who: "agent", from: 1_200, to: 2_000, spoke: [[1_500, 2_000]] },
+    ]);
+
+    const measured = measureIn(trace, "turn_response_latency");
+    // The response begins with speech at 1500, not with silent tool work at
+    // 900: 1500 - 1000 = 500 ms.
+    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([500]);
+  });
+
+  it("does not call silent tool work an answer when LiveKit records speech", async () => {
+    const trace = await aLiveKitCall([
+      { who: "agent", from: 0, to: 1_000, spoke: [[200, 1_000]] },
+      { who: "human", from: 2_000, to: 3_000 },
+      { who: "agent", from: 3_250, to: 3_500 },
+      { who: "human", from: 4_000, to: 5_000 },
+    ]);
+
+    // This framework records speech, and the human spoke again before the
+    // agent said anything. Silent tool work is not an answer.
+    expect(measureIn(trace, "turn_response_latency")).toBeUndefined();
+  });
+
   it("does not count the caller's delay before speaking as agent response latency", async () => {
     const trace = await aLiveKitCall([
       { who: "agent", from: 0, to: 1_000 },
