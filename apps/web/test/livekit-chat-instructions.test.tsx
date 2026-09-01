@@ -110,6 +110,8 @@ describe("LiveKit testing instructions", () => {
     // what puts the one agent under test in the marked room.
     expect(copy).toContain("agent_name in its WorkerOptions");
     expect(copy).toContain(PYTHON_TESTING_SETUP_INSTALL);
+    expect(copy).toContain("npm install --global egma-cli");
+    expect(copy).toContain("egma livekit");
     expect(copy).not.toMatch(/egma[>=~^]/);
 
     // The mirror of the monitoring surface's promise: the web explains work it

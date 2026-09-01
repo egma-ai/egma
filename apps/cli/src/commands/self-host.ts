@@ -449,13 +449,13 @@ async function runUp(
 
   options.out(`services: ${STARTED.join(" ")}`);
   options.out("status: ready");
-  options.out(`connect: npx @egma/cli --url ${address}`);
+  options.out(`login: egma login --url ${address}`);
 
   options.fail("");
   options.fail(`Egma is ready at ${address}`);
   options.fail("");
-  options.fail("In your agent repository, once:");
-  options.fail(`  npx @egma/cli --url ${address}`);
+  options.fail("In your agent repository, sign in:");
+  options.fail(`  egma login --url ${address}`);
   return SELF_HOST_EXIT.ok;
 }
 

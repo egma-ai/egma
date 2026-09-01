@@ -82,12 +82,13 @@ Python or `monitorLiveKit(ctx)` in JavaScript before `AgentSession.start`.
 
 ## How setup works
 
-Run the bare CLI in the voice-agent repository. It prints the public skill
-install command and the handoff for your current coding agent. It performs no
-setup itself.
+Install the CLI once, then install the public skills separately:
 
 ```bash
-npx --yes @egma/cli
+npm install --global egma-cli
+npx --yes skills add egma-ai/egma \
+  --skill integrate-egma \
+  --skill write-egma-tests
 ```
 
 The coding agent uses the `integrate-egma` skill and named promptless commands.

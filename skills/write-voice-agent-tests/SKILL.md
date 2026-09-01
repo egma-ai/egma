@@ -9,7 +9,7 @@ An Egma **test** describes one situation for a voice agent and the expected
 behaviors that must hold. Egma executes it as one **simulation** per persona.
 
 Write one Markdown file per test in the direct suite directory that the CLI
-created. Use `egma` when installed and `npx --yes @egma/cli` otherwise. Read
+created. Run `npm install --global egma-cli` if the `egma` command is unavailable. Read
 current help before using an operation; it owns command syntax and file
 locations.
 

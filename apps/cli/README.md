@@ -6,14 +6,12 @@ and repository knowledge. Named CLI commands perform each local or remote
 operation and print stable facts that the coding agent can read.
 
 ```bash
-npx --yes @egma/cli
+npm install --global egma-cli
 ```
 
-The package is `@egma/cli`; the command it installs is `egma`. The bare command
-does only two things: it prints the public skill install command, and it prints
-the exact handoff for the coding agent you already use. It does not sign in,
-inspect the repository, start another agent, create resources, edit files, or
-run tests.
+The package is `egma-cli`; the command it installs is `egma`. Run `egma --help`
+to see the current command surface. The npm package does not contain a copy of
+the public skills. Install those separately from the Egma repository.
 
 ## Requirements
 
@@ -21,46 +19,36 @@ run tests.
 - a coding agent that can read Agent Skills and run shell commands
 - a browser where the developer can approve `egma login`
 
-You can skip a global install. Use `egma` after a global install, or use
-`npx --yes @egma/cli` as the command prefix on a clean machine.
+## Install the CLI and public skills
 
-## Give the repository to your coding agent
-
-Run the bare command from the repository that contains the voice agent:
+Install the CLI once:
 
 ```bash
-npx --yes @egma/cli
+npm install --global egma-cli
 ```
 
-It prints this install command:
+Install the two public skills separately:
 
 ```bash
 npx --yes skills add egma-ai/egma \
   --skill integrate-egma \
-  --skill write-egma-tests \
-  --skill egma
+  --skill write-egma-tests
 ```
 
-Then give your coding agent the printed handoff:
+Then give your coding agent this handoff:
 
 > Use the integrate-egma skill to complete the requested Egma simulation
 > testing, production monitoring, or both for this repository's voice agent end
 > to end.
 
-For a self-hosted instance, add `--url` to the bare command. The output includes
-the selected platform in the handoff:
-
-```bash
-npx --yes @egma/cli --url http://localhost:3101
-```
-
-The `integrate-egma` skill owns first-time discovery and setup. The `egma`
-skill owns later pull, push, run, and result work. The `write-egma-tests` skill
-owns the Markdown test format.
+The `integrate-egma` skill owns first-time discovery and setup. Named CLI
+commands own later pull, push, run, and result work. The `write-egma-tests`
+skill owns the Markdown test format. For a self-hosted instance, the coding
+agent passes `--url http://localhost:3101` to the applicable `egma` commands.
 
 ## The complete integration sequence
 
-The copied end-to-end prompt authorizes the normal repository edits, remote
+The developer's end-to-end request authorizes the normal repository edits, remote
 setup, publish, chat run, and monitoring work needed for its requested outcome.
 The coding agent does not stop for repeated confirmation between these states.
 
@@ -68,7 +56,7 @@ The coding agent does not stop for repeated confirmation between these states.
    developer approves the request in the browser.
 2. The coding agent inspects committed source without changing it. It identifies
    one voice agent, its platform, prompt, tools, entrypoint, and production path.
-3. The pasted prompt selects **testing**, **monitoring**, or **both**. The coding
+3. The developer selects **testing**, **monitoring**, or **both**. The coding
    agent asks only when the request or repository leaves a real choice.
 4. The coding agent resolves the exact remote target from repository and CLI
    facts before `connect` or `monitoring enable` runs.
@@ -420,7 +408,7 @@ always stops the worker when the followed run completes, fails, or is
 interrupted. The worker credentials are read only from `LIVEKIT_URL`,
 `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`.
 
-The copied end-to-end prompt authorizes normal worker preparation. The
+The developer's end-to-end request authorizes normal worker preparation. The
 integration skill adds the latest unpinned Egma Python SDK through the
 repository's package manager. The CLI may install or upgrade LiveKit CLI 2.18.2
 or newer, create `.venv`, and install the declared dependencies with `uv` or
@@ -510,7 +498,7 @@ From the Egma checkout:
 pnpm install
 cp .env.example .env
 chmod 600 .env
-npx --yes @egma/cli self-host up
+egma self-host up
 ```
 
 This starts Postgres, ClickHouse, MinIO, the API, web application, simulator,
@@ -552,13 +540,13 @@ simulation, then revoke the old credential.
 To use the CLI build from the same checkout:
 
 ```bash
-pnpm --filter @egma/cli build
+pnpm --filter egma-cli build
 cd ~/your-voice-agent
-node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
+node ~/egma/apps/cli/dist/bin.js --help
 ```
 
-The bare local command prints the same skill install and coding-agent handoff.
-The coding agent then runs the named commands against the supplied URL.
+The local build has the same command surface as the installed `egma`
+executable. Pass the self-hosted URL to each applicable named command.
 
 ## Licence
 

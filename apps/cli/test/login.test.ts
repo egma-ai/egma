@@ -528,7 +528,6 @@ describe("which egma a command talks to", () => {
     // compiled, and a scan of both would go red twice for one mention.
     const written = [
       ...(await filesIn(path.join(CLI_PACKAGE, "src"))),
-      ...(await filesIn(path.join(CLI_PACKAGE, "skills"))),
       ...(await filesIn(path.join(CLI_PACKAGE, "smoke"))),
       path.join(CLI_PACKAGE, "NOTICE"),
       path.join(CLI_PACKAGE, "README.md"),

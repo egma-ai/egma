@@ -41,7 +41,7 @@ await session.start(agent=agent, room=ctx.room, room_options=options)`;
 
 const PYTHON_PROMPT_START = `Set up Egma simulation testing for this repository's Python LiveKit worker.
 
-Start by running \`egma livekit\` if it is available, or \`npx --yes @egma/cli livekit\` otherwise, and follow its current Python testing contract.
+Install the Egma CLI with \`npm install --global egma-cli\` if the \`egma\` command is unavailable. Then run \`egma livekit\` and follow its current Python testing contract.
 
 Use the repository's existing dependency file and package manager to install the latest Egma Python SDK from \`egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python\`. Do not pin a version, tag, or commit.
 
@@ -103,7 +103,7 @@ await session.start({
 
 const JAVASCRIPT_PROMPT_START = `Set up Egma simulation testing for this repository's JavaScript or TypeScript LiveKit worker.
 
-Start by running \`egma livekit\` if it is available, or \`npx --yes @egma/cli livekit\` otherwise, and follow its current JavaScript testing contract.
+Install the Egma CLI with \`npm install --global egma-cli\` if the \`egma\` command is unavailable. Then run \`egma livekit\` and follow its current JavaScript testing contract.
 
 Use the repository's existing dependency file and package manager to install the latest \`@egma/livekit\` package. Do not pin a version, tag, or commit.
 

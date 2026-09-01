@@ -8,8 +8,12 @@ Every named Egma command asks no terminal questions. It prints one fact per
 line, writes a final `status:` fact, and uses its numeric exit code as the next
 branch. Egma designed this contract for coding agents, shell scripts, and CI.
 
-Use `egma` after you install it. On a clean machine, replace it with
-`npx --yes @egma/cli`.
+The npm package is `egma-cli`. Install it once; it provides the `egma`
+executable:
+
+```bash
+npm install --global egma-cli
+```
 
 ## Common options
 
@@ -46,20 +50,14 @@ argument. LiveKit monitoring mints its own Egma project key.
 
 ## `egma`
 
-Prints the public skill install command and the coding-agent handoff.
+Prints command help.
 
 ```bash
-egma [--url <address>]
+egma
 ```
 
-The bare command does not sign in, inspect source, start another process, edit
-files, create remote resources, or run tests.
-
-The live output is the authority. It prints `setup:`, the current `skills:`
-install command, the complete `next:` handoff, and `status: ready-for-agent`.
-
-When you pass `--url`, output also includes `platform:` and adds that platform
-to the handoff. Exit code `0` confirms that the command printed the handoff.
+The output is the same as `egma --help`. The bare command accepts no operation
+options and performs no sign-in, repository, process, file, or remote work.
 
 ## `egma login`
 
@@ -607,7 +605,7 @@ restart monitoring, or mint another key.
 Starts a complete Egma platform from an Egma source checkout:
 
 ```bash
-npx --yes @egma/cli self-host up [--cwd <platform-workspace>]
+egma self-host up [--cwd <platform-workspace>]
 ```
 
 The command starts Postgres, ClickHouse, MinIO, the API, web application,

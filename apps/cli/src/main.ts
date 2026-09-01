@@ -1,4 +1,4 @@
-/** The promptless Egma CLI and its small coding-agent handoff. */
+/** The promptless Egma CLI. */
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -32,7 +32,6 @@ import {
   isSelfHostInvocation,
   runSelfHostCommand,
 } from "./commands/self-host.ts";
-import { runSetupCommand } from "./commands/setup.ts";
 import { runSuiteCreateCommand } from "./commands/suite.ts";
 import { runValidateCommand } from "./commands/validate.ts";
 import type { PlatformBinding } from "./folder/egma-folder.ts";
@@ -40,11 +39,9 @@ import {
   BoundPlatformAddressError,
   choosePlatform,
   credentialsFileIn,
-  DEFAULT_PLATFORM_URL,
   KEYS_UNUSABLE,
   KeysUnusableError,
   RepositoryPlatformConfigError,
-  selectPlatform,
   UnboundPlatformIdentifiersError,
   UnusableUrlError,
   type PlatformAccess,
@@ -265,12 +262,11 @@ export function helpText(): string {
   return [
     "Egma — take a voice agent to reviewed, graded results.",
     "",
-    "The bare command prints the public skill install command and the exact",
-    "handoff for your coding agent. The coding agent runs login and every later",
-    "step. Egma does not start or control it.",
+    "Run one promptless command at a time. Run egma with no command to print",
+    "this help.",
     "",
     "Usage:",
-    "  egma [options]                         Print the coding-agent handoff.",
+    "  egma                                   Print this help.",
     "  egma login [options]                   Sign this machine in.",
     "  egma connect [options]                 Register a Retell or LiveKit agent.",
     "  egma connect record [selector]         Recover a repository record.",
@@ -666,25 +662,12 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
 
   if (invocation.verb === null) {
-    let platformUrl: string | null = null;
-    if (invocation.url !== null) {
-      try {
-        platformUrl = selectPlatform({
-          flag: invocation.url,
-          binding: null,
-          fallback: DEFAULT_PLATFORM_URL,
-        }).url;
-      } catch (error) {
-        if (!(error instanceof UnusableUrlError)) throw error;
-        process.stderr.write(`${error.message}\n`);
-        process.exitCode = 1;
-        return;
-      }
+    if (argv.length === 0) {
+      process.stdout.write(`${helpText()}\n`);
+      return;
     }
-    process.exitCode = runSetupCommand({
-      platformUrl,
-      out: (line) => process.stdout.write(`${line}\n`),
-    });
+    process.stderr.write("Egma needs a command. Run egma --help to see the commands.\n");
+    process.exitCode = 1;
     return;
   }
 

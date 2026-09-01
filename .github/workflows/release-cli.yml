@@ -2,14 +2,14 @@ name: Release CLI
 
 # Releasing is one deliberate act: push a tag that names the version.
 #
-#   pnpm --filter @egma/cli exec npm version minor   # bumps apps/cli/package.json
-#   git commit -am "cli: 0.2.0" && git push
-#   git tag cli-v0.2.0 && git push origin cli-v0.2.0
+#   pnpm --filter egma-cli exec npm version patch   # bumps apps/cli/package.json
+#   git commit -am "cli: 0.3.2" && git push
+#   git tag cli-v0.3.2 && git push origin cli-v0.3.2
 #
 # Nothing else publishes. Merging to main does not publish.
 #
 # There is no npm token in this repository. npm is told, once, on the package
-# settings page, that this workflow in this repository may publish @egma/cli.
+# settings page, that this workflow in this repository may publish egma-cli.
 # GitHub proves that per run with a short-lived OIDC token, which is what
 # `id-token: write` below allows. Provenance is attached automatically.
 
@@ -50,12 +50,17 @@ jobs:
         # Catches the classic slip: tagged cli-v0.2.0, shipped 0.1.0.
         run: |
           tagged="${GITHUB_REF_NAME#cli-v}"
+          package="$(node -p "require('./apps/cli/package.json').name")"
           packaged="$(node -p "require('./apps/cli/package.json').version")"
+          if [ "$package" != "egma-cli" ]; then
+            echo "apps/cli/package.json names $package, expected egma-cli." >&2
+            exit 1
+          fi
           if [ "$tagged" != "$packaged" ]; then
             echo "Tag says $tagged, apps/cli/package.json says $packaged." >&2
             exit 1
           fi
-          echo "Releasing @egma/cli $packaged."
+          echo "Releasing egma-cli $packaged."
 
       - name: Build
         # Root build is lint + tsc -b over every project the CLI is built from.
@@ -68,7 +73,7 @@ jobs:
         run: |
           set -e
           dir="$(mktemp -d)"
-          pnpm --config.node-linker=hoisted --filter @egma/cli pack --pack-destination "$dir"
+          pnpm --config.node-linker=hoisted --filter egma-cli pack --pack-destination "$dir"
           echo "tarball=$(ls "$dir"/*.tgz)" >> "$GITHUB_OUTPUT"
 
       - name: Prove new and upgraded installs
@@ -79,6 +84,10 @@ jobs:
           set -e
           tarball="${{ steps.pack.outputs.tarball }}"
           dir="$(dirname "$tarball")"
+          if tar -tzf "$tarball" | grep -q '^package/skills/'; then
+            echo "The CLI tarball must not contain Agent Skills." >&2
+            exit 1
+          fi
           tar -xOf "$tarball" package/package.json > "$dir/packed-package.json"
           node -e '
             const manifest = require(process.argv[1]);
@@ -98,8 +107,8 @@ jobs:
           mkdir "$dir/upgrade"
           cd "$dir/upgrade"
           npm init -y > /dev/null
-          previous="$(npm view @egma/cli version)"
-          npm install "@egma/cli@$previous" --no-audit --no-fund
+          previous="$(npm view egma-cli version)"
+          npm install "egma-cli@$previous" --no-audit --no-fund
           npm install "$tarball" --no-audit --no-fund
           ./node_modules/.bin/egma --version
 

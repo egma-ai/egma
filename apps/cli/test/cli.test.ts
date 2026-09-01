@@ -1,4 +1,4 @@
-/** The built CLI boundary: handoff, help, refusal, and version. */
+/** The built CLI boundary: help, refusal, and version. */
 
 import { execFile, spawn } from "node:child_process";
 import process from "node:process";
@@ -6,10 +6,6 @@ import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  INTEGRATION_HANDOFF,
-  SKILLS_INSTALL_COMMAND,
-} from "../src/commands/setup.ts";
 import {
   CLI_ENTRY,
   MANIFEST,
@@ -70,35 +66,23 @@ describe("the egma command", () => {
     expect(refused.stderr).not.toContain("Usage:");
   });
 
-  it("prints the coding-agent handoff without login or a terminal", async () => {
-    const result = await egma([], workspace);
+  it("prints help when no command is named", async () => {
+    const bare = await egma([], workspace);
+    const explicit = await egma(["--help"], workspace);
 
-    expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(result.stdout).toContain("setup: skills-and-cli");
-    expect(result.stdout).toContain(`skills: ${SKILLS_INSTALL_COMMAND}`);
-    expect(result.stdout).toContain(
-      "If integrate-egma is already available to this coding agent, keep it",
-    );
-    expect(result.stdout).toContain(`next: ${INTEGRATION_HANDOFF}`);
-    expect(result.stdout).toContain("status: ready-for-agent");
-    expect(result.stdout).not.toContain("approve_url:");
-    expect(result.stdout).not.toContain("waiting:");
+    expect(bare).toMatchObject({ code: 0, stderr: "" });
+    expect(bare.stdout).toBe(explicit.stdout);
+    expect(bare.stdout).toContain("Usage:");
+    expect(bare.stdout).not.toContain("setup: skills-and-cli");
+    expect(bare.stdout).not.toContain("coding-agent handoff");
   });
 
-  it("keeps a named self-hosted URL in the agent handoff", async () => {
+  it("refuses options that have no command", async () => {
     const result = await egma(["--url", "http://localhost:3101/"], workspace);
 
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("platform: http://localhost:3101");
-    expect(result.stdout).toContain("Use http://localhost:3101 as the Egma platform URL.");
-
-    const refused = await egma(
-      ["--url", "https://developer:must-not-be-repeated@example.com"],
-      workspace,
-    );
-    expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain("--url is not a platform origin");
-    expect(refused.stderr).not.toContain("must-not-be-repeated");
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Egma needs a command");
   });
 
   it("documents the complete raw integration surface and no wizard controls", async () => {

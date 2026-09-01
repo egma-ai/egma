@@ -234,7 +234,7 @@ const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
  *
  * **A published package's `src` may not import a workspace package that is
  * never published.** `apps/cli` ships `dist/` unbundled, so an import written
- * in `src` is still an import in the file `npx @egma/cli` runs — and a
+ * in `src` is still an import in the file `egma` runs — and a
  * `private: true` workspace package is not on npm for it to resolve. The
  * command installs, starts, and then fails at the first line that needs it, on
  * somebody else's machine.

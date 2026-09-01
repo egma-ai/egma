@@ -385,7 +385,7 @@ export async function startRun(
       })),
       // Node's own, deliberately, and not `newId` from `@egma/ids`. That
       // package is private and never published, so an import of it survives
-      // into `dist/` — which this package ships unbundled — and `npx @egma/cli`
+      // into `dist/` — which this package ships unbundled — and `egma`
       // would fail to resolve it at the moment somebody started a run. The
       // build caught it here only because nothing built the package first; the
       // published crash would have had no such warning.
