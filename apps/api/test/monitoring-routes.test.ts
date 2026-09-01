@@ -6,6 +6,7 @@ import {
   disablePullProductionCalls,
   enablePullProductionCalls,
   readAgentPullState,
+  sealAgentMonitoringKey,
   type AuthContext,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -464,6 +465,55 @@ describe("starting monitoring", () => {
     expect((await readAgentPullState(at(ada), second.id))?.pullProductionCalls).toBe(
       false,
     );
+  });
+
+  it("is not blocked by an archived agent that once watched the platform agent", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_archived_holder", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-archived-holder@acme.example", "Acme");
+    // Yesterday's agent watched agent_voice_1, and was archived with the
+    // switch still on.
+    const yesterday = await pulling(ada);
+    await archiveAgent(at(ada), yesterday);
+    // Today's agent is connected to the same Retell agent the way the connect
+    // flow leaves it — key sealed, switch off. Every screen reads this as
+    // "Production monitoring: Not configured".
+    const today = await createAgent(at(ada), {
+      agentPlatform: "retell",
+      name: "Front desk again",
+    });
+    await sealAgentMonitoringKey(at(ada), {
+      agentId: today.id,
+      agentPlatform: "retell",
+      platformAgentId: "agent_voice_1",
+      apiKey: RETELL_KEY,
+    });
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", agentId: today.id }],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { agentId: string }[];
+      refused: { message: string }[];
+    };
+    // An archived agent releases its watch the way it releases its name: the
+    // living agent starts, and nobody is told a dead row is watching.
+    expect(outcome.refused).toEqual([]);
+    expect(outcome.watching).toHaveLength(1);
+    expect(
+      (await readAgentPullState(at(ada), today.id))?.pullProductionCalls,
+    ).toBe(true);
   });
 
   /**

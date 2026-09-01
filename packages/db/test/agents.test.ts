@@ -4,9 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createAgent,
   archiveAgent,
+  enablePullProductionCalls,
   getAgent,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  readAgentPullState,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -198,6 +200,28 @@ describe("an agent's name", () => {
     const filed = await getAgent(actingAsAcme(), retiring.id);
     expect(filed?.name).toBe("Retiring");
     expect(filed?.archivedAt).toBeInstanceOf(Date);
+  });
+
+  it("releases its production watch the way it releases its name", async () => {
+    const retiring = await createAgent(actingAsAcme(), {
+      agentPlatform: "retell",
+      name: "Watching until retired",
+    });
+    await enablePullProductionCalls(actingAsAcme(), {
+      agentId: retiring.id,
+      agentPlatform: "retell",
+      platformAgentId: "agent_watched_until_retired",
+      apiKey: "key_live_watch_release_secret_WXYZ",
+    });
+
+    await archiveAgent(actingAsAcme(), retiring.id);
+
+    // A row nothing lists must not keep the one-watcher claim, or the next
+    // agent bound to this platform agent is refused by a ghost. The key and
+    // the monitoring history stay stored, as stopping always leaves them.
+    const state = await readAgentPullState(actingAsAcme(), retiring.id);
+    expect(state?.pullProductionCalls).toBe(false);
+    expect(state?.monitoringApiKeyHint).not.toBeNull();
   });
 });
 

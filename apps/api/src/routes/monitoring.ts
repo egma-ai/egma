@@ -493,14 +493,21 @@ export async function monitoringRoutes(
         }
         if (!lostToPullUniqueness(error)) throw error;
         // The database refused this one tick. The ticks beside it are
-        // untouched, and the sentence names the agent already watching.
+        // untouched, and the sentence names the agent already watching \u2014
+        // only an agent whose switch is actually on. The roster also holds
+        // switched-off agents that merely name the platform agent, and
+        // naming one of those would blame the very agent being started.
         const holder = known.get(one.platformAgentId);
+        const watcher =
+          holder !== undefined && holder.pullProductionCalls
+            ? holder.agentName
+            : "another agent";
         refused.push({
           platformAgentId: one.platformAgentId,
           reason: "contested",
           message:
             `${one.platformAgentId} is already watched by ` +
-            `\u201C${holder?.agentName ?? "another agent"}\u201D. One Egma agent ` +
+            `\u201C${watcher}\u201D. One Egma agent ` +
             "watches one Retell agent, so turn that agent's switch off " +
             "first, or start monitoring from it instead.",
         });
