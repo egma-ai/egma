@@ -104,10 +104,30 @@ const radioItemVariants = cva(
           "data-[state=checked]:bg-surface data-[state=checked]:font-medium data-[state=checked]:text-foreground",
           "data-[state=checked]:shadow-[inset_0_2px_0_var(--accent)]",
         ],
+        /*
+         * **One option, drawn as the whole card.** The chosen one carries the
+         * narrow Ember edge this file already asks Ember for — on the leading
+         * edge, which is the edge a person reads first and the same edge the
+         * sidebar's active row marks itself with. It is drawn as an inset
+         * shadow rather than a border so the card never changes size between
+         * states: a border that thickened on selection would shift every word
+         * beside it by a pixel.
+         *
+         * The wash arrives with it, and the two together mean the state is
+         * never colour alone — the indicator's own filled ring says it a third
+         * time. `DESIGN.md` keeps one radius and it is 0, so this is square,
+         * and the only motion is the press scale the base already carries plus
+         * a quiet colour fade.
+         */
         card: [
-          "flex min-h-(--tap-target) w-full items-start gap-3 border border-border bg-surface p-4 text-left",
-          "text-foreground pointer-hover:border-border-strong",
+          "relative flex min-h-(--tap-target) w-full items-start gap-3 p-4 text-left",
+          "border border-border bg-surface text-foreground",
+          "transition-colors duration-(--duration-hover) ease-out",
+          "motion-reduce:transition-none",
+          "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
           "data-[state=checked]:border-brand data-[state=checked]:bg-selected",
+          "data-[state=checked]:shadow-[inset_var(--active-edge-width)_0_0_var(--accent)]",
+          "data-[state=checked]:pointer-hover:bg-selected",
         ],
       },
     },
@@ -150,8 +170,18 @@ function RadioCardIndicator({
     <span
       aria-hidden="true"
       className={cn(
-        "size-4 flex-none rounded-full border border-border-strong",
+        "size-4 flex-none rounded-full border border-border-strong bg-surface",
+        /*
+         * The one round shape `DESIGN.md` keeps, and the third way this option
+         * says it is chosen: a filled Ember ring rather than a colour swap.
+         * Only `border-color` and `border-width` move, both composited-cheap
+         * and both instant enough not to delay the press.
+         */
+        "transition-[border-color,border-width] duration-(--duration-hover) ease-out",
+        "motion-reduce:transition-none",
+        "group-pointer-hover:border-foreground",
         "group-data-[state=checked]:border-4 group-data-[state=checked]:border-brand",
+        "group-data-[state=checked]:group-pointer-hover:border-brand",
         className,
       )}
       {...props}

@@ -327,6 +327,17 @@ class RunningSimulation:
                         name=f"sim:{self.simulation_id}",
                     )
             finally:
+                # The platform's own name for the exchange, taken here
+                # rather than off the ending. A simulation that failed has
+                # an ending only if it reached one, and the failures worth
+                # reading are exactly the ones that did not: "the agent
+                # said nothing — go and listen to the call" is worth
+                # little without the call's own identifier beside it. So
+                # it is read wherever conducting stopped, and every
+                # terminal document carries it.
+                conducting = assembled.conductor or assembled.plug
+                if conducting is not None:
+                    reporter.provider_reference = conducting.provider_reference
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 recording = assembled.recording

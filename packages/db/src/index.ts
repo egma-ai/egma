@@ -94,7 +94,6 @@ export {
   mockMetadataRow,
   type MockEngineNote,
   type MockMetadata,
-  type MockNumberNote,
 } from "./mock-tools/record.ts";
 /**
  * Which connection lanes branch a temporary copy when they are mocked. The

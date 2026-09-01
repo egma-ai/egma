@@ -7,13 +7,15 @@ import {
   getAgent,
   listAgents,
   listConnectionOptions,
+  discoverMockTools,
   registerAgent,
+  updateConnection,
   startMonitoring,
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   RadioCardIndicator,
   RadioGroup,
@@ -49,10 +51,11 @@ import {
   retellCandidateForLane,
   retellCandidateValue,
   retellCandidatesForPlan,
-  retellLanesInOrder,
   RETELL_LANES,
   RETELL_LANE_HELP,
   RETELL_LANE_LABELS,
+  retellLaneBranchesDraft,
+  retellLaneMocksTools,
   RETELL_LANE_QUESTION,
   stepAfterRetellLanes,
   type RetellLane,
@@ -101,6 +104,18 @@ export type RetellRecovery = {
 type ConnectionBody = NonNullable<
   Parameters<typeof registerAgent>[0]["connection"]
 >;
+
+/**
+ * What the mock question knows, in the three shapes it can be in.
+ *
+ * `refused` carries the platform's own sentence rather than a code this screen
+ * would have to translate: the same words the agent's own mock-tools read
+ * shows, because they are the same fact about the same account.
+ */
+type MockToolsRead =
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly tools: readonly string[] }
+  | { readonly status: "refused"; readonly message: string };
 
 type RetellSaveProgress = {
   readonly signature: string;
@@ -240,13 +255,27 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   // voice down a call. The modality question the flow leads with for a voice
   // agent whose goal is a simulation.
   /**
-   * The lanes ticked in the one question, in the order they were ticked.
+   * The lane picked in the one question. One, because a lane is a connection.
    *
-   * Several at once is the point: text and voice land as connections on **one**
-   * egma agent in one pass, so the same suite runs over both. Nothing starts
-   * ticked — one lane dials a real telephone.
+   * Nothing starts picked — one lane dials a real telephone, and a flow that
+   * arrived with an answer already in it would be answering for the developer.
+   * A second lane on the same agent is added afterwards, through this same
+   * flow, from the agent's own screen.
    */
-  const [lanes, setLanes] = useState<readonly RetellLane[]>([]);
+  const [lane, setLane] = useState<RetellLane | "">("");
+  /**
+   * Whether runs over the new connection answer the agent's tools themselves.
+   *
+   * **Off unless it is turned on.** Mocking changes what a run is: the agent
+   * reaches Egma's test data instead of the customer's own backend, and for a
+   * web call it also means a temporary version on their Retell account. That is
+   * an explicit yes, never a default somebody meets afterwards — so the
+   * connection is written `false` and this switch is what changes it.
+   */
+  const [mockTools, setMockTools] = useState(false);
+  const [mockRead, setMockRead] = useState<MockToolsRead>({ status: "loading" });
+  /** The connection the mock question is about, once it has been written. */
+  const [mockTarget, setMockTarget] = useState<ConnectSheetResult | null>(null);
   const [discovering, setDiscovering] = useState(false);
 
   // This chooses which source instructions are visible. It is never written
@@ -281,7 +310,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
-    setLanes([]);
+    setLane("");
     setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
@@ -368,6 +397,50 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     };
   }, [catalogAttempt]);
 
+  /**
+   * The agent's tools, read once the mock question has something to read.
+   *
+   * **The same discovery the agent's own mock-tools read uses.** A second path
+   * here would be a second opinion about one account, and the two would drift
+   * the first time one of them learned something. It runs after the connection
+   * is written because that is what gives Egma the agent, its sealed key and
+   * its platform identity to read with.
+   */
+  useEffect(() => {
+    const target = mockTarget;
+    if (step !== "retell-mocks" || target === null) return;
+    let alive = true;
+    setMockRead({ status: "loading" });
+    void platformAnswer(
+      discoverMockTools(
+        { agentId: target.agentId, projectId },
+        { client: platformClient },
+      ),
+    ).then((answer) => {
+      if (!alive) return;
+      if (answer.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+      if (answer.status !== "ready") {
+        setMockRead({ status: "refused", message: answer.refusal.message });
+        return;
+      }
+      const found = answer.value;
+      if (found.refusal !== null) {
+        setMockRead({ status: "refused", message: found.refusal.message });
+        return;
+      }
+      setMockRead({
+        status: "ready",
+        tools: found.tools.map((tool) => tool.name),
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [mockTarget, projectId, step]);
+
   useEffect(() => {
     const target =
       bodyRef.current?.querySelector<HTMLElement>("[data-setup-heading]") ??
@@ -407,16 +480,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   const selectedVoiceRoute = voiceRoutes.find(
     (one) => retellCandidateValue(one) === retellRoute,
   );
-  /** The lanes picked, in reading order, whatever order they were ticked in. */
-  const pickedLanes = retellLanesInOrder(lanes);
   /**
-   * Every lane the goal will save, and the candidate that saves it.
+   * The lane this goal will save, and the candidate that saves it.
    *
-   * A monitoring goal skips the question and saves the phone lane alone, which
-   * is what production pull needs. A simulation goal saves what was ticked.
+   * A monitoring goal skips the question and saves the phone lane, which is
+   * what production pull needs. A simulation goal saves the one that was
+   * picked.
    */
+  const laneToSave: RetellLane | "" =
+    plan?.asksHowToTest === true ? lane : "phone";
   const lanesToSave: readonly RetellLane[] =
-    plan?.asksHowToTest === true ? pickedLanes : ["phone"];
+    laneToSave === "" ? [] : [laneToSave];
   const retellSaveSignature = JSON.stringify([
     retellAgentId,
     lanesToSave,
@@ -497,7 +571,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(null);
     setRetellAgentId("");
     setRetellRoute("");
-    setLanes([]);
+    setLane("");
     setLivekitLanguage("python");
     setLivekitModality("");
     setLivekitAccess(PROJECT_CREDENTIALS);
@@ -583,7 +657,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellAgents(answer.value.agents);
     setRetellAgentId("");
     setRetellRoute("");
-    setLanes([]);
+    setLane("");
     transition("retell-agent");
   }
 
@@ -604,6 +678,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           ? {}
           : { credentials: { apiKey: apiKey.trim() } }),
         ...(pullProductionCalls ? { pullProductionCalls: true } : {}),
+        // Written off, whatever the lane's own default is, so mocking is only
+        // ever the explicit yes given on the step after this write.
+        mockToolsEnabled: false,
       };
     }
 
@@ -878,6 +955,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       retryConnections = answer.value.connections;
       retryPullEnabled = answer.value.agent.pullProductionCalls;
     }
+    // **One lane, walked by a loop that can carry several.** The setup flow
+    // picks exactly one lane now, so `requestedLanes` always holds one entry.
+    // The loop stays because everything inside it is the recovery path — the
+    // committed-connection read-back, the landed-agent carry, the progress
+    // record a lost response is resumed from — and that machinery answers the
+    // same questions for one lane as for three. Rewriting it into a straight
+    // line would be rewriting the part that is hard to get right in order to
+    // delete an `index` that costs nothing.
     for (const [index, { body, pullsProduction }] of requestedLanes.entries()) {
       if (readReusedLanding && landed !== null) {
         setSaving(true);
@@ -976,8 +1061,52 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     }
     if (landed !== null) {
       setRetellProgress(null);
+      // **The mock question comes after the write, because it is about the
+      // agent's own tools** and Egma reads those through the agent it has just
+      // made. The connection is already `false`, so a person who closes the
+      // sheet here leaves with mocks off — the answer this flow defaults to.
+      if (laneToSave !== "" && retellLaneMocksTools(laneToSave)) {
+        setMockTarget(landed);
+        transition("retell-mocks");
+        return;
+      }
       onConnected(landed);
     }
+  }
+
+  /** Turn the switch's answer into the connection, then leave. */
+  async function finishMockQuestion(): Promise<void> {
+    const target = mockTarget;
+    if (target === null) return;
+    // Nothing to write when the answer is the one the connection already
+    // holds, which is the ordinary path: the switch starts off.
+    if (!mockTools || target.connectionId === null) {
+      onConnected(target);
+      return;
+    }
+    setSaving(true);
+    setRefused(null);
+    const answer = await platformAnswer(
+      updateConnection(
+        {
+          agentId: target.agentId,
+          connectionId: target.connectionId,
+          projectId,
+          mockToolsEnabled: true,
+        },
+        { client: platformClient },
+      ),
+    );
+    setSaving(false);
+    if (!finishAnswer(answer)) {
+      // **The control goes back to what the server holds.** The refusal is
+      // rendered above, and a switch left reading ON over a connection that is
+      // still off would be the screen disagreeing with the account — the one
+      // thing a state this file draws must never do.
+      setMockTools(false);
+      return;
+    }
+    onConnected(target);
   }
 
   async function finishLiveKit(): Promise<void> {
@@ -1028,11 +1157,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         transition(next);
         return;
       }
+      case "retell-mocks":
+        await finishMockQuestion();
+        return;
       case "retell-lanes": {
-        if (pickedLanes.length === 0) return;
-        const next = stepAfterRetellLanes(pickedLanes);
-        // The phone-number chooser appears only when Phone call is picked.
-        // Every other set of picks has nothing left to ask and saves here.
+        if (lane === "") return;
+        // The phone lane carries on to the number chooser; the other two have
+        // nothing left to ask and save here.
+        const next = stepAfterRetellLanes(lane);
         if (next === null) {
           await finishRetellLanes();
           return;
@@ -1110,8 +1242,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       step === "livekit-modality" ||
       step === "livekit-simulation" ||
       step === "retell-phone" ||
-      // The one question can save on Continue when no phone lane was picked,
-      // and that needs the option catalog to name the rows it writes.
+      // The one question can save on Continue when the phone lane was not
+      // picked, and that needs the option catalog to name the row it writes.
       step === "retell-lanes";
     if (needsCatalog && catalogRefused !== null) {
       return (
@@ -1176,11 +1308,16 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 choosePlatform(value as AgentSetupPlatform)
               }
             >
-              {known === null || known.agentPlatform === "retell" ? (
-                <ChoiceCard compact value="retell" title="Retell" />
-              ) : null}
+              {/*
+                LiveKit leads. (Developer decision, 2026-08-31.) The order is
+                the only thing that says which platform this product expects
+                first, and nothing else on this step ranks them.
+              */}
               {known === null || known.agentPlatform === "livekit" ? (
                 <ChoiceCard compact value="livekit" title="LiveKit" />
+              ) : null}
+              {known === null || known.agentPlatform === "retell" ? (
+                <ChoiceCard compact value="retell" title="Retell" />
               ) : null}
             </RadioGroup>
           </div>
@@ -1243,7 +1380,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 onValueChange={(value) => {
                   setRetellAgentId(value);
                   setRetellRoute("");
-                  setLanes([]);
+                  setLane("");
                 }}
               >
                 {visibleRetellAgents.map((one) => {
@@ -1288,57 +1425,43 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             <StepIntro
               title={RETELL_LANE_QUESTION}
               description={
-                "Pick as many as you want. Each one is a connection on " +
+                "Pick one. It becomes a connection on " +
                 String(selectedRetellAgent?.name ?? "this agent") +
-                ", and one test suite runs over all of them."
+                ", and your test suites run over it. You can add another lane " +
+                "to the same agent afterwards."
               }
             />
-            <fieldset className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
-              <legend className="sr-only">{RETELL_LANE_QUESTION}</legend>
-              {RETELL_LANES.map((lane) => (
-                <div
-                  className="flex min-w-0 items-start gap-3 border border-border p-4"
-                  key={lane}
-                >
-                  <Checkbox
-                    aria-describedby={`retell-lane-${lane}-help`}
-                    checked={lanes.includes(lane)}
-                    disabled={retellProgress !== null}
-                    id={`retell-lane-${lane}`}
-                    onChange={(event) =>
-                      setLanes((held) =>
-                        event.target.checked
-                          ? [...held.filter((one) => one !== lane), lane]
-                          : held.filter((one) => one !== lane),
-                      )
-                    }
-                  />
-                  <span className="flex min-w-0 flex-col gap-1">
-                    {/*
-                      The visible copy stays visible and points at the control
-                      with `htmlFor`, which makes the whole line a target as
-                      well as naming the box.
-                    */}
-                    <label
-                      className="cursor-pointer text-sm font-medium text-foreground"
-                      htmlFor={`retell-lane-${lane}`}
-                    >
-                      {RETELL_LANE_LABELS[lane]}
-                    </label>
-                    <span
-                      className="text-sm text-faint"
-                      id={`retell-lane-${lane}-help`}
-                    >
-                      {RETELL_LANE_HELP[lane]}
-                    </span>
-                  </span>
-                </div>
+            <RadioGroup
+              className="gap-4"
+              aria-label={RETELL_LANE_QUESTION}
+              value={lane}
+              onValueChange={(value) => setLane(value as RetellLane)}
+            >
+              {RETELL_LANES.map((one) => (
+                <ChoiceCard
+                  description={RETELL_LANE_HELP[one]}
+                  disabled={retellProgress !== null}
+                  key={one}
+                  title={RETELL_LANE_LABELS[one]}
+                  value={one}
+                />
               ))}
-            </fieldset>
-            <InfoBox>
-              Text and voice land as connections on one agent, so the same tests
-              run across all of them. A phone run reaches your real tools.
-            </InfoBox>
+            </RadioGroup>
+          </div>
+        );
+      case "retell-mocks":
+        return (
+          <div className="flex flex-col gap-5">
+            <StepIntro
+              title="Mock this agent's tools?"
+              description="Egma read these off the agent. With mocks on, runs answer them with your test data instead of your real backend."
+            />
+            <MockToolsStep
+              branchesDraft={laneToSave !== "" && retellLaneBranchesDraft(laneToSave)}
+              on={mockTools}
+              onChange={setMockTools}
+              read={mockRead}
+            />
           </div>
         );
       case "retell-phone":
@@ -1461,34 +1584,36 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     step === "livekit-modality"
       ? "Continue"
       : step === "retell-lanes"
-          ? // Picking the phone lane carries on to the number chooser; every
-            // other set of picks has nothing left to ask and saves here.
-            pickedLanes.includes("phone")
+          ? lane === "phone"
             ? "Continue"
             : saving
               ? "Setting up…"
+              : "Continue"
+          : step === "retell-mocks"
+            ? saving
+              ? "Finishing…"
               : "Set up simulation"
-          : step === "retell-key"
-            ? discovering
-              ? "Finding agents…"
-              : "Find agents"
-            : step === "retell-phone"
-              ? saving
-                ? "Finishing…"
-                : goal === "simulation"
-                  ? "Set up simulation"
-                  : goal === "monitoring"
-                    ? "Start monitoring"
-                    : "Set up both"
-              : step === "livekit-simulation"
+            : step === "retell-key"
+              ? discovering
+                ? "Finding agents…"
+                : "Find agents"
+              : step === "retell-phone"
                 ? saving
-                  ? "Saving…"
-                  : completed === null
-                    ? "Continue to testing"
-                    : "Continue"
-                : step === "livekit-monitoring" && goal === "both"
-                  ? "Continue to simulation"
-                  : "Return to agents";
+                  ? "Finishing…"
+                  : goal === "simulation"
+                    ? "Set up simulation"
+                    : goal === "monitoring"
+                      ? "Start monitoring"
+                      : "Set up both"
+                : step === "livekit-simulation"
+                  ? saving
+                    ? "Saving…"
+                    : completed === null
+                      ? "Continue to testing"
+                      : "Continue"
+                  : step === "livekit-monitoring" && goal === "both"
+                    ? "Continue to simulation"
+                    : "Return to agents";
 
   const primaryDisabled =
     saving ||
@@ -1497,11 +1622,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     (step === "platform" && platform === "") ||
     (step === "retell-key" && !keyReady) ||
     (step === "retell-agent" && selectedRetellAgent === undefined) ||
-    // Nothing picked yet, or a set that saves here picked before the catalog
+    // Nothing picked yet, or a lane that saves here picked before the catalog
     // it writes from arrived.
     (step === "retell-lanes" &&
-      (pickedLanes.length === 0 ||
-        (!pickedLanes.includes("phone") && catalog === null))) ||
+      (lane === "" || (lane !== "phone" && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
     (step === "livekit-modality" && livekitModality === "") ||
@@ -1649,6 +1773,102 @@ function ChoiceCard({
         )}
       </span>
     </RadioGroupItem>
+  );
+}
+
+/**
+ * The mock question: what Egma would stand in front of, and one switch.
+ *
+ * **A refusal replaces the list, and the switch goes with it.** Every reason
+ * discovery refuses is a fact about the agent that no answer on this screen can
+ * change — a custom-LLM engine, two keys on two accounts, nothing published, or
+ * Retell not answering — so offering a switch over it would be offering a
+ * choice Egma cannot keep. The connection is already written with mocks off, so
+ * a refusal costs a person the feature and never the setup.
+ *
+ * Names only, no per-tool labels: the question here is whether to mock, not
+ * which. Which is what the agent's own mock-tools surface is for.
+ */
+function MockToolsStep({
+  branchesDraft,
+  on,
+  onChange,
+  read,
+}: {
+  /** Whether turning this on branches a draft version on the agent. */
+  readonly branchesDraft: boolean;
+  readonly on: boolean;
+  readonly onChange: (next: boolean) => void;
+  readonly read: MockToolsRead;
+}) {
+  const askable = read.status === "ready" && read.tools.length > 0;
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      {read.status === "loading" ? (
+        <Loading what="this agent's tools" />
+      ) : read.status === "refused" ? (
+        <InfoBox title="Egma cannot mock this agent's tools">
+          {read.message}
+        </InfoBox>
+      ) : read.tools.length === 0 ? (
+        <InfoBox>
+          This agent declares no tools Egma can stand in front of, so a mocked
+          run would answer nothing differently.
+        </InfoBox>
+      ) : (
+        <ul
+          className="m-0 flex list-none flex-col border border-border p-0"
+          data-slot="mock-tools-found"
+        >
+          {read.tools.map((tool) => (
+            <li
+              className="border-t border-border px-4 py-3 font-mono text-sm text-foreground first:border-t-0"
+              key={tool}
+            >
+              {tool}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {askable ? (
+        <div className="flex min-w-0 items-center justify-between gap-4 border border-border p-4">
+          <label
+            className="cursor-pointer text-sm text-foreground"
+            htmlFor="retell-mock-tools"
+          >
+            Mock tools on runs
+          </label>
+          <Switch
+            checked={on}
+            data-slot="mock-tools-switch"
+            id="retell-mock-tools"
+            onCheckedChange={onChange}
+          />
+        </div>
+      ) : null}
+
+      {/*
+        The web-call lane only, and only while the switch is on. A text run
+        carries its mocked answers on each request and writes nothing to the
+        Retell account, so there is no draft for a number or a tag to reach and
+        nothing here to warn about.
+      */}
+      {branchesDraft && on ? (
+        <p
+          className="m-0 border border-border p-4 text-sm text-faint"
+          data-slot="mock-tools-latest-created-note"
+          role="note"
+        >
+          Mocked runs create a temporary draft version on this agent and delete
+          it after each run. A draft counts as Latest Created — make sure no
+          phone number or tag sends real callers to Latest Created. Leaving a
+          number's version unset also means Latest Created. Retell keeps an
+          unused copy of the conversation flow behind each mocked run — Retell
+          has no way to delete one — but nothing can route callers to it.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

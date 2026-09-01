@@ -273,6 +273,10 @@ export type RegisterAgentData = {
              */
             pullProductionCalls?: boolean;
             /**
+             * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
+             */
+            mockToolsEnabled?: boolean;
+            /**
              * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
              */
             agentPlatformSelection?: {
@@ -611,6 +615,10 @@ export type AddConnectionData = {
          */
         pullProductionCalls?: boolean;
         /**
+         * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
+         */
+        mockToolsEnabled?: boolean;
+        /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
@@ -759,7 +767,7 @@ export type DiscoverMockToolsResponses = {
     200: {
         mockable: boolean;
         refusal: {
-            reason: 'custom_llm_engine' | 'keys_disagree' | 'platform_unavailable';
+            reason: 'custom_llm_engine' | 'keys_disagree' | 'platform_unavailable' | 'never_published';
             message: string;
         } | null;
         engine: 'retell-llm' | 'conversation-flow' | 'custom-llm' | null;
@@ -779,7 +787,6 @@ export type DiscoverMockToolsResponses = {
             number: string;
             label: string;
             verdicts: Array<'numeric' | 'environment-tag' | 'latest-published' | 'hijackable'>;
-            pin: boolean;
         }>;
         seeded: Array<string>;
     };
@@ -4357,11 +4364,6 @@ export type GetRunResponses = {
                 engineId: string;
                 version: number | null;
             };
-            numbers: Array<{
-                number: string;
-                was: string | number | null;
-                pinnedTo: number;
-            }>;
         } | null;
         connectionSnapshot: {
             agentPlatform: string | null;

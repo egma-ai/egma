@@ -46,7 +46,6 @@ import {
   type RetellRecovery,
 } from "./connect-sheet.tsx";
 import { ConnectionSheet } from "./connection-sheet.tsx";
-import { MockToolsSheet } from "./mock-tools-sheet.tsx";
 import { RenameAgentSheet } from "./rename-sheet.tsx";
 
 /**
@@ -163,8 +162,6 @@ export function AgentsScreen({
   const [archiving, setArchiving] = useState<ListedAgentWithConnections | null>(null);
   /** The agent whose name is being changed, in the sheet that changes it. */
   const [renaming, setRenaming] = useState<ListedAgentWithConnections | null>(null);
-  /** The agent whose mocked world is being explained and ticked. */
-  const [mocking, setMocking] = useState<ListedAgentWithConnections | null>(null);
   /** A Retell write whose answer may have been lost, kept across sheet Close. */
   const [retellRecovery, setRetellRecovery] =
     useState<RetellRecovery | null>(null);
@@ -661,10 +658,7 @@ export function AgentsScreen({
         />
       ) : null}
 
-      {detailsAgent === null ||
-      renaming !== null ||
-      archiving !== null ||
-      mocking !== null ? null : (
+      {detailsAgent === null || renaming !== null || archiving !== null ? null : (
         <AgentDetailsSheet
           agent={detailsAgent}
           home={home}
@@ -676,25 +670,10 @@ export function AgentsScreen({
             stopRefused?.agentId === detailsAgent.id ? stopRefused.refusal : null
           }
           onStopMonitoring={() => void stopPullMonitoring(detailsAgent.id)}
-          onMockTools={() => setMocking(detailsAgent)}
           onRename={() => setRenaming(detailsAgent)}
           onDelete={() => setArchiving(detailsAgent)}
           onClose={close}
           returnFocusTo={returnDetailsFocusTo}
-        />
-      )}
-
-      {mocking === null ? null : (
-        <MockToolsSheet
-          projectId={projectId}
-          agent={mocking}
-          mayAuthor={mayAuthor}
-          {...(whyNotChange === undefined ? {} : { why: whyNotChange })}
-          onClose={() => setMocking(null)}
-          onChanged={() => {
-            setMocking(null);
-            reload();
-          }}
         />
       )}
 

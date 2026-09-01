@@ -373,6 +373,7 @@ const CONNECTION_KEYS = [
   "credentials",
   "platformAgentId",
   "pullProductionCalls",
+  "mockToolsEnabled",
   "agentPlatformSelection",
 ] as const;
 
@@ -522,6 +523,12 @@ function connectionIn(value: unknown): NewConnection | Refusal {
       : {
           credentials: body.credentials as Readonly<Record<string, unknown>>,
         }),
+    // Sent by the setup flow so mocking is an explicit yes rather than a lane
+    // default a person meets afterwards. Absent leaves the lane's own default,
+    // and the store refuses a true a lane cannot keep.
+    ...(typeof body.mockToolsEnabled === "boolean"
+      ? { mockToolsEnabled: body.mockToolsEnabled }
+      : {}),
   };
 }
 
@@ -1861,7 +1868,6 @@ export async function agentRoutes(
         number: number.number,
         label: number.label,
         verdicts: number.verdicts,
-        pin: number.pin,
       })),
       seeded: seededNames,
     });

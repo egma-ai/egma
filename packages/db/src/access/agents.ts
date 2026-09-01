@@ -705,11 +705,13 @@ function admitConnection(input: NewConnection): AdmittedConnection {
     config,
     credentials: sealed === null ? null : sealCredentials(sealed.sealed),
     credentialsHint: sealed === null ? null : sealed.hint,
-    // On by default for the text door and off everywhere else. The text lane
-    // writes nothing to the customer's account, so the fast safe lane is safe
-    // by default; every other lane says yes explicitly.
-    mockToolsEnabled:
-      input.mockToolsEnabled ?? input.connectionType === "retell_text_mode",
+    // **Off unless the caller says otherwise, on every lane.** The text door
+    // used to default on, because a text run writes nothing to the customer's
+    // account and the fast lane was judged safe by default. It is still safe,
+    // and it is still not the caller's answer: a connection that mocks changes
+    // what every run over it means, and a door that never mentioned mocking
+    // would have created one that does. Every door that wants mocks says so.
+    mockToolsEnabled: input.mockToolsEnabled ?? false,
   };
 }
 
@@ -1582,7 +1584,16 @@ export async function archiveAgent(
   return db().transaction(async (tx): Promise<ArchivedAgent | undefined> => {
     const [archived] = await tx
       .update(agent)
-      .set({ archivedAt: now, updatedAt: now })
+      /*
+       * Archiving releases the production watch the way it releases the
+       * agent's name: the one-watcher claim belongs to the living. Without
+       * this, the archived row keeps `agent_pulled_platform_agent_unique`
+       * held and keeps being polled, and the next agent bound to the same
+       * platform agent is refused by a row no screen can show. The sealed
+       * key and the monitoring history stay, exactly as stopping leaves
+       * them.
+       */
+      .set({ archivedAt: now, updatedAt: now, pullProductionCalls: false })
       .where(
         theAgent(auth, id),
       )

@@ -123,6 +123,10 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
          */
         pullProductionCalls?: boolean;
         /**
+         * Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools.
+         */
+        mockToolsEnabled?: boolean;
+        /**
          * Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.
          */
         agentPlatformSelection?: {
@@ -231,6 +235,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     };
     platformAgentId?: string;
     pullProductionCalls?: boolean;
+    mockToolsEnabled?: boolean;
     agentPlatformSelection?: {
         platformAgentId: string;
         credentials: {
@@ -251,6 +256,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'credentials' },
                 { in: 'body', key: 'platformAgentId' },
                 { in: 'body', key: 'pullProductionCalls' },
+                { in: 'body', key: 'mockToolsEnabled' },
                 { in: 'body', key: 'agentPlatformSelection' }
             ] }]);
     return (options?.client ?? client).post<AddConnectionResponses, AddConnectionErrors, ThrowOnError>({

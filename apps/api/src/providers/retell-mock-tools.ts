@@ -3,8 +3,9 @@ import {
   bindingDecisionsFor,
   discoverTools,
   listRoutedNumbers,
+  PUBLISH_OR_BIND_A_VERSION,
   readEngineConfiguration,
-  resolveAgentVersion,
+  resolveServingAgentVersion,
   versionReferenceIn,
   type BindingDecision,
   type DiscoveredTool,
@@ -14,7 +15,7 @@ import {
 } from "@egma/retell";
 
 /**
- * What enabling mock tools would find, and the three reasons it is refused.
+ * What enabling mock tools would find, and the four reasons it is refused.
  *
  * The refusals are here, together, on purpose. Each one is a different fact
  * about the customer's account, and each has a different next move — so
@@ -33,7 +34,7 @@ import {
  * that connection itself now, so the dead end cannot exist and the refusal that
  * named it is gone with it.
  *
- * The three:
+ * The four:
  *
  * 1. **A custom-LLM engine.** The brain and the tools live on the customer's
  *    own socket server; Retell stores no tool configuration this seam could
@@ -49,12 +50,22 @@ import {
  *    the moment: Retell was unreachable while Egma read the account. Nothing is
  *    changed, and the person is told to try again — kept apart from the other
  *    two because its next move is "wait", not "reconfigure".
+ * 4. **Nothing published.** The agent is there and every version on it is a
+ *    draft. A mocked run is conducted against the version real callers reach
+ *    and never against a draft, so there is nothing here to stand in front of.
+ *    Its own reason rather than a shade of "keys disagree", because the two are
+ *    different facts with different next moves: that one says the key cannot
+ *    see the agent, this one says the agent has nothing to serve. Retell
+ *    answers both with the same 404, and the resolve tells them apart by
+ *    reading what the account says rather than by reading a status code — the
+ *    same mechanism the run-start read uses, so a person meets one fact once.
  */
 
 export const MOCK_TOOLS_REFUSALS = [
   "custom_llm_engine",
   "keys_disagree",
   "platform_unavailable",
+  "never_published",
 ] as const;
 export type MockToolsRefusalReason = (typeof MOCK_TOOLS_REFUSALS)[number];
 
@@ -113,6 +124,19 @@ function keysDisagree(named: string, held: string): string {
 const PLATFORM_AWAY =
   "Retell did not answer while Egma read this agent. Nothing was changed. Try " +
   "again.";
+
+/**
+ * The agent is there, and every version on it is a draft.
+ *
+ * The lead-in is this screen's voice — the tick explains what a mocked run
+ * *would* find, where a run start refuses one outright — and the way out is the
+ * shared clause, so the two surfaces can never name different doors out of one
+ * dead end.
+ */
+const NEVER_PUBLISHED =
+  "this agent has no published version on Retell. A mocked run is conducted " +
+  "against the version real callers reach and never against a draft, so " +
+  `there is nothing here for Egma to stand in front of. ${PUBLISH_OR_BIND_A_VERSION}`;
 
 function refused(
   reason: MockToolsRefusalReason,
@@ -184,12 +208,28 @@ export async function discoverMockTools(
   }
   const numbers = bindingDecisionsFor(listed.numbers, input.platformAgentId);
 
-  const serving = await resolveAgentVersion(
+  // The same resolve a run start makes: the same reference, worked out from
+  // this agent's own bindings by the same `versionReferenceIn`, through the
+  // same verb. **That is now true of both surfaces rather than nearly true of
+  // them.** A run start that asked for the published pointer regardless would
+  // have refused an agent this screen had just called mockable on the strength
+  // of a number bound to version 5 — one account, two answers, and the person
+  // caught between them.
+  const serving = await resolveServingAgentVersion(
     key,
     input.platformAgentId,
     versionReferenceIn(numbers),
     reach,
   );
+  // The agent answered and has published nothing. Its own refusal rather than
+  // the two-keys one below: Retell says 404 to both "this key cannot see that
+  // agent" and "that agent has published nothing", and telling a person to
+  // reconnect their key when what they need to do is publish is a wrong
+  // instruction dressed as a diagnosis. The resolve separates them by reading
+  // the account, not the status code.
+  if (serving.kind === "none-published") {
+    return refused("never_published", NEVER_PUBLISHED, { numbers });
+  }
   if (serving.kind !== "version") {
     // A key that reads the account but cannot see this agent is the other half
     // of the two-keys check: the account the key opens does not hold the agent

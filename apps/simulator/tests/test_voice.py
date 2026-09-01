@@ -37,7 +37,12 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.contract import ERROR
-from egma_simulator.conversation import Conducted, ConversationControls
+from egma_simulator.conversation import (
+    SAID_NOTHING,
+    Conducted,
+    ConversationControls,
+    SilentAgent,
+)
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -111,6 +116,7 @@ async def voice_simulation(
     speech: SpeechProviders = SCRIPTED_PAIR,
     parameters: ConductParameters | None = None,
     controls: ConversationControls | None = None,
+    spans: list[tuple[str, str, int, int]] | None = None,
     **overrides,
 ) -> Observed:
     """One voice simulation, conducted the way the service conducts it."""
@@ -128,6 +134,7 @@ async def voice_simulation(
         assembled,
         spec,
         controls=controls or ConversationControls(),
+        spans=spans,
     )
 
 
@@ -137,9 +144,17 @@ async def observe(
     spec: SimulationSpec,
     *,
     controls: ConversationControls,
+    spans: list[tuple[str, str, int, int]] | None = None,
 ) -> Observed:
-    """Conduct, and keep everything the conductor said about it."""
-    spans: list[tuple[str, str, int, int]] = []
+    """Conduct, and keep everything the conductor said about it.
+
+    ``spans`` is a list the caller owns, filled turn by turn as the
+    conversation runs. The same handle :func:`room_walk` offers next door,
+    and for the same reason: a simulation that ends in a raise never
+    returns an :class:`Observed`, and what it said before it raised is
+    often the whole subject.
+    """
+    spans = [] if spans is None else spans
     measures: list[tuple[str, float]] = []
 
     async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
@@ -1273,6 +1288,25 @@ async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
         await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
 
 
+class DeafEars(FrameProcessor):
+    """A listening leg that carries audio but emits no transcription.
+
+    What a transcriber handed a stretch of audio it finds no words in
+    really does: it pushes no frame at all. Every agent turn is then
+    recorded with no words, which is the shape of the dead call the
+    silence rule exists for, and the cheapest way to script one.
+    """
+
+    async def process_frame(self, frame, direction) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
+def deaf_legs(providers, *, voice):
+    """The scripted legs, with nobody listening on the agent's side."""
+    return SpeechLegs(stt=DeafEars(), tts=ScriptedTTS(voice=voice), voice=voice)
+
+
 async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1303,36 +1337,126 @@ async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
     its duration limit and the record says "limit reached" about hold
     music. What the record should say is that the turn carried no words,
     which is what it did.
+
+    That backstop is the subject here, and it holds: the turn closes, it
+    is recorded with no words, and the persona carries on rather than
+    waiting out the clock. What the whole simulation is then *worth* is
+    the second half of the story — every one of the agent's turns empty is
+    the dead call this product must never grade, so the run fails instead
+    of ending.
     """
-
-    class DeafEars(FrameProcessor):
-        """A listening leg that carries audio but emits no transcription."""
-
-        async def process_frame(self, frame, direction) -> None:
-            await super().process_frame(frame, direction)
-            await self.push_frame(frame, direction)
-
-    def deaf_legs(providers, *, voice):
-        return SpeechLegs(
-            stt=DeafEars(),
-            tts=ScriptedTTS(voice=voice),
-            voice=voice,
-        )
 
     monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
 
+    spans: list[tuple[str, str, int, int]] = []
+    with pytest.raises(SilentAgent) as silent:
+        await voice_simulation(
+            tmp_path,
+            scenario="One point.",
+            replies=["Noted."],
+            # Only the waiting is shortened; what is given up on is exactly
+            # what a deployment gives up on.
+            parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+            spans=spans,
+        )
+
+    # The backstop did its work: the turn was closed and recorded, and the
+    # persona spoke on both sides of it rather than the clock running out.
+    turns = [(speaker, text) for speaker, text, _began, _ended in spans]
+    assert ("agent", "") in turns, turns
+    assert [speaker for speaker, _text in turns] == ["human", "agent", "human"]
+    # The persona reached the end of its scenario and concluded, which is
+    # what says the turn really was given up on rather than waited out —
+    # the run got all the way to its natural end inside the limits.
+    assert turns[-1] == ("human", GOODBYE), turns
+    # And the simulation is a failure the contract never grades, never one
+    # of the deliberate endings it used to claim.
+    assert failed_ending(silent.value) == ERROR
+    assert str(silent.value) == SAID_NOTHING
+
+
+async def test_a_turn_limit_of_one_keeps_its_own_ending(tmp_path: Path):
+    """A spec that allows one turn ends before the agent could answer.
+
+    The persona speaks, the budget is spent, and the run stops — with no
+    agent turn on the record, which looks exactly like an agent that said
+    nothing. It is not: the limit is deliberate and is never the agent
+    failing, so the run keeps ``limit_reached`` rather than being called
+    a silence. One persona turn is the whole of the difference, which is
+    why the silence rule waits for a second one.
+    """
     observed = await voice_simulation(
         tmp_path,
-        scenario="One point.",
-        replies=["Noted."],
-        # Only the waiting is shortened; what is given up on is exactly
-        # what a deployment gives up on.
-        parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+        scenario="One point. Two point.",
+        greeting=None,
+        replies=[],
+        max_turns=1,
     )
 
     assert observed.conducted.status == "completed"
-    assert observed.conducted.ending == "persona_concluded"
-    assert ("agent", "") in observed.turns, observed.turns
+    assert observed.conducted.ending == "limit_reached"
+    assert [speaker for speaker, _text in observed.turns] == ["human"]
+
+
+class CancelsOnce(ConversationControls):
+    """A cancel directive that lands the moment the record says to.
+
+    A directive really arrives on a heartbeat answer, mid-exchange, and
+    *when* it lands is the whole subject of the test below. A cancel that
+    landed before the agent had taken a turn would be answered the same
+    way whichever order the two answers were decided in, so it would
+    prove nothing: the record has to already hold what the silence rule
+    fires on at the moment the directive arrives.
+    """
+
+    def __init__(self, when: Callable[[], bool]) -> None:
+        super().__init__()
+        self._when = when
+
+    async def guard(self, coroutine):
+        if self._when():
+            self.request_cancel()
+        return await super().guard(coroutine)
+
+
+async def test_a_cancel_outranks_a_silence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A run stopped on purpose is not a run that failed.
+
+    Both answers are true of this run at once. Nobody is listening on the
+    agent's side, so every turn it takes is recorded with no words — the
+    dead call the silence rule fails runs for — and the directive lands
+    only once one of those turns is on the record, so the rule really
+    would fire if it were asked first.
+
+    The cancel is the answer. It is somebody's own act, and a run stopped
+    before it could finish is not a run that failed: reporting a defect
+    there would put one on the record where a decision belongs, and it
+    would be a defect nobody could act on.
+    """
+    monkeypatch.setattr(conductor_module, "build_legs", deaf_legs)
+
+    spans: list[tuple[str, str, int, int]] = []
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="One point. Two point. Three point.",
+        replies=["Noted.", "Noted again."],
+        parameters=ConductParameters(agent_turn_backstop_seconds=0.3),
+        controls=CancelsOnce(
+            lambda: any(speaker == "agent" for speaker, *_rest in spans)
+        ),
+        spans=spans,
+    )
+
+    # The record really did hold a wordless agent turn when the directive
+    # landed — without this the test would pass on an empty record, which
+    # the silence rule leaves alone anyway.
+    turns = [(speaker, text) for speaker, text, _began, _ended in spans]
+    assert ("agent", "") in turns, turns
+    # And the cancel is still what the run is reported as.
+    assert observed.conducted.status == "canceled"
+    assert observed.conducted.ending == "canceled"
 
 
 async def test_an_unconfigured_voice_exchange_connects_nothing(

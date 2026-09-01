@@ -86,14 +86,20 @@ export const mockToolCoverageSchema = {
 } as const;
 
 /**
- * The put-it-back note a mocked run leaves behind, as a reader sees it.
+ * The note a mocked run leaves behind, as a reader sees it.
  *
  * It is on the run's header because it is a fact about the whole run: one
- * temporary copy, one set of touched numbers, one engine the tools were read
- * from. Each number's entry says where its binding pointed before Egma touched
- * it and what Egma pinned it to — so a reader can see exactly what Egma
- * promised to restore, and a sweep after a crash has the two values it needs to
- * decide whether restoring is still the right thing to do.
+ * engine, read once, that the temporary copy's tools were built from. Naming it
+ * is what lets a reader go and look at the version this run was conducted
+ * against.
+ *
+ * **It once carried a list of touched phone numbers**, because Egma pinned a
+ * number that follows Retell's latest pointer for the length of a run and put
+ * it back afterwards. Egma writes to no customer's numbers any more (developer
+ * ruling, 2026-08-31), so there is nothing of theirs to promise back and
+ * nothing to list. The one thing a mocked run makes is its own temporary
+ * version, and the two cleanup fields beside this note are what say whether it
+ * is still standing.
  */
 export const mockMetadataSchema = {
   type: "object",
@@ -108,20 +114,8 @@ export const mockMetadataSchema = {
       required: ["type", "engineId", "version"],
       additionalProperties: false,
     },
-    numbers: arrayOf({
-      type: "object",
-      properties: {
-        number: stringSchema,
-        was: {
-          oneOf: [stringSchema, integerSchema, { type: "null" }],
-        },
-        pinnedTo: integerSchema,
-      },
-      required: ["number", "was", "pinnedTo"],
-      additionalProperties: false,
-    }),
   },
-  required: ["engine", "numbers"],
+  required: ["engine"],
   additionalProperties: false,
 } as const;
 

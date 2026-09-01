@@ -174,6 +174,14 @@ export const agent = pgTable(
       "agent_pull_needs_binding",
       sql`${table.pullProductionCalls} = false or (${table.agentPlatform} is not null and ${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
     ),
+    // Only the living watch. An archived row that kept its switch on would
+    // hold the one-watcher claim and keep being polled while no screen can
+    // show it, so the state is unrepresentable rather than merely avoided by
+    // the archive path.
+    check(
+      "agent_archived_releases_pull",
+      sql`${table.pullProductionCalls} = false or ${table.archivedAt} is null`,
+    ),
     // The pairing, not each column on its own: an agent cannot name one
     // organization and another organization's project.
     foreignKey({
