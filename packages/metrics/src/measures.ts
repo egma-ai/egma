@@ -82,7 +82,7 @@
  * Version 6 stopped at the first turn and could drop the measurement when that
  * bookkeeping overlapped the human turn. Version 7 continues to the first
  * speech before the next human turn. The agent-turn fallback remains only for
- * a conversation whose framework recorded no speaking spans at all.
+ * a trace whose framework recorded no speaking spans at all.
  */
 export const MEASURE_CATALOG_VERSION = 7;
 

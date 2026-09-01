@@ -1330,15 +1330,15 @@ describe("the block a platform reported on the root span", () => {
 describe("LiveKit lifecycle evidence in the production transcript list", () => {
   const customer = { organizationId: newId("org"), userId: newId("usr") };
   const project = newId("prj");
-  const newerConversation = "eeee1111111111111111111111111111";
+  const newerTraceId = "eeee1111111111111111111111111111";
   const lifecycle = "eeee2222222222222222222222222222";
-  const olderConversation = "eeee3333333333333333333333333333";
+  const olderTraceId = "eeee3333333333333333333333333333";
 
   beforeAll(async () => {
     const activity = spanId();
     await appendSpans(at(customer, project), [
       span({
-        traceId: newerConversation,
+        traceId: newerTraceId,
         startedAtMicroseconds: BigInt(WHEN.getTime() + 30_000) * 1000n,
       }),
       span({
@@ -1357,7 +1357,7 @@ describe("LiveKit lifecycle evidence in the production transcript list", () => {
         startedAtMicroseconds: BigInt(WHEN.getTime() + 21_000) * 1000n,
       }),
       span({
-        traceId: olderConversation,
+        traceId: olderTraceId,
         startedAtMicroseconds: BigInt(WHEN.getTime() + 10_000) * 1000n,
       }),
     ]);
@@ -1371,7 +1371,7 @@ describe("LiveKit lifecycle evidence in the production transcript list", () => {
       limit: 1,
     });
     expect(first.traces.map((trace) => trace.traceId)).toEqual([
-      newerConversation,
+      newerTraceId,
     ]);
     expect(first.nextCursor).toBeDefined();
 
@@ -1382,7 +1382,7 @@ describe("LiveKit lifecycle evidence in the production transcript list", () => {
       cursor: first.nextCursor,
     });
     expect(second.traces.map((trace) => trace.traceId)).toEqual([
-      olderConversation,
+      olderTraceId,
     ]);
     expect(second.nextCursor).toBeUndefined();
 
@@ -1392,8 +1392,8 @@ describe("LiveKit lifecycle evidence in the production transcript list", () => {
       limit: 10,
     });
     expect(whole.traces.map((trace) => trace.traceId)).toEqual([
-      newerConversation,
-      olderConversation,
+      newerTraceId,
+      olderTraceId,
     ]);
 
     // The unfiltered trace-store interface and direct detail read remain raw:

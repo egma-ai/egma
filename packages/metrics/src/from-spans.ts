@@ -640,7 +640,7 @@ function put(
  * From the **human turn's end** to the first later agent speech before another
  * human turn. LiveKit can open one agent turn for model and tool work, then a
  * second agent turn for the spoken answer, so a silent turn on the way is part
- * of the wait rather than its endpoint. Where the conversation carries no
+ * of the wait rather than its endpoint. Where the trace carries no
  * `speaking` spans at all, the first agent turn's own start stands in for a
  * framework whose turns begin at their first word.
  *
@@ -677,10 +677,12 @@ function put(
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
-  const speechless = turns.every((turn) => turn.speech.length === 0);
+  const traceHasNoSpeakingSpans = turns.every(
+    (turn) => turn.speech.length === 0,
+  );
   for (const [at, turn] of turns.entries()) {
     if (turn.kind !== HUMAN_TURN) continue;
-    const answered = answeringSpeech(turns, at, speechless);
+    const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - turn.endedAt);
     if (latency < 0) continue;
@@ -718,11 +720,13 @@ function firstResponseLatency(
   if (root === undefined) return [];
   const first = turns.find((turn) => turn.kind === AGENT_TURN);
   if (first === undefined) return [];
-  const speechless = turns.every((turn) => turn.speech.length === 0);
+  const traceHasNoSpeakingSpans = turns.every(
+    (turn) => turn.speech.length === 0,
+  );
   const spoke = first.speech[0];
   const from =
     spoke ??
-    (speechless && first.duration > 0n
+    (traceHasNoSpeakingSpans && first.duration > 0n
       ? { startedAt: first.startedAt, spanId: first.spanId }
       : undefined);
   if (from === undefined) return [];
@@ -777,21 +781,21 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
 function answeringSpeech(
   turns: readonly TimedSpan[],
   at: number,
-  speechless: boolean,
+  traceHasNoSpeakingSpans: boolean,
 ): { readonly startedAt: bigint; readonly spanId: string } | undefined {
   let silentAnswer:
     | { readonly startedAt: bigint; readonly spanId: string }
     | undefined;
   for (const turn of turns.slice(at + 1)) {
     if (turn.kind === HUMAN_TURN) {
-      return speechless ? silentAnswer : undefined;
+      return traceHasNoSpeakingSpans ? silentAnswer : undefined;
     }
     if (turn.kind !== AGENT_TURN) continue;
     const speech = turn.speech[0];
     if (speech !== undefined) return speech;
     silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
   }
-  return speechless ? silentAnswer : undefined;
+  return traceHasNoSpeakingSpans ? silentAnswer : undefined;
 }
 
 /**

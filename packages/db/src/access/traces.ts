@@ -734,8 +734,8 @@ export async function listTraces(
 
   // LiveKit JavaScript emits successful start/drain activity trees under
   // their own wire trace ids. They remain immutable evidence and a direct
-  // detail read can still open them; they are only not conversations in the
-  // production transcript list.
+  // detail read can still open them; they are omitted only from the production
+  // transcript list.
   //
   // This belongs in HAVING because the decision is about every span in one
   // trace. It runs in the list's existing grouped scan, after the WHERE clause
@@ -743,7 +743,7 @@ export async function listTraces(
   // before ORDER BY/LIMIT so an omitted group never consumes a page slot.
   // Exact names, all-LiveKit provenance, no root and no error make this fail
   // open: anything new, mixed or failed stays visible.
-  const visibleProductionConversation =
+  const visibleProductionTracePredicate =
     source === "production"
       ? `not (
          countIf(${SPANS_TABLE}.agent_platform = 'livekit') = count()
@@ -752,7 +752,7 @@ export async function listTraces(
          and countIf(${SPANS_TABLE}.status = 'error') = 0
        )`
       : undefined;
-  const groupedPredicates = [visibleProductionConversation, after].filter(
+  const groupedPredicates = [visibleProductionTracePredicate, after].filter(
     (predicate): predicate is string => predicate !== undefined,
   );
   const having =
