@@ -1327,6 +1327,147 @@ describe("the block a platform reported on the root span", () => {
   });
 });
 
+describe("LiveKit lifecycle evidence in the production transcript list", () => {
+  const customer = { organizationId: newId("org"), userId: newId("usr") };
+  const project = newId("prj");
+  const newerConversation = "eeee1111111111111111111111111111";
+  const lifecycle = "eeee2222222222222222222222222222";
+  const olderConversation = "eeee3333333333333333333333333333";
+
+  beforeAll(async () => {
+    const activity = spanId();
+    await appendSpans(at(customer, project), [
+      span({
+        traceId: newerConversation,
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 30_000) * 1000n,
+      }),
+      span({
+        traceId: lifecycle,
+        spanId: activity,
+        name: "start_agent_activity",
+        kind: "other",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 20_000) * 1000n,
+      }),
+      span({
+        traceId: lifecycle,
+        spanId: spanId(),
+        parentSpanId: activity,
+        name: "on_enter",
+        kind: "other",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 21_000) * 1000n,
+      }),
+      span({
+        traceId: olderConversation,
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 10_000) * 1000n,
+      }),
+    ]);
+  });
+
+  it("keeps the evidence without spending a production page slot on it", async () => {
+    const context = at(customer, project);
+    const first = await listTraces(context, {
+      window: WINDOW,
+      source: "production",
+      limit: 1,
+    });
+    expect(first.traces.map((trace) => trace.traceId)).toEqual([
+      newerConversation,
+    ]);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await listTraces(context, {
+      window: WINDOW,
+      source: "production",
+      limit: 1,
+      cursor: first.nextCursor,
+    });
+    expect(second.traces.map((trace) => trace.traceId)).toEqual([
+      olderConversation,
+    ]);
+    expect(second.nextCursor).toBeUndefined();
+
+    const whole = await listTraces(context, {
+      window: WINDOW,
+      source: "production",
+      limit: 10,
+    });
+    expect(whole.traces.map((trace) => trace.traceId)).toEqual([
+      newerConversation,
+      olderConversation,
+    ]);
+
+    // The unfiltered trace-store interface and direct detail read remain raw:
+    // nothing was deleted, rewritten or made unreachable.
+    const raw = await listTraces(context, { window: WINDOW, limit: 10 });
+    expect(raw.traces.map((trace) => trace.traceId)).toContain(lifecycle);
+    expect(everySpanOf(await readTrace(context, lifecycle, { window: WINDOW })))
+      .toHaveLength(2);
+  });
+
+  it("keeps failed, unknown, rooted, non-LiveKit and simulation traces visible", async () => {
+    const edgeCustomer = {
+      organizationId: newId("org"),
+      userId: newId("usr"),
+    };
+    const edgeProject = newId("prj");
+    const context = at(edgeCustomer, edgeProject);
+    const failed = "eeee4444444444444444444444444444";
+    const unknown = "eeee5555555555555555555555555555";
+    const rooted = "eeee6666666666666666666666666666";
+    const anotherPlatform = "eeee7777777777777777777777777777";
+    const simulation = "eeee8888888888888888888888888888";
+
+    await appendSpans(context, [
+      span({
+        traceId: failed,
+        name: "start_agent_activity",
+        kind: "other",
+        status: "error",
+      }),
+      span({
+        traceId: unknown,
+        name: "future_agent_activity",
+        kind: "other",
+      }),
+      span({
+        traceId: rooted,
+        name: "start_agent_activity",
+        kind: "root",
+      }),
+      span({
+        traceId: anotherPlatform,
+        name: "start_agent_activity",
+        kind: "other",
+        agentPlatform: "pipecat",
+      }),
+      span({
+        traceId: simulation,
+        name: "start_agent_activity",
+        kind: "other",
+        source: "simulation",
+      }),
+    ]);
+
+    const production = await listTraces(context, {
+      window: WINDOW,
+      source: "production",
+      limit: 20,
+    });
+    expect(production.traces.map((trace) => trace.traceId).sort()).toEqual(
+      [failed, unknown, rooted, anotherPlatform].sort(),
+    );
+
+    const simulations = await listTraces(context, {
+      window: WINDOW,
+      source: "simulation",
+      limit: 20,
+    });
+    expect(simulations.traces.map((trace) => trace.traceId)).toEqual([
+      simulation,
+    ]);
+  });
+});
+
 describe("a page token", () => {
   it("survives a round trip and resumes exactly where the page stopped", async () => {
     const context = at(acme, undefined);
