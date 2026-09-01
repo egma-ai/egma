@@ -677,9 +677,7 @@ function put(
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
-  const traceHasNoSpeakingSpans = turns.every(
-    (turn) => turn.speech.length === 0,
-  );
+  const traceHasNoSpeakingSpans = hasNoSpeakingSpans(turns);
   for (const [at, turn] of turns.entries()) {
     if (turn.kind !== HUMAN_TURN) continue;
     const answered = answeringSpeech(turns, at, traceHasNoSpeakingSpans);
@@ -720,9 +718,7 @@ function firstResponseLatency(
   if (root === undefined) return [];
   const first = turns.find((turn) => turn.kind === AGENT_TURN);
   if (first === undefined) return [];
-  const traceHasNoSpeakingSpans = turns.every(
-    (turn) => turn.speech.length === 0,
-  );
+  const traceHasNoSpeakingSpans = hasNoSpeakingSpans(turns);
   const spoke = first.speech[0];
   const from =
     spoke ??
@@ -796,6 +792,11 @@ function answeringSpeech(
     silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
   }
   return traceHasNoSpeakingSpans ? silentAnswer : undefined;
+}
+
+/** Whether this trace's emitter recorded speech at all. */
+function hasNoSpeakingSpans(turns: readonly TimedSpan[]): boolean {
+  return turns.every((turn) => turn.speech.length === 0);
 }
 
 /**
