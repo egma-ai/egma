@@ -50,32 +50,46 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  *    temporary version serves every override.
  *
  * Everything else is refused, and **each refusal is its own answer**: a dead
- * run, a foreign simulation, an uncovered tool and a bad signature are four
- * different things and are never collapsed into one.
+ * run, a foreign simulation and an uncovered tool are three different things
+ * and are never collapsed into one. All three are a 404, because all three say
+ * the same thing about the address: it names nothing this endpoint will answer.
  *
- * ## The signature, and the guess inside it
+ * **Those three gates are the whole of the authentication**, and the secret
+ * they rest on is the address itself. The request arrives from the customer's
+ * platform carrying no credential of egma's, so what stands in for one is a run
+ * identifier and a simulation identifier that nobody can guess, both of which
+ * have to name the same live run before a single word about the mocked world is
+ * said.
  *
- * Where the platform signs one of these requests, it is verified over the raw
- * bytes that arrived with **the agent's own sealed platform key** — the key the
- * customer stored for this agent.
+ * ## The signature: a guess, its falsification, and the ruling
  *
- * **That choice is a guess, and it is written down as one.** Retell's *webhook*
- * signatures are made with a dedicated webhook-signing key, which is a
- * different value from every management key on the same account — proven by
- * hand on 2026-08-27, after the management key failed to verify a real webhook.
- * Whether a **custom-function** call is signed with that same webhook key, with
- * the management key, or not signed at all is not known, and nothing here may
- * pretend otherwise.
+ * Retell signs a custom-function call with `X-Retell-Signature`, an HMAC-SHA256
+ * over the raw bytes of the body. This file used to **refuse** a signature that
+ * did not verify against the agent's own sealed platform key — the key the
+ * customer connected — and its header said in as many words that the choice of
+ * key was a guess.
  *
- * So the check is conditional in the direction that fails safe for the product:
- * a signature that is present must verify, and a request that carries none is
- * admitted on the strength of the two unguessable identifiers and the liveness
- * gate. If the guess is wrong, the symptom is a wall of `bad_signature`
- * refusals rather than a silent hole — and the refusal names which key was
- * tried and which one to try instead, so whoever sees that wall knows what they
- * are looking at. The question is on the developer's live checklist beside the
- * fork check, in `packages/retell/README.md`; when it is answered, either this
- * reads a different key or the header becomes required.
+ * **The guess was wrong, and a live run falsified it on 2026-08-31.** Every
+ * mocked tool call a real Retell agent made to this endpoint failed with
+ * `bad_signature`, and the agent apologised for a broken backend on every one
+ * of them. Retell signs these calls with the account's **webhook-badge** key —
+ * the one wearing the Webhook badge on the dashboard's API Keys page — which is
+ * a different value from the key the customer connected and from every other
+ * management key on the account. Egma is never handed that key, cannot list it
+ * over the API, and has nowhere to keep it. Probed against the live account and
+ * confirmed by the developer the same day.
+ *
+ * **The ruling (Naman, 2026-08-31): the signature is never refused on.** The
+ * three gates above carry the authentication and lose nothing by it. The header
+ * is still read, and a signature that does not match the key egma does hold is
+ * written down as one note — never a refusal — so that the day some account
+ * signs with a key egma holds is a day somebody can measure rather than guess
+ * at. Neither the key nor the signature is ever written into that note.
+ *
+ * The five-minute freshness window went out with the refusal. A replay window
+ * earns its keep by refusing a replay, and nothing here refuses; reporting a
+ * stale timestamp as a mismatch would only make the one measurement this is
+ * kept for less true.
  *
  * ## The record
  *
@@ -106,42 +120,21 @@ export function mockToolBase(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}${MOCK_TOOL_PREFIX}`;
 }
 
-/** The header the platform signs these requests with, where it signs them. */
+/**
+ * The header the platform signs these requests with, where it signs them.
+ *
+ * Read and noted, never refused on — the header at the top of this file says
+ * why.
+ */
 export const SIGNATURE_HEADER = "x-retell-signature";
 
-/**
- * How old a signed request may be, in milliseconds.
- *
- * The platform's own window. A replay of a signed request outside it is
- * refused on the signature, which is the only thing that makes a signature
- * worth checking at all.
- */
-export const SIGNATURE_WINDOW_MILLISECONDS = 5 * 60 * 1000;
-
-/** How each refusal names itself, so four different things stay four. */
+/** How each refusal names itself, so three different things stay three. */
 export const MOCK_TOOL_REFUSALS = [
   "no_live_run",
   "simulation_not_in_run",
   "tool_not_mocked",
-  "bad_signature",
 ] as const;
 export type MockToolRefusal = (typeof MOCK_TOOL_REFUSALS)[number];
-
-/**
- * What a badly signed request is told.
- *
- * It names the key Egma tried and the one to try instead, because the failure
- * this sentence most likely describes is not an attack: it is Egma having
- * guessed wrong about which key Retell signs a custom-function call with. A
- * developer meeting a wall of these needs to know that in the first sentence,
- * not after reading the source.
- */
-const WRONG_SIGNING_KEY =
-  "this request's signature was not made with the Retell API key stored for " +
-  "this agent, which is the key Egma checks against. If every mocked tool " +
-  "call is failing this way, Retell is probably signing these requests with " +
-  "the account's separate webhook-signing key — the one carrying the Webhook " +
-  "badge in the Retell dashboard's API Keys page — which is a different value.";
 
 export type MockEndpointOptions = {
   /**
@@ -169,18 +162,20 @@ const sleep = (milliseconds: number): Promise<void> =>
       });
 
 /**
- * Whether a signature the platform sent is this request's.
+ * Whether a signature that arrived was made with the key egma holds.
  *
  * `v={milliseconds},d={hex}`, where the digest is an HMAC-SHA256 of the raw
  * body followed by the timestamp. The raw body, always: a body that has been
- * parsed and re-serialised is different bytes, and a check over different bytes
- * is a check of nothing.
+ * parsed and re-serialised is different bytes, and a comparison over different
+ * bytes is a comparison of nothing.
+ *
+ * **Nothing turns on the answer except one log line.** It is not a gate, and
+ * there is no freshness window in it — see the ruling at the top of this file.
  */
-export function signatureIsValid(
+function signatureMatchesKey(
   header: string,
   rawBody: string,
   key: string,
-  now: number,
 ): boolean {
   const parts = new Map<string, string>();
   for (const piece of header.split(",")) {
@@ -193,9 +188,6 @@ export function signatureIsValid(
   const digest = parts.get("d");
   if (timestamp === undefined || digest === undefined) return false;
   if (!/^\d+$/u.test(timestamp) || !/^[0-9a-f]+$/iu.test(digest)) return false;
-  if (Math.abs(now - Number(timestamp)) > SIGNATURE_WINDOW_MILLISECONDS) {
-    return false;
-  }
 
   const expected = createHmac("sha256", key)
     .update(`${rawBody}${timestamp}`)
@@ -205,7 +197,13 @@ export function signatureIsValid(
   return sent.length === mine.length && timingSafeEqual(sent, mine);
 }
 
-/** The signature a caller would have to send. Exported for the tests only. */
+/**
+ * The signature a platform signing with this key would send.
+ *
+ * Exported for the tests only: nothing a caller sends changes what this
+ * endpoint answers, so this builds the two cases the note is about — one that
+ * matches the key egma holds and one that does not.
+ */
 export function signatureFor(
   rawBody: string,
   key: string,
@@ -322,13 +320,19 @@ async function record(
   }
 }
 
+/**
+ * Say no, and say which no it is.
+ *
+ * Always a 404: every refusal left here is the same kind of thing, an address
+ * naming something this endpoint will not answer for. The name in the body is
+ * what tells the three of them apart.
+ */
 function refuse(
   reply: FastifyReply,
-  status: number,
   refusal: MockToolRefusal,
   sentence: string,
 ): FastifyReply {
-  return reply.code(status).send({ refusal, error: sentence });
+  return reply.code(404).send({ refusal, error: sentence });
 }
 
 export async function mockEndpointRoutes(
@@ -380,9 +384,9 @@ export async function mockEndpointRoutes(
     // are written down as the JSON object they are — because every reader of a
     // tool call's arguments parses this column as JSON, and one row that was a
     // query string instead would be the row that breaks them. The **signature**
-    // is a separate matter and is still checked over the raw body, which on a
-    // GET is empty; conflating the two would be checking a signature over bytes
-    // that never travelled.
+    // is a separate matter and is still compared over the raw body, which on a
+    // GET is empty; conflating the two would be comparing a signature against
+    // bytes that never travelled.
     const heardArguments =
       request.method === "GET"
         ? JSON.stringify(request.query ?? {})
@@ -399,7 +403,6 @@ export async function mockEndpointRoutes(
     if (target === undefined || !target.runIsLive) {
       return refuse(
         reply,
-        404,
         "no_live_run",
         "this address does not name a run Egma is conducting right now.",
       );
@@ -410,34 +413,31 @@ export async function mockEndpointRoutes(
     if (simulation === undefined) {
       return refuse(
         reply,
-        404,
         "simulation_not_in_run",
         "this address names a simulation that is not part of that run.",
       );
     }
 
-    // The signature, **before** the tool is looked up, and before anything is
-    // written down.
+    // The signature: read here, and refused on nowhere.
     //
-    // Both halves of that order are load-bearing. Checking it after gate three
-    // would answer a badly signed call about an uncovered tool with
-    // `tool_not_mocked`, which is a sentence about the mocked world sent to
-    // somebody who has not authenticated. And writing the record first would
-    // let anyone holding the two identifiers spray `refused` spans carrying any
-    // tool name they liked, by sending a signature that was never going to
-    // verify.
+    // Retell signs these with the account's webhook-badge key, which egma is
+    // never handed — falsified live on 2026-08-31, when every mocked tool call
+    // on a real agent came back `bad_signature`. So a signature that does not
+    // match is the ordinary case and says nothing at all about the caller: the
+    // two gates above are what admitted this request.
     //
-    // A request carrying no signature at all is admitted on the two unguessable
-    // identifiers and the liveness gate — see the note at the top of this file
-    // for why the check is conditional rather than required.
+    // What is left is a measurement. One note, so that the day an account signs
+    // with a key egma holds is a day somebody can count rather than assume.
+    // Neither the key nor the signature goes into it.
     const signature = request.headers[SIGNATURE_HEADER];
     if (typeof signature === "string" && signature.trim() !== "") {
       const key = target.signingKey;
-      if (
-        key === null ||
-        !signatureIsValid(signature, rawBody, key, Date.now())
-      ) {
-        return refuse(reply, 401, "bad_signature", WRONG_SIGNING_KEY);
+      if (key === null || !signatureMatchesKey(signature, rawBody, key)) {
+        request.log.info(
+          { runId: target.runId, keyHeld: key !== null },
+          "a mocked tool call's signature did not match the platform key held " +
+            "for this agent",
+        );
       }
     }
 
@@ -464,7 +464,6 @@ export async function mockEndpointRoutes(
       );
       return refuse(
         reply,
-        404,
         "tool_not_mocked",
         "this simulation has no answer for that tool.",
       );

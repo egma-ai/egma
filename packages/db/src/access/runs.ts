@@ -2271,10 +2271,15 @@ export async function resolveSimulationStanding(
  * `resolveSimulationStanding` beside it takes none — there is no caller to
  * resolve, and the row is the authority.
  *
- * `signingKey` is the agent's sealed platform key, opened. It is used to
- * **verify** a signature the platform put on the request and for nothing else:
- * nothing on this path spends it, and it never reaches an answer, a log, or a
- * refusal.
+ * `signingKey` is the agent's sealed platform key, opened. The mock endpoint
+ * compares a signature the platform put on the request against it and writes
+ * down whether the two agreed, and does nothing else with it: nothing on this
+ * path spends it, and it never reaches an answer, a log, or a refusal.
+ *
+ * **It gates nothing.** Retell signs a custom-function call with the account's
+ * webhook-badge key, which egma is never handed — falsified live on 2026-08-31
+ * — so the comparison is an observation kept for the day that changes, and the
+ * mock endpoint's own header carries the ruling.
  *
  * `undefined` means no such run, which is the first gate's answer.
  */
