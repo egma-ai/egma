@@ -1998,7 +1998,7 @@ describe("a livekit connection", () => {
       payload: { topology: "agent-dials-out" },
       message:
         'a connection has no key "topology"; it holds name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection",
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection",
     },
     {
       named: "a credential key that does not belong",
@@ -2384,7 +2384,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection; the agent's content " +
+        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -2422,7 +2422,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, mockToolsEnabled, agentPlatformSelection',
     });
   });
 });

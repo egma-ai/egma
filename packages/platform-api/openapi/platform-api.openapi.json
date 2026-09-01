@@ -598,6 +598,10 @@
                         "type": "boolean",
                         "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                       },
+                      "mockToolsEnabled": {
+                        "type": "boolean",
+                        "description": "Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools."
+                      },
                       "agentPlatformSelection": {
                         "type": "object",
                         "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
@@ -2484,6 +2488,10 @@
                     "type": "boolean",
                     "description": "Start pulling this agent's production calls with the same save. Off unless the request says otherwise; the first switch-on imports the fixed 30-day history."
                   },
+                  "mockToolsEnabled": {
+                    "type": "boolean",
+                    "description": "Whether runs over this connection answer the agent's tools with your test data. Sent by the setup flow so mocking is always an explicit yes; absent leaves the lane's own default. Never true for a phone_number connection, which reaches your real tools."
+                  },
                   "agentPlatformSelection": {
                     "type": "object",
                     "description": "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
@@ -2846,7 +2854,8 @@
                               "enum": [
                                 "custom_llm_engine",
                                 "keys_disagree",
-                                "platform_unavailable"
+                                "platform_unavailable",
+                                "never_published"
                               ]
                             },
                             "message": {
@@ -2966,16 +2975,12 @@
                                 "hijackable"
                               ]
                             }
-                          },
-                          "pin": {
-                            "type": "boolean"
                           }
                         },
                         "required": [
                           "number",
                           "label",
-                          "verdicts",
-                          "pin"
+                          "verdicts"
                         ],
                         "additionalProperties": false
                       }
@@ -15749,44 +15754,10 @@
                                 "version"
                               ],
                               "additionalProperties": false
-                            },
-                            "numbers": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "number": {
-                                    "type": "string"
-                                  },
-                                  "was": {
-                                    "oneOf": [
-                                      {
-                                        "type": "string"
-                                      },
-                                      {
-                                        "type": "integer"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ]
-                                  },
-                                  "pinnedTo": {
-                                    "type": "integer"
-                                  }
-                                },
-                                "required": [
-                                  "number",
-                                  "was",
-                                  "pinnedTo"
-                                ],
-                                "additionalProperties": false
-                              }
                             }
                           },
                           "required": [
-                            "engine",
-                            "numbers"
+                            "engine"
                           ],
                           "additionalProperties": false
                         },

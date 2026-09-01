@@ -73,6 +73,19 @@ type AccountOptions = {
   readonly whenCaptured?: (account: Account) => void;
   /** Requests that fail, by a substring of the path, with the status to answer. */
   readonly refuse?: Readonly<Record<string, number>>;
+  /** Whether the serving version is published. It is, unless a test says not. */
+  readonly published?: boolean;
+  /**
+   * The delete answers, and deletes nothing — the defect the read-back proof
+   * exists for. `"gone"` is the production failure exactly: a delete Retell had
+   * no route for answered 404, and Egma read 404 as "already deleted".
+   */
+  readonly deletePretends?: "gone" | "deleted" | undefined;
+  /**
+   * The engine write mints a new version instead of editing the named one —
+   * the accident that would leave litter Retell has no endpoint to remove.
+   */
+  readonly writeMints?: boolean;
 };
 
 type Account = {
@@ -121,7 +134,7 @@ function account(options: AccountOptions = {}): Account {
   versions.set(105, {
     agent_id: AGENT,
     version: 105,
-    is_published: true,
+    is_published: options.published ?? true,
     response_engine: servingEngineRef,
   });
 
@@ -187,12 +200,32 @@ function account(options: AccountOptions = {}): Account {
       return json(number);
     }
 
+    if (path.startsWith("/list-agent-versions/")) {
+      // Retell's current listing. The legacy `/get-agent-versions` retires
+      // 2026-09-15 and this account deliberately has no route for it.
+      return json({
+        items: [...versions.values()].map((held) => ({
+          version: held["version"],
+          is_published: held["is_published"] === true,
+        })),
+        has_more: false,
+      });
+    }
+
     if (path.startsWith("/get-agent/")) {
       const asked = new URL(url).searchParams.get("version") ?? "latest";
+      const published = [...versions.values()]
+        .filter((held) => held["is_published"] === true)
+        .map((held) => Number(held["version"]));
       const resolved =
         asked === "latest"
           ? Math.max(...versions.keys())
-          : options.tags?.[asked] ?? Number(asked);
+          : asked === "latest_published"
+            ? // Nothing published resolves to nothing, which is a 404 below —
+              // the same answer Retell gives for an agent that is not there,
+              // and the reason the resolve disambiguates with a second read.
+              (published.length === 0 ? Number.NaN : Math.max(...published))
+            : options.tags?.[asked] ?? Number(asked);
       const version = versions.get(resolved);
       return version === undefined ? json({ error: "gone" }, 404) : json(version);
     }
@@ -255,15 +288,42 @@ function account(options: AccountOptions = {}): Account {
       const asked = Number(new URL(url).searchParams.get("version"));
       const document = engines.get(engineKey(engineId, asked));
       if (document === undefined) return json({ error: "gone" }, 404);
+      if (options.writeMints) {
+        // What an account that forks on write looks like: the edit lands on a
+        // version nobody asked for, and Retell's own answer is the only place
+        // that is visible. Retell has no endpoint that deletes an engine
+        // version, so this one would outlive the run.
+        const minted = asked + 1;
+        engines.set(engineKey(engineId, minted), {
+          ...structuredClone(document),
+          ...structuredClone(body ?? {}),
+          version: minted,
+        });
+        return json({ version: minted });
+      }
       Object.assign(document, structuredClone(body ?? {}));
-      return json(document);
+      return json({ ...document, version: asked });
     }
 
     if (method === "DELETE" && path.startsWith("/delete-agent-version/")) {
-      const asked = Number(path.split("/").at(-1));
-      if (!versions.has(asked)) return json({ error: "gone" }, 404);
-      versions.delete(asked);
-      engines.delete(engineKey(engineId, asked));
+      // The version rides in the query string, exactly as Retell's router
+      // requires. A path-segment delete finds no route here and answers 404 —
+      // the same "Cannot DELETE" a real account answers, which is what let a
+      // teardown that deleted nothing call itself done.
+      const asked = new URL(url).searchParams.get("version");
+      if (asked === null) return json({ error: "Cannot DELETE" }, 404);
+      if (options.deletePretends !== undefined) {
+        return options.deletePretends === "gone"
+          ? json({ error: "Cannot DELETE" }, 404)
+          : json({ deleted: true });
+      }
+      const version = Number(asked);
+      if (!versions.has(version)) return json({ error: "gone" }, 404);
+      versions.delete(version);
+      // **The engine version stays.** Retell deletes the agent version and
+      // keeps the flow version it pointed at, and offers no endpoint that
+      // removes one (verified live, 2026-08-31). The orphan is what a real
+      // account is left holding, so the fake holds it too.
       return json({ deleted: true });
     }
 
@@ -312,7 +372,7 @@ const RIDES_LATEST = [{ agent_id: AGENT, agent_version: "latest", weight: 3 }];
 const RIDES_TAG = [{ agent_id: AGENT, agent_version: "prod" }];
 
 describe("the binding verdicts, for every number routing to the agent", () => {
-  it("pins `latest` and an unset binding, and lets the other three through", () => {
+  it("reads every binding's verdict, and skips a number that is not this agent's", () => {
     const decisions = bindingDecisionsFor(
       [
         {
@@ -369,19 +429,21 @@ describe("the binding verdicts, for every number routing to the agent", () => {
       AGENT,
     );
 
-    expect(decisions.map((one) => [one.label, one.pin])).toEqual([
-      ["numeric", false],
-      ["tag", false],
-      ["published", false],
-      ["latest", true],
-      ["unset", true],
+    // Read, and acted on nowhere: Egma writes to none of these numbers. What
+    // the verdict decides is the version a run is conducted against.
+    expect(decisions.map((one) => [one.label, one.verdicts])).toEqual([
+      ["numeric", ["numeric"]],
+      ["tag", ["environment-tag"]],
+      ["published", ["latest-published"]],
+      ["latest", ["hijackable"]],
+      ["unset", ["hijackable"]],
     ]);
     // The sixth number routes to somebody else and is not this agent's
     // business at all.
     expect(decisions.some((one) => one.number === "+15550000006")).toBe(false);
   });
 
-  it("pins a shared number when any one of this agent's entries rides latest", () => {
+  it("keeps every one of this agent's entries on a shared number", () => {
     const [decision] = bindingDecisionsFor(
       [
         {
@@ -401,11 +463,9 @@ describe("the binding verdicts, for every number routing to the agent", () => {
       AGENT,
     );
 
-    expect(decision?.pin).toBe(true);
     expect(decision?.verdicts).toEqual(["numeric", "hijackable"]);
-    // The whole array rides along, the other agent's entry included: the write
-    // that puts it back replaces the array, so a decision that dropped an entry
-    // would delete somebody's routing.
+    // The whole array rides along, the other agent's entry included, so a
+    // reader of the screen sees the number as Retell really holds it.
     expect(decision?.bindings).toHaveLength(3);
     // But the reading of what runs against the number is this agent's entries
     // only.
@@ -413,9 +473,10 @@ describe("the binding verdicts, for every number routing to the agent", () => {
   });
 
   it("resolves the version from this agent's binding, never a sibling agent's", () => {
-    // A number two agents share: the other agent pins it to 7, this agent
-    // rides `latest`. The version this run tests must be this agent's `latest`,
-    // not the stranger's 7 — a version no traffic to this agent ever reaches.
+    // A number two agents share: the other agent is bound to 7, this agent
+    // rides `latest`. The version this run tests must follow this agent's own
+    // binding, not the stranger's 7 — a version no traffic to this agent ever
+    // reaches.
     const decisions = bindingDecisionsFor(
       [
         {
@@ -438,7 +499,61 @@ describe("the binding verdicts, for every number routing to the agent", () => {
       AGENT,
     );
 
-    expect(versionReferenceIn(decisions)).toBe("latest");
+    // Neither 7 nor the stranger's binding: this agent rides `latest`, which
+    // names no version, so the answer is the published pointer below.
+    expect(versionReferenceIn(decisions)).toBe("latest_published");
+  });
+
+  it("reads a number riding `latest` as naming no version at all", () => {
+    // `latest` is Retell's word for the newest version *created*, drafts
+    // included — so it is the one reference a run must never resolve. An agent
+    // whose numbers all ride it is tested against what it publishes.
+    for (const rides of ["latest", "", null] as const) {
+      const decisions = bindingDecisionsFor(
+        [
+          {
+            number: "+15550000009",
+            label: "front desk",
+            bindings: [
+              {
+                agentId: AGENT,
+                agentVersion: rides,
+                verbatim: { agent_id: AGENT, agent_version: rides },
+              },
+            ],
+          },
+        ],
+        AGENT,
+      );
+      expect(versionReferenceIn(decisions)).toBe("latest_published");
+    }
+  });
+
+  it("keeps an explicitly bound version or tag as the version to test", () => {
+    const bound = (agentVersion: string | number) =>
+      versionReferenceIn(
+        bindingDecisionsFor(
+          [
+            {
+              number: "+15550000010",
+              label: "front desk",
+              bindings: [
+                {
+                  agentId: AGENT,
+                  agentVersion,
+                  verbatim: { agent_id: AGENT, agent_version: agentVersion },
+                },
+              ],
+            },
+          ],
+          AGENT,
+        ),
+      );
+
+    // A customer whose traffic is pinned to an older published version, or
+    // routed through a movable tag, keeps reaching exactly what it reaches.
+    expect(bound(101)).toBe(101);
+    expect(bound("prod")).toBe("prod");
   });
 });
 
@@ -540,86 +655,13 @@ describe("building the world over a conversation flow", () => {
   });
 });
 
-describe("the pin, and the routing it promises to put back", () => {
-  it("pins a number riding `latest`, and puts every byte of it back", async () => {
-    const original = [
-      { agent_id: AGENT, agent_version: "latest", weight: 3, a_field_egma_never_read: "keep me" },
-      { agent_id: OTHER_AGENT, agent_version: 7 },
-    ];
-    const retell = account({ numbers: { "+12567332874": original } });
-    const kept = recorder();
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind, JSON.stringify(built)).toBe("built");
-    if (built.kind !== "built") return;
-
-    // During the run the number is on a real numeric version, so a caller
-    // ringing mid-run reaches the real agent with real tools.
-    expect(retell.bindingsOf("+12567332874")).toEqual([
-      { agent_id: AGENT, agent_version: 105, weight: 3, a_field_egma_never_read: "keep me" },
-      { agent_id: OTHER_AGENT, agent_version: 7 },
-    ]);
-    // The note says where the binding pointed and what Egma pinned it to —
-    // the two values a restore reads before it decides to write.
-    expect(built.state.mockMetadata?.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
-
-    const finished = await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(finished.unfinished).toEqual([]);
-    // Restored, not reconstructed: the field Egma never read is still there.
-    expect(retell.bindingsOf("+12567332874")).toEqual(original);
-    expect(mockRunIsSettled(finished.state)).toBe(true);
-  });
-
-  it("never touches a tag assignment", async () => {
+describe("the version a run is conducted against", () => {
+  it("branches from what the agent publishes, never from a leftover draft", async () => {
+    // The exact production shape: a stray draft above the published version,
+    // left by a run whose teardown deleted nothing. `latest` is that draft.
     const retell = account({
-      numbers: { "+12567332874": RIDES_TAG },
-      tags: { prod: 105 },
-    });
-
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "prod", target: TARGET, record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: async () => undefined },
-      REACH(retell.fetchImpl),
-    );
-
-    // Not one write to the number, in either direction. A tagged number was
-    // never pinned, so putting it "back" would be Egma editing a binding it
-    // had no business in.
-    expect(
-      retell.seen.filter((one) => one.url.includes("/update-phone-number/")),
-    ).toEqual([]);
-    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
-  });
-
-  it("pins to what that number reaches now, not to the version the run tests", async () => {
-    // The customer's tagged number serves 105. A second number rides `latest`,
-    // which is 110 today. Pinning the second number to 105 would quietly move
-    // its callers back five versions for the length of a run.
-    const retell = account({
-      alsoVersions: [110],
-      tags: { prod: 105 },
-      numbers: {
-        "+12567332874": RIDES_TAG,
-        "+12567332875": RIDES_LATEST,
-      },
+      numbers: { "+12567332874": RIDES_LATEST },
+      alsoVersions: [106],
     });
 
     const built = await buildMockedWorld(
@@ -630,79 +672,79 @@ describe("the pin, and the routing it promises to put back", () => {
 
     expect(built.kind, JSON.stringify(built)).toBe("built");
     if (built.kind !== "built") return;
-    // The run tests what a real caller reaches, worked out from the numbers.
+    // 105, the published version — not 106, the leftover.
     expect(built.agentVersion).toBe(105);
-    // And the pin preserves the other number's behaviour exactly.
-    expect(retell.bindingsOf("+12567332875")[0]?.["agent_version"]).toBe(110);
-    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_TAG);
+    expect(built.state.tempMockAgentVersion).toBe(107);
+
+    const asked = retell.seen
+      .filter((one) => one.url.includes("/get-agent/"))
+      .map((one) => new URL(one.url).searchParams.get("version"));
+    expect(asked).toContain("latest_published");
   });
 
-  it("pins only the hijackable entry, and leaves a numeric sibling alone", async () => {
-    // Weighted routing: this agent has both a numeric entry (105) and a
-    // hijackable one (latest) on one number. Pinning the whole array to
-    // `latest`'s resolved version would move the 105 sibling — the exact
-    // hijack this pin exists to stop, by Egma's own hand.
-    const mixed = [
-      { agent_id: AGENT, agent_version: 105, weight: 1 },
-      { agent_id: AGENT, agent_version: "latest", weight: 4 },
-      { agent_id: OTHER_AGENT, agent_version: 9 },
-    ];
-    const retell = account({
-      alsoVersions: [112],
-      numbers: { "+12567332874": mixed },
-    });
+  it("refuses an agent that has published nothing, before it writes anything", async () => {
+    const retell = account({ published: false });
 
     const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: 105, target: TARGET, record: recorder().record },
+      { agentId: AGENT, target: TARGET, record: recorder().record },
       REACH(retell.fetchImpl),
     );
-    expect(built.kind, JSON.stringify(built)).toBe("built");
-    if (built.kind !== "built") return;
 
-    // Only the hijackable entry moved to what `latest` reaches now; the numeric
-    // sibling kept its 105, and the other agent kept its 9.
-    expect(retell.bindingsOf("+12567332874")).toEqual([
-      { agent_id: AGENT, agent_version: 105, weight: 1 },
-      { agent_id: AGENT, agent_version: 112, weight: 4 },
-      { agent_id: OTHER_AGENT, agent_version: 9 },
-    ]);
-
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: async () => undefined },
-      REACH(retell.fetchImpl),
-    );
-    // And the whole array is restored, byte for byte.
-    expect(retell.bindingsOf("+12567332874")).toEqual(mixed);
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("no published version");
+    expect(built.reason).toContain("Publish in Retell the version you want tested");
+    expect(built.reason).toContain("pin a Retell phone number that routes to this agent");
+    // Nothing was made and nothing is owed.
+    expect(built.state).toBeNull();
+    expect(retell.versions.size).toBe(1);
+    expect(retell.seen.some((one) => one.method === "POST")).toBe(false);
+    expect(retell.seen.some((one) => one.method === "PATCH")).toBe(false);
   });
 
-  it("records the pin it is about to make before it makes it", async () => {
-    const retell = account({ numbers: { "+12567332874": RIDES_LATEST } });
-    const kept = recorder();
-    await buildMockedWorld(
+  it("still conducts against a draft a developer named on purpose", async () => {
+    // Testing a candidate before publishing it is the whole point of door two.
+    const retell = account({ published: false, alsoVersions: [106] });
+
+    const built = await buildMockedWorld(
       key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
+      { agentId: AGENT, versionReference: 106, target: TARGET, record: recorder().record },
       REACH(retell.fetchImpl),
     );
 
-    // The very first record is written before a single request goes out, and
-    // it already owes a cleanup: a crash anywhere after it is a run the next
-    // claim finds by one indexed query.
-    const first = kept.written[0];
-    expect(first?.tempMockAgentVersion).toBeNull();
-    expect(first?.tempMockAgentVersionCleanup).toBe(false);
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    expect(built.agentVersion).toBe(106);
+  });
+});
 
-    // And the pin is written down before it is made, so a crash between the
-    // two leaves a restore that finds the binding untouched and leaves it
-    // alone, rather than a pin nobody knows about.
-    const beforeThePin = kept.written.find(
-      (one) => (one.mockMetadata?.numbers.length ?? 0) > 0,
+describe("the write that must edit rather than mint", () => {
+  it("fails the run when Retell answers that it wrote a different version", async () => {
+    // Retell documents neither in-place editing nor minting, and only the
+    // version it answers with tells the truth per call. A minted engine version
+    // is litter no endpoint can remove — there is no
+    // delete-conversation-flow-version — so the accident fails the run rather
+    // than surviving it.
+    const retell = account({ writeMints: true });
+    const kept = recorder();
+
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
     );
-    expect(beforeThePin?.tempMockAgentVersion).toBeNull();
-    expect(beforeThePin?.mockMetadata?.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
+
+    expect(built.kind).toBe("refused");
+    if (built.kind !== "refused") return;
+    expect(built.reason).toContain("wrote v107 instead");
+    expect(built.reason).toContain("no endpoint that deletes one");
+    // The world is owed back, and the caller tears it down.
+    expect(built.state?.tempMockAgentVersion).toBe(106);
+    // And the version real callers reach was never written to.
+    expect(retell.toolsAt(105)[0]?.["url"]).toBe(
+      "https://backend.example.com/emrs/boulevard/tools/get_availability",
+    );
   });
 });
 
@@ -851,62 +893,6 @@ describe("the custom-LLM refusal", () => {
 });
 
 describe("the teardown, and the sweep that finishes it", () => {
-  it("deletes the draft before it restores a pin", async () => {
-    const retell = account({ numbers: { "+12567332874": RIDES_LATEST } });
-    const kept = recorder();
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-
-    const before = retell.seen.length;
-    await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    const during = retell.seen.slice(before);
-
-    const deleteAt = during.findIndex((one) => one.method === "DELETE");
-    const restoreAt = during.findIndex((one) => one.url.includes("/update-phone-number/"));
-    expect(deleteAt).toBeGreaterThanOrEqual(0);
-    expect(restoreAt).toBeGreaterThanOrEqual(0);
-    // The reverse order is lethal: restoring `latest` while the draft exists
-    // makes the draft *be* latest.
-    expect(deleteAt).toBeLessThan(restoreAt);
-  });
-
-  it("does not restore a pin when the delete failed", async () => {
-    const retell = account({
-      numbers: { "+12567332874": RIDES_LATEST },
-      refuse: { "/delete-agent-version/": 500 },
-    });
-    const kept = recorder();
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "latest", target: TARGET, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-
-    const finished = await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: kept.record },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(finished.unfinished[0]).toContain("deleting temporary version 106");
-    // Still pinned, and still owed. A number left on `latest` beside a live
-    // draft is the one state that hurts a customer.
-    expect(retell.bindingsOf("+12567332874")[0]?.["agent_version"]).toBe(105);
-    expect(finished.state.mockMetadata?.numbers).toHaveLength(1);
-    expect(mockRunIsSettled(finished.state)).toBe(false);
-  });
-
   it("sweeps what a crashed run left, from that run's own recorded bindings", async () => {
     // A run that branched, pinned, and then died: its record is all that is
     // left of it, and it is enough.
@@ -941,7 +927,6 @@ describe("the teardown, and the sweep that finishes it", () => {
       tempMockAgentVersionCleanup: false,
       mockMetadata: {
         engine: { type: "conversation-flow", engineId: FLOW, version: 999 },
-        numbers: [],
       },
     };
 
@@ -956,5 +941,227 @@ describe("the teardown, and the sweep that finishes it", () => {
     // account is back is the cleanup flag.
     expect(swept.state.tempMockAgentVersion).toBe(999);
     expect(swept.state.tempMockAgentVersionCleanup).toBe(true);
+    // And "gone" was a success only because the versions were read back: the
+    // account's own listing says 999 is not there.
+    expect(
+      retell.seen.some((one) => one.url.includes("/list-agent-versions/")),
+    ).toBe(true);
+  });
+});
+
+describe("the proof that the delete happened", () => {
+  it("does not record the account put back when a 404 delete left the version standing", async () => {
+    // The production defect exactly: Egma's delete was a shape Retell has no
+    // route for, Retell answered 404, and 404 read as "already deleted". Every
+    // teardown reported the account put back and every draft survived.
+    const retell = account({
+      numbers: { "+12567332874": RIDES_LATEST },
+      deletePretends: "gone",
+    });
+    const kept = recorder();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+
+    const finished = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(mockRunIsSettled(finished.state)).toBe(false);
+    expect(finished.unfinished.join(" ")).toContain("still hold it");
+    // The draft is what it says: still there, and the record keeps saying so.
+    expect(retell.versions.has(106)).toBe(true);
+    expect(finished.state.mockMetadata?.temporaryVersionGone).toBeUndefined();
+    // The customer's number was never touched, before or after.
+    expect(retell.bindingsOf("+12567332874")).toEqual(RIDES_LATEST);
+  });
+
+  it("does not record the account put back when a 204 delete left the version standing", async () => {
+    const retell = account({ deletePretends: "deleted" });
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind).toBe("built");
+    if (built.kind !== "built") return;
+
+    const finished = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: async () => undefined },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(mockRunIsSettled(finished.state)).toBe(false);
+    expect(finished.unfinished.join(" ")).toContain("still hold it");
+  });
+
+  it("does not record the account put back when the read-back cannot say", async () => {
+    for (const [status, expected] of [
+      [404, /is not proof/u],
+      [500, /unavailable/u],
+    ] as const) {
+      const retell = account({ refuse: { "/list-agent-versions/": status } });
+      const built = await buildMockedWorld(
+        key,
+        { agentId: AGENT, target: TARGET, record: recorder().record },
+        REACH(retell.fetchImpl),
+      );
+      expect(built.kind).toBe("built");
+      if (built.kind !== "built") return;
+
+      const finished = await finishMockedWorld(
+        key,
+        { agentId: AGENT, state: built.state, record: async () => undefined },
+        REACH(retell.fetchImpl),
+      );
+
+      expect(mockRunIsSettled(finished.state), String(status)).toBe(false);
+      expect(finished.unfinished.join(" ")).toMatch(expected);
+      expect(JSON.stringify(finished)).not.toContain(KEY);
+    }
+  });
+
+  it("writes down the flow version Retell keeps behind", async () => {
+    // Retell deletes the agent version and keeps the flow version it ran on,
+    // and no endpoint removes one. Nothing can route to the orphan — a binding
+    // names a live agent version and this one's is gone — so it is residue,
+    // and the number is recorded rather than pretended away.
+    const retell = account();
+    const kept = recorder();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    // The branch's own flow version, carried from the branch response.
+    expect(built.state.mockMetadata?.engine.draftVersion).toBe(106);
+
+    const finished = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    // The agent side is settled, which is the whole of what Egma can give back.
+    expect(finished.unfinished).toEqual([]);
+    expect(mockRunIsSettled(finished.state)).toBe(true);
+    expect(retell.versions.has(106)).toBe(false);
+    // And the flow version stands, named on the record.
+    expect(retell.engines.has(`${FLOW}@106`)).toBe(true);
+    expect(finished.state.mockMetadata?.strayFlowVersion).toBe(106);
+    expect(kept.last().mockMetadata?.strayFlowVersion).toBe(106);
+  });
+
+  it("never deletes a version twice once the read-back proved it gone", async () => {
+    // A teardown can finish the delete, prove it, and still leave the world
+    // unsettled on something else — here the serving version's own read-back,
+    // which the note promises and which runs before the delete. The next sweep
+    // retries the whole function, and Retell hands the next branch the lowest
+    // free number: a second delete can land on somebody else's draft, made in
+    // the window while this world stayed unsettled.
+    //
+    // The refusal map is read live on every request, so the build runs clean
+    // and only the teardown afterwards meets a wall.
+    const refuse: Record<string, number> = {};
+    const retell = account({ refuse });
+    const kept = recorder();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    refuse["/get-conversation-flow/"] = 500;
+
+    const first = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    // The copy is gone; the promise about the serving version could not be
+    // kept, so the world is not settled.
+    expect(retell.versions.has(106)).toBe(false);
+    expect(first.unfinished.join(" ")).toContain("never moved");
+    expect(mockRunIsSettled(first.state)).toBe(false);
+    // The version number stays — it is what this run branched — and the note
+    // beside it says it is no longer standing.
+    expect(first.state.tempMockAgentVersion).toBe(106);
+    expect(first.state.mockMetadata?.temporaryVersionGone).toBe(true);
+    // Recorded once, so the next process reads it rather than re-learning it.
+    expect(kept.last().mockMetadata?.temporaryVersionGone).toBe(true);
+
+    // The customer branches their own draft in the window, and Retell gives it
+    // the number Egma's copy freed.
+    retell.versions.set(106, {
+      agent_id: AGENT,
+      version: 106,
+      is_published: false,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: FLOW,
+        version: 106,
+      },
+    });
+
+    const before = retell.seen.length;
+    const writes = kept.written.length;
+    const second = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: first.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    const during = retell.seen.slice(before);
+
+    // Not one delete: the customer's draft is untouched.
+    expect(during.filter((one) => one.method === "DELETE")).toEqual([]);
+    expect(retell.versions.has(106)).toBe(true);
+    // The same debt is still reported.
+    expect(second.unfinished.join(" ")).toContain("never moved");
+    expect(mockRunIsSettled(second.state)).toBe(false);
+    // **And nothing was written down.** Nothing about what Egma owes moved on
+    // this pass, and a finished run's header refuses a write that moves
+    // neither the note nor the cleanup flag — so a record here would come back
+    // as a database error standing in for the real sentence above.
+    expect(kept.written.length).toBe(writes);
+  });
+
+  it("deletes the version with the version in the query string", async () => {
+    const retell = account();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: recorder().record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind).toBe("built");
+    if (built.kind !== "built") return;
+
+    const finished = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: async () => undefined },
+      REACH(retell.fetchImpl),
+    );
+
+    expect(finished.unfinished).toEqual([]);
+    expect(mockRunIsSettled(finished.state)).toBe(true);
+    const removed = retell.seen.find((one) => one.method === "DELETE");
+    expect(removed?.url).toBe(
+      `https://retell.invalid/delete-agent-version/${AGENT}?version=106`,
+    );
+    // **The engine version is still there, and that is the expected residue.**
+    // Retell keeps it, no endpoint removes one, and nothing can route to it
+    // because a binding names a live agent version and there is none. So the
+    // teardown records the number rather than claiming a cleanup it cannot do.
+    expect(retell.engines.has(`${FLOW}@106`)).toBe(true);
+    expect(finished.state.mockMetadata?.strayFlowVersion).toBe(106);
   });
 });

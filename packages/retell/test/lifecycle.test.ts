@@ -5,12 +5,13 @@ import {
   bindingVerdictOf,
   branchAgentVersion,
   deleteAgentVersion,
+  LATEST_PUBLISHED,
+  listAgentVersions,
   listRoutedNumbers,
   numbersRouting,
-  pinNumberBinding,
   readEngineConfiguration,
   resolveAgentVersion,
-  restoreNumberBinding,
+  resolveServingAgentVersion,
   writeEngineTools,
   type RetellCredential,
 } from "../src/index.ts";
@@ -317,12 +318,44 @@ describe("branching, writing and deleting a version", () => {
         },
         REACH(fetchImpl),
       );
-      expect(written).toEqual({ kind: "written" });
+      // The stand-in answers no version of its own, and the client hands that
+      // back as null rather than inventing the one it asked for. What a null
+      // is worth is the caller's to judge, and the builder refuses it: see
+      // `mocked-world.ts`, where an answer that names no version cannot be
+      // told from one that minted a version nothing can delete.
+      expect(written).toEqual({ kind: "written", version: null });
     }
 
     for (const request of seen) {
       expect(new URL(request.url).searchParams.get("version")).not.toBeNull();
     }
+  });
+
+  it("hands back the version Retell says it wrote", async () => {
+    // Retell's reference says nothing about whether a PATCH edits the named
+    // version or mints a new one, and only this field tells the truth per call.
+    // There is no endpoint that deletes a stray engine version, so the caller
+    // has to be able to see one being made.
+    const { fetchImpl } = retell([
+      (request) =>
+        json({
+          conversation_flow_id: "flow_1",
+          version:
+            Number(new URL(request.url).searchParams.get("version")) + 1,
+        }),
+    ]);
+
+    const written = await writeEngineTools(
+      key,
+      {
+        reference: { type: "conversation-flow", engineId: "flow_1", version: 106 },
+        version: 106,
+        tools: { tools: [] },
+      },
+      REACH(fetchImpl),
+    );
+
+    expect(written).toEqual({ kind: "written", version: 107 });
   });
 
   it("refuses to write onto a custom LLM, and asks Retell nothing", async () => {
@@ -340,17 +373,30 @@ describe("branching, writing and deleting a version", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("deletes one version by number", async () => {
+  it("names the version to delete as a query parameter", async () => {
+    // Retell's router has no `/delete-agent-version/{agent}/{version}` route:
+    // the path form answers 404 "Cannot DELETE" and the query form answers 204
+    // (verified live, 2026-08-31). The stand-in answers exactly that way, so a
+    // return to the path form fails here rather than on somebody's account.
     const { fetchImpl, seen } = retell([
-      () => new Response(null, { status: 204 }),
+      (request) =>
+        request.method === "DELETE" &&
+        new URL(request.url).searchParams.get("version") === null
+          ? json({ error: "Cannot DELETE" }, 404)
+          : new Response(null, { status: 204 }),
     ]);
+
     expect(await deleteAgentVersion(key, AGENT, 106, REACH(fetchImpl))).toEqual({
       kind: "deleted",
     });
     expect(seen[0]?.method).toBe("DELETE");
     expect(seen[0]?.url).toBe(
-      `https://retell.invalid/delete-agent-version/${AGENT}/106`,
+      `https://retell.invalid/delete-agent-version/${AGENT}?version=106`,
     );
+    // Version zero is the one a caller is most likely to fumble into a falsy
+    // check and leave off the query string entirely.
+    await deleteAgentVersion(key, AGENT, 0, REACH(fetchImpl));
+    expect(new URL(String(seen[1]?.url)).searchParams.get("version")).toBe("0");
   });
 
   it("answers gone for a version that is already not there", async () => {
@@ -358,6 +404,212 @@ describe("branching, writing and deleting a version", () => {
     expect(await deleteAgentVersion(key, AGENT, 106, REACH(fetchImpl))).toEqual({
       kind: "gone",
     });
+  });
+});
+
+describe("reading an agent's versions back", () => {
+  it("reads the current listing, never the one that retires 2026-09-15", async () => {
+    const { fetchImpl, seen } = retell([
+      (request) =>
+        request.url.includes("/list-agent-versions/")
+          ? json([
+              { version: 105, is_published: true },
+              { version: 106, is_published: false },
+            ])
+          : undefined,
+    ]);
+
+    const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+
+    expect(listed).toEqual({
+      kind: "versions",
+      versions: [
+        { version: 105, published: true },
+        { version: 106, published: false },
+      ],
+    });
+    expect(seen[0]?.url).toContain(
+      `https://retell.invalid/list-agent-versions/${AGENT}?`,
+    );
+    expect(seen.some((one) => one.url.includes("/get-agent-versions"))).toBe(
+      false,
+    );
+  });
+
+  it("pages to the end of a paged listing", async () => {
+    const { fetchImpl, seen } = retell([
+      (request) => {
+        if (!request.url.includes("/list-agent-versions/")) return undefined;
+        const cursor = new URL(request.url).searchParams.get("pagination_key");
+        return cursor === null
+          ? json({
+              items: [{ version: 105, is_published: true }],
+              has_more: true,
+              pagination_key: "page-2",
+            })
+          : json({ items: [{ version: 106 }], has_more: false });
+      },
+    ]);
+
+    const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+    expect(listed).toEqual({
+      kind: "versions",
+      versions: [
+        { version: 105, published: true },
+        { version: 106, published: false },
+      ],
+    });
+    expect(seen).toHaveLength(2);
+  });
+
+  it("says it cannot tell rather than answering an empty list", async () => {
+    for (const [answer, reason] of [
+      [json({ nothing: true }), /malformed/u],
+      [json({ items: [], has_more: true }), /without a new cursor/u],
+      [json({ error: "boom" }, 500), /unavailable/u],
+    ] as const) {
+      const { fetchImpl } = retell([() => answer.clone()]);
+      const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+      expect(listed.kind).toBe("refused");
+      expect(listed.kind === "refused" ? listed.reason : "").toMatch(reason);
+    }
+  });
+
+  it("refuses a page holding a row it cannot read, rather than dropping it", async () => {
+    // A dropped row is one version fewer, and one version fewer is exactly how
+    // a version that is still standing reads as absent — the false put-back
+    // this listing exists to prevent.
+    for (const row of [
+      { version: "106", is_published: false },
+      { version: null },
+      { is_published: true },
+      "106",
+    ]) {
+      const { fetchImpl } = retell([
+        () => json([{ version: 105, is_published: true }, row]),
+      ]);
+      const listed = await listAgentVersions(key, AGENT, REACH(fetchImpl));
+      expect(listed.kind, JSON.stringify(row)).toBe("refused");
+      expect(listed.kind === "refused" ? listed.reason : "").toMatch(
+        /could not read/u,
+      );
+    }
+  });
+});
+
+describe("resolving the version a run should conduct against", () => {
+  it("asks Retell for the newest published version, and pins the number", async () => {
+    const { fetchImpl, seen } = retell([
+      () =>
+        json({
+          version: 105,
+          is_published: true,
+          response_engine: {
+            type: "conversation-flow",
+            conversation_flow_id: "flow_1",
+            version: 105,
+          },
+        }),
+    ]);
+
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+
+    expect(serving.kind).toBe("version");
+    expect(
+      serving.kind === "version" ? serving.agentVersion.version : null,
+    ).toBe(105);
+    expect(seen).toHaveLength(1);
+    expect(new URL(String(seen[0]?.url)).searchParams.get("version")).toBe(
+      "latest_published",
+    );
+  });
+
+  it("refuses an agent whose newest version is a draft, and names both doors", async () => {
+    // Retell answers the published reference with nothing, and `latest` with a
+    // draft: the agent is there and has published nothing.
+    const { fetchImpl } = retell([
+      (request) =>
+        new URL(request.url).searchParams.get("version") === "latest"
+          ? json({ version: 3, is_published: false, response_engine: {} })
+          : json({ error: "not found" }, 404),
+    ]);
+
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+
+    expect(serving.kind).toBe("none-published");
+    const reason = serving.kind === "none-published" ? serving.reason : "";
+    expect(reason).toContain("no published version");
+    expect(reason).toContain("Publish in Retell the version you want tested");
+    expect(reason).toContain("pin a Retell phone number that routes to this agent");
+  });
+
+  it("refuses a published pointer that resolved to a draft anyway", async () => {
+    const { fetchImpl } = retell([
+      () => json({ version: 9, is_published: false, response_engine: {} }),
+    ]);
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+    expect(serving.kind).toBe("none-published");
+  });
+
+  it("still says gone for an agent that is not there at all", async () => {
+    const { fetchImpl } = retell([() => json({ error: "not found" }, 404)]);
+    const serving = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      LATEST_PUBLISHED,
+      REACH(fetchImpl),
+    );
+    expect(serving).toEqual({ kind: "gone" });
+  });
+
+  it("passes an explicitly named version or tag straight through", async () => {
+    const { fetchImpl, seen } = retell([
+      () =>
+        json({
+          version: 42,
+          is_published: false,
+          response_engine: { type: "retell-llm", llm_id: "llm_1", version: 42 },
+        }),
+    ]);
+
+    // A draft named on purpose is a candidate a developer wants tested. It
+    // resolves, and nothing here second-guesses it.
+    const named = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      42,
+      REACH(fetchImpl),
+    );
+    expect(named.kind).toBe("version");
+    expect(named.kind === "version" ? named.agentVersion.version : null).toBe(
+      42,
+    );
+
+    const tagged = await resolveServingAgentVersion(
+      key,
+      AGENT,
+      "prod",
+      REACH(fetchImpl),
+    );
+    expect(tagged.kind).toBe("version");
+    expect(seen.map((one) => new URL(one.url).searchParams.get("version"))).toEqual(
+      ["42", "prod"],
+    );
   });
 });
 
@@ -465,141 +717,5 @@ describe("discovering the numbers that route to an agent", () => {
       "environment-tag",
       "environment-tag",
     ]);
-  });
-});
-
-describe("pinning and restoring a binding", () => {
-  it("pins only this agent's entry, keeping every other field verbatim", async () => {
-    const listing = retell(accountWithTwoPagesOfNumbers());
-    const listed = await listRoutedNumbers(key, REACH(listing.fetchImpl));
-    if (listed.kind !== "numbers") throw new Error("expected numbers");
-    const overflow = numbersRouting(listed.numbers, AGENT)[1]!;
-
-    const { fetchImpl, seen } = retell([() => json({ ok: true })]);
-    const pinned = await pinNumberBinding(
-      key,
-      {
-        number: overflow.number,
-        agentId: AGENT,
-        version: 106,
-        bindings: overflow.bindings,
-      },
-      REACH(fetchImpl),
-    );
-
-    expect(pinned).toEqual({ kind: "written" });
-    expect(seen[0]?.method).toBe("PATCH");
-    expect(seen[0]?.url).toBe(
-      "https://retell.invalid/update-phone-number/%2B14155550199",
-    );
-    expect(seen[0]?.body).toEqual({
-      inbound_agents: [
-        { agent_id: "agent_other", agent_version: "latest_published" },
-        {
-          agent_id: AGENT,
-          agent_version: 106,
-          weight: 2,
-          a_field_egma_has_never_heard_of: "keep me",
-        },
-      ],
-    });
-  });
-
-  it("reads the number first and puts back only what it still pinned", async () => {
-    // The number as it stands now: this agent's entry still points where the
-    // run pinned it, so the recorded `was` goes back — onto the array read
-    // now, so a sibling agent's entry survives whatever it has become since.
-    const { fetchImpl, seen } = retell([
-      () =>
-        json({
-          phone_number: "+14155550199",
-          nickname: "Overflow",
-          inbound_agents: [
-            { agent_id: "agent_other", agent_version: "latest_published" },
-            {
-              agent_id: AGENT,
-              agent_version: 106,
-              weight: 2,
-              a_field_egma_has_never_heard_of: "keep me",
-            },
-          ],
-        }),
-      () => json({ ok: true }),
-    ]);
-
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-
-    expect(restored).toEqual({ kind: "restored" });
-    expect(seen[0]?.method).toBe("GET");
-    expect(seen[1]?.method).toBe("PATCH");
-    expect(seen[1]?.body).toEqual({
-      inbound_agents: [
-        { agent_id: "agent_other", agent_version: "latest_published" },
-        {
-          agent_id: AGENT,
-          agent_version: "latest",
-          weight: 2,
-          a_field_egma_has_never_heard_of: "keep me",
-        },
-      ],
-    });
-  });
-
-  it("writes nothing when the binding has moved, and says why", async () => {
-    // Race rule two. A teardown that failed once retries later, and by then
-    // the number may point somewhere else — the customer rebound it, or a
-    // newer run pinned it. Writing the recorded value back then would undo a
-    // deliberate change, and in the worst case would put `latest` onto a newer
-    // run's temporary copy.
-    const { fetchImpl, seen } = retell([
-      () =>
-        json({
-          phone_number: "+14155550199",
-          nickname: "Overflow",
-          inbound_agents: [{ agent_id: AGENT, agent_version: 112 }],
-        }),
-    ]);
-
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-
-    expect(restored.kind).toBe("left-alone");
-    if (restored.kind !== "left-alone") throw new Error("expected left-alone");
-    expect(restored.reason).toContain("no longer points at version 106");
-    // One request, and it was the read. Nothing was written.
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.method).toBe("GET");
-  });
-
-  it("leaves a number that is no longer on the account alone", async () => {
-    const { fetchImpl, seen } = retell([() => json({ error: "gone" }, 404)]);
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: null },
-      REACH(fetchImpl),
-    );
-    expect(restored.kind).toBe("left-alone");
-    expect(seen).toHaveLength(1);
-  });
-
-  it("reports a refused restore instead of throwing, and quotes no key", async () => {
-    const { fetchImpl } = retell([() => json({ error: "boom" }, 500)]);
-    const restored = await restoreNumberBinding(
-      key,
-      { number: "+14155550199", agentId: AGENT, pinnedTo: 106, was: "latest" },
-      REACH(fetchImpl),
-    );
-    expect(restored).toEqual({
-      kind: "refused",
-      reason: "Retell is unavailable. Try again.",
-    });
-    expect(JSON.stringify(restored)).not.toContain(KEY);
   });
 });

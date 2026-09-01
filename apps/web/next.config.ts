@@ -9,6 +9,11 @@ import type { NextConfig } from "next";
  * from, which is also what makes a self-hoster's login depend on nothing they
  * do not run.
  *
+ * **Not only the browser.** A mocked run points a customer's agent at
+ * `/mock-tools/…` on this same origin, so the agent's own platform calls this
+ * process too. A path this process does not forward is answered by its
+ * not-found page, and a page is not an answer a caller's agent can use.
+ *
  * `EGMA_API_ORIGIN` is read when the site is built rather than when it starts,
  * because Next resolves rewrites into the build. In Compose that is the API
  * service; running the two processes by hand it is localhost. Neither is a
@@ -92,6 +97,20 @@ const config: NextConfig = {
         {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
+        },
+        // Where a mocked run's tool calls arrive. They come from the agent's
+        // own platform rather than from a browser, and the URLs Egma mints for
+        // them point at this origin — one origin is the design, and Retell
+        // refuses localhost and private addresses for a tool URL, so the mock
+        // endpoint has to answer where the pages answer.
+        //
+        // Without this rule they were answered by this process's not-found
+        // page: every mocked tool call on a live agent got Egma's own HTML 404,
+        // and the agent apologized to the caller for a broken backend on every
+        // call. The endpoint itself is the API's.
+        {
+          source: "/mock-tools/:path*",
+          destination: `${api}/mock-tools/:path*`,
         },
         // `/api/health` proves only this Next process. The platform deployment
         // waits for the API and its stores directly; it must not depend on a

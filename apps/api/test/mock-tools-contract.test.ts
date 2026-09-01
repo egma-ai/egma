@@ -208,7 +208,6 @@ describe("what one run records, through the API", () => {
         engineId: "conversation_flow_2346a0e8367c",
         version: 105,
       },
-      numbers: [{ number: "+14155550199", was: "latest", pinnedTo: 8 }],
     };
     await recordMockState(contextFor(ada, "member"), runId, {
       tempMockAgentVersion: 106,
@@ -220,15 +219,15 @@ describe("what one run records, through the API", () => {
     expect(after.statusCode, JSON.stringify(after.body)).toBe(200);
     expect(after.body.tempMockAgentVersion).toBe(106);
     expect(after.body.tempMockAgentVersionCleanup).toBe(false);
-    // The note as the record stores it: where each touched number pointed,
-    // and what Egma pinned it to.
+    // The note as the record stores it: the engine this run's tools were read
+    // from, and nothing about anything of the customer's — Egma touched none
+    // of it.
     expect(after.body.mockMetadata).toEqual({
       engine: {
         type: "conversation-flow",
         engineId: "conversation_flow_2346a0e8367c",
         version: 105,
       },
-      numbers: [{ number: "+14155550199", was: "latest", pinnedTo: 8 }],
     });
   });
 });
