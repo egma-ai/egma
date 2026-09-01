@@ -319,6 +319,12 @@ export async function confirmRetellCandidate(
     // told it at the first run is a suite that will not start for a reason
     // nobody expected. The run start asks the same question again through the
     // same read, so the two refusals are one sentence in one place.
+    //
+    // **Without the bindings, though.** Registering a connection conducts
+    // nothing and pins no version, so the customer's phone numbers decide
+    // nothing here — and a door that read them would refuse a registration
+    // when that listing failed, for a run that does not exist. The last
+    // argument is what says so.
     const world = await readTextModeWorld(
       {
         apiKey,
@@ -326,6 +332,8 @@ export async function confirmRetellCandidate(
         ...(baseUrl === undefined ? {} : { baseUrl }),
       },
       fetchImpl,
+      undefined,
+      false,
     );
     if (world.kind === "refused") {
       return { kind: "rejected", message: world.message };

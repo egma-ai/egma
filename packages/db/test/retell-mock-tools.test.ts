@@ -150,7 +150,6 @@ async function seedRun(
 /** The put-it-back note one mocked web-call run wrote. */
 const NOTE: MockMetadata = {
   engine: { type: "conversation-flow", engineId: "flow_9c", version: 105 },
-  numbers: [{ number: "+15550100", was: "latest", pinnedTo: 8 }],
 };
 
 /** An agent whose platform identity and key are in place. */
@@ -431,14 +430,15 @@ describe("the four fields one run records", () => {
       tempMockAgentVersionCleanup: false,
       mockMetadata: NOTE,
     });
-    // The stored note is exactly the shape the decisions record settled.
+    // The stored note is exactly the shape the decisions record settled: the
+    // engine that was captured, and no claim about anything of the customer's.
     const stored = await database.sql<{ mock_metadata: unknown }>(
       "select mock_metadata from run where id = $1",
       [runId],
     );
-    expect(
-      (stored.rows[0]?.mock_metadata as { numbers: unknown[] }).numbers,
-    ).toEqual([{ number: "+15550100", was: "latest", pinned_to: 8 }]);
+    expect(stored.rows[0]?.mock_metadata).toEqual({
+      engine: { type: "conversation-flow", engine_id: "flow_9c", version: 105 },
+    });
 
     // After teardown: the flag says the account is back. The version number
     // and the note stay — they are the record of what this run branched and
@@ -454,6 +454,97 @@ describe("the four fields one run records", () => {
       tempMockAgentVersionCleanup: true,
       mockMetadata: NOTE,
     });
+  });
+
+  it("carries the proof that the temporary version was deleted, and only when it is true", async () => {
+    // The one fact a teardown hands the next one. It rides in the note because
+    // a finished run's header admits a write to the note and the cleanup flag
+    // and to nothing else — the version number beside it is frozen, being the
+    // permanent answer to what this run branched.
+    const agentId = await anAgent("Web call proof");
+    const connectionId = await aConnection(agentId, WEB_CALL);
+    const { runId } = await seedRun(agentId, connectionId);
+
+    // Absent while the copy still stands, and absent from the row rather than
+    // written false — a note from before this fact existed reads back exactly
+    // as it was written.
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: NOTE,
+    });
+    const owed = await database.sql<{ mock_metadata: Record<string, unknown> }>(
+      "select mock_metadata from run where id = $1",
+      [runId],
+    );
+    expect(owed.rows[0]?.mock_metadata).not.toHaveProperty(
+      "temporary_version_gone",
+    );
+
+    // Written the moment the delete is proved, in the row's own spelling.
+    const proved = { ...NOTE, temporaryVersionGone: true };
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: proved,
+    });
+    const stored = await database.sql<{
+      mock_metadata: Record<string, unknown>;
+    }>("select mock_metadata from run where id = $1", [runId]);
+    expect(stored.rows[0]?.mock_metadata?.["temporary_version_gone"]).toBe(true);
+
+    // The stray Retell keeps behind rides beside it, in the row's own
+    // spelling, and is read back as a number.
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: { ...proved, strayFlowVersion: 106 },
+    });
+    const withStray = await database.sql<{
+      mock_metadata: Record<string, unknown>;
+    }>("select mock_metadata from run where id = $1", [runId]);
+    expect(withStray.rows[0]?.mock_metadata?.["stray_flow_version"]).toBe(106);
+    const strayOwed = await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "only-when-owed" },
+      async (rows) => rows,
+    );
+    expect(
+      strayOwed.find((one) => one.runId === runId)?.metadata,
+    ).toEqual({ ...proved, strayFlowVersion: 106 });
+    // And it is dropped from the run header with the rest of the bookkeeping.
+    expect((await fieldsOf(runId)).mockMetadata).toEqual(NOTE);
+
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: proved,
+    });
+
+    // **Read back typed by the sweep**, which is the one reader that acts on
+    // it, so a teardown decides on a boolean rather than on truthy bytes.
+    const owedNow = await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "only-when-owed" },
+      async (rows) => rows,
+    );
+    expect(owedNow.find((one) => one.runId === runId)?.metadata).toEqual(proved);
+
+    // **And dropped from the run header**, beside the tool print: a reader of a
+    // run wants to know whether the account is back, and the cleanup flag says
+    // that. This is bookkeeping between one teardown and the next.
+    expect((await fieldsOf(runId)).mockMetadata).toEqual(NOTE);
+
+    // A row holding something that is not a boolean is a row Egma refuses to
+    // read, rather than one it guesses at: this flag is what stops a second
+    // delete, so a wrong reading of it deletes somebody else's draft.
+    await database.sql(
+      `update run set mock_metadata = jsonb_set(mock_metadata, '{temporary_version_gone}', '"yes"') where id = $1`,
+      [runId],
+    );
+    await expect(fieldsOf(runId)).rejects.toThrow();
   });
 
   it("says an unmocked web call conducted against a version and copied nothing", async () => {
@@ -538,7 +629,7 @@ describe("the four fields one run records", () => {
     const settled = await recordMockState(acting(), runId, {
       tempMockAgentVersion: 106,
       tempMockAgentVersionCleanup: true,
-      mockMetadata: { ...NOTE, numbers: [] },
+      mockMetadata: { ...NOTE, temporaryVersionGone: true },
     });
     expect(settled?.tempMockAgentVersionCleanup).toBe(true);
 

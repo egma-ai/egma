@@ -1,4 +1,5 @@
 import { newId } from "@egma/ids";
+import { PUBLISH_OR_BIND_A_VERSION } from "@egma/retell";
 import {
   createPersona,
   getSimulation,
@@ -10,7 +11,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { reportPathFor } from "../src/routes/reports.ts";
-import { readTextModeWorld } from "../src/providers/retell-run-start.ts";
+import {
+  readTextModeWorld,
+  readWebCallWorld,
+} from "../src/providers/retell-run-start.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
@@ -97,6 +101,26 @@ type RetellPlan = {
   readonly agentStatus?: number | undefined;
   /** The status the engine read answers with. */
   readonly engineStatus?: number | undefined;
+  /**
+   * Whether the agent has published anything.
+   *
+   * When it has not, the published pointer resolves to nothing — Retell's own
+   * 404 — and `latest` answers the draft, which is what tells the two apart
+   * from an agent that is not there at all.
+   */
+  readonly published?: boolean | undefined;
+  /**
+   * The account's phone numbers, whole.
+   *
+   * Read before the version is resolved, because this agent's own bindings are
+   * what decide which version a run is conducted against: a number bound to a
+   * version or riding an environment tag names one, and only where none does is
+   * the published pointer the answer. The account has no numbers unless a test
+   * gives it some — the ordinary shape for a chat agent.
+   */
+  readonly numbers?: readonly Record<string, unknown>[] | undefined;
+  /** The status the phone-number listing answers with. */
+  readonly numbersStatus?: number | undefined;
 };
 
 /** A Retell that answers exactly what one test's plan says, and records asks. */
@@ -119,11 +143,18 @@ function retell(plan: RetellPlan = {}): {
           { status },
         );
       }
+      const published = plan.published ?? true;
+      const asked = new URL(url).searchParams.get("version") ?? "latest";
+      if (!published && asked === "latest_published") {
+        return new Response(JSON.stringify({ message: "not found" }), {
+          status: 404,
+        });
+      }
       return new Response(
         JSON.stringify({
           agent_id: PLATFORM_AGENT,
           version: SERVING_VERSION,
-          is_published: true,
+          is_published: published,
           response_engine: plan.engine ?? {
             type: "conversation-flow",
             conversation_flow_id: FLOW.conversation_flow_id,
@@ -143,6 +174,19 @@ function retell(plan: RetellPlan = {}): {
         );
       }
       return new Response(JSON.stringify(FLOW), { status: 200 });
+    }
+
+    if (url.includes("/v2/list-phone-numbers")) {
+      const status = plan.numbersStatus ?? 200;
+      if (status !== 200) {
+        return new Response(JSON.stringify({ message: "no numbers" }), {
+          status,
+        });
+      }
+      return new Response(
+        JSON.stringify({ items: plan.numbers ?? [], has_more: false }),
+        { status: 200 },
+      );
     }
 
     if (url.includes("/v2/list-agents")) {
@@ -169,7 +213,12 @@ function retell(plan: RetellPlan = {}): {
 /** A customer with a suite, a persona and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
-  connection: typeof TEXT_MODE | typeof RETELL_CHAT,
+  connection:
+    | typeof TEXT_MODE
+    | typeof RETELL_CHAT
+    | ((typeof TEXT_MODE | typeof RETELL_CHAT) & {
+        readonly mockToolsEnabled: boolean;
+      }),
   plan: RetellPlan = {},
   /** A trace store, for the one test that lands a terminal report. */
   traceStore = false,
@@ -426,15 +475,154 @@ describe("the run-start read", () => {
     // live rather than off a list a run start froze.
     expect(Object.keys(read)).toEqual(["kind", "agentVersion"]);
 
-    // It asks for `latest` exactly once, and reads the engine at the number
-    // that came back. That is the opposite of leaning on the default: the
-    // number is what every request from now on names.
-    expect(asked.filter((url) => url.includes("latest"))).toHaveLength(1);
+    // It asks for the **published** pointer exactly once, and reads the engine
+    // at the number that came back. That is the opposite of leaning on a
+    // default: the number is what every request from now on names, and
+    // `latest_published` cannot resolve onto a draft the way `latest` can.
+    const versions = asked
+      .filter((url) => url.includes("/get-agent/"))
+      .map((url) => new URL(url).searchParams.get("version"));
+    expect(versions).toEqual(["latest_published"]);
     expect(
       asked.some((url) =>
         url.includes(`/get-conversation-flow/${FLOW.conversation_flow_id}?version=${SERVING_VERSION}`),
       ),
     ).toBe(true);
+  });
+
+  it("refuses an agent that has published nothing, and names both doors", async () => {
+    for (const read of [readTextModeWorld, readWebCallWorld]) {
+      const { fetchImpl, asked } = retell({ published: false });
+      const answer = await read(
+        { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+        fetchImpl,
+      );
+
+      expect(answer.kind, read.name).toBe("refused");
+      const message = answer.kind === "refused" ? answer.message : "";
+      expect(message).toContain("no published version");
+      expect(message).toContain("Publish in Retell the version you want tested");
+      expect(message).toContain("pin a Retell phone number that routes to this agent");
+      // The same doors the enable-time read shows, held to the one string both
+      // are built from. A developer refused here and a developer reading the
+      // tick screen are told the same way out of the same dead end.
+      expect(message).toContain(PUBLISH_OR_BIND_A_VERSION);
+      // Never the sentence for an agent Retell does not hold: an agent that is
+      // there and publishes nothing has a different next move.
+      expect(message).not.toContain("no longer holds agent");
+      expect(JSON.stringify(answer)).not.toContain(SENTINEL_KEY);
+
+      // The published pointer first, then one read of `latest` to tell "the
+      // agent publishes nothing" from "the agent is not there". Nothing else:
+      // the engine is never read for a version that was never chosen.
+      expect(
+        asked
+          .filter((url) => url.includes("/get-agent/"))
+          .map((url) => new URL(url).searchParams.get("version")),
+      ).toEqual(["latest_published", "latest"]);
+      expect(asked.some((url) => url.includes("/get-conversation-flow/"))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("follows a number bound to a version, exactly as the tick does", async () => {
+    // **The one reference, read the one way, at every surface.** The
+    // enable-time screen resolves what this agent's own bindings name; so does
+    // the mocked builder; and so does this. A run start that asked for the
+    // published pointer regardless would refuse an agent the screen had just
+    // called mockable — one account, two answers.
+    for (const [bound, expected] of [
+      [7, "7"],
+      ["prod", "prod"],
+    ] as const) {
+      const { fetchImpl, asked } = retell({
+        published: false,
+        numbers: [
+          {
+            phone_number: "+12567332874",
+            nickname: "Front desk",
+            inbound_agents: [
+              { agent_id: PLATFORM_AGENT, agent_version: bound },
+            ],
+          },
+        ],
+      });
+
+      const read = await readWebCallWorld(
+        { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+        fetchImpl,
+      );
+
+      // The agent has published nothing, and it is still runnable: the number
+      // names the version its callers reach, which is the whole question.
+      expect(read.kind, String(bound)).toBe("world");
+      const versions = asked
+        .filter((url) => url.includes("/get-agent/"))
+        .map((url) => new URL(url).searchParams.get("version"));
+      expect(versions).toEqual([expected]);
+      // And the numbers were read before the version, because they decide it.
+      expect(asked[0]).toContain("/v2/list-phone-numbers");
+    }
+  });
+
+  it("reads no phone numbers at the connect door, which pins no version", async () => {
+    // Registering a connection conducts nothing and names no version, so the
+    // customer's bindings decide nothing there — and a door that read them
+    // would refuse a registration when that listing failed, in a sentence
+    // about a run that does not exist.
+    const { fetchImpl, asked } = retell({ numbersStatus: 503 });
+    const world = await readTextModeWorld(
+      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+      fetchImpl,
+      undefined,
+      false,
+    );
+
+    expect(world.kind, JSON.stringify(world)).toBe("world");
+    expect(world.kind === "world" ? world.agentVersion : null).toBe(
+      SERVING_VERSION,
+    );
+    expect(asked.some((url) => url.includes("/v2/list-phone-numbers"))).toBe(
+      false,
+    );
+    // It asks the published pointer directly, and reads that version's engine.
+    expect(
+      asked
+        .filter((url) => url.includes("/get-agent/"))
+        .map((url) => new URL(url).searchParams.get("version")),
+    ).toEqual(["latest_published"]);
+  });
+
+  it("fails the run when it cannot read the numbers that decide the version", async () => {
+    // No fallback. A reference Egma could not work out is a run testing
+    // whichever version a guess landed on.
+    const { fetchImpl, asked } = retell({ numbersStatus: 503 });
+    const read = await readWebCallWorld(
+      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+      fetchImpl,
+    );
+    expect(read.kind).toBe("unavailable");
+    expect(read.kind === "unavailable" ? read.message : "").toContain(
+      "Nothing was started",
+    );
+    // It never guessed a version behind the failure.
+    expect(asked.some((url) => url.includes("/get-agent/"))).toBe(false);
+    expect(JSON.stringify(read)).not.toContain(SENTINEL_KEY);
+  });
+
+  it("still says the agent is gone when the agent really is gone", async () => {
+    // Both reads answer 404: Retell holds no such agent. One status, two facts,
+    // and the second read is what tells them apart.
+    const { fetchImpl } = retell({ agentStatus: 404, published: false });
+    const answer = await readWebCallWorld(
+      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
+      fetchImpl,
+    );
+    expect(answer.kind).toBe("refused");
+    expect(answer.kind === "refused" ? answer.message : "").toContain(
+      "no longer holds agent",
+    );
   });
 
   it("refuses a custom LLM with Retell's own absence as the reason", async () => {
@@ -515,6 +703,35 @@ describe("a run over a Retell text mode connection", () => {
     // Nothing was started, and that is a fact about the record rather than a
     // sentence: no run row, and therefore no simulation to conduct against a
     // world nobody read.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
+  });
+
+  it("refuses before any run row exists when the agent publishes nothing", async () => {
+    const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
+      "text_mode_run_never_published",
+      TEXT_MODE,
+      { published: false },
+    );
+
+    const refused = await ask(api.app, "POST", "/v1/runs", key, {
+      suiteId,
+      agentId,
+      connectionId,
+      idempotencyKey: newId("run"),
+    });
+
+    // A settled fact about the agent, so 422 and not the 503 an unanswered
+    // Retell earns: retrying changes nothing, publishing does.
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    const message = String(refused.body.message);
+    expect(message).toContain("no published version");
+    expect(message).toContain("Publish in Retell the version you want tested");
+    expect(message).toContain("pin a Retell phone number that routes to this agent");
+    expect(JSON.stringify(refused.body)).not.toContain(SENTINEL_KEY);
+
     const { rows } = await api.database.sql<{ count: string }>(
       "select count(*)::text as count from run",
     );
@@ -921,9 +1138,12 @@ describe("what a version-pinned run's landing records", () => {
 
 describe("the work order a version-pinned run hands over", () => {
   it("carries the version, this simulation's variables, and what the run resolved", async () => {
+    // Mocks are off on every lane unless the door that made the connection
+    // said otherwise, so this one says so — the text lane used to be the one
+    // exception and is not any more.
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
       "text_mode_claim",
-      TEXT_MODE,
+      { ...TEXT_MODE, mockToolsEnabled: true },
     );
 
     // One answer per class of tool the agent has.

@@ -520,6 +520,39 @@ describe("the pages", () => {
   });
 
   /**
+   * The one rewrite whose caller is not a browser.
+   *
+   * A mocked run mints tool URLs on this origin under `/mock-tools/…` and
+   * writes them onto the agent under test, so the calls arrive from the
+   * agent's own platform. Without the rule they were answered by this
+   * process's not-found page: every mocked tool call on a live agent read
+   * Egma's own HTML 404, and the agent apologized to the caller for a broken
+   * backend on every call.
+   */
+  it("reach the API for a mocked run's tool calls at a path this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const endpoint = await readFile(
+      path.join(WEB, "../api/src/routes/mock-endpoint.ts"),
+      "utf8",
+    );
+
+    expect(rewrites).toContain('source: "/mock-tools/:path*"');
+    expect(rewrites).toContain("destination: `${api}/mock-tools/:path*`");
+    // The whole tail, never the bare prefix: a rule matching only
+    // `/mock-tools` would forward nothing a real call is addressed to.
+    expect(rewrites).not.toContain('source: "/mock-tools",');
+    // The prefix the API answers on and the prefix this process forwards are
+    // the same prefix. A minted URL points at this origin, so a disagreement
+    // here is a 404 on somebody's live agent.
+    expect(endpoint).toContain('export const MOCK_TOOL_PREFIX = "/mock-tools"');
+    // The run, the simulation and the tool all live under the prefix, so the
+    // rule has to carry the whole tail rather than one segment.
+    expect(endpoint).toContain(
+      "`${MOCK_TOOL_PREFIX}/:runId/:simulationId/:toolName`",
+    );
+  });
+
+  /**
    * The Settings pages reach the API paths below, and none is
    * served by this process. Without the rules the pages would post at Next and
    * read its 404 page as egma's refusal.

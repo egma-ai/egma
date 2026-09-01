@@ -1009,6 +1009,56 @@ async def test_a_text_mode_billing_wall_fails_loudly_and_says_nothing(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
+async def test_a_voice_run_the_agent_was_silent_through_fails_and_names_the_call(
+    workbench, start_simulator
+):
+    """The whole silence story, read back off the record the platform gets.
+
+    An agent that joins, is heard, and says no word in any turn: the run
+    is reported ``failed`` with an ending the contract never grades,
+    rather than ``completed`` with an ending that would send ten minutes
+    of nothing to a grader.
+
+    And it keeps the platform's own name for the call. That reference is
+    written when conducting stops rather than when an ending is decided,
+    because a run that failed may have reached no ending at all — and
+    "the agent said nothing, go and listen to the call" is worth very
+    little without the call's own identifier beside it.
+    """
+    spec = loopback_spec(
+        "sim-voice-silent",
+        scenario="One point. Two point.",
+        greeting=None,
+        replies=[],
+        goes_quiet_after_replies=True,
+        provider_reference="loopback-voice-silent-1",
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-voice-silent"))
+
+    terminal = terminal_event_for(records, "sim-voice-silent")
+    assert terminal["status"] == "failed"
+    # The contract's failed endings are the ones that mean the test never
+    # ran or the test broke, and none of them is ever graded.
+    assert terminal["facts"]["ending"] == "error"
+    reason = terminal["reason"]
+    assert "said nothing" in reason, reason
+    assert "grade" in reason, reason
+    # Never one of the deliberate endings this used to claim.
+    assert "persona_concluded" not in reason
+    assert "limit_reached" not in reason
+    # The call is still named, so the sentence is actionable.
+    assert terminal["facts"]["provider_reference"] == "loopback-voice-silent-1"
+    # The persona really did talk to it — a conversation that ran and got
+    # nothing back, not a run that never opened.
+    speakers = [speaker for speaker, _text in turns_for(records, "sim-voice-silent")]
+    assert speakers and set(speakers) == {"human"}
+
+    simulator.stop()
+
+
 async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     workbench, start_simulator
 ):

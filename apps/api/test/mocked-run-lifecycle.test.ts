@@ -73,6 +73,14 @@ type Account = {
   /** Read afterwards, so a test can say what the account looks like now. */
   readonly state: {
     versions: Set<number>;
+    /**
+     * Which of those versions Retell has published.
+     *
+     * Kept apart from `versions` because it is what the serving read now turns
+     * on: `latest_published` resolves out of this set, and an account with
+     * nothing in it is an agent a run is refused for.
+     */
+    published: Set<number>;
     engines: Map<number, Record<string, unknown>>;
     bindings: Map<string, readonly Record<string, unknown>[]>;
     /** Flipped by a test to make every delete fail — a teardown that cannot
@@ -101,12 +109,19 @@ type Account = {
   };
 };
 
-function anAccount(options: { branching?: "fork" | "share" } = {}): {
+function anAccount(
+  options: {
+    branching?: "fork" | "share";
+    /** Whether the agent's one version is published. It is, unless said not. */
+    published?: boolean;
+  } = {},
+): {
   readonly fetchImpl: typeof fetch;
   readonly state: Account["state"];
 } {
   const state: Account["state"] = {
     versions: new Set([105]),
+    published: new Set((options.published ?? true) ? [105] : []),
     engines: new Map([[105, { conversation_flow_id: FLOW, version: 105, tools: structuredClone(FLOW_TOOLS) }]]),
     bindings: new Map([
       ["+12567332874", [{ agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 }]],
@@ -169,15 +184,33 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       state.bindings.set(number, inbound);
       return json({ phone_number: number });
     }
+    if (path.startsWith("/list-agent-versions/")) {
+      // Retell's current listing, which is what a teardown proves a deletion
+      // with. The legacy `/get-agent-versions` retires 2026-09-15 and this
+      // account deliberately has no route for it.
+      return json({
+        items: [...state.versions].map((version) => ({
+          version,
+          is_published: state.published.has(version),
+        })),
+        has_more: false,
+      });
+    }
     if (path.startsWith("/get-agent/")) {
       const asked = new URL(url).searchParams.get("version") ?? "latest";
+      const standing = [...state.versions];
+      const published = standing.filter((one) => state.published.has(one));
       const version =
-        asked === "latest" ? Math.max(...state.versions) : Number(asked);
+        asked === "latest"
+          ? Math.max(...standing)
+          : asked === "latest_published"
+            ? (published.length === 0 ? Number.NaN : Math.max(...published))
+            : Number(asked);
       if (!state.versions.has(version)) return json({ error: "gone" }, 404);
       return json({
         agent_id: RETELL_AGENT,
         version,
-        is_published: version === 105,
+        is_published: state.published.has(version),
         response_engine: {
           type: "conversation-flow",
           conversation_flow_id: FLOW,
@@ -197,10 +230,13 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
       const next = Math.max(...state.versions) + 1;
       const engineVersion = branching === "share" ? base : next;
       if (branching !== "share") {
-        state.engines.set(
-          engineVersion,
-          structuredClone(state.engines.get(base) ?? {}),
-        );
+        state.engines.set(engineVersion, {
+          ...structuredClone(state.engines.get(base) ?? {}),
+          // A forked flow document reports its own version rather than the one
+          // it was forked from — and that field is where Egma reads whether a
+          // write landed in place or minted a version nothing can delete.
+          version: engineVersion,
+        });
       }
       state.versions.add(next);
       state.onBranch?.();
@@ -230,10 +266,17 @@ function anAccount(options: { branching?: "fork" | "share" } = {}): {
         await holding;
       }
       if (state.refuseDeletes) return json({ error: "not today" }, 500);
-      const asked = Number(path.split("/").at(-1));
+      // The version rides in the query string. Retell's router has no
+      // path-segment route for it and answers that shape 404 "Cannot DELETE",
+      // which Egma once read as "already deleted".
+      const named = new URL(url).searchParams.get("version");
+      if (named === null) return json({ error: "Cannot DELETE" }, 404);
+      const asked = Number(named);
       if (!state.versions.has(asked)) return json({ error: "gone" }, 404);
       state.versions.delete(asked);
-      state.engines.delete(asked);
+      state.published.delete(asked);
+      // The flow version stays: Retell keeps it and offers no way to remove
+      // one (verified live, 2026-08-31).
       return json({ deleted: true });
     }
     throw new Error(`Unexpected Retell request: ${method} ${url}`);
@@ -254,7 +297,7 @@ type Ready = {
 /** A ticked Retell agent with one test, ready for a run. */
 async function aTickedAgent(
   label: string,
-  options: { branching?: "fork" | "share" } = {},
+  options: { branching?: "fork" | "share"; published?: boolean } = {},
 ): Promise<Ready> {
   const account = anAccount(options);
   api = await createApi(label, {
@@ -409,19 +452,20 @@ describe("one mocked run, from the tick to the teardown", () => {
     expect(header.body.agentVersion).toBe(105);
     expect(header.body.tempMockAgentVersion).toBe(106);
     expect(header.body.tempMockAgentVersionCleanup).toBe(false);
-    const world = header.body.mockMetadata as {
-      numbers: { number: string; was: string | number | null; pinnedTo: number }[];
-    };
-    // The put-it-back note: where the binding pointed, and what Egma pinned it
-    // to. A restore reads the number again and writes only where it still
-    // points at `pinnedTo`.
-    expect(world.numbers).toEqual([
-      { number: "+12567332874", was: "latest", pinnedTo: 105 },
-    ]);
+    // The note names the engine this run's tools were read from, and claims
+    // nothing about anything of the customer's — because Egma touched none of
+    // it.
+    expect(header.body.mockMetadata).toEqual({
+      engine: {
+        type: "conversation-flow",
+        engineId: FLOW,
+        version: 105,
+      },
+    });
 
     // The account, as it stands mid-run: the temporary version points at Egma,
-    // the serving version is exactly as it was, and the number that rode
-    // `latest` is pinned to a real version so a caller reaches the real agent.
+    // the serving version is exactly as it was, and the number that rides
+    // `latest` is exactly as the customer left it.
     const draftTools = (ready.state.engines.get(106)?.["tools"] ??
       []) as Record<string, unknown>[];
     expect(String(draftTools[0]?.["url"])).toContain(
@@ -433,7 +477,7 @@ describe("one mocked run, from the tick to the teardown", () => {
       []) as Record<string, unknown>[];
     expect(servingTools[0]?.["url"]).toBe(LIVE_TOOL_URL);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The claim hands the simulation the temporary version and its variables.
@@ -557,6 +601,68 @@ describe("a web-call run whose connection has the switch off", () => {
     // that rides `latest` was never repointed.
     expect([...ready.state.versions]).toEqual([105]);
     expect(ready.state.writes).toEqual([]);
+
+    // **The record and the call agree.** A run row naming a version the call
+    // did not target would be a result tied to the wrong agent, which is the
+    // whole thing the pinning exists to prevent. There is no temporary copy on
+    // this lane, so what the work order carries is the version run start
+    // pinned — and the simulator sends exactly that as `agent_version` on
+    // create-web-call.
+    const [spec] = await claim();
+    expect(spec?.["agent_version"]).toBe(105);
+  });
+});
+
+describe("a run over a Retell lane against an agent that publishes nothing", () => {
+  it("is refused before any run row exists, and names both doors", async () => {
+    const ready = await aTickedAgent("web_call_never_published", {
+      published: false,
+    });
+
+    const refused = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+
+    // A settled fact about the agent, not a bad moment: 422, not 503.
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    const message = String(refused.body.message);
+    expect(message).toContain("no published version");
+    // Door one, and door two.
+    expect(message).toContain("Publish in Retell the version you want tested");
+    expect(message).toContain("pin a Retell phone number that routes to this agent");
+    expect(JSON.stringify(refused.body)).not.toContain(KEY);
+
+    // Nothing was started, and that is a fact about the record rather than a
+    // sentence: no run row, so no simulation can ever be conducted against a
+    // version nobody chose.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*)::text as count from run",
+    );
+    expect(rows[0]?.count).toBe("0");
+
+    // And nothing was written to Retell: no branch, no pin.
+    expect([...ready.state.versions]).toEqual([105]);
+    expect(ready.state.writes).toEqual([]);
+  });
+
+  it("conducts the run once that version is published", async () => {
+    const ready = await aTickedAgent("web_call_published_after", {
+      published: false,
+    });
+    // The developer takes door one.
+    ready.state.published.add(105);
+
+    const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    expect(started.body.agentVersion).toBe(105);
   });
 });
 
@@ -616,7 +722,7 @@ describe("a second mocked run on an agent already holding its world", () => {
     // The first run holds the world: its draft exists and the number is pinned.
     expect(ready.state.versions.has(106)).toBe(true);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     const before = {
@@ -703,14 +809,14 @@ describe("a second mocked run on an agent already holding its world", () => {
  * A finished run never blocks a claim — its litter is the next run's sweep to
  * clear — so the two really do arrive at once every time a suite is started
  * again as soon as the last one ends. Without one fence over both, the first
- * run's restore is still in flight while the second branches its copy, and the
- * restore then writes `latest` onto that copy: real callers reach a mocked
- * agent. Nothing downstream catches it, because the number still points exactly
- * where the first run's note says it pinned it — the second run pinned it to
- * the same version.
+ * run's delete is still in flight while the second branches its copy, and
+ * Retell hands the next branch the lowest free number: the number the first
+ * run is in the middle of deleting is the number the second is given. One
+ * teardown would then delete the other run's live copy, and nothing downstream
+ * could tell whose version it had been.
  */
 describe("a teardown that is in flight when the next run starts", () => {
-  it("never restores a binding while a temporary version stands", async () => {
+  it("makes the next run wait for it, and touches no binding either way", async () => {
     const ready = await aTickedAgent("mocked_run_teardown_meets_claim");
 
     const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
@@ -766,21 +872,13 @@ describe("a teardown that is in flight when the next run starts", () => {
     release();
     const [, answered] = await Promise.all([landing, second]);
 
-    // The whole point: every write of this number's binding happened over an
-    // account holding no temporary version but the serving one.
-    for (const write of ready.state.writes) {
-      expect(write.versionsStanding).toEqual([105]);
-    }
-    // Put back once, to exactly what it was.
-    expect(
-      ready.state.writes.filter((write) =>
-        JSON.stringify(write.wrote).includes("latest"),
-      ),
-    ).toHaveLength(1);
-    // And it stands pinned again now — the second run's own pin, to a real
-    // serving version, which is what keeps real callers off its copy.
+    // **Not one write to a number, by either run.** Egma edits no customer's
+    // inbound routing, so the number stands exactly as the customer left it
+    // through both runs — during the first, during its teardown, and during
+    // the second's build.
+    expect(ready.state.writes).toEqual([]);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The second run got its turn: the agent was clean by the time it had the
@@ -829,7 +927,7 @@ describe("a mocked run after a predecessor's teardown failed", () => {
     await report(simulationId, "completed");
     expect(ready.state.versions.has(106)).toBe(true);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The next run is refused with the debt named, **before branching
@@ -846,7 +944,7 @@ describe("a mocked run after a predecessor's teardown failed", () => {
     expect(String(second.body.message)).toContain("could not be fully given back");
     expect([...ready.state.versions].sort()).toEqual([105, 106]);
     expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: 105, weight: 2 },
+      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
     // The account honours deletes again, and the cleanup retries on the

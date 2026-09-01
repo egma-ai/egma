@@ -138,8 +138,10 @@ export function retellCandidatesForPlan(
  * The three lanes, and the one question that leads.
  *
  * They are the same three words the CLI says, because they are the same three
- * lanes: each one is a connection, several may be picked, and every pick lands
- * on **one** egma agent in one pass.
+ * lanes. **One is picked, and it is one connection**: a lane decides how Egma
+ * reaches the agent, and a connection is that reach — so two lanes at once was
+ * two connections dressed as one answer. A second lane on the same agent is
+ * added afterwards, through the same flow, from the agent's own screen.
  */
 export const RETELL_LANES = ["text", "web-call", "phone"] as const;
 export type RetellLane = (typeof RETELL_LANES)[number];
@@ -153,14 +155,48 @@ export const RETELL_LANE_LABELS: Readonly<Record<RetellLane, string>> = {
   phone: "Phone call",
 };
 
-/** One help line each, in what the lane tests rather than what it is made of. */
+/**
+ * One help line each, in what the lane tests rather than what it is made of.
+ *
+ * Two of them end by saying mocking is supported, because that is the next
+ * question the flow asks and a person choosing a lane deserves to know it is
+ * coming. The phone lane says the opposite in its own words — it reaches the
+ * real tools — which is why it is never asked.
+ */
 export const RETELL_LANE_HELP: Readonly<Record<RetellLane, string>> = {
-  text: "Egma talks to the agent in text. No call is placed, and a run takes seconds.",
-  "web-call": "A voice call Egma places over the internet.",
+  text:
+    "Egma talks to the agent in text. No call is placed, and a run takes " +
+    "seconds. Supports mocking of tools.",
+  "web-call":
+    "A voice call Egma places over the internet. Supports mocking of tools.",
   phone:
     "Egma dials the real number, so a run has true telephone latency and " +
     "reaches your real tools.",
 };
+
+/**
+ * Whether this lane can answer the agent's tools with test data.
+ *
+ * The phone lane cannot and never will: it dials the customer's own published
+ * number, and what answers is their real agent with their real tools. So it is
+ * not asked the mock question at all, rather than asked and refused.
+ */
+export function retellLaneMocksTools(lane: RetellLane): boolean {
+  return lane !== "phone";
+}
+
+/**
+ * Whether turning mocks on for this lane creates a draft version on the agent.
+ *
+ * Only the web-call lane. A text run carries its mocked answers on each
+ * request, so nothing is written to the customer's Retell account and there is
+ * no draft for a phone number or a tag to reach. A web call is placed by Retell
+ * against a version, so Egma branches one — and that draft **is** the latest
+ * created version, which is the fact the note beside the switch exists to say.
+ */
+export function retellLaneBranchesDraft(lane: RetellLane): boolean {
+  return lane === "web-call";
+}
 
 /** The connection type each lane is saved as. */
 export const RETELL_LANE_CONNECTION_TYPES: Readonly<Record<RetellLane, string>> = {
@@ -168,20 +204,6 @@ export const RETELL_LANE_CONNECTION_TYPES: Readonly<Record<RetellLane, string>> 
   "web-call": "retell_web_call",
   phone: "phone_number",
 };
-
-/**
- * The picked lanes, in reading order, out of whatever order they were ticked
- * in.
- *
- * Two people ticking the same three boxes in different orders must write the
- * same three connections in the same order, or one project's connection names
- * would depend on the order somebody clicked.
- */
-export function retellLanesInOrder(
-  picked: readonly string[],
-): readonly RetellLane[] {
-  return RETELL_LANES.filter((lane) => picked.includes(lane));
-}
 
 /**
  * The candidate that saves one lane, out of the ones discovery answered with.
@@ -236,6 +258,7 @@ export type AgentSetupStep =
   | "retell-key"
   | "retell-agent"
   | "retell-lanes"
+  | "retell-mocks"
   | "retell-phone"
   | "livekit-language"
   | "livekit-modality"
@@ -298,15 +321,14 @@ export function stepAfterRetellAgent(plan: AgentSetupPlan): AgentSetupStep {
  * Where the answer to the one question leads, or `null` when the flow can save
  * now.
  *
- * **The phone-number chooser appears only when Phone call is picked.** A
- * developer who picked only Text is never asked for a phone number: the fast
- * lane has no needless steps, and there is nothing honest to ask about a number
- * nothing will dial.
+ * **The phone-number chooser appears only when Phone call is picked**, because
+ * a voice agent can answer several routed numbers and the flow has to be told
+ * which one to dial. A developer who picked Text is never asked for a phone
+ * number: the fast lane has no needless steps, and there is nothing honest to
+ * ask about a number nothing will dial.
  */
-export function stepAfterRetellLanes(
-  lanes: readonly RetellLane[],
-): AgentSetupStep | null {
-  return lanes.includes("phone") ? "retell-phone" : null;
+export function stepAfterRetellLanes(lane: RetellLane): AgentSetupStep | null {
+  return lane === "phone" ? "retell-phone" : null;
 }
 
 /** The single Back graph shared by every rendering of the setup flow. */
@@ -334,6 +356,10 @@ export function previousAgentSetupStep({
       return "retell-key";
     case "retell-lanes":
       return "retell-agent";
+    case "retell-mocks":
+      // The connection is already written before this screen appears, and its
+      // tools are read against it. Do not let Back cross that write.
+      return null;
     case "retell-phone":
       // The phone chooser is reached through the one question when the goal is
       // a simulation, and straight from the agent for the goals that skip it.
