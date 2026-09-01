@@ -32,6 +32,15 @@ export type MockEngineNote = {
   /** The engine version the serving agent version points at. */
   readonly version: number | null;
   /**
+   * The version of that same engine the run's temporary copy ran on, as the
+   * platform's own branch response reported it.
+   *
+   * Kept so a teardown can name what it leaves behind, and never derived from
+   * the agent version — the two numbers track each other in practice and
+   * nothing documents that they must.
+   */
+  readonly draftVersion?: number;
+  /**
    * The tools that engine declared when this run captured it, in the one
    * spelling a comparison uses.
    *
@@ -71,6 +80,18 @@ export type MockMetadata = {
    * branch" rather than a statement about what is standing now.
    */
   readonly temporaryVersionGone?: boolean;
+  /**
+   * The conversation-flow version the platform keeps after the agent version is
+   * deleted.
+   *
+   * **Deleting an agent version does not take its flow version with it**
+   * (verified live, 2026-08-31), and no endpoint removes one: the flow can only
+   * be deleted whole. The orphan is invisible in the platform's own screens and
+   * unroutable, because a binding can only name a live agent version — but it
+   * exists over the API. So the number is written down rather than pretended
+   * away, and it is written only once the agent version's deletion is proved.
+   */
+  readonly strayFlowVersion?: number;
 };
 
 /** The note a stored row holds, or `null` for a run that made no copy. */
@@ -84,22 +105,26 @@ export function mockMetadataFrom(
 
   const engine = row["engine"];
   const gone = row["temporary_version_gone"];
+  const stray = row["stray_flow_version"];
   if (
     typeof engine !== "object" ||
     engine === null ||
     Array.isArray(engine) ||
-    (gone !== undefined && gone !== null && typeof gone !== "boolean")
+    (gone !== undefined && gone !== null && typeof gone !== "boolean") ||
+    (stray !== undefined && stray !== null && typeof stray !== "number")
   ) {
     throw malformed();
   }
   const held = engine as Record<string, unknown>;
   const engineVersion = held["version"];
   const print = held["tool_print"];
+  const draft = held["draft_version"];
   if (
     typeof held["type"] !== "string" ||
     typeof held["engine_id"] !== "string" ||
     (engineVersion !== null && typeof engineVersion !== "number") ||
-    (print !== undefined && print !== null && typeof print !== "string")
+    (print !== undefined && print !== null && typeof print !== "string") ||
+    (draft !== undefined && draft !== null && typeof draft !== "number")
   ) {
     throw malformed();
   }
@@ -110,8 +135,10 @@ export function mockMetadataFrom(
       engineId: held["engine_id"],
       version: engineVersion,
       ...(typeof print === "string" ? { toolPrint: print } : {}),
+      ...(typeof draft === "number" ? { draftVersion: draft } : {}),
     },
     ...(gone === true ? { temporaryVersionGone: true } : {}),
+    ...(typeof stray === "number" ? { strayFlowVersion: stray } : {}),
   };
 }
 
@@ -119,21 +146,26 @@ export function mockMetadataFrom(
  * The note as a **reader of the run** sees it: what Egma promised to put back,
  * and nothing of how it goes about it.
  *
- * Two fields are the teardown's own working notes and are dropped here. The
+ * Four fields are the teardown's own working notes and are dropped here. The
  * print is the whole of the serving version's tools in one line, kept so a
  * resumed teardown can still prove that version never moved; a canonicalized
  * copy of the customer's tool declarations is neither something a person can
- * act on nor something a page of runs should carry. `temporaryVersionGone` is
- * bookkeeping between one teardown and the next — what a reader wants to know
- * about the copy is whether the account is back, and the cleanup flag beside
- * the note says that. So the sweep's read keeps both and the run's read drops
- * both, which is also why the published shape of the note names neither.
+ * act on nor something a page of runs should carry. `draftVersion`,
+ * `temporaryVersionGone` and `strayFlowVersion` are bookkeeping between one
+ * teardown and the next — what a reader wants to know about the copy is
+ * whether the account is back, and the cleanup flag beside the note says that.
+ * So the sweep's read keeps all four and the run's read drops all four, which
+ * is also why the published shape of the note names none of them.
  */
 export function mockMetadataAsRead(
   metadata: MockMetadata | null,
 ): MockMetadata | null {
   if (metadata === null) return null;
-  const { toolPrint: _print, ...engine } = metadata.engine;
+  const {
+    toolPrint: _print,
+    draftVersion: _draft,
+    ...engine
+  } = metadata.engine;
   return { engine };
 }
 
@@ -146,15 +178,21 @@ export function mockMetadataRow(
       type: metadata.engine.type,
       engine_id: metadata.engine.engineId,
       version: metadata.engine.version,
-      // The row's own spelling, beside `engine_id` and `pinned_to`.
+      // The row's own spelling, beside `engine_id`.
       ...(metadata.engine.toolPrint === undefined
         ? {}
         : { tool_print: metadata.engine.toolPrint }),
+      ...(metadata.engine.draftVersion === undefined
+        ? {}
+        : { draft_version: metadata.engine.draftVersion }),
     },
-    // The row's own spelling again. Written only when true, so a note from
-    // before this fact existed reads back exactly as it was written.
+    // The row's own spelling again. Each is written only when it is there, so a
+    // note from before these facts existed reads back exactly as written.
     ...(metadata.temporaryVersionGone === true
       ? { temporary_version_gone: true }
       : {}),
+    ...(metadata.strayFlowVersion === undefined
+      ? {}
+      : { stray_flow_version: metadata.strayFlowVersion }),
   };
 }

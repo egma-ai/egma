@@ -275,7 +275,8 @@ function anAccount(
       if (!state.versions.has(asked)) return json({ error: "gone" }, 404);
       state.versions.delete(asked);
       state.published.delete(asked);
-      state.engines.delete(asked);
+      // The flow version stays: Retell keeps it and offers no way to remove
+      // one (verified live, 2026-08-31).
       return json({ deleted: true });
     }
     throw new Error(`Unexpected Retell request: ${method} ${url}`);

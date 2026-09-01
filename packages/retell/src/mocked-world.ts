@@ -203,6 +203,16 @@ export type MockEngineNote = {
    * customer's configuration.
    */
   readonly toolPrint?: string;
+  /**
+   * The version of **this same engine** that the run's temporary copy runs on,
+   * read from the branch's own response.
+   *
+   * Kept so a teardown can name what it leaves behind. Never derived from the
+   * agent version: the agent-to-flow lockstep at branch time is observed and
+   * undocumented, and the only honest source is what Retell answered. Absent on
+   * a note written before the branch, and on a run that never branched.
+   */
+  readonly draftVersion?: number;
 };
 
 /** The put-it-back note, and nothing else lives in it. */
@@ -227,6 +237,24 @@ export type MockMetadataRecord = {
    * branched anything.
    */
   readonly temporaryVersionGone?: boolean;
+  /**
+   * The conversation-flow version Retell keeps after the agent version is gone.
+   *
+   * **Deleting an agent version does not delete its lockstep flow version**
+   * (verified live, 2026-08-31, against the developer's own dashboard): Retell
+   * removes the agent version, keeps the flow version, and offers no API that
+   * removes one — `delete-conversation-flow` takes the whole flow, and a
+   * `?version` on it answers 400 "Unknown query parameter". The orphan is
+   * invisible in every Retell screen and unroutable, because a binding can only
+   * name a live agent version; but it exists over the API and it becomes that
+   * flow's `latest`.
+   *
+   * So it is written down rather than pretended away. This is the one thing a
+   * mocked run leaves on a customer's account, and a reader asking what Egma
+   * left deserves the number rather than silence. Recorded only once the delete
+   * of the agent version is **proved**, because until then nothing is orphaned.
+   */
+  readonly strayFlowVersion?: number;
 };
 
 /**
@@ -399,6 +427,8 @@ function stateOf(
   engine: EngineReference,
   /** What that engine declared when this run captured it. */
   capturedPrint: string,
+  /** The branch's own version of that engine, once there is a branch. */
+  draftVersion?: number,
 ): MockRunRecord {
   return {
     tempMockAgentVersion,
@@ -412,6 +442,7 @@ function stateOf(
         engineId: engine.engineId,
         version: engine.version,
         toolPrint: capturedPrint,
+        ...(draftVersion === undefined ? {} : { draftVersion }),
       },
     },
   };
@@ -550,7 +581,14 @@ export async function buildMockedWorld(
     };
   }
   const draft = branched.agentVersion;
-  state = stateOf(draft.version, servingEngine, before);
+  state = stateOf(
+    draft.version,
+    servingEngine,
+    before,
+    // Read from the branch's own response, never derived. It is what the
+    // teardown names as the flow version Retell keeps behind.
+    draft.engine.version ?? undefined,
+  );
   await record(state);
 
   // 5. **The fork guard**, before any write.
@@ -893,11 +931,22 @@ export async function finishMockedWorld(
     // what says it is no longer standing. Set here rather than at the end
     // because everything below can fail, and a delete proved is a delete that
     // must never be attempted again whatever happens next.
+    //
+    // **And what Retell keeps.** The agent version is gone; its conversation
+    // flow version is not, and no Retell endpoint removes one. Nothing can
+    // route to it — a binding names a live agent version, and there is none —
+    // so it is residue rather than a hazard, and it is written down rather
+    // than pretended away.
     const metadata = state.mockMetadata;
     if (metadata !== null) {
+      const stray = metadata.engine.draftVersion;
       state = {
         ...state,
-        mockMetadata: { ...metadata, temporaryVersionGone: true },
+        mockMetadata: {
+          ...metadata,
+          temporaryVersionGone: true,
+          ...(stray === undefined ? {} : { strayFlowVersion: stray }),
+        },
       };
       provedNow = true;
     }

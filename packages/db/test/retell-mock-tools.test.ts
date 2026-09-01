@@ -493,6 +493,35 @@ describe("the four fields one run records", () => {
     }>("select mock_metadata from run where id = $1", [runId]);
     expect(stored.rows[0]?.mock_metadata?.["temporary_version_gone"]).toBe(true);
 
+    // The stray Retell keeps behind rides beside it, in the row's own
+    // spelling, and is read back as a number.
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: { ...proved, strayFlowVersion: 106 },
+    });
+    const withStray = await database.sql<{
+      mock_metadata: Record<string, unknown>;
+    }>("select mock_metadata from run where id = $1", [runId]);
+    expect(withStray.rows[0]?.mock_metadata?.["stray_flow_version"]).toBe(106);
+    const strayOwed = await owedMockCleanups(
+      acting(),
+      agentId,
+      { fence: "only-when-owed" },
+      async (rows) => rows,
+    );
+    expect(
+      strayOwed.find((one) => one.runId === runId)?.metadata,
+    ).toEqual({ ...proved, strayFlowVersion: 106 });
+    // And it is dropped from the run header with the rest of the bookkeeping.
+    expect((await fieldsOf(runId)).mockMetadata).toEqual(NOTE);
+
+    await recordMockState(acting(), runId, {
+      tempMockAgentVersion: 106,
+      tempMockAgentVersionCleanup: false,
+      mockMetadata: proved,
+    });
+
     // **Read back typed by the sweep**, which is the one reader that acts on
     // it, so a teardown decides on a boolean rather than on truthy bytes.
     const owedNow = await owedMockCleanups(

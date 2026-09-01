@@ -320,8 +320,10 @@ function account(options: AccountOptions = {}): Account {
       const version = Number(asked);
       if (!versions.has(version)) return json({ error: "gone" }, 404);
       versions.delete(version);
-      // Deleting the agent version takes its lockstep engine version with it.
-      engines.delete(engineKey(engineId, version));
+      // **The engine version stays.** Retell deletes the agent version and
+      // keeps the flow version it pointed at, and offers no endpoint that
+      // removes one (verified live, 2026-08-31). The orphan is what a real
+      // account is left holding, so the fake holds it too.
       return json({ deleted: true });
     }
 
@@ -1026,6 +1028,39 @@ describe("the proof that the delete happened", () => {
     }
   });
 
+  it("writes down the flow version Retell keeps behind", async () => {
+    // Retell deletes the agent version and keeps the flow version it ran on,
+    // and no endpoint removes one. Nothing can route to the orphan — a binding
+    // names a live agent version and this one's is gone — so it is residue,
+    // and the number is recorded rather than pretended away.
+    const retell = account();
+    const kept = recorder();
+    const built = await buildMockedWorld(
+      key,
+      { agentId: AGENT, target: TARGET, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+    expect(built.kind, JSON.stringify(built)).toBe("built");
+    if (built.kind !== "built") return;
+    // The branch's own flow version, carried from the branch response.
+    expect(built.state.mockMetadata?.engine.draftVersion).toBe(106);
+
+    const finished = await finishMockedWorld(
+      key,
+      { agentId: AGENT, state: built.state, record: kept.record },
+      REACH(retell.fetchImpl),
+    );
+
+    // The agent side is settled, which is the whole of what Egma can give back.
+    expect(finished.unfinished).toEqual([]);
+    expect(mockRunIsSettled(finished.state)).toBe(true);
+    expect(retell.versions.has(106)).toBe(false);
+    // And the flow version stands, named on the record.
+    expect(retell.engines.has(`${FLOW}@106`)).toBe(true);
+    expect(finished.state.mockMetadata?.strayFlowVersion).toBe(106);
+    expect(kept.last().mockMetadata?.strayFlowVersion).toBe(106);
+  });
+
   it("never deletes a version twice once the read-back proved it gone", async () => {
     // A teardown can finish the delete, prove it, and still leave the world
     // unsettled on something else — here the serving version's own read-back,
@@ -1122,7 +1157,11 @@ describe("the proof that the delete happened", () => {
     expect(removed?.url).toBe(
       `https://retell.invalid/delete-agent-version/${AGENT}?version=106`,
     );
-    // The lockstep engine version went with it — there is no second cleanup.
-    expect(retell.engines.has(`${FLOW}@106`)).toBe(false);
+    // **The engine version is still there, and that is the expected residue.**
+    // Retell keeps it, no endpoint removes one, and nothing can route to it
+    // because a binding names a live agent version and there is none. So the
+    // teardown records the number rather than claiming a cleanup it cannot do.
+    expect(retell.engines.has(`${FLOW}@106`)).toBe(true);
+    expect(finished.state.mockMetadata?.strayFlowVersion).toBe(106);
   });
 });

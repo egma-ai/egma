@@ -504,9 +504,13 @@ export async function writeEngineTools(
  * why no caller of this may treat 404 as proof on its own. See
  * `finishMockedWorld`, which deletes and then reads the versions back.
  *
- * Deleting an agent version takes the lockstep conversation-flow version with
- * it (verified live in Retell's own version panel), so there is no second
- * cleanup here and none is needed.
+ * **Deleting an agent version leaves its conversation-flow version behind**
+ * (verified live, 2026-08-31, against the developer's own dashboard). Retell
+ * has no endpoint that removes one — `delete-conversation-flow` takes the whole
+ * flow, and a `?version` on it answers 400 "Unknown query parameter" — so there
+ * is no second cleanup here because there is none to make. The orphan is
+ * invisible in Retell's own screens and unroutable, since a binding can only
+ * name a live agent version; the teardown writes its number down instead.
  *
  * `gone` is still answered rather than swallowed, because a version that is not
  * there is a version serving nobody. What it is worth is the caller's to judge.

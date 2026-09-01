@@ -210,6 +210,20 @@ you make while the run is in flight cannot change what it is testing, and the
 run record carries that number — which is how a result read months later still
 says which version of the agent it speaks for.
 
+## What a mocked run leaves behind
+
+A mocked web-call run creates a temporary draft version of your agent, points
+the tools it can intercept at Egma, and deletes that draft when the run ends.
+Deleting it leaves one thing: Retell keeps the unused copy of the conversation
+flow the draft ran on, and Retell offers no way to delete a single flow version.
+Nothing can route callers to that copy — a phone number or a tag can only point
+at a live agent version — and it does not appear in the Retell dashboard. Egma
+records its version number on the run so you can see exactly what was left.
+
+While a mocked run is in flight the temporary draft is your agent's Latest
+Created version. Make sure no phone number or tag sends real callers to Latest
+Created; leaving a number's version unset means Latest Created too.
+
 ## Author, validate, and run tests
 
 After connection setup, the coding agent follows the normal end-to-end sequence:

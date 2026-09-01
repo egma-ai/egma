@@ -1931,7 +1931,9 @@ function MockToolsStep({
           Mocked runs create a temporary draft version on this agent and delete
           it after each run. A draft counts as Latest Created — make sure no
           phone number or tag sends real callers to Latest Created. Leaving a
-          number's version unset also means Latest Created.
+          number's version unset also means Latest Created. Retell keeps an
+          unused copy of the conversation flow behind each mocked run — Retell
+          has no way to delete one — but nothing can route callers to it.
         </p>
       ) : null}
     </div>

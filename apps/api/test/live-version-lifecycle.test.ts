@@ -11,6 +11,7 @@ import {
   resolveServingAgentVersion,
   writeEngineTools,
   type AgentVersionSummary,
+  type EngineReference,
   type RetellCredential,
 } from "@egma/retell";
 import { afterAll, describe, expect, it } from "vitest";
@@ -61,6 +62,14 @@ import { afterAll, describe, expect, it } from "vitest";
  * every failure path too, and a crash between the branch and the delete leaves
  * one unpublished draft the developer can remove from the version panel.
  *
+ * **One thing is left behind, and it cannot be helped.** Deleting the agent
+ * version does not delete the conversation-flow version it ran on, and Retell
+ * has no endpoint that removes one — the flow can only be deleted whole. That
+ * orphan is invisible in every Retell screen and unroutable, because a binding
+ * can only name a live agent version; it exists over the API and it becomes
+ * the flow's `latest`. This proof asserts it is there, exactly once, rather
+ * than pretending the account is untouched.
+ *
  * ## The six steps, which are the acceptance list
  *
  * 1. Capture the agent's version list as found.
@@ -69,13 +78,16 @@ import { afterAll, describe, expect, it } from "vitest";
  * 4. Write the mock tools onto the branch's flow, naming its own version; the
  *    list did **not** grow again — the write edited in place.
  * 5. Delete the draft with the version as a query parameter; confirm the
- *    answer, then prove it with the read-back.
- * 6. Compare against step 1. Three readings, because no one of them catches
- *    everything: the same version numbers with the same published flags; the
- *    same numbers behind `latest` and `latest_published`, which is what catches
- *    a stray draft the list's flags would not; and the serving version's own
- *    configuration unchanged. The account is as it was found, and that
- *    comparison is the whole point.
+ *    answer, then prove it with the read-back. Then read what Retell keeps:
+ *    the branch's flow version is still there, and the flow's latest is
+ *    exactly that one version — so the run added one and no more.
+ * 6. Compare against step 1. Four readings, because no one of them catches
+ *    everything: the same agent version numbers with the same published flags;
+ *    the same numbers behind `latest` and `latest_published`, which is what
+ *    catches a stray draft the list's flags would not; the serving version's
+ *    own configuration unchanged; and the flow grown by exactly the one
+ *    version this run branched. The agent side is as it was found, the flow
+ *    side holds one known orphan, and that comparison is the whole point.
  *
  * ## What to bank when it passes
  *
@@ -144,6 +156,24 @@ function print(versions: readonly AgentVersionSummary[]): string {
   return canonicalJson([...versions].sort((a, b) => a.version - b.version));
 }
 
+/**
+ * The version this flow answers for when no version is named — its latest.
+ *
+ * The only count Retell offers on the flow side: there is no
+ * list-conversation-flow-versions in the whole reference, so "did the flow grow
+ * by exactly one" is asked as "is its latest exactly the one version this run
+ * branched".
+ */
+async function flowLatest(reference: EngineReference): Promise<number | null> {
+  const read = await readEngineConfiguration(key, {
+    ...reference,
+    version: null,
+  });
+  if (read.kind !== "engine") return null;
+  const named = read.engine.document["version"];
+  return typeof named === "number" ? named : null;
+}
+
 afterAll(async () => {
   if (missing.length > 0 || made.draftVersion === null) return;
   // Runs on every failure path, so a check that threw halfway through still
@@ -203,6 +233,17 @@ live("the corrected version lifecycle, on the live agent", () => {
     const captured = await readEngineConfiguration(key, servingEngine);
     expect(captured.kind, JSON.stringify(captured)).toBe("engine");
     if (captured.kind !== "engine") return;
+
+    // **The flow's own newest version, before anything is branched.** There is
+    // no list-conversation-flow-versions anywhere in Retell's API, so the only
+    // way to count what a run adds on the flow side is what the flow answers
+    // for with no version named — which is its latest. A branch mints one flow
+    // version, and after the run that number is the one thing left behind.
+    const flowLatestBefore = await flowLatest(servingEngine);
+    expect(
+      flowLatestBefore,
+      "Retell answered no version for this flow's latest",
+    ).not.toBeNull();
     const servingToolsBefore = canonicalJson(captured.engine.document);
 
     // ── 3. Branch one draft, and confirm the list grew by exactly it. ──
@@ -347,22 +388,54 @@ live("the corrected version lifecycle, on the live agent", () => {
     // teardown then walks away from.
     made.draftVersion = null;
 
-    // The agent version took its lockstep flow version with it, so there is no
-    // second cleanup and none is needed.
+    // ── 5b. What Retell keeps, said plainly. ──
+    //
+    // **Deleting the agent version does not delete its flow version.** Retell
+    // keeps it, offers no endpoint that removes one — `delete-conversation-flow`
+    // takes the whole flow, and a `?version` on it answers 400 "Unknown query
+    // parameter" — and shows it in none of its own screens. Nothing can route
+    // to it either: a binding names a live agent version, and this one's is
+    // gone. So the orphan is the expected residue of a mocked run, and this
+    // proof asserts it is there rather than pretending it is not.
     const strayFlow = await readEngineConfiguration(key, draftEngine);
     expect(
       strayFlow.kind,
-      "the branch's engine version outlived the agent version it belonged to",
-    ).toBe("gone");
+      "Retell no longer holds the flow version the branch ran on; the residue " +
+        "this proof expects has changed",
+    ).toBe("engine");
+
+    // **Exactly one, and no more.** The flow's latest is now the version this
+    // run branched — so the run added that one flow version and nothing else.
+    // A second orphan, from this run or from a write that minted one, would
+    // push the latest past it and fail here.
+    const flowLatestAfter = await flowLatest(draftEngine);
+    expect(
+      flowLatestAfter,
+      "the flow grew by more than the one version this run branched",
+    ).toBe(draftEngine.version);
+    expect(
+      flowLatestAfter === null || flowLatestBefore === null
+        ? null
+        : flowLatestAfter > flowLatestBefore,
+      "the flow's latest did not move at all, so nothing was branched",
+    ).toBe(true);
+
+    console.log(
+      `[live lifecycle] Retell keeps flow version ` +
+        `${String(draftEngine.version)} behind — no API removes one. The ` +
+        `flow's latest was ${String(flowLatestBefore)} before this run and is ` +
+        `${String(flowLatestAfter)} now: exactly the one version it branched.`,
+    );
 
     // ── 6. The account as it was found. ──
     //
-    // Three readings, because no one of them catches everything. The version
-    // list says which versions exist and which are published. The two
+    // Four readings, because no one of them catches everything. The version
+    // list says which agent versions exist and which are published. The two
     // references say what each of them resolves to — a stray draft moves
     // `latest` without moving any published flag, so the list alone would miss
-    // it. And the serving engine's own configuration says the tools a real
-    // caller reaches are untouched.
+    // it. The serving engine's own configuration says the tools a real caller
+    // reaches are untouched. And the flow's latest, checked above, says the
+    // one thing this run leaves behind is the one version it branched.
     expect(
       print(proof.versions),
       "the version panel is not as this proof found it",
