@@ -80,35 +80,33 @@ conversations it conducts.
 
 ## The live checklist
 
-Three questions can only be answered against a real Retell account, and all
-three are the developer's to answer by hand. Each finding lands, dated, in
+Three questions can only be answered against a real Retell account. One of them
+is answered below; the other two are still the developer's to answer by hand.
+Each finding lands, dated, in
 `.scratch/mock-tools/research/retell-mocking-surface.md`.
 
 **1. Does branching fork a Retell LLM?** — the command above.
 
-**2. Which key signs a custom-function call?** This one is not yet answered, and
-Egma is currently guessing. The mock endpoint verifies a request's
-`X-Retell-Signature` with **the agent's own Retell API key**, the one stored on
-the agent. But Retell's *webhook* signatures are known to use a separate
-webhook-signing key — the one wearing the **Webhook** badge in the dashboard's
-API Keys page — which is a different value from every management key on the
-same account. Whether a custom-function call uses that key, the management key,
-or is not signed at all is unknown.
+**2. Which key signs a custom-function call? — ANSWERED 2026-08-31: the
+account's webhook-signing key**, the one wearing the **Webhook** badge in the
+dashboard's API Keys page. It is a different value from the agent's own Retell
+API key, from every other management key on the account, and Egma is never
+handed it: it cannot be read back over the API, so Egma can neither hold it nor
+guess it.
 
-To answer it, run one mocked simulation and look at what arrives:
+Egma had guessed the agent's own key and refused any signature that did not
+verify against it. The first live mocked run answered the question the hard
+way — **every** mocked tool call failed on the signature, and the agent
+apologised to the caller for a broken backend on every one of them.
 
-- **No `X-Retell-Signature` header at all** — Retell does not sign these. Egma
-  already admits such requests; nothing to change.
-- **A header that verifies** — the guess was right. Make the header required.
-- **A header that does not verify** — every mocked tool call refuses with
-  `bad_signature`, and the refusal says so. Point the check at the
-  webhook-signing key instead: it is read in `resolveMockToolCall`
-  (`packages/db/src/access/runs.ts`), which today selects the agent's stored
-  Retell key.
-
-Until it is answered the endpoint fails safe rather than open: a signature that
-is present must verify, and a request carrying none is admitted on the two
-unguessable identifiers and the live-run gate.
+The ruling is that **the signature is never refused on**. What authenticates one
+of these requests is the address itself: an unguessable run identifier and an
+unguessable simulation identifier that have to name the same live run, plus the
+three gates in `apps/api/src/routes/mock-endpoint.ts` — live run, matching
+simulation, covered tool. The header is still read, and a signature that does
+not match the key Egma does hold is written to the log as one note, so the day
+some account signs with a key Egma holds is measurable rather than assumed. The
+endpoint's own file header carries the whole story.
 
 **3. Does `{{egma_simulation}}` render into a tool URL on a live *voice*
 call?** Per-call rendering into a custom-function URL is proven on a real agent

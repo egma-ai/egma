@@ -76,11 +76,33 @@ const CONDUCTOR = "sim-under-test";
 /** Every delay the endpoint was asked to wait out, in the order it asked. */
 let waited: number[] = [];
 
+/** Every line this instance logged, for the claims about the one note. */
+let logged: string[] = [];
+
+/**
+ * The one note egma keeps about a signature, matched on its own words.
+ *
+ * The signature refuses nothing any more, so the note is the whole of what a
+ * test can see about it — and a substring is what the log gives a reader,
+ * rather than reaching into anything private.
+ */
+const SIGNATURE_NOTE = "signature did not match";
+
+function signatureNotes(): string[] {
+  return logged.filter((line) => line.includes(SIGNATURE_NOTE));
+}
+
 async function anInstance(label: string): Promise<void> {
   waited = [];
+  logged = [];
   api = await createApi(label, {
     traceStore: true,
     retellFetch: RETELL_CHAT_FETCH,
+    logTo: {
+      write: (line) => {
+        logged.push(line);
+      },
+    },
     mockToolWait: async (milliseconds: number) => {
       waited.push(milliseconds);
     },
@@ -506,35 +528,66 @@ describe("a tool the customer wrote as a GET", () => {
     expect((uncovered.json as { refusal: string }).refusal).toBe(
       "tool_not_mocked",
     );
-
-    // A GET carries no body, so the platform signs the timestamp alone — and a
-    // signature made with the wrong key still refuses as its own thing.
-    const badly = await call(
-      {
-        runId: ready.runId,
-        simulationId: ready.simulationId,
-        toolName: "get_availability",
-      },
-      { ...asGet, signature: signatureFor("", "not-the-agents-key", Date.now()) },
-    );
-    expect(badly.statusCode).toBe(401);
-    expect((badly.json as { refusal: string }).refusal).toBe("bad_signature");
-
-    // And one made with the right key over that same empty body is admitted.
-    const properly = await call(
-      {
-        runId: ready.runId,
-        simulationId: ready.simulationId,
-        toolName: "get_availability",
-      },
-      { ...asGet, signature: signatureFor("", PLATFORM_KEY, Date.now()) },
-    );
-    expect(properly.statusCode, properly.raw).toBe(200);
   });
 });
 
+/**
+ * The signature: read, and refused on nowhere.
+ *
+ * Retell signs a custom-function call with the account's webhook-badge key,
+ * which egma is never handed — falsified live on 2026-08-31, when every mocked
+ * tool call a real agent made here came back `bad_signature` and the agent
+ * apologised for a broken backend on every one. So what is proved here is that
+ * a signature can no longer change what the endpoint answers, and that the one
+ * note egma keeps about it is written when it does not match and not when it
+ * does.
+ */
 describe("the signature", () => {
-  it("admits a request signed with the key egma holds for the agent", async () => {
+  it("answers a call signed with a key egma does not hold, and notes it", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_other_key");
+    const body = JSON.stringify({ service: "facial" });
+
+    const answered = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "get_availability",
+      },
+      { body, signature: signatureFor(body, "not-the-agents-key", Date.now()) },
+    );
+
+    // This is what every live mocked call looks like today, and it must be the
+    // mock's answer rather than a wall of refusals.
+    expect(answered.statusCode, answered.raw).toBe(200);
+    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
+
+    // The record says the mock answered, the same as any other call.
+    const spans = await toolSpansOf(ready.simulationId);
+    expect(spans).toHaveLength(1);
+    expect(JSON.parse(spans[0]!.payload)["egma.tool.provenance"]).toBe("mocked");
+
+    // And one note, so the day an account signs with a key egma holds can be
+    // counted rather than assumed. Neither the key nor the signature is in it.
+    expect(signatureNotes()).toHaveLength(1);
+    expect(logged.join("\n")).not.toContain(PLATFORM_KEY);
+  });
+
+  it("answers a call carrying no signature at all, and notes nothing", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_unsigned");
+
+    const answered = await call({
+      runId: ready.runId,
+      simulationId: ready.simulationId,
+      toolName: "get_availability",
+    });
+
+    expect(answered.statusCode, answered.raw).toBe(200);
+    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
+    // Nothing arrived to compare, so there is nothing to write down.
+    expect(signatureNotes()).toHaveLength(0);
+  });
+
+  it("notes nothing when the signature does match the key egma holds", async () => {
     const ready = await aRunningSimulation("mock_endpoint_signed");
     const body = JSON.stringify({ service: "facial" });
 
@@ -546,57 +599,13 @@ describe("the signature", () => {
       },
       { body, signature: signatureFor(body, PLATFORM_KEY, Date.now()) },
     );
-    expect(answered.statusCode).toBe(200);
+
+    expect(answered.statusCode, answered.raw).toBe(200);
+    // The measurement the note exists for: silence is a match.
+    expect(signatureNotes()).toHaveLength(0);
   });
 
-  it("refuses one signed with another key, distinctly, and writes nothing", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_bad_signature");
-    const body = JSON.stringify({ service: "facial" });
-
-    const refused = await call(
-      {
-        runId: ready.runId,
-        simulationId: ready.simulationId,
-        toolName: "get_availability",
-      },
-      { body, signature: signatureFor(body, "not-the-agents-key", Date.now()) },
-    );
-    expect(refused.statusCode).toBe(401);
-    expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
-    // The refusal never repeats the key it checked against — and it names which
-    // key that was, because the likeliest cause of a wall of these is Egma
-    // having guessed the wrong one rather than anybody attacking anything.
-    expect(refused.raw).not.toContain(PLATFORM_KEY);
-    expect(refused.raw).toContain("webhook-signing key");
-
-    // **Nothing is written.** A caller who cannot authenticate must not be able
-    // to put rows on somebody's record: two identifiers plus a garbage
-    // signature would otherwise spray `refused` spans carrying any tool name
-    // the sender liked.
-    expect(await toolSpansOf(ready.simulationId)).toHaveLength(0);
-  });
-
-  it("is checked before the tool is looked up, so the two never blur", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_signature_first");
-    const body = "{}";
-
-    // A badly signed call about a tool this simulation does not cover is a
-    // signature failure, not a sentence about the mocked world: telling an
-    // unauthenticated caller which tools are covered would be answering a
-    // question they have not earned.
-    const refused = await call(
-      {
-        runId: ready.runId,
-        simulationId: ready.simulationId,
-        toolName: "charge_card",
-      },
-      { body, signature: signatureFor(body, "not-the-agents-key", Date.now()) },
-    );
-    expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
-    expect(await toolSpansOf(ready.simulationId)).toHaveLength(0);
-  });
-
-  it("refuses a signature over different bytes than arrived", async () => {
+  it("is compared over the bytes that arrived, not a re-serialisation", async () => {
     const ready = await aRunningSimulation("mock_endpoint_body_swapped");
     const signature = signatureFor(
       JSON.stringify({ service: "facial" }),
@@ -604,7 +613,10 @@ describe("the signature", () => {
       Date.now(),
     );
 
-    const refused = await call(
+    // The right key over the wrong bytes is a mismatch, which is what keeps the
+    // note worth reading: a comparison over anything but the raw body would say
+    // "matched" about a signature that never covered this request.
+    const answered = await call(
       {
         runId: ready.runId,
         simulationId: ready.simulationId,
@@ -612,23 +624,91 @@ describe("the signature", () => {
       },
       { body: JSON.stringify({ service: "massage" }), signature },
     );
-    expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
+    expect(answered.statusCode, answered.raw).toBe(200);
+    expect(signatureNotes()).toHaveLength(1);
   });
 
-  it("refuses one signed outside the window a replay could not survive", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_stale_signature");
-    const body = JSON.stringify({ service: "facial" });
-    const longAgo = Date.now() - 10 * 60 * 1000;
+  it("is compared over the empty body a GET sends", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_get_signature", {
+      answer: { ok: true },
+      delayMs: 0,
+    });
+    const where = {
+      runId: ready.runId,
+      simulationId: ready.simulationId,
+      toolName: "get_availability",
+    };
 
-    const refused = await call(
+    // A GET carries no body, so the platform signs the timestamp alone.
+    const matching = await call(where, {
+      method: "GET",
+      signature: signatureFor("", PLATFORM_KEY, Date.now()),
+    });
+    expect(matching.statusCode, matching.raw).toBe(200);
+    expect(signatureNotes()).toHaveLength(0);
+
+    const other = await call(where, {
+      method: "GET",
+      signature: signatureFor("", "not-the-agents-key", Date.now()),
+    });
+    expect(other.statusCode, other.raw).toBe(200);
+    expect(signatureNotes()).toHaveLength(1);
+  });
+
+  it("opens none of the three gates, and closes none of them either", async () => {
+    const ready = await aRunningSimulation("mock_endpoint_signature_gates");
+    const body = "{}";
+    const wrongly = () => signatureFor(body, "not-the-agents-key", Date.now());
+
+    // A dead run and a foreign simulation are refused exactly as they are
+    // without a signature: the two unguessable identifiers are the secret, and
+    // nothing a caller signs with can stand in for either of them.
+    const dead = await call(
       {
-        runId: ready.runId,
+        runId: newId("run"),
         simulationId: ready.simulationId,
         toolName: "get_availability",
       },
-      { body, signature: signatureFor(body, PLATFORM_KEY, longAgo) },
+      { body, signature: wrongly() },
     );
-    expect((refused.json as { refusal: string }).refusal).toBe("bad_signature");
+    expect(dead.statusCode).toBe(404);
+    expect((dead.json as { refusal: string }).refusal).toBe("no_live_run");
+
+    const foreign = await call(
+      {
+        runId: ready.runId,
+        simulationId: newId("sim"),
+        toolName: "get_availability",
+      },
+      { body, signature: wrongly() },
+    );
+    expect(foreign.statusCode).toBe(404);
+    expect((foreign.json as { refusal: string }).refusal).toBe(
+      "simulation_not_in_run",
+    );
+
+    // And an uncovered tool is refused for the tool, which is now the only
+    // thing left to be wrong about it. The signature has no say either way.
+    const uncovered = await call(
+      {
+        runId: ready.runId,
+        simulationId: ready.simulationId,
+        toolName: "charge_card",
+      },
+      { body, signature: wrongly() },
+    );
+    expect(uncovered.statusCode).toBe(404);
+    expect((uncovered.json as { refusal: string }).refusal).toBe(
+      "tool_not_mocked",
+    );
+
+    // Egma was in the path and said no, so the record says so.
+    const spans = await toolSpansOf(ready.simulationId);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.tool_name).toBe("charge_card");
+    expect(JSON.parse(spans[0]!.payload)["egma.tool.provenance"]).toBe(
+      "refused",
+    );
   });
 });
 
