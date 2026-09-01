@@ -81,22 +81,29 @@ const HAND_COMPUTED = {
   first_response_latency: [9605.774],
 
   /**
-   * One sample per human turn, in order. Three of the five run backwards — the
-   * agent began answering before the caller stopped — and a latency that runs
-   * backwards is dropped rather than kept as a negative number.
+   * One sample per human turn that reached agent speech before the next human
+   * turn. Silent agent turns on the way are the model and tool work that led to
+   * the spoken answer, not the answer itself.
    *
-   * 1. human 1e6796c0e195e424 ends 1785693901696743226; the next agent turn
-   *    9ac4333458575745 has no speech and starts 1785693899185629103. Backwards
-   *    by 2511 ms — the agent talked over the caller. Dropped.
+   * 1. human 1e6796c0e195e424 is followed by silent agent turn
+   *    9ac4333458575745, then another human turn before any agent speech. It
+   *    was not answered and takes no sample.
    * 2. human baac22a26a96fa9b starts 1785693902082961920 → 1785693902082961 µs,
-   *    runs 297806362 ns, so it ends at 1785693902380767362. The next agent
-   *    turn 00820fa943b873e6 has no speech and starts 1785693902382202784 →
-   *    1785693902382202 µs. 1785693902382202000 − 1785693902380767362 =
-   *    1434638 ns = 1.434638 ms.
-   * 3. human c35b92a87f8121a1 ends 1785693923116446625; agent 674743df7fe60024
-   *    starts 1785693922817568419. Backwards by 299 ms. Dropped.
-   * 4. human f88cf2a243a38318 ends 1785693942127284137; agent cfbcc2e51885f0fa
-   *    starts 1785693941270896447. Backwards by 856 ms. Dropped.
+   *    runs 297806362 ns, so it ends at 1785693902380767362. Agent turn
+   *    00820fa943b873e6 does silent tool work; the next turn b2444815bd74fb3b
+   *    speaks in 1b8cc4d1064a766d at 1785693904727004928 →
+   *    1785693904727004 µs. 1785693904727004000 − 1785693902380767362 =
+   *    2346236638 ns = 2346.236638 ms.
+   * 3. human c35b92a87f8121a1 starts 1785693917865489664 →
+   *    1785693917865489 µs and runs 5250956961 ns, so it ends at
+   *    1785693923116445961. Agent turn 674743df7fe60024 does silent tool work;
+   *    the next turn 2c8883b32dbc323c speaks in 42b9d5797f17aa9d at
+   *    1785693924924691968 → 1785693924924691 µs.
+   *    1785693924924691000 − 1785693923116445961 = 1808245039 ns =
+   *    1808.245039 ms.
+   * 4. human f88cf2a243a38318 is followed by silent agent turn
+   *    cfbcc2e51885f0fa, then another human turn before any agent speech. It
+   *    was not answered and takes no sample.
    * 5. human 9839f5ef664bc919 starts 1785693942114222080 → 1785693942114222 µs,
    *    runs 1980473194 ns, so it ends at 1785693944094695194. The next agent
    *    turn fe4af349db1e440f spoke in `agent_speaking` 11a1eaca219437a9, which
@@ -104,7 +111,7 @@ const HAND_COMPUTED = {
    *    1785693946089613000 − 1785693944094695194 = 1994917806 ns =
    *    1994.917806 ms.
    */
-  turn_response_latency: [1.434638, 1994.917806],
+  turn_response_latency: [2346.236638, 1808.245039, 1994.917806],
 
   /**
    * One sample per agent turn that spoke, and four of the eight did. Each has a
@@ -244,10 +251,10 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
     );
 
     expect(measured?.samples).toEqual(HAND_COMPUTED.turn_response_latency);
-    // The agent turn that answered without speaking, then the speech that
-    // answered the last thing the caller said.
+    // The three speech spans that began the three spoken answers.
     expect(measured?.spanIds).toEqual([
-      "00820fa943b873e6",
+      "1b8cc4d1064a766d",
+      "42b9d5797f17aa9d",
       "11a1eaca219437a9",
     ]);
     // The mean is the number the pages lead with, rounded once in the module

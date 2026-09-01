@@ -637,12 +637,12 @@ function put(
 /**
  * How long the agent took to answer, once for every turn the human took.
  *
- * From the **human turn's end** to the moment the agent's next turn began
- * speaking — its first `speaking` child's start, or the turn's own start for an
- * agent turn that carried no speech, which is what a turn that answered with a
- * tool call looks like. The next agent turn is the next one in the
- * conversation, ordered by when each began, which is the order a transcript
- * reads in.
+ * From the **human turn's end** to the first later agent speech before another
+ * human turn. LiveKit can open one agent turn for model and tool work, then a
+ * second agent turn for the spoken answer, so a silent turn on the way is part
+ * of the wait rather than its endpoint. Where the conversation carries no
+ * `speaking` spans at all, the first agent turn's own start stands in for a
+ * framework whose turns begin at their first word.
  *
  * **A measurement that runs backwards is not a slow answer and is not kept.**
  * Turn spans overlap on a real captured call — five neighbouring pairs out of
@@ -677,9 +677,10 @@ function put(
  */
 function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
   const samples: Sample[] = [];
+  const speechless = turns.every((turn) => turn.speech.length === 0);
   for (const [at, turn] of turns.entries()) {
     if (turn.kind !== HUMAN_TURN) continue;
-    const answered = answeringSpeech(turns, at);
+    const answered = answeringSpeech(turns, at, speechless);
     if (answered === undefined) continue;
     const latency = milliseconds(answered.startedAt - turn.endedAt);
     if (latency < 0) continue;
@@ -757,9 +758,12 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
 /**
  * Where the agent's answer to the human turn at `at` began.
  *
- * The next agent turn's first speech, or that turn's own start when it carried
- * none. `undefined` when nobody answered — the human had the last word, or said
- * something else first.
+ * The first agent speech before the next human turn. Silent agent turns on the
+ * way can be model or tool work, so they do not become the response when a
+ * later agent turn speaks. When no agent turn speaks at all, the first silent
+ * agent turn's own start remains the fallback for frameworks that do not emit
+ * speaking spans. `undefined` when nobody answered — the human had the last
+ * word, or said something else first.
  *
  * **An agent turn answers only the nearest human turn before it, so the walk
  * stops at the next human turn rather than reading past it.** A caller who says
@@ -773,13 +777,21 @@ function agentSpeechDuration(turns: readonly TimedSpan[]): readonly Sample[] {
 function answeringSpeech(
   turns: readonly TimedSpan[],
   at: number,
+  speechless: boolean,
 ): { readonly startedAt: bigint; readonly spanId: string } | undefined {
+  let silentAnswer:
+    | { readonly startedAt: bigint; readonly spanId: string }
+    | undefined;
   for (const turn of turns.slice(at + 1)) {
-    if (turn.kind === HUMAN_TURN) return undefined;
+    if (turn.kind === HUMAN_TURN) {
+      return speechless ? silentAnswer : undefined;
+    }
     if (turn.kind !== AGENT_TURN) continue;
-    return turn.speech[0] ?? { startedAt: turn.startedAt, spanId: turn.spanId };
+    const speech = turn.speech[0];
+    if (speech !== undefined) return speech;
+    silentAnswer ??= { startedAt: turn.startedAt, spanId: turn.spanId };
   }
-  return undefined;
+  return speechless ? silentAnswer : undefined;
 }
 
 /**
