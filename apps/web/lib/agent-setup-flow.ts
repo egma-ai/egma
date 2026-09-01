@@ -23,6 +23,16 @@ export type AgentSetupPlan = {
   readonly mayWriteConnection: boolean;
   /** Whether the Retell connection save also turns on production pulling. */
   readonly pullWithConnection: boolean;
+  /**
+   * Whether the flow ends by flipping the pull switch, with no connection.
+   *
+   * Production pull needs the sealed key and the platform agent id — the
+   * puller selects calls by agent id alone — so the monitoring goal asks for
+   * no phone number and writes no provider route. The switch commit registers
+   * an agent this project does not hold yet (ADR-0015: watching one means
+   * registering it).
+   */
+  readonly pullWithoutConnection: boolean;
   /** Whether the UI shows LiveKit instructions without recording an on/off state. */
   readonly monitoringInstructions: boolean;
   /**
@@ -45,15 +55,17 @@ const PLANS: Readonly<
       platform: "retell",
       mayWriteConnection: true,
       pullWithConnection: false,
+      pullWithoutConnection: false,
       monitoringInstructions: false,
       asksHowToTest: true,
     },
     monitoring: {
       goal: "monitoring",
       platform: "retell",
-      /* The selected voice route is saved, and that same save starts pulling. */
-      mayWriteConnection: true,
-      pullWithConnection: true,
+      /* Nothing is saved but the pull switch: no route, no phone number. */
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: true,
       monitoringInstructions: false,
       asksHowToTest: false,
     },
@@ -62,9 +74,10 @@ const PLANS: Readonly<
       platform: "retell",
       mayWriteConnection: true,
       pullWithConnection: true,
+      pullWithoutConnection: false,
       monitoringInstructions: false,
-      // Both needs the voice connection for production pull, so it takes the
-      // number chooser without the question, exactly as Monitoring does.
+      // Both saves the phone lane for simulation, so it takes the number
+      // chooser without the question; the same save starts pulling.
       asksHowToTest: false,
     },
   },
@@ -74,6 +87,7 @@ const PLANS: Readonly<
       platform: "livekit",
       mayWriteConnection: true,
       pullWithConnection: false,
+      pullWithoutConnection: false,
       monitoringInstructions: false,
       asksHowToTest: false,
     },
@@ -82,6 +96,7 @@ const PLANS: Readonly<
       platform: "livekit",
       mayWriteConnection: false,
       pullWithConnection: false,
+      pullWithoutConnection: false,
       monitoringInstructions: true,
       asksHowToTest: false,
     },
@@ -92,6 +107,7 @@ const PLANS: Readonly<
       // the matching production-monitoring instructions.
       mayWriteConnection: true,
       pullWithConnection: false,
+      pullWithoutConnection: false,
       monitoringInstructions: true,
       asksHowToTest: false,
     },
@@ -121,7 +137,8 @@ export function retellAgentsForPlan(
   plan: AgentSetupPlan,
   agents: readonly RetellDiscoveredAgent[] | null,
 ): readonly RetellDiscoveredAgent[] {
-  if (plan.platform !== "retell" || !plan.mayWriteConnection) return [];
+  if (plan.platform !== "retell") return [];
+  if (!plan.mayWriteConnection && !plan.pullWithoutConnection) return [];
   return agents?.filter((agent) => agent.modality === "voice") ?? [];
 }
 
@@ -232,7 +249,11 @@ export function retellAgentCanEnterPlan(
   plan: AgentSetupPlan,
   agent: RetellDiscoveredAgent,
 ): boolean {
-  if (plan.platform !== "retell" || !plan.mayWriteConnection) return false;
+  if (plan.platform !== "retell") return false;
+  // Pull selects calls by platform agent id, so a monitoring-only plan takes
+  // every voice agent — one with no routed number as much as any other.
+  if (plan.pullWithoutConnection) return true;
+  if (!plan.mayWriteConnection) return false;
   if (!plan.asksHowToTest) {
     return agent.connectionCandidates.some(
       (candidate) => candidate.connectionType === "phone_number",
@@ -302,15 +323,19 @@ export function stepAfterLiveKitTesting(
 }
 
 /**
- * Where a chosen Retell agent leads.
+ * Where a chosen Retell agent leads, or `null` when the flow can finish now.
  *
  * Straight to the one question — how should Egma test this agent — because the
- * choice a person understands comes before any plumbing. Monitoring and Both
- * need the voice connection for production pull, so they skip the question and
- * go to the number chooser exactly as they do today.
+ * choice a person understands comes before any plumbing. Both needs the voice
+ * connection for the simulation phone lane, so it skips the question and goes
+ * to the number chooser. Monitoring needs no connection at all — the pull
+ * switch is the whole finish — so the agent choice is its last step.
  */
-export function stepAfterRetellAgent(plan: AgentSetupPlan): AgentSetupStep {
-  return plan.asksHowToTest ? "retell-lanes" : "retell-phone";
+export function stepAfterRetellAgent(
+  plan: AgentSetupPlan,
+): AgentSetupStep | null {
+  if (plan.asksHowToTest) return "retell-lanes";
+  return plan.pullWithoutConnection ? null : "retell-phone";
 }
 
 /**
@@ -356,7 +381,8 @@ export function previousAgentSetupStep({
       return null;
     case "retell-phone":
       // The phone chooser is reached through the one question when the goal is
-      // a simulation, and straight from the agent for the goals that skip it.
+      // a simulation, and straight from the agent for Both, which skips it.
+      // Monitoring never arrives here: it finishes on the agent choice.
       return goal === "simulation" ? "retell-lanes" : "retell-agent";
     case "livekit-simulation":
       return "livekit-modality";
