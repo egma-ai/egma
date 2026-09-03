@@ -26,6 +26,24 @@ import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts
 
 /** Truncated mid-key, which is what an interrupted write leaves behind. */
 const DAMAGED = '{\n  "version": 1,\n  "platforms": {\n    "https://one.example": {"ke';
+const AGENT_ID = "agt_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const CONNECTION_ID = "con_01K3XQ7M4E8YB2FVN0H9TZQWES";
+
+const REPRESENTATIVE_COMMANDS: readonly (readonly string[])[] = [
+  ["login"],
+  ["agent", "connection", "options", "--platform", "retell"],
+  ["push"],
+  ["pull"],
+  [
+    "run",
+    "create",
+    "release",
+    "--agent",
+    AGENT_ID,
+    "--connection",
+    CONNECTION_ID,
+  ],
+];
 
 let platform: Platform;
 let workspace: Workspace;
@@ -41,15 +59,16 @@ beforeEach(async () => {
     config: {
       ...EMPTY_CONFIG,
       platform: { origin: platform.url },
+      project: { id: platform.projectId, name: "Fixture project" },
       agents: [
         {
           name: "receptionist",
-          id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
+          id: AGENT_ID,
+          platform: "retell",
           connections: [
             {
               name: "retell-1",
-              id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES",
-              modality: "chat",
+              id: CONNECTION_ID,
             },
           ],
         },
@@ -92,9 +111,9 @@ async function egma(args: readonly string[]): Promise<{
   return { stdout, stderr, code };
 }
 
-it.each([["login"], ["connect"], ["push"], ["pull"], ["run", "release"]])(
+it.each(REPRESENTATIVE_COMMANDS)(
   "tells %s's caller what is wrong with the keys file instead of throwing at them",
-  async (...command) => {
+  async (...command: string[]) => {
     const result = await egma([...command, "--cwd", workspace.dir]);
     const verb = command[0] as string;
     const shown = `${result.stdout}${result.stderr}`;
@@ -115,7 +134,7 @@ it.each([["login"], ["connect"], ["push"], ["pull"], ["run", "release"]])(
 );
 
 it("leaves the damaged file exactly as it was, on every one of them", async () => {
-  for (const command of [["login"], ["connect"], ["push"], ["pull"], ["run", "release"]]) {
+  for (const command of REPRESENTATIVE_COMMANDS) {
     await egma([...command, "--cwd", workspace.dir]);
   }
   expect(await readFile(workspace.credentialsFile, "utf8")).toBe(DAMAGED);

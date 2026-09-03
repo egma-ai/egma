@@ -117,7 +117,7 @@ describe("runPersonasCommand", () => {
     expect(requests).toBe(0);
     expect(lines).toContain("status: no-project");
     expect(lines).toContain(
-      "stderr: This repository does not name its Egma project. Run egma connect here first.",
+      "stderr: This repository does not name its Egma Project. Run egma init here first.",
     );
   });
 });

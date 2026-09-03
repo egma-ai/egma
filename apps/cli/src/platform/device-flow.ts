@@ -29,7 +29,15 @@ export type DeviceGrant = {
 
 /** What one attempt to collect a key came back with. */
 export type Collection =
-  | { readonly kind: "key"; readonly key: string }
+  | {
+      readonly kind: "key";
+      readonly key: string;
+      /** Present on current platforms; absent only for an older server. */
+      readonly login?: {
+        readonly apiKeyId: string;
+        readonly projectId: string;
+      };
+    }
   | { readonly kind: "waiting" }
   | { readonly kind: "slow-down" }
   | { readonly kind: "denied" }
@@ -185,7 +193,15 @@ export async function collectKey(
         reason: "Egma minted no key for this login. Start again from the terminal.",
       };
     }
-    return { kind: "key", key };
+    const apiKeyId = text(body.api_key_id);
+    const projectId = text(body.project_id);
+    return {
+      kind: "key",
+      key,
+      ...(apiKeyId === "" || projectId === ""
+        ? {}
+        : { login: { apiKeyId, projectId } }),
+    };
   }
 
   switch (text(body.error)) {

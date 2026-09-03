@@ -703,6 +703,7 @@ const CONNECTION_KEYS = [
   "environment",
   "config",
   "credentials",
+  "platformAgentId",
   "agentPlatformSelection",
 ] as const;
 
@@ -1317,6 +1318,10 @@ export function agentRoutes(options: {
   const selectedPlatformAgentId = (
     body: Record<string, unknown>,
   ): string | null => {
+    const direct = body["platformAgentId"];
+    if (typeof direct === "string" && direct.trim() !== "") {
+      return direct.trim();
+    }
     const selection = body["agentPlatformSelection"];
     if (typeof selection !== "object" || selection === null) return null;
     const value = (selection as Record<string, unknown>)["platformAgentId"];
@@ -1391,10 +1396,10 @@ export function agentRoutes(options: {
       connectionType === "phone_number" &&
       accessVariant === "phone_number.public_e164" &&
       modality === "voice" &&
-      input["agentPlatformSelection"] === undefined
+      selectedPlatformAgentId(input) === null
     ) {
       throw new Refusal(
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+        "a Retell phone connection needs platformAgentId so Egma can confirm the number still reaches the selected agent",
       );
     }
     const config = validConfig(connectionType, accessVariant, input["config"]);

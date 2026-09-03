@@ -40,6 +40,7 @@ export type SelectOptions = {
   readonly paths: FolderPaths;
   readonly directory: string;
   readonly fetchImpl?: Fetch;
+  readonly signal?: AbortSignal;
 };
 
 /** A run never guesses identity from a name or path and never runs a subset. */
@@ -48,7 +49,7 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
   const projectId = repository.config.project?.id ?? "";
   if (projectId === "") {
     throw new RepositoryValidationError([
-      "egma/config.yaml does not name a project. Run egma connect here first.",
+      "egma/config.yaml does not name a Project. Run egma init here first.",
     ]);
   }
   if (
@@ -59,7 +60,7 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
     options.directory.includes("\\")
   ) {
     throw new RunSelectionError([
-      "Choose exactly one direct directory under egma/tests, such as `egma run release`.",
+      "Choose exactly one direct directory under egma/tests, such as `egma run create release`.",
     ]);
   }
   const suite = repository.suites.find((entry) => entry.directory === options.directory);
@@ -73,6 +74,7 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
     options.signedIn,
     suite.manifest.id,
     options.fetchImpl,
+    options.signal,
   );
   if (remoteSuite === null || remoteSuite.projectId !== projectId) {
     throw new RunSelectionError([
@@ -88,6 +90,7 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
   const remote = await listTests(options.signedIn, {
     projectId,
     suiteId: suite.manifest.id,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   const currentByVersion = new Map(remote.map((test) => [test.versionId, test] as const));
@@ -103,7 +106,12 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
     }
     let test: PlatformTest | undefined = currentByVersion.get(pin);
     if (test === undefined) {
-      const version = await getTestVersion(options.signedIn, pin, options.fetchImpl);
+      const version = await getTestVersion(
+        options.signedIn,
+        pin,
+        options.fetchImpl,
+        options.signal,
+      );
       if (version !== null && version.suiteId !== suite.manifest.id) {
         issues.push(`${file.shown} belongs to suite ${version.suiteId}; tests cannot move between suites.`);
       } else {

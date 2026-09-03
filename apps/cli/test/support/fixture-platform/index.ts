@@ -89,7 +89,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
   let projectId!: string;
 
   const platform = await startFixturePlatform((origin) => {
-    const deviceGroup = deviceRoutes(origin);
+    projectId = newId("prj");
+    const deviceGroup = deviceRoutes(origin, () => projectId);
     device = deviceGroup.controls;
 
     // Which customer this is comes from the key, so every group that writes
@@ -97,7 +98,6 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     // acts in the one project that key was minted for, so a body or a filter
     // naming a project meets one answer rather than one per route group.
     const holdsKey = (key: string): boolean => device.keys.includes(key);
-    projectId = newId("prj");
     const organizationId = newId("org");
 
     const suiteGroup = suiteRoutes({

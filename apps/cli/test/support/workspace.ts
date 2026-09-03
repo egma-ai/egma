@@ -39,6 +39,7 @@ export const NO_RETELL = "http://127.0.0.1:1";
 export const NO_DEFAULT_PLATFORM = "http://127.0.0.1:1";
 
 const CLEARED_VARIABLES = [
+  "EGMA_API_KEY",
   "EGMA_RETELL_API_KEY",
   "RETELL_API_KEY",
   "EGMA_RETELL_AGENT_ID",

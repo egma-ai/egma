@@ -132,7 +132,7 @@ export type AgentMonitoring = {
   /**
    * The platforms this agent's living connections reach.
    *
-   * Read because an agent registered by `egma connect` holds no binding of its
+   * Read because a registered agent may hold no binding of its
    * own — the binding arrived with monitoring, which is the decision that
    * needs it — while its connections have always known which platform they
    * reach. It is what lets a verb work out the platform instead of asking.
@@ -225,7 +225,8 @@ export async function discoverRetellAgents(
 export async function startMonitoring(
   input: {
     readonly agentPlatform: "retell";
-    readonly apiKey: RevealableKey;
+    /** Omit to reuse the sealed key already stored on every named Agent. */
+    readonly apiKey?: RevealableKey | undefined;
     readonly watch: readonly Watch[];
     /** Which project the agents land in. Omit for the key's own. */
     readonly projectId?: string | undefined;
@@ -236,7 +237,7 @@ export async function startMonitoring(
     {
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
       agentPlatform: input.agentPlatform,
-      apiKey: input.apiKey.reveal(),
+      ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey.reveal() }),
       watch: input.watch.map((one) => ({
         platformAgentId: one.platformAgentId,
         ...(one.name === undefined ? {} : { name: one.name }),
@@ -279,8 +280,12 @@ export async function startMonitoring(
 export async function stopMonitoring(
   agentId: string,
   options: RegisterOptions,
+  projectId?: string,
 ): Promise<Stopped> {
-  const answer = await stopRequest({ agentId }, requestOptions(options));
+  const answer = await stopRequest(
+    { agentId, ...(projectId === undefined ? {} : { projectId }) },
+    requestOptions(options),
+  );
 
   if (answer.response?.status === 404) return { kind: "not-found" };
   const failed = commonFailure(answer, options);
@@ -318,8 +323,12 @@ export async function stopMonitoring(
 export async function readAgentMonitoring(
   agentId: string,
   options: RegisterOptions,
+  projectId?: string,
 ): Promise<ReadMonitoring> {
-  const answer = await getAgentRequest({ agentId }, requestOptions(options));
+  const answer = await getAgentRequest(
+    { agentId, ...(projectId === undefined ? {} : { projectId }) },
+    requestOptions(options),
+  );
 
   if (answer.response?.status === 404) return { kind: "not-found" };
   const failed = commonFailure(answer, options);

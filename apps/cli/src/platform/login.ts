@@ -233,7 +233,11 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
 
     switch (collected.kind) {
       case "key": {
-        const credentials: Credentials = { url: options.url, key: collected.key };
+        const credentials: Credentials = {
+          url: options.url,
+          key: collected.key,
+          ...(collected.login === undefined ? {} : { login: collected.login }),
+        };
         await writeCredentials(options.credentialsFile, credentials);
         return { kind: "stored", url: credentials.url, key: credentials.key };
       }

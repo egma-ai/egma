@@ -132,6 +132,7 @@ export type ListOptions = {
   readonly projectId: string;
   readonly suiteId: string;
   readonly fetchImpl?: Fetch;
+  readonly signal?: AbortSignal;
 };
 
 /** Walk the complete project or suite list through bounded platform pages. */
@@ -149,7 +150,10 @@ export async function listTests(
         suiteId: options.suiteId,
         ...(pageToken === undefined ? {} : { pageToken }),
       },
-      { client },
+      {
+        client,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      },
     );
     const response = platformResponse(answer, signedIn.url);
     if (!response.ok) {
@@ -205,10 +209,14 @@ export async function getTestVersion(
   signedIn: SignedIn,
   versionId: string,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformTestVersion | null> {
   const answer = await getTestVersionRequest(
     { versionId },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (response.status === 404) return null;

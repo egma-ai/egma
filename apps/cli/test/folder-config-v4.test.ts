@@ -1,17 +1,11 @@
-import { mkdir, readFile } from "node:fs/promises";
-import path from "node:path";
-
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   EMPTY_CONFIG,
   parseConfig,
   platformOwnedIds,
-  recordRegisteredTarget,
   serializeConfig,
-  writeConfig,
 } from "../src/folder/egma-folder.ts";
-import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 const PROJECT_ID = "prj_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const FIRST_AGENT_ID = "agt_01K3XQ7M4E8YB2FVN0H9TZQWER";
@@ -19,31 +13,26 @@ const SECOND_AGENT_ID = "agt_01K3XQ7M4E8YB2FVN0H9TZQWES";
 const FIRST_CONNECTION_ID = "con_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const SECOND_CONNECTION_ID = "con_01K3XQ7M4E8YB2FVN0H9TZQWES";
 
-let workspace: Workspace | null = null;
-
-afterEach(async () => {
-  await workspace?.remove();
-  workspace = null;
-});
-
-describe("folder config format 3", () => {
+describe("folder config format 4", () => {
   it("round-trips many agents and their connections", () => {
     const config = {
-      format: 3,
+      format: 4,
       platform: { origin: "https://egma.example" },
       project: { id: PROJECT_ID, name: "LiveKit examples" },
       agents: [
         {
           id: FIRST_AGENT_ID,
           name: "Appointment scheduler",
+          platform: "livekit",
           connections: [
-            { id: FIRST_CONNECTION_ID, name: "livekit-1", modality: "chat" },
-            { id: SECOND_CONNECTION_ID, name: "phone_number-1", modality: "voice" },
+            { id: FIRST_CONNECTION_ID, name: "livekit-1" },
+            { id: SECOND_CONNECTION_ID, name: "livekit-chat" },
           ],
         },
         {
           id: SECOND_AGENT_ID,
           name: "Billing support",
+          platform: "retell",
           connections: [],
         },
       ],
@@ -57,7 +46,7 @@ describe("folder config format 3", () => {
         "#",
         "# Committed on purpose: nothing in this folder is secret. Egma writes an id",
         "# beside each name once it has registered one.",
-        "format: 3",
+        "format: 4",
         "platform:",
         "  origin: https://egma.example",
         "project:",
@@ -66,15 +55,15 @@ describe("folder config format 3", () => {
         "agents:",
         `  - id: ${FIRST_AGENT_ID}`,
         "    name: Appointment scheduler",
+        "    platform: livekit",
         "    connections:",
         `      - id: ${FIRST_CONNECTION_ID}`,
         "        name: livekit-1",
-        "        modality: chat",
         `      - id: ${SECOND_CONNECTION_ID}`,
-        "        name: phone_number-1",
-        "        modality: voice",
+        "        name: livekit-chat",
         `  - id: ${SECOND_AGENT_ID}`,
         "    name: Billing support",
+        "    platform: retell",
         "    connections: []",
         "",
       ].join("\n"),
@@ -86,51 +75,97 @@ describe("folder config format 3", () => {
     [
       "the former unversioned singleton shape",
       "platform:\nproject:\nagent:\nconnection:\n",
-      /folder format none.*requires format 3.*no legacy reader/i,
+      /folder format none.*requires format 4.*no legacy reader/i,
     ],
     [
       "the former format",
-      "format: 2\nplatform:\nproject:\nagents: []\n",
-      /folder format 2.*requires format 3.*no legacy reader/i,
+      "format: 3\nplatform:\nproject:\nagents: []\n",
+      /folder format 3.*requires format 4.*no legacy reader/i,
     ],
   ])("refuses %s", (_name, document, message) => {
     expect(() => parseConfig(document, "config.yaml")).toThrow(message);
   });
 
   it.each([
-    ["a missing modality", null],
-    ["an unknown modality", "video"],
-  ])("refuses %s on a stored connection", (_name, modality) => {
+    ["a missing platform", null],
+    ["an unknown platform", "vapi"],
+  ])("refuses %s on a stored agent", (_name, platform) => {
     const document = [
-      "format: 3",
+      "format: 4",
       "platform:",
       "project:",
       "agents:",
       `  - id: ${FIRST_AGENT_ID}`,
       "    name: One",
-      "    connections:",
-      `      - id: ${FIRST_CONNECTION_ID}`,
-      "        name: First",
-      ...(modality === null ? [] : [`        modality: ${modality}`]),
+      ...(platform === null ? [] : [`    platform: ${platform}`]),
+      "    connections: []",
       "",
     ].join("\n");
 
     expect(() => parseConfig(document, "config.yaml")).toThrow(
-      /must contain modality chat or voice/i,
+      /must contain platform retell or livekit/i,
+    );
+  });
+
+  it("refuses a provider Agent ID on a stored agent", () => {
+    const document = [
+      "format: 4",
+      "platform:",
+      "project:",
+      "agents:",
+      `  - id: ${FIRST_AGENT_ID}`,
+      "    name: One",
+      "    platform: retell",
+      "    platformAgentId: agent_retell_123",
+      "    connections: []",
+      "",
+    ].join("\n");
+
+    expect(() => parseConfig(document, "config.yaml")).toThrow(
+      /unsupported key: platformAgentId/i,
+    );
+  });
+
+  it.each([
+    ["Access", "access", "retell-api-key"],
+    ["Modality", "modality", "voice"],
+    ["Credentials", "credentials", "sealed-secret"],
+    ["Hints", "hints", "anything"],
+    ["Config", "config", "anything"],
+  ])("refuses %s on a stored connection", (_name, key, value) => {
+    const document = [
+      "format: 4",
+      "platform:",
+      "project:",
+      "agents:",
+      `  - id: ${FIRST_AGENT_ID}`,
+      "    name: One",
+      "    platform: retell",
+      "    connections:",
+      `      - id: ${FIRST_CONNECTION_ID}`,
+      "        name: First",
+      `        ${key}: ${value}`,
+      "",
+    ].join("\n");
+
+    expect(() => parseConfig(document, "config.yaml")).toThrow(
+      new RegExp(`unsupported key: ${key}`, "i"),
     );
   });
 
   it("refuses duplicate agent and connection identities", () => {
     const duplicateAgent = [
-      "format: 3",
+      "format: 4",
       "platform:",
       "project:",
       "agents:",
       `  - id: ${FIRST_AGENT_ID}`,
       "    name: One",
+      "    platform: retell",
       "    connections: []",
       `  - id: ${FIRST_AGENT_ID}`,
       "    name: Two",
+      "    platform: livekit",
       "    connections: []",
       "",
     ].join("\n");
@@ -139,89 +174,27 @@ describe("folder config format 3", () => {
     );
 
     const duplicateConnection = [
-      "format: 3",
+      "format: 4",
       "platform:",
       "project:",
       "agents:",
       `  - id: ${FIRST_AGENT_ID}`,
       "    name: One",
+      "    platform: retell",
       "    connections:",
       `      - id: ${FIRST_CONNECTION_ID}`,
       "        name: First",
-      "        modality: chat",
       `  - id: ${SECOND_AGENT_ID}`,
       "    name: Two",
+      "    platform: livekit",
       "    connections:",
       `      - id: ${FIRST_CONNECTION_ID}`,
       "        name: Copy",
-      "        modality: voice",
       "",
     ].join("\n");
     expect(() => parseConfig(duplicateConnection, "config.yaml")).toThrow(
       new RegExp(`connection id ${FIRST_CONNECTION_ID}.*both agent`, "i"),
     );
-  });
-
-  it("records a target by id without replacing sibling agents or connections", async () => {
-    workspace = await makeWorkspace();
-    const root = path.join(workspace.dir, "egma");
-    await mkdir(root);
-    const file = path.join(root, "config.yaml");
-    await writeConfig(file, {
-      ...EMPTY_CONFIG,
-      platform: { origin: "https://egma.example" },
-      project: { id: PROJECT_ID, name: "LiveKit examples" },
-      agents: [
-        {
-          id: FIRST_AGENT_ID,
-          name: "Old appointment name",
-          connections: [
-            { id: FIRST_CONNECTION_ID, name: "old-livekit", modality: "chat" },
-          ],
-        },
-        {
-          id: SECOND_AGENT_ID,
-          name: "Billing support",
-          connections: [],
-        },
-      ],
-    });
-
-    await recordRegisteredTarget(file, {
-      project: { id: PROJECT_ID, name: "LiveKit Examples" },
-      agent: { id: FIRST_AGENT_ID, name: "Appointment scheduler" },
-      connection: {
-        id: SECOND_CONNECTION_ID,
-        name: "phone_number-1",
-        modality: "voice",
-      },
-    });
-    const recorded = await recordRegisteredTarget(file, {
-      agent: { id: FIRST_AGENT_ID, name: "Appointment scheduler" },
-      connection: {
-        id: SECOND_CONNECTION_ID,
-        name: "phone-production",
-        modality: "voice",
-      },
-    });
-
-    expect(recorded.project?.name).toBe("LiveKit Examples");
-    expect(recorded.agents).toEqual([
-      {
-        id: FIRST_AGENT_ID,
-        name: "Appointment scheduler",
-        connections: [
-          { id: FIRST_CONNECTION_ID, name: "old-livekit", modality: "chat" },
-          { id: SECOND_CONNECTION_ID, name: "phone-production", modality: "voice" },
-        ],
-      },
-      {
-        id: SECOND_AGENT_ID,
-        name: "Billing support",
-        connections: [],
-      },
-    ]);
-    expect(parseConfig(await readFile(file, "utf8"), "config.yaml")).toEqual(recorded);
   });
 
   it("reports every platform-owned identity in the new hierarchy", () => {
@@ -234,8 +207,9 @@ describe("folder config format 3", () => {
             {
               id: FIRST_AGENT_ID,
               name: "Appointment scheduler",
+              platform: "livekit",
               connections: [
-                { id: FIRST_CONNECTION_ID, name: "livekit-1", modality: "voice" },
+                { id: FIRST_CONNECTION_ID, name: "livekit-1" },
               ],
             },
           ],

@@ -85,6 +85,11 @@ export type Minted =
   | { readonly kind: "active-name-conflict" }
   | CommonFailure;
 
+/** A generic Project key created for the developer, not for a CLI-owned job. */
+export type CreatedProjectKey =
+  | { readonly kind: "created"; readonly key: MintedKey }
+  | CommonFailure;
+
 export type Revoked = { readonly kind: "revoked" } | CommonFailure;
 
 export type ActiveProjectKey = {
@@ -102,6 +107,60 @@ function apiErrorCode(error: unknown): string {
   return typeof error === "object" && error !== null && "error" in error
     ? platformText(error.error)
     : "";
+}
+
+/**
+ * Create one ordinary Project-scoped key.
+ *
+ * The existing platform contract derives the scope from `projectId`. There is
+ * no scope flag and no Agent association to invent here. The secret is wrapped
+ * as soon as it crosses the HTTP boundary so callers must opt in to revealing
+ * it at the one output line that is allowed to print it.
+ */
+export async function createProjectKey(
+  input: { readonly name: string; readonly projectId: string },
+  options: RegisterOptions,
+): Promise<CreatedProjectKey> {
+  const answer = await createApiKeyRequest(
+    { body: { name: input.name, projectId: input.projectId } },
+    requestOptions(options),
+  );
+
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+
+  const id = platformText(answer.data?.id);
+  const name = answer.data?.name === null ? null : platformText(answer.data?.name);
+  const projectId =
+    answer.data?.projectId === null ? null : platformText(answer.data?.projectId);
+  const secret =
+    typeof answer.data?.secret === "string" ? answer.data.secret.trim() : "";
+  if (
+    answer.data === undefined ||
+    id === "" ||
+    name === null ||
+    name === "" ||
+    projectId === null ||
+    projectId === "" ||
+    secret === ""
+  ) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without the complete Project API-key receipt. Check the Project's API keys before retrying.",
+    };
+  }
+
+  return {
+    kind: "created",
+    key: {
+      id,
+      name,
+      projectId,
+      looksLike: platformText(answer.data.looksLike),
+      secret: new MintedSecret(secret),
+    },
+  };
 }
 
 /**
