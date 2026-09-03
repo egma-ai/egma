@@ -1153,6 +1153,35 @@ describe("goal-first agent setup", () => {
     ],
   };
 
+  /** One voice agent whose discovery answers with no routed number at all. */
+  const unroutedVoiceDiscovery = {
+    agents: [
+      {
+        platformAgentId: "agent_voice_unrouted",
+        name: "Voice without a number",
+        modality: "voice",
+        connectionCandidates: [
+          {
+            agentPlatform: "retell",
+            connectionType: "retell_text_mode",
+            accessVariant: "retell_text_mode.api_key",
+            modality: "chat",
+            productLabel: "Retell text mode",
+            config: { retellAgentId: "agent_voice_unrouted" },
+          },
+          {
+            agentPlatform: "retell",
+            connectionType: "retell_web_call",
+            accessVariant: "retell_web_call.api_key",
+            modality: "voice",
+            productLabel: "Retell web call",
+            config: { retellAgentId: "agent_voice_unrouted" },
+          },
+        ],
+      },
+    ],
+  };
+
   const liveKitAgent = {
     ...AGENT,
     id: "agt_livekit",
@@ -1215,6 +1244,16 @@ describe("goal-first agent setup", () => {
       await screen.findByRole("radio", { name: new RegExp(`^${name}`) }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  }
+
+  /**
+   * Select the agent radio without advancing. The monitoring goal finishes on
+   * this step, so its primary button is Start monitoring, not Continue.
+   */
+  async function selectRetellAgent(name: string): Promise<void> {
+    fireEvent.click(
+      await screen.findByRole("radio", { name: new RegExp(`^${name}`) }),
+    );
   }
 
   /** Choose the simulation modality before any connection detail. */
@@ -1636,9 +1675,16 @@ describe("goal-first agent setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Choose a Retell agent" }),
     ).toBeDefined();
-    await pickRetellAgent("Appointment line");
 
-    expect(await screen.findByLabelText("Phone number*")).toBeDefined();
+    // Monitoring finishes on the agent choice and never sees a phone number.
+    // Both saves the phone lane, so its walk keeps the chooser.
+    if (goal === "monitoring") {
+      await selectRetellAgent("Appointment line");
+      expect(screen.queryByLabelText("Phone number*")).toBeNull();
+    } else {
+      await pickRetellAgent("Appointment line");
+      expect(await screen.findByLabelText("Phone number*")).toBeDefined();
+    }
     const start = screen.getByRole("button", { name: action });
     for (let turn = 1; turn <= 2; turn += 1) {
       fireEvent.click(start);
@@ -1766,42 +1812,32 @@ describe("goal-first agent setup", () => {
     expect(unrouted.disabled).toBe(false);
   });
 
-  it("disables a no-phone Retell agent when production monitoring needs a phone", async () => {
+  it("keeps a no-phone Retell agent usable and counts no phones when Monitoring is the goal", async () => {
+    // Pull selects calls by platform agent id, so a voice agent with no
+    // routed number can be monitored — and a phone count would be a fact
+    // about a chooser this walk never reaches.
     sheetAnswers({
-      "/v1/agents:discover": {
-        status: 200,
-        body: {
-          agents: [
-            {
-              platformAgentId: "agent_voice_unrouted",
-              name: "Voice without a number",
-              modality: "voice",
-              connectionCandidates: [
-                {
-                  agentPlatform: "retell",
-                  connectionType: "retell_text_mode",
-                  accessVariant: "retell_text_mode.api_key",
-                  modality: "chat",
-                  productLabel: "Retell text mode",
-                  config: { retellAgentId: "agent_voice_unrouted" },
-                },
-                {
-                  agentPlatform: "retell",
-                  connectionType: "retell_web_call",
-                  accessVariant: "retell_web_call.api_key",
-                  modality: "voice",
-                  productLabel: "Retell web call",
-                  config: { retellAgentId: "agent_voice_unrouted" },
-                },
-              ],
-            },
-          ],
-        },
-      },
+      "/v1/agents:discover": { status: 200, body: unroutedVoiceDiscovery },
     });
     render(<RegisterAgentPage />);
 
     await choose("Monitor production", "Retell");
+    await findRetellAgents();
+
+    const unrouted = screen.getByRole("radio", {
+      name: /Voice without a number/,
+    }) as HTMLButtonElement;
+    expect(unrouted.disabled).toBe(false);
+    expect(screen.queryByText(/phone numbers? available/)).toBeNull();
+  });
+
+  it("disables a no-phone Retell agent when Both needs a phone for its lane", async () => {
+    sheetAnswers({
+      "/v1/agents:discover": { status: 200, body: unroutedVoiceDiscovery },
+    });
+    render(<RegisterAgentPage />);
+
+    await choose("Set up both", "Retell");
     await findRetellAgents();
 
     const unrouted = screen.getByRole("radio", {
@@ -2715,54 +2751,52 @@ describe("goal-first agent setup", () => {
     ).toBe(false);
   });
 
-  it("never sees the test question when Monitoring is the goal", async () => {
-    // A monitoring-goal user skips the question, as before: production pull
-    // needs the voice connection and nothing else, so asking "text, web call
-    // or phone?" would be a question whose answer it cannot use.
+  it("never sees the test question or a phone number when Monitoring is the goal", async () => {
+    // A monitoring-goal user skips the question: pull selects calls by
+    // platform agent id, so "text, web call or phone?" would be a question
+    // whose answer it cannot use — and so would a phone-number chooser.
     sheetAnswers({
       "/v1/agents:discover": { status: 200, body: retellDiscovery },
     });
     render(<RegisterAgentPage />);
     await choose("Monitor production", "Retell");
     await findRetellAgents();
-    await pickRetellAgent("Appointment line");
+    await selectRetellAgent("Appointment line");
 
-    expect(await screen.findByLabelText("Phone number*")).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: "Start monitoring" }),
+    ).toBeDefined();
     expect(
       screen.queryByRole("heading", {
         name: "How should Egma test this agent?",
       }),
     ).toBeNull();
+    expect(screen.queryByLabelText("Phone number*")).toBeNull();
   });
 
-  it("stores the selected Retell route and starts pulling when Monitoring is the goal", async () => {
+  it("starts pulling with no connection and no phone number when Monitoring is the goal", async () => {
     sheetAnswers({
       "/v1/agents:discover": { status: 200, body: retellDiscovery },
-      "/v1/agents": [
-        { status: 200, body: { agents: [], nextPageToken: null } },
-        {
-          status: 201,
-          body: {
-            result: "created",
-            agent: {
-              ...AGENT,
-              name: "Appointment line",
+      "/v1/monitoring/start": {
+        status: 200,
+        body: {
+          watching: [
+            {
+              agentId: "agt_watched",
+              agentName: "Appointment line",
               platformAgentId: "agent_voice_1",
-              monitoringKeyPresent: true,
-              monitoringApiKeyHint: "WXYZ",
+              created: true,
               pullProductionCalls: true,
             },
-            connection: MEASURED_CONNECTION,
-          },
+          ],
+          refused: [],
         },
-        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
-      ],
+      },
     });
     render(<RegisterAgentPage />);
     await choose("Monitor production", "Retell");
     await findRetellAgents();
-    await pickRetellAgent("Appointment line");
-    expect(await screen.findByLabelText("Phone number*")).toBeDefined();
+    await selectRetellAgent("Appointment line");
 
     const start = screen.getByRole("button", { name: "Start monitoring" });
     await waitFor(() => {
@@ -2772,30 +2806,32 @@ describe("goal-first agent setup", () => {
 
     await waitFor(() => {
       expect(
-        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+        sent.some((call) => call.url.startsWith("/v1/monitoring/start")),
       ).toBe(true);
     });
-    const registration = sent.find(
-      (call) => call.url === "/v1/agents?projectId=prj_1",
+    // The switch commit carries the key and registers the platform agent
+    // itself, so the walk names the agent by the platform's own identity.
+    const started = sent.find((call) =>
+      call.url.startsWith("/v1/monitoring/start"),
     );
-    expect(registration?.body).toEqual({
-      name: "Appointment line",
+    expect(started?.body).toEqual({
       agentPlatform: "retell",
-      connection: {
-        agentPlatform: "retell",
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "voice",
-        config: { phoneNumber: "+14155550100" },
-        platformAgentId: "agent_voice_1",
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-        pullProductionCalls: true,
-        mockToolsEnabled: false,
-      },
+      apiKey: "retell-secret-A1B2C3D4WXYZ",
+      watch: [
+        { platformAgentId: "agent_voice_1", name: "Appointment line" },
+      ],
     });
+    await waitFor(() => {
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents");
+    });
+    // No agent registration write and no connection write anywhere.
     expect(
-      sent.some((call) => call.url.startsWith("/v1/monitoring/start")),
+      sent.some(
+        (call) =>
+          call.method === "POST" && call.url.startsWith("/v1/agents?"),
+      ),
     ).toBe(false);
+    expect(sent.some((call) => call.url.includes("/connections"))).toBe(false);
   });
 
   it("creates the LiveKit room connection, then shows the testing hook", async () => {

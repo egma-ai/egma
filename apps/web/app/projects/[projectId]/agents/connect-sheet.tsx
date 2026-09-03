@@ -483,9 +483,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   /**
    * The lane this goal will save, and the candidate that saves it.
    *
-   * A monitoring goal skips the question and saves the phone lane, which is
-   * what production pull needs. A simulation goal saves the one that was
-   * picked.
+   * A Both goal skips the question and saves the phone lane, and that save
+   * also starts pulling. A simulation goal saves the one that was picked.
+   * The monitoring goal saves no lane at all — its finish is the pull
+   * switch — so this value never reaches a save on that walk.
    */
   const laneToSave: RetellLane | "" =
     plan?.asksHowToTest === true ? lane : "phone";
@@ -756,10 +757,21 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     };
   }
 
-  async function startRetellMonitoringFor(
-    targetAgentId: string,
-    targetPlatformAgentId: string,
-  ): Promise<boolean> {
+  /**
+   * Flip the pull switch through the one commit `startMonitoring` is.
+   *
+   * `agentId` is the egma agent the flow started from, when there is one.
+   * Without it the server resolves the platform agent by (project, platform,
+   * platform agent id) and registers one under `name` when nothing answers —
+   * watching an unregistered agent means registering it (ADR-0015). The
+   * stored key is spent only when an egma agent is named, because that is the
+   * only entry shape the omitted-key preflight accepts.
+   */
+  async function startRetellMonitoringWatch(target: {
+    readonly agentId: string | null;
+    readonly platformAgentId: string;
+    readonly name: string;
+  }): Promise<{ readonly agentId: string; readonly created: boolean } | null> {
     setSaving(true);
     setRefused(null);
     const answer = await platformAnswer(
@@ -767,26 +779,33 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         {
           projectId,
           agentPlatform: "retell",
-          ...(storedRetellKey ? {} : { apiKey: apiKey.trim() }),
+          ...(storedRetellKey && target.agentId !== null
+            ? {}
+            : { apiKey: apiKey.trim() }),
           watch: [
-            {
-              agentId: targetAgentId,
-              platformAgentId: targetPlatformAgentId,
-            },
+            target.agentId === null
+              ? {
+                  platformAgentId: target.platformAgentId,
+                  name: target.name,
+                }
+              : {
+                  agentId: target.agentId,
+                  platformAgentId: target.platformAgentId,
+                },
           ],
         },
         { client: platformClient },
       ),
     );
     setSaving(false);
-    if (!finishAnswer(answer)) return false;
+    if (!finishAnswer(answer)) return null;
 
     const watching = answer.value.watching.find(
-      (one) => one.agentId === targetAgentId,
+      (one) => one.platformAgentId === target.platformAgentId,
     );
     if (watching === undefined) {
       const refusal = answer.value.refused.find(
-        (one) => one.platformAgentId === targetPlatformAgentId,
+        (one) => one.platformAgentId === target.platformAgentId,
       );
       setRefused({
         error: "monitoring_not_started",
@@ -794,10 +813,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           refusal?.message ??
           "Egma did not start monitoring this agent. Try again.",
       });
-      return false;
+      return null;
     }
 
-    return true;
+    return { agentId: watching.agentId, created: watching.created === true };
   }
 
   async function resumeRetellMonitoring(): Promise<ConnectSheetResult | null> {
@@ -810,13 +829,38 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       return null;
     }
 
-    const started = await startRetellMonitoringFor(
+    const watched = await startRetellMonitoringWatch({
       agentId,
-      known.platformAgentId,
-    );
-    if (!started) return null;
+      platformAgentId: known.platformAgentId,
+      name: known.name,
+    });
+    if (watched === null) return null;
 
     return { agentId, connectionId: null, created: false };
+  }
+
+  /**
+   * The Monitoring goal's whole finish, from the agent choice itself.
+   *
+   * Production pull needs the sealed key and the platform agent id — the
+   * puller selects calls by agent id alone — so no provider connection is
+   * written and no phone number is asked for.
+   */
+  async function finishRetellMonitoring(): Promise<void> {
+    if (selectedRetellAgent === undefined) return;
+    const startedFrom =
+      agentId !== undefined && agentId !== NEW_AGENT ? agentId : null;
+    const watched = await startRetellMonitoringWatch({
+      agentId: startedFrom,
+      platformAgentId: selectedRetellAgent.platformAgentId,
+      name: selectedRetellAgent.name || selectedRetellAgent.platformAgentId,
+    });
+    if (watched === null) return;
+    onConnected({
+      agentId: watched.agentId,
+      connectionId: null,
+      created: watched.created,
+    });
   }
 
   /**
@@ -1004,11 +1048,12 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         pullsProduction &&
         !retryPullEnabled
       ) {
-        const started = await startRetellMonitoringFor(
-          landed?.agentId ?? committed.agentId,
-          selectedRetellAgent.platformAgentId,
-        );
-        if (!started) return;
+        const started = await startRetellMonitoringWatch({
+          agentId: landed?.agentId ?? committed.agentId,
+          platformAgentId: selectedRetellAgent.platformAgentId,
+          name: selectedRetellAgent.name || selectedRetellAgent.platformAgentId,
+        });
+        if (started === null) return;
         retryPullEnabled = true;
       }
       if (committed === undefined && landed !== null) {
@@ -1148,7 +1193,13 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           return;
         }
         const next = stepAfterRetellAgent(plan);
-        // A goal that skips the question saves the phone lane, so it needs its
+        // The monitoring goal has nothing left to ask: the pull switch needs
+        // no provider route, so the agent choice is the whole of it.
+        if (next === null) {
+          await finishRetellMonitoring();
+          return;
+        }
+        // Both skips the question and saves the phone lane, so it needs its
         // first routed number chosen for it; the question's own walk waits.
         if (next === "retell-phone") {
           const first = voiceRoutes[0];
@@ -1388,16 +1439,20 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                   const phones = one.connectionCandidates.filter(
                     (candidate) => candidate.connectionType === "phone_number",
                   ).length;
+                  // Pull selects calls by agent id, so a monitoring-only walk
+                  // has no use for a phone count and does not show one.
                   const description =
-                    modality === "voice"
-                      ? "Voice agent · " +
-                        (phones === 0
-                          ? "no phone numbers available"
-                          : phones +
-                            (phones === 1
-                              ? " phone number available"
-                              : " phone numbers available"))
-                      : "No supported connection available";
+                    modality !== "voice"
+                      ? "No supported connection available"
+                      : plan?.pullWithoutConnection === true
+                        ? "Voice agent"
+                        : "Voice agent · " +
+                          (phones === 0
+                            ? "no phone numbers available"
+                            : phones +
+                              (phones === 1
+                                ? " phone number available"
+                                : " phone numbers available"));
                   return (
                     <ChoiceCard
                       key={one.platformAgentId}
@@ -1415,7 +1470,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             <InfoBox>
               {plan?.asksHowToTest === true
                 ? "Egma lists your Retell voice agents. You choose how to test the one you pick next."
-                : "Egma lists your Retell voice agents. Production monitoring needs one of the phone numbers routed to the agent you pick."}
+                : plan?.pullWithoutConnection === true
+                  ? "Egma lists your Retell voice agents, and pulls the production calls of the one you pick from your Retell account."
+                  : "Egma lists your Retell voice agents. Setting up both needs one of the phone numbers routed to the agent you pick."}
             </InfoBox>
           </div>
         );
@@ -1578,12 +1635,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   const primaryLabel =
-    step === "goal" ||
-    step === "platform" ||
-    step === "retell-agent" ||
-    step === "livekit-modality"
+    step === "goal" || step === "platform" || step === "livekit-modality"
       ? "Continue"
-      : step === "retell-lanes"
+      : step === "retell-agent"
+        ? // The monitoring goal finishes on this step: the pull switch needs
+          // no provider route, so the agent choice is the whole of it.
+          plan?.pullWithoutConnection === true
+          ? saving
+            ? "Starting…"
+            : "Start monitoring"
+          : "Continue"
+        : step === "retell-lanes"
           ? lane === "phone"
             ? "Continue"
             : saving
@@ -1598,13 +1660,13 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 ? "Finding agents…"
                 : "Find agents"
               : step === "retell-phone"
-                ? saving
+                ? // Monitoring never reaches the number chooser any more: it
+                  // finishes on the agent choice.
+                  saving
                   ? "Finishing…"
                   : goal === "simulation"
                     ? "Set up simulation"
-                    : goal === "monitoring"
-                      ? "Start monitoring"
-                      : "Set up both"
+                    : "Set up both"
                 : step === "livekit-simulation"
                   ? saving
                     ? "Saving…"
