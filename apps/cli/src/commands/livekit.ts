@@ -1,16 +1,17 @@
 /**
  * The current source contract for a LiveKit worker.
  *
- * This belongs to the versioned CLI, not to an Agent Skill. The skill tells a
- * coding agent when it needs this contract; the installed CLI tells it the
- * source hooks without choosing an SDK version.
+ * This file is not a public CLI verb. The web product reads the versioned
+ * contract here to keep its LiveKit instructions in step with the installed
+ * CLI. The public CLI sends developers and coding agents to the integration
+ * skill instead of exposing a root-level LiveKit command.
  */
 
 export type LiveKitContractCommandOptions = {
   readonly out: (line: string) => void;
 };
 
-/** Print stable fact lines that a coding agent can apply to the real worker. */
+/** Print stable fact lines that the web contract test can compare. */
 export function runLiveKitContractCommand(
   options: LiveKitContractCommandOptions,
 ): number {
@@ -34,9 +35,7 @@ export function runLiveKitContractCommand(
   options.out(
     'javascript_testing_import: import { mockable } from "@egma/livekit"',
   );
-  options.out(
-    "javascript_testing_call: await mockable(agent, ctx, session)",
-  );
+  options.out("javascript_testing_call: await mockable(agent, ctx, session)");
   options.out(
     "javascript_testing_position: after the initial agent and AgentSession exist; before AgentSession.start",
   );

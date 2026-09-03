@@ -425,7 +425,7 @@ describe("this repository", () => {
  * A package this repository publishes may not import one it never publishes.
  *
  * `apps/cli` ships its source compiled rather than bundled, so an import
- * written in `src` is still an import in the file `npx @egma/cli` runs. A
+ * written in `src` is still an import in the file `egma` runs. A
  * `private: true` workspace package is not on npm for it to resolve, so the
  * command installs, starts, and fails at the first line that needs it.
  *

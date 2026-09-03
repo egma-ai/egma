@@ -1,8 +1,8 @@
 {
-  "name": "@egma/cli",
-  "version": "0.3.1",
+  "name": "egma-cli",
+  "version": "0.3.2",
   "type": "module",
-  "description": "Promptless commands and public agent skills for integrating voice agents with Egma.",
+  "description": "Promptless commands for integrating voice agents with Egma.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/egma-ai/egma",
   "repository": {
@@ -25,8 +25,6 @@
   "files": [
     "dist",
     "!dist/.tsbuildinfo",
-    "runtime",
-    "skills",
     "NOTICE",
     "README.md"
   ],
@@ -40,8 +38,7 @@
     "build": "node tools/clean-dist.mjs && tsc -b",
     "prepack": "pnpm build",
     "prepublishOnly": "pnpm -w build",
-    "smoke:platform": "node smoke/real-platform-login.ts",
-    "smoke:retell": "node smoke/real-retell-connect.ts"
+    "smoke:platform": "node smoke/real-platform-login.ts"
   },
   "dependencies": {
     "@egma/platform-api": "workspace:*",

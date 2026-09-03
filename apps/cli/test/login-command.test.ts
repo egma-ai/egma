@@ -90,6 +90,10 @@ describe("egma login", () => {
     if (held === null) throw new Error("login did not store credentials");
     expect(held.url).toBe(platform.url);
     expect(held.key).toBe(platform.device.keys.at(-1));
+    expect(held.login).toEqual({
+      apiKeyId: expect.stringMatching(/^ak_/u),
+      projectId: platform.projectId,
+    });
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
 
     // And it works on a request that needs one.
@@ -291,20 +295,21 @@ describe("egma login", () => {
   });
 
   it("is offered in the help, with what it prints and what it answers", async () => {
-    const help = await egma(["--help"]);
+    const help = await egma(["login", "--help"]);
 
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("egma login");
     expect(help.stdout).toContain("--url <address>");
     expect(help.stdout).toContain("approve_url");
-    expect(help.stdout).toContain("2 denied");
+    expect(help.stdout).toContain("2 means denied");
     // 4 is both an egma that never answered and one that said no, and the help
     // says both rather than only the one that reads better.
-    expect(help.stdout).toContain("4 Egma did not answer, or refused");
+    expect(help.stdout).toContain("4 means the platform");
+    expect(help.stdout).toContain("refused or did not answer");
   });
 
   it("names what a self-hoster sets, in the help", async () => {
-    const help = await egma(["--help"]);
+    const help = await egma(["login", "--help"]);
 
     // Which egma is said on the command and nowhere else, so the flag is the
     // whole of that half. What is left in the environment is where the key it

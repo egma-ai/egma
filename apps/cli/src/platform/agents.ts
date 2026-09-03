@@ -40,16 +40,8 @@ export type NewConnection = {
   readonly config: Readonly<Record<string, string>>;
   /** Sealed by the platform. Never answered back and never stored here. */
   readonly credentials?: ConnectionCredentials | undefined;
-  /**
-   * The external agent selected during provider discovery. The platform checks
-   * it again inside the create request, then discards it.
-   */
-  readonly agentPlatformSelection?:
-    | {
-        readonly platformAgentId: string;
-        readonly credentials: ConnectionCredentials;
-      }
-    | undefined;
+  /** The provider agent selected through server-side discovery. */
+  readonly platformAgentId?: string | undefined;
 };
 
 export type Registration = {
@@ -68,6 +60,8 @@ export type RegisteredAgent = {
   readonly agentPlatform: "retell" | "livekit";
   /** The provider's public agent id, when this agent is bound to one. */
   readonly platformAgentId: string | null;
+  /** Whether the server can reuse the provider key already sealed on it. */
+  readonly monitoringKeyPresent?: boolean;
 };
 
 export type RegisteredConnection = {
@@ -148,16 +142,28 @@ function cleanAgent(value: unknown): RegisteredAgent | null {
   const rawPlatformAgentId = agent["platformAgentId"];
   const platformAgentId =
     rawPlatformAgentId === null ? null : platformText(rawPlatformAgentId);
+  const monitoringKeyPresent = agent["monitoringKeyPresent"];
   if (
     id === "" ||
     name === "" ||
     projectId === "" ||
     (agentPlatform !== "retell" && agentPlatform !== "livekit") ||
-    (rawPlatformAgentId !== null && platformAgentId === "")
+    (rawPlatformAgentId !== null && platformAgentId === "") ||
+    (monitoringKeyPresent !== undefined &&
+      typeof monitoringKeyPresent !== "boolean")
   ) {
     return null;
   }
-  return { id, name, projectId, agentPlatform, platformAgentId };
+  return {
+    id,
+    name,
+    projectId,
+    agentPlatform,
+    platformAgentId,
+    ...(typeof monitoringKeyPresent === "boolean"
+      ? { monitoringKeyPresent }
+      : {}),
+  };
 }
 
 /** A successful registration is useful only with its complete stable receipt. */
@@ -232,8 +238,6 @@ function connectionReceipt(value: unknown): RegisteredConnection | null {
 }
 
 function connectionParameters(connection: NewConnection): ConnectionInput {
-  const selectionCredentials =
-    connection.agentPlatformSelection?.credentials.reveal();
   return {
     ...(connection.name === undefined ? {} : { name: connection.name }),
     agentPlatform: connection.agentPlatform,
@@ -247,14 +251,9 @@ function connectionParameters(connection: NewConnection): ConnectionInput {
     ...(connection.credentials === undefined
       ? {}
       : { credentials: connection.credentials.reveal() }),
-    ...(connection.agentPlatformSelection === undefined
+    ...(connection.platformAgentId === undefined
       ? {}
-      : {
-          agentPlatformSelection: {
-            platformAgentId: connection.agentPlatformSelection.platformAgentId,
-            credentials: { apiKey: selectionCredentials?.["apiKey"] ?? "" },
-          },
-        }),
+      : { platformAgentId: connection.platformAgentId }),
   };
 }
 
@@ -300,6 +299,77 @@ export type MatchedConnections =
 
 /** How many pages of agents are walked before giving up on finding a name. */
 const MOST_PAGES = 20;
+
+export type ListedAgent = {
+  readonly agent: PlatformAgent;
+  readonly connections: readonly RegisteredConnection[];
+};
+
+export type ListedAgents =
+  | { readonly kind: "agents"; readonly agents: readonly ListedAgent[] }
+  | CommonFailure;
+
+/** Read the complete active Agent roster for one Project. */
+export async function listAllAgents(
+  projectId: string,
+  options: RegisterOptions,
+): Promise<ListedAgents> {
+  let pageToken: string | undefined;
+  const agents: ListedAgent[] = [];
+
+  for (let page = 0; page < MOST_PAGES; page += 1) {
+    const answer = await listAgentsRequest(
+      {
+        projectId,
+        pageSize: 200,
+        ...(pageToken === undefined ? {} : { pageToken }),
+      },
+      requestOptions(options),
+    );
+    const failed = commonFailure(answer, options);
+    if (failed !== null) return failed;
+    if (answer.data === undefined || !Array.isArray(answer.data.agents)) {
+      return {
+        kind: "refused",
+        reason:
+          "Egma answered without an Agent list. Check that this Egma platform is up to date.",
+      };
+    }
+    for (const row of answer.data.agents) {
+      const agent = cleanAgent(row);
+      if (agent === null || !Array.isArray(row.connections)) {
+        return {
+          kind: "refused",
+          reason:
+            "Egma answered with an incomplete Agent. Check that this Egma platform is up to date.",
+        };
+      }
+      const connections: RegisteredConnection[] = [];
+      for (const raw of row.connections) {
+        const connection = connectionReceipt(raw);
+        if (connection === null) {
+          return {
+            kind: "refused",
+            reason:
+              "Egma answered with an incomplete Connection. Check that this Egma platform is up to date.",
+          };
+        }
+        connections.push(connection);
+      }
+      agents.push({ agent, connections });
+    }
+
+    const next = answer.data.nextPageToken ?? null;
+    if (next === null || next === "") return { kind: "agents", agents };
+    pageToken = next;
+  }
+
+  return {
+    kind: "refused",
+    reason:
+      "Egma has more Agent pages than this CLI can read safely. Update the CLI and try again.",
+  };
+}
 
 /** The living agent holding one name, or the word that there is none. */
 export async function agentNamed(

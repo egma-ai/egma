@@ -27,12 +27,14 @@ behaviors you expect.
 ## Get started
 
 <Steps>
-  <Step title="Install the public skills">
-    Run the bare CLI from the voice-agent repository. It prints the skill
-    install command and the exact handoff for the coding agent you already use.
+  <Step title="Install the CLI and public skills">
+    Install the npm package once. It provides the `egma` command.
 
     ```bash
-    npx --yes @egma/cli
+    npm install --global egma-cli
+    npx --yes skills add egma-ai/egma \
+      --skill integrate-egma \
+      --skill write-egma-tests
     ```
   </Step>
   <Step title="Approve sign-in">

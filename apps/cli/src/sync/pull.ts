@@ -15,8 +15,10 @@ import path from "node:path";
 import {
   RepositoryValidationError,
   readRepository,
+  serializeConfig,
   serializeMockToolsFile,
   serializeSuiteManifest,
+  type FolderConfig,
   type FolderPaths,
   type FolderSuite,
 } from "../folder/egma-folder.ts";
@@ -79,6 +81,8 @@ type StagedFileApplier = (
 export type PullOptions = {
   readonly signedIn: SignedIn;
   readonly paths: FolderPaths;
+  /** A freshly read target index to commit with every other pulled file. */
+  readonly config?: FolderConfig;
   readonly fetchImpl?: Fetch;
   /** Failure injection at the real local-write boundary. */
   readonly applyStagedFile?: StagedFileApplier;
@@ -253,10 +257,11 @@ async function applyStaged(
 
 export async function pullRepository(options: PullOptions): Promise<PullReport> {
   const repository = await readRepository(options.paths);
-  const projectId = repository.config.project?.id ?? "";
+  const pulledConfig = options.config ?? repository.config;
+  const projectId = pulledConfig.project?.id ?? "";
   if (projectId === "") {
     throw new RepositoryValidationError([
-      "egma/config.yaml does not name a project. Run egma connect here first.",
+      "egma/config.yaml does not name a Project. Run egma init again.",
     ]);
   }
 
@@ -427,6 +432,13 @@ export async function pullRepository(options: PullOptions): Promise<PullReport> 
   const mockDocument = serializeMockToolsFile(mockTools);
   if (!(await sameBytes(options.paths.mockTools, mockDocument))) {
     planned.push({ destination: options.paths.mockTools, document: mockDocument });
+  }
+
+  const configDocument = serializeConfig(pulledConfig);
+  if (!(await sameBytes(options.paths.config, configDocument))) {
+    // Apply the config last. A failed earlier write never exposes a target
+    // index for suite and test files that were not applied.
+    planned.push({ destination: options.paths.config, document: configDocument });
   }
 
   await applyStaged(

@@ -68,6 +68,7 @@ export type PushOptions = {
   readonly signedIn: SignedIn;
   readonly paths: FolderPaths;
   readonly fetchImpl?: Fetch;
+  readonly signal?: AbortSignal;
 };
 
 function inputFrom(test: TestFile): TestInput {
@@ -120,7 +121,7 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
   const projectId = repository.config.project?.id ?? "";
   if (projectId === "") {
     throw new Error(
-      "This repository does not name its Egma project. Run egma connect here first.",
+      "This repository does not name its Egma Project. Run egma init again.",
     );
   }
 
@@ -162,6 +163,7 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     options.signedIn,
     changeSet,
     options.fetchImpl,
+    options.signal,
   );
   const fileByRef = new Map(files.map((file) => [file.shown, file] as const));
   const pushed: PushedTest[] = [];

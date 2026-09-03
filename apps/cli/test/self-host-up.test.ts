@@ -38,9 +38,7 @@ describe("egma self-host up", () => {
       expect(run.stdout).toContain(`url: ${platform.url}`);
       expect(run.stdout).toContain("status: ready");
       expect(run.stderr).toContain(`Egma is ready at ${platform.url}`);
-      expect(run.stdout).toContain(
-        `connect: npx @egma/cli --url ${platform.url}`,
-      );
+      expect(run.stdout).toContain(`login: egma login --url ${platform.url}`);
 
       // Every service it started, named. Five of them — the object store, the
       // simulator, the grader, the SIP gateway and its Redis — publish nothing

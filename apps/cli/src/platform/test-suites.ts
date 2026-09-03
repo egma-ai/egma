@@ -101,10 +101,14 @@ export async function getTestSuite(
   signedIn: SignedIn,
   suiteId: string,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformTestSuite | null> {
   const answer = await getTestSuiteRequest(
     { suiteId },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (response.status === 404) return null;

@@ -11,7 +11,7 @@
  * and refuses the rest by name and line number.
  *
  * It is written rather than depended on for two reasons. The first is that
- * `npx egma` is the first thing a developer runs, so every dependency is
+ * `egma` is the first thing a developer runs, so every dependency is
  * download time before anything happens. The second matters more: `pull`
  * immediately after `push` has to change zero bytes, and that is a promise about
  * output, not about a parse tree. Writing the bytes here is what lets it be

@@ -129,6 +129,22 @@ describe("signing a machine in", () => {
     expect(held?.url).toBe(platform.url);
     expect(held?.key).toMatch(/^egma_sk_/u);
     expect(held?.key).toBe(platform.device.keys.at(-1));
+    expect(held?.login).toEqual({
+      apiKeyId: expect.stringMatching(/^ak_/u),
+      projectId: platform.projectId,
+    });
+    expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
+      version: 2,
+      platforms: {
+        [platform.url]: {
+          api_key: held?.key,
+          login: {
+            api_key_id: held?.login?.apiKeyId,
+            project_id: platform.projectId,
+          },
+        },
+      },
+    });
 
     // And nobody else on the machine can read it.
     const mode = (await stat(workspace.credentialsFile)).mode & 0o777;
@@ -510,25 +526,15 @@ describe("which egma a command talks to", () => {
    * covered by reading it. The checks themselves are not scanned: proving the
    * variable is inert means naming it.
    *
-   * **Two files name it on purpose, and the list below is exhaustive** (founder
-   * decision, monitoring audit round, 2026-08-24). The variable has a second
-   * life that has nothing to do with choosing a platform: it is one of the two
-   * the Egma Python SDK reads inside the *customer's own* worker process, and
-   * egma both writes it into their `.env` and teaches a coding agent to name it
-   * when the entrypoint has to be wired by hand. A by-hand fallback that would
-   * not say what the two variables are called produces a worker that crashes on
-   * start, which is the defect this carve-out fixes.
-   *
-   * The carve is by exact path rather than by a pattern, so a new file naming
-   * the variable fails here and has to be argued for.
+   * No shipped CLI source names it. Monitoring setup now points to the skill;
+   * the CLI does not write a worker environment file.
    */
-  it("offers one way to name a platform, and names the old one only where the SDK does", async () => {
+  it("offers one way to name a platform and does not name the old one", async () => {
     // Everything `package.json` puts in the published package, plus the
     // repository's own front page. `dist` is left out because it is `src`
     // compiled, and a scan of both would go red twice for one mention.
     const written = [
       ...(await filesIn(path.join(CLI_PACKAGE, "src"))),
-      ...(await filesIn(path.join(CLI_PACKAGE, "skills"))),
       ...(await filesIn(path.join(CLI_PACKAGE, "smoke"))),
       path.join(CLI_PACKAGE, "NOTICE"),
       path.join(CLI_PACKAGE, "README.md"),
@@ -536,19 +542,13 @@ describe("which egma a command talks to", () => {
     ];
     expect(written.length).toBeGreaterThan(20);
 
-    /** The worker's environment contract, and nothing else. */
-    const THE_SDK_CONTRACT = [
-      // Egma's own code writes the two lines into the customer's `.env`.
-      "src/monitoring/env-file.ts",
-    ];
-
     const naming: string[] = [];
     for (const file of written) {
       if ((await readFile(file, "utf8")).includes("EGMA_URL")) {
         naming.push(path.relative(CLI_PACKAGE, file).replaceAll(path.sep, "/"));
       }
     }
-    expect(naming.sort()).toEqual([...THE_SDK_CONTRACT].sort());
+    expect(naming).toEqual([]);
   });
 });
 
@@ -815,10 +815,37 @@ describe("writing the key down", () => {
     expect(said.join("\n")).not.toContain(legacy.key);
     expect(said.join("\n")).not.toContain(next.key);
     expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
-      version: 1,
+      version: 2,
       platforms: {
-        "https://old.example": { key: legacy.key },
-        "https://second.example": { key: next.key },
+        "https://old.example": { api_key: legacy.key },
+        "https://second.example": { api_key: next.key },
+      },
+    });
+  });
+
+  it("reads the version 1 platform map and moves it forward on the next write", async () => {
+    const old = {
+      url: "https://old-map.example",
+      key: "egma_sk_preserved-from-version-one",
+    };
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(
+      workspace.credentialsFile,
+      `${JSON.stringify({ version: 1, platforms: { [old.url]: { key: old.key } } })}\n`,
+      "utf8",
+    );
+
+    expect(await readCredentials(workspace.credentialsFile, old.url)).toEqual(old);
+    await writeCredentials(workspace.credentialsFile, {
+      url: "https://new-map.example",
+      key: "egma_sk_new-version-two-entry",
+    });
+
+    expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
+      version: 2,
+      platforms: {
+        "https://new-map.example": { api_key: "egma_sk_new-version-two-entry" },
+        "https://old-map.example": { api_key: old.key },
       },
     });
   });

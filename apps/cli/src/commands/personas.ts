@@ -1,4 +1,4 @@
-/** `egma personas`: list the identities repository tests may name. */
+/** `egma persona list`: list the identities repository tests may name. */
 
 import { readConfig } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
@@ -19,7 +19,7 @@ export async function runPersonasCommand(
   if (projectId === "") {
     options.out("status: no-project");
     options.fail(
-      "This repository does not name its Egma project. Run egma connect here first.",
+      "This repository does not name its Egma Project. Run egma init here first.",
     );
     return FOLDER_EXIT.nothing;
   }

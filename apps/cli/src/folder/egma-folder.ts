@@ -86,13 +86,12 @@ export type IdentifiedThing = {
 };
 
 /** One committed way Egma can reach an agent. */
-export type FolderConnection = IdentifiedThing & {
-  /** Whether this connection carries typed turns or spoken audio. */
-  readonly modality: "chat" | "voice";
-};
+export type FolderConnection = IdentifiedThing;
 
 /** One agent in this project, and every committed way Egma can reach it. */
 export type FolderAgent = IdentifiedThing & {
+  /** Which provider runs this agent. */
+  readonly platform: "retell" | "livekit";
   readonly connections: readonly FolderConnection[];
 };
 
@@ -113,7 +112,7 @@ export type FolderConfig = {
   readonly agents: readonly FolderAgent[];
 };
 
-export const CONFIG_FORMAT = 3 as const;
+export const CONFIG_FORMAT = 4 as const;
 
 export const EMPTY_CONFIG: FolderConfig = {
   format: CONFIG_FORMAT,
@@ -124,8 +123,8 @@ export const EMPTY_CONFIG: FolderConfig = {
 
 const ROOT_CONFIG_KEYS = ["format", "platform", "project", "agents"] as const;
 const NAMED_KEYS = ["id", "name"] as const;
-const CONNECTION_KEYS = [...NAMED_KEYS, "modality"] as const;
-const AGENT_KEYS = [...NAMED_KEYS, "connections"] as const;
+const CONNECTION_KEYS = NAMED_KEYS;
+const AGENT_KEYS = [...NAMED_KEYS, "platform", "connections"] as const;
 
 const CONFIG_HEADER = [
   "# What this folder points at on Egma.",
@@ -156,6 +155,7 @@ export function serializeConfig(config: FolderConfig): string {
     for (const agent of config.agents) {
       lines.push(`  - id: ${yamlScalar(agent.id)}`);
       lines.push(`    name: ${yamlScalar(agent.name)}`);
+      lines.push(`    platform: ${agent.platform}`);
       if (agent.connections.length === 0) {
         lines.push("    connections: []");
         continue;
@@ -164,7 +164,6 @@ export function serializeConfig(config: FolderConfig): string {
       for (const connection of agent.connections) {
         lines.push(`      - id: ${yamlScalar(connection.id)}`);
         lines.push(`        name: ${yamlScalar(connection.name)}`);
-        lines.push(`        modality: ${connection.modality}`);
       }
     }
   }
@@ -205,12 +204,7 @@ function identifiedConnection(
   mapping: YamlMapping,
   where: string,
 ): FolderConnection {
-  const connection = identifiedThing(mapping, where, CONNECTION_KEYS);
-  const modality = textAt(mapping, "modality");
-  if (modality !== "chat" && modality !== "voice") {
-    throw new Error(`${where} must contain modality chat or voice.`);
-  }
-  return { ...connection, modality };
+  return identifiedThing(mapping, where, CONNECTION_KEYS);
 }
 
 /**
@@ -262,7 +256,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       ? (() => {
           if (platformScalar !== null) {
             throw new Error(
-              `${where} has a platform value without an origin. Repair the repository binding, then run egma validate.`,
+              `${where} has a platform value without an origin. Repair the repository binding, then run egma pull.`,
             );
           }
           return null;
@@ -272,7 +266,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
           const origin = textAt(platformMapping, "origin");
           if (origin === null) {
             throw new Error(
-              `${where} has a platform binding without an origin. Repair it, then run egma validate.`,
+              `${where} has a platform binding without an origin. Repair it, then run egma pull.`,
             );
           }
           return { origin: committedOrigin(origin) };
@@ -306,6 +300,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
       { id: entry["id"] ?? null, name: entry["name"] ?? null },
       `${where} agent ${String(index + 1)}`,
     );
+    const platform = textAt(entry, "platform");
+    if (platform !== "retell" && platform !== "livekit") {
+      throw new Error(
+        `${where} agent ${String(index + 1)} must contain platform retell or livekit.`,
+      );
+    }
     if (agentIds.has(agent.id)) {
       throw new Error(`${where} uses agent id ${agent.id} more than once.`);
     }
@@ -318,7 +318,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     ).entries()) {
       if (typeof connectionEntry !== "object") {
         throw new Error(
-          `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id, name, and modality.`,
+          `${where} agent ${agent.id} connection ${String(connectionIndex + 1)} must contain id and name.`,
         );
       }
       const connection = identifiedConnection(
@@ -334,7 +334,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
       connectionOwners.set(connection.id, agent.id);
       connections.push(connection);
     }
-    agents.push({ ...agent, connections });
+    agents.push({ ...agent, platform, connections });
   }
 
   return {
@@ -364,74 +364,6 @@ async function updateConfig(
     platform: changes.platform === undefined ? held.platform : changes.platform,
     project: changes.project === undefined ? held.project : changes.project,
     agents: changes.agents === undefined ? held.agents : changes.agents,
-  };
-  await writeConfig(file, updated);
-  return updated;
-}
-
-export type RegisteredTarget = {
-  /** The project read beside the registered agent, when this call learned it. */
-  readonly project?: IdentifiedThing;
-  readonly agent: IdentifiedThing;
-  /** Omitted for an agent configured only for production monitoring. */
-  readonly connection?: FolderConnection;
-};
-
-/**
- * Record one platform registration without replacing another agent's target.
- *
- * Stable ids decide identity. Names are refreshed from the platform, a new
- * connection joins its owning agent, and every sibling the file already held
- * stays in place. A connection id already owned by another agent is refused:
- * moving it locally would make the folder disagree with the platform.
- */
-export async function recordRegisteredTarget(
-  file: string,
-  target: RegisteredTarget,
-): Promise<FolderConfig> {
-  const held = await readConfig(file);
-  if (
-    target.project !== undefined &&
-    held.project !== null &&
-    held.project.id !== target.project.id
-  ) {
-    throw new Error(
-      `${CONFIG_FILE_NAME} names project ${held.project.id}, so it cannot record an agent from project ${target.project.id}.`,
-    );
-  }
-
-  const owner = held.agents.find((agent) =>
-    agent.connections.some((connection) => connection.id === target.connection?.id),
-  );
-  if (owner !== undefined && owner.id !== target.agent.id) {
-    throw new Error(
-      `${CONFIG_FILE_NAME} already records connection ${target.connection?.id ?? ""} under agent ${owner.id}, so it cannot move that connection under agent ${target.agent.id}.`,
-    );
-  }
-
-  const existing = held.agents.find((agent) => agent.id === target.agent.id);
-  const connections = existing?.connections ?? [];
-  const nextConnections =
-    target.connection === undefined
-      ? connections
-      : connections.some((connection) => connection.id === target.connection?.id)
-        ? connections.map((connection) =>
-            connection.id === target.connection?.id ? target.connection : connection,
-          )
-        : [...connections, target.connection];
-  const nextAgent: FolderAgent = {
-    ...target.agent,
-    connections: nextConnections,
-  };
-  const agents =
-    existing === undefined
-      ? [...held.agents, nextAgent]
-      : held.agents.map((agent) => (agent.id === target.agent.id ? nextAgent : agent));
-  const updated: FolderConfig = {
-    format: CONFIG_FORMAT,
-    platform: held.platform,
-    project: target.project ?? held.project,
-    agents,
   };
   await writeConfig(file, updated);
   return updated;

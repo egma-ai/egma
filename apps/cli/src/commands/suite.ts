@@ -77,7 +77,7 @@ export async function runSuiteCreateCommand(
   if (projectId === "") {
     options.out("status: no-project");
     options.fail(
-      "This repository does not name its Egma project. Run egma connect here first.",
+      "This repository does not name its Egma Project. Run egma init here first.",
     );
     return FOLDER_EXIT.nothing;
   }

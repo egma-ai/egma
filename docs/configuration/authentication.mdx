@@ -29,14 +29,10 @@ Navigate to your Egma instance and enter your email and password. Your session i
 Run `egma login` in your terminal. The CLI initiates a device code flow: it prints a short code, opens your browser to the approval page with the code pre-filled, and waits. Approve the request in your browser, select which project the terminal is acting for, and the CLI exchanges the code for an API key.
 
 ```bash
-npx @egma/cli login --url http://localhost:3101
+egma login --url http://localhost:3101
 ```
 
 The key is stored at `~/.egma/credentials` by default. See [Credential storage location](#credential-storage-location) to change this with `EGMA_HOME`.
-
-<Tip>
-  The CLI's `login` command is also the final step of `egma` (the first-run onboarding command). If you have already run that, you have a key stored and do not need to run `login` separately.
-</Tip>
 
 ### Via the web dashboard
 
@@ -156,7 +152,7 @@ The CLI stores your credentials at `~/.egma/credentials` by default. Override th
 
 ```bash
 export EGMA_HOME=/path/to/custom/dir
-npx @egma/cli login --url http://localhost:3101
+egma login --url http://localhost:3101
 # credentials now stored at /path/to/custom/dir/credentials
 ```
 

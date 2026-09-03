@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Voice Agent Tests"
+  short_description: "Write tests to accurately judge if the voice agent is behaving as expected"
+  default_prompt: "Use $write-voice-agent-tests to write tests that can judge if the voice agent is behaving as expected by using the egma platform."

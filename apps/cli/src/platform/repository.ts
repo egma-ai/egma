@@ -70,6 +70,7 @@ export async function applyRepositoryChangeSet(
   signedIn: SignedIn,
   changeSet: RepositoryChangeSet,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<AppliedRepositoryChangeSet> {
   const answer = await applyRepositoryChangeSetRequest(
     {
@@ -88,7 +89,10 @@ export async function applyRepositoryChangeSet(
       })),
       mockTools: changeSet.mockTools.map(mockToolBody),
     },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (!response.ok || answer.data === undefined) {

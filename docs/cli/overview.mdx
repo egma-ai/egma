@@ -19,54 +19,46 @@ driver.
 - a coding agent that can use Agent Skills and run shell commands
 - a browser where the developer can approve sign-in
 
-A global install is optional. Use `egma` after you install it, or
-`npx --yes @egma/cli` as the command prefix on a clean machine.
+The npm package is `egma-cli`. Install it once; it provides the `egma`
+executable:
+
+```bash
+npm install --global egma-cli
+```
 
 ## Bootstrap a repository
 
-Run the bare CLI from the repository that contains the voice agent:
-
-```bash
-npx --yes @egma/cli
-```
-
-The bare command prints only the skill install command and the coding-agent
-handoff. It does not sign in, inspect source, start another process, edit files,
-or create remote resources.
-
-Install the public skills it names:
+Install the public skills separately:
 
 ```bash
 npx --yes skills add egma-ai/egma \
   --skill integrate-egma \
-  --skill write-egma-tests \
-  --skill egma
+  --skill write-egma-tests
 ```
 
-Give your coding agent the printed handoff:
+Give your coding agent this handoff:
 
 > Use the integrate-egma skill to complete the requested Egma simulation
 > testing, production monitoring, or both for this repository's voice agent end
 > to end.
 
-The three skills divide the work by purpose:
+The two skills divide the work by purpose:
 
 | Skill | Responsibility |
 |---|---|
 | `integrate-egma` | First-time repository discovery, Retell or LiveKit setup, human-only pauses, the first suite, a first run, and monitoring |
 | `write-egma-tests` | Egma Markdown test authoring, personas, expected behaviors, and test-level mock tools |
-| `egma` | Post-onboarding pull, validate, push, run, and grade interpretation |
 
 ## Human and command boundaries
 
 The coding agent performs repository work. Egma performs platform operations.
-The pasted end-to-end prompt authorizes its normal local and remote work.
+The developer's end-to-end request authorizes its normal local and remote work.
 
 | Boundary | Owner |
 |---|---|
 | Inspect committed source and propose one target | Coding agent using `integrate-egma` |
 | Approve login request | Developer in the browser |
-| State testing, monitoring, or both in the copied prompt | Developer |
+| State testing, monitoring, or both in the integration request | Developer |
 | Resolve the exact resource plan | Coding agent |
 | Create or read platform resources | Named Egma command |
 | Author and validate local files | Coding agent plus `egma validate` |
@@ -91,7 +83,7 @@ cost money.
     provider identifier boundary.
   </Step>
   <Step title="Read the requested outcome">
-    The copied prompt says testing, monitoring, or both. Monitoring-only skips
+    The integration request says testing, monitoring, or both. Monitoring-only skips
     the simulation connection, suite, tests, publish, and run.
   </Step>
   <Step title="Resolve remote setup">
@@ -160,7 +152,7 @@ cost money.
 
 | Command | What it does |
 |---|---|
-| `egma` | Prints the public skill install command and coding-agent handoff |
+| `egma` | Prints command help |
 | `egma login` | Starts browser-approved device login for this machine |
 | `egma connect` | Registers a Retell or LiveKit agent and simulation connection |
 | `egma connect record` | Proves receipt IDs or matches provider-public identity, then writes the target to local `egma/config.yaml` without a remote write |
@@ -255,7 +247,7 @@ egma run receptionist-core \
 The CLI starts the worker, waits for registration, starts the remote run, and
 always stops the worker. It refuses `--no-follow` when it owns the worker.
 
-The copied end-to-end prompt authorizes normal worker preparation. The
+The developer's end-to-end request authorizes normal worker preparation. The
 integration skill adds the latest unpinned Egma Python SDK through the
 repository's package manager. The CLI may install or upgrade LiveKit CLI,
 create the worker project's `.venv`, and install the declared dependencies with
@@ -270,7 +262,7 @@ for a real phone run. Never reuse it after changing inputs or for a new run.
 Run platform commands from the Egma platform workspace:
 
 ```bash
-npx --yes @egma/cli self-host up
+egma self-host up
 ```
 
 Run repository commands from the separate voice-agent repository. Pass the URL
@@ -289,5 +281,5 @@ the instance. Later commands resolve the URL from `egma/config.yaml`.
 Named commands already have plain output and no terminal questions. Supply all
 required choices as flags or environment variables, branch on the exit code,
 and read the `status:` line. Login still needs a developer to approve the
-device request in a browser. A copied end-to-end prompt authorizes normal
+device request in a browser. The developer's end-to-end request authorizes normal
 repository and remote writes; a real phone run still needs immediate approval.

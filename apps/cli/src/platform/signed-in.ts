@@ -1,18 +1,32 @@
 /**
  * The key this machine holds, for the verbs that need one.
  *
- * `login` mints it; everything else reads it. A verb that finds none says so in
- * plain words and names the command that fixes it, rather than failing on a 401
- * from an instance the developer never meant to talk to anonymously.
+ * A CI job supplies `EGMA_API_KEY`; otherwise `login` mints a machine-local
+ * key. A verb that finds neither says so before it sends an anonymous request.
  */
 
+import process from "node:process";
+
 import { readCredentials, type PlatformAccess } from "./credentials.ts";
+
+/** A control-plane key supplied to one process, including a CI job. */
+export const EGMA_API_KEY_VARIABLE = "EGMA_API_KEY";
 
 /** Which egma, and the key for it. */
 export type SignedIn = {
   readonly url: string;
   readonly key: string;
+  /** Optional so existing callers may still construct the two-field wire shape. */
+  readonly source?: "environment" | "device-login" | "stored";
+  /** Known without a request only for a current device-login credential. */
+  readonly projectId?: string;
 };
+
+/** The process-scoped control-plane key, or `null` when none was supplied. */
+export function environmentApiKeyIn(env: NodeJS.ProcessEnv): string | null {
+  const key = env[EGMA_API_KEY_VARIABLE]?.trim();
+  return key === undefined || key === "" ? null : key;
+}
 
 /**
  * The key for the egma this command is talking to, or `null`.
@@ -20,13 +34,28 @@ export type SignedIn = {
  * A key minted against one instance means nothing against another, so a stored
  * key for a different address is no key at all here.
  */
-export async function signedInAt(access: PlatformAccess): Promise<SignedIn | null> {
+export async function signedInAt(
+  access: PlatformAccess,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SignedIn | null> {
+  const environmentKey = environmentApiKeyIn(env);
+  if (environmentKey !== null) {
+    return { url: access.url, key: environmentKey, source: "environment" };
+  }
+
   const held = await readCredentials(access.credentialsFile, access.url);
   if (held === null || held.url !== access.url) return null;
-  return { url: access.url, key: held.key };
+  return held.login === undefined
+    ? { url: access.url, key: held.key, source: "stored" }
+    : {
+        url: access.url,
+        key: held.key,
+        source: "device-login",
+        projectId: held.login.projectId,
+      };
 }
 
 /** What a developer is told when there is no key for this egma. */
 export function notSignedInRefusal(url: string): string {
-  return `This machine is not signed in to Egma at ${url}. Run egma login first, then run this again.`;
+  return `Egma has no control-plane key for ${url}. Set EGMA_API_KEY for this process, or run egma login, then run this again.`;
 }

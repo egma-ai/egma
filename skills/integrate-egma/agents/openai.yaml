@@ -1,4 +1,4 @@
 interface:
   display_name: "Integrate Egma"
-  short_description: "Onboard a repository voice agent with Egma"
-  default_prompt: "Use $integrate-egma to onboard this repository's voice agent for the testing, monitoring, or both outcome I request."
+  short_description: "Integrate Egma into a repository containing voice agent code. Use when the developer asks to integrate voice agent testing, monitoring or both"
+  default_prompt: "Use $integrate-egma to make this repository's voice agent ready for the testing, monitoring, or both with the egma platform."

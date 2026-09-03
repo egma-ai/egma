@@ -217,7 +217,7 @@ describe("the complete suite repository", () => {
     );
 
     await expect(readRepository(folderPathsIn(workspace.dir))).rejects.toThrow(
-      /config\.yaml.*folder format none.*requires format 3.*no legacy reader/i,
+      /config\.yaml.*folder format none.*requires format 4.*no legacy reader/i,
     );
   });
 

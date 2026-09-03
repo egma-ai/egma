@@ -98,7 +98,7 @@ export type DeviceControls = {
   readonly keys: readonly string[];
 };
 
-export function deviceRoutes(origin: () => string): {
+export function deviceRoutes(origin: () => string, projectId: () => string): {
   readonly group: RouteGroup;
   readonly controls: DeviceControls;
 } {
@@ -221,6 +221,7 @@ export function deviceRoutes(origin: () => string): {
                   access_token: key,
                   token_type: "Bearer",
                   api_key_id: `ak_${randomBytes(8).toString("hex")}`,
+                  project_id: projectId(),
                 },
               };
             }

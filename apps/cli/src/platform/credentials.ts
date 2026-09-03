@@ -64,6 +64,17 @@ export type Credentials = {
   readonly url: string;
   /** The key itself, handed over once at the end of login and kept here. */
   readonly key: string;
+  /**
+   * The server record behind a key minted by `egma login`.
+   *
+   * Older files do not have this. Its presence is the proof logout needs
+   * before it may revoke anything remotely: a bare secret can authenticate a
+   * request, but it does not identify the key row that request should revoke.
+   */
+  readonly login?: {
+    readonly apiKeyId: string;
+    readonly projectId: string;
+  };
 };
 
 /**
@@ -85,7 +96,7 @@ export function credentialsFileIn(env: NodeJS.ProcessEnv): string {
   return path.join(egmaFolderIn(env), "credentials");
 }
 
-type CredentialEntries = ReadonlyMap<string, string>;
+type CredentialEntries = ReadonlyMap<string, Credentials>;
 
 /**
  * The file is here and egma cannot make sense of it.
@@ -142,7 +153,7 @@ function entriesIn(raw: string, file: string): CredentialEntries {
     throw new CredentialsFileUnreadableError(file, new Error("not a JSON object"));
   }
 
-  const entries = new Map<string, string>();
+  const entries = new Map<string, Credentials>();
 
   // The first shipped format held one pair. It is read so an upgrade does not
   // sign a developer out, and the next write moves it into the map.
@@ -150,7 +161,7 @@ function entriesIn(raw: string, file: string): CredentialEntries {
     try {
       const origin = normalizePlatformOrigin(held.url);
       const key = held.key.trim();
-      if (key !== "") entries.set(origin, key);
+      if (key !== "") entries.set(origin, { url: origin, key });
     } catch {
       // Not a usable legacy entry.
     }
@@ -158,11 +169,36 @@ function entriesIn(raw: string, file: string): CredentialEntries {
 
   if (typeof held.platforms === "object" && held.platforms !== null) {
     for (const [givenOrigin, value] of Object.entries(held.platforms)) {
-      if (typeof value !== "object" || value === null || !("key" in value)) continue;
-      const key = typeof value.key === "string" ? value.key.trim() : "";
+      if (typeof value !== "object" || value === null) continue;
+      const record = value as Readonly<Record<string, unknown>>;
+      // Version 2 names the secret for what it is. `key` is the version 1
+      // spelling and stays readable so an upgrade never signs a machine out.
+      const rawKey = record["api_key"] ?? record["key"];
+      const key = typeof rawKey === "string" ? rawKey.trim() : "";
       if (key === "") continue;
       try {
-        entries.set(normalizePlatformOrigin(givenOrigin), key);
+        const origin = normalizePlatformOrigin(givenOrigin);
+        const rawLogin = record["login"];
+        if (typeof rawLogin === "object" && rawLogin !== null) {
+          const login = rawLogin as Readonly<Record<string, unknown>>;
+          const apiKeyId =
+            typeof login["api_key_id"] === "string"
+              ? login["api_key_id"].trim()
+              : "";
+          const projectId =
+            typeof login["project_id"] === "string"
+              ? login["project_id"].trim()
+              : "";
+          if (apiKeyId !== "" && projectId !== "") {
+            entries.set(origin, {
+              url: origin,
+              key,
+              login: { apiKeyId, projectId },
+            });
+            continue;
+          }
+        }
+        entries.set(origin, { url: origin, key });
       } catch {
         // One bad hand-edited key must not hide every usable platform entry.
       }
@@ -209,8 +245,7 @@ export async function readCredentials(
   } catch {
     return null;
   }
-  const key = entries.get(origin);
-  return key === undefined ? null : { url: origin, key };
+  return entries.get(origin) ?? null;
 }
 
 export type WriteOptions = {
@@ -267,6 +302,55 @@ async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> 
   }
 }
 
+/** The version 2 bytes for every platform entry, in a stable order. */
+function documentFor(entries: CredentialEntries): string {
+  const platforms = Object.fromEntries(
+    [...entries.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([url, credentials]) => [
+        url,
+        {
+          api_key: credentials.key,
+          ...(credentials.login === undefined
+            ? {}
+            : {
+                login: {
+                  api_key_id: credentials.login.apiKeyId,
+                  project_id: credentials.login.projectId,
+                },
+              }),
+        },
+      ]),
+  );
+  return `${JSON.stringify({ version: 2, platforms }, null, 2)}\n`;
+}
+
+/** Replace the credentials file without exposing a partial document. */
+async function replaceCredentialsFile(
+  file: string,
+  folder: string,
+  entries: CredentialEntries,
+): Promise<void> {
+  const fresh = path.join(
+    folder,
+    `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`,
+  );
+  await writeFile(fresh, documentFor(entries), {
+    encoding: "utf8",
+    mode: FILE_MODE,
+    flag: "wx",
+  });
+  try {
+    // The umask can only narrow what a file is created with, never widen it,
+    // so this is the one that makes 0600 true rather than 0600-or-less.
+    await chmod(fresh, FILE_MODE);
+    await rename(fresh, file);
+  } catch (cause) {
+    await rm(fresh, { force: true });
+    throw cause;
+  }
+}
+
 /**
  * Write the key, owner-readable and no wider.
  *
@@ -310,29 +394,63 @@ export async function writeCredentials(
     const existing = await bytesOf(file);
     const entries = new Map(entriesIn(existing ?? "", file));
     const origin = normalizePlatformOrigin(credentials.url);
-    entries.set(origin, credentials.key);
+    entries.set(origin, { ...credentials, url: origin });
+    await replaceCredentialsFile(file, folder, entries);
+  });
+}
 
-    const platforms = Object.fromEntries(
-      [...entries.entries()]
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([url, key]) => [url, { key }]),
-    );
-    const document = `${JSON.stringify({ version: 1, platforms }, null, 2)}\n`;
+export type RemovedCredentials =
+  | { readonly kind: "removed"; readonly fileRemoved: boolean }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "changed" };
 
-    const fresh = path.join(
-      folder,
-      `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`,
-    );
-    await writeFile(fresh, document, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
-    try {
-      // The umask can only narrow what a file is created with, never widen it,
-      // so this is the one that makes 0600 true rather than 0600-or-less.
-      await chmod(fresh, FILE_MODE);
-      await rename(fresh, file);
-    } catch (cause) {
-      await rm(fresh, { force: true });
-      throw cause;
+function sameCredentials(left: Credentials, right: Credentials): boolean {
+  return (
+    left.url === right.url &&
+    left.key === right.key &&
+    left.login?.apiKeyId === right.login?.apiKeyId &&
+    left.login?.projectId === right.login?.projectId
+  );
+}
+
+/**
+ * Remove exactly the entry a caller read, without touching another platform.
+ *
+ * The equality check matters when login and logout run together. A logout
+ * that just revoked an old key must not remove a replacement login that landed
+ * while the network request was in flight.
+ */
+export async function removeCredentials(
+  file: string,
+  expected: Credentials,
+): Promise<RemovedCredentials> {
+  // Do not create ~/.egma merely to say that no login was there. A first read
+  // also separates that ordinary case from every real read failure.
+  if (await bytesOf(file) === null) return { kind: "not-found" };
+
+  const folder = path.dirname(file);
+  return whileLocked(file, async () => {
+    const existing = await bytesOf(file);
+    if (existing === null) return { kind: "not-found" };
+
+    const entries = new Map(entriesIn(existing, file));
+    const origin = normalizePlatformOrigin(expected.url);
+    const held = entries.get(origin);
+    if (held === undefined) return { kind: "not-found" };
+    if (!sameCredentials(held, { ...expected, url: origin })) {
+      return { kind: "changed" };
     }
+
+    entries.delete(origin);
+    if (entries.size === 0) {
+      // Remove the file, not its parent. ~/.egma may hold other machine-local
+      // state, and an empty login must not delete any of it.
+      await rm(file);
+      return { kind: "removed", fileRemoved: true };
+    }
+
+    await replaceCredentialsFile(file, folder, entries);
+    return { kind: "removed", fileRemoved: false };
   });
 }
 

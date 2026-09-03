@@ -1,19 +1,10 @@
 /**
  * The runs on the platform, over egma's public HTTP API.
  *
- * The same seam the tests and the agents sit behind, and it is a seam rather
- * than a convenience: pointing this at a real instance is one address and one
- * key, and nothing in this file, in the follower above it, or in the screen
- * above that knows which egma answered.
- *
- * Three things happen here. A complete-suite run is started with an optional
- * exact current-set precondition. Start and detail return a bounded header;
- * simulations are read through their own pages. Changes since a point are
- * fetched in order, which is how a terminal follows execution without holding
- * a socket open. Grading progress is read from the bounded simulation page,
- * because grades do not change the execution event feed. A cursor can be asked again
- * from where it was, so a follower never misses a change and never sees one
- * twice.
+ * A complete-suite Run is created with an optional exact current-set
+ * precondition, or canceled by ID. Simulation pages remain available to other
+ * repository contract checks, but the CLI does not follow a Run in the
+ * terminal. The web product owns progress.
  *
  * One shape of answer is a value rather than an exception, because it is an
  * ordinary thing that happens: **the platform refusing to start the run**. A
@@ -26,15 +17,11 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  cancelRun as cancelRunRequest,
   createRun as createRunRequest,
-  getRun as getRunRequest,
-  getSimulation as getSimulationRequest,
-  listRunEvents as listRunEventsRequest,
   listRunSimulations as listRunSimulationsRequest,
+  type CancelRunResponse,
   type CreateRunResponse,
-  type GetRunResponse,
-  type GetSimulationResponse,
-  type ListRunEventsResponse,
   type ListRunSimulationsResponse,
 } from "@egma/platform-api/client";
 
@@ -71,16 +58,6 @@ export type GradingState =
 
 export type RunStatus = "pending" | "running" | "completed" | "canceled";
 
-/** One current grader result from the simulation detail projection. */
-export type PlatformGrade = GetSimulationResponse["grades"][number];
-
-/** Current grades and their display-only mean for one completed trace. */
-export type GradeProjection = {
-  readonly grades: readonly PlatformGrade[];
-  readonly combinedScore: number | null;
-  readonly expectedBehaviors: readonly string[] | null;
-};
-
 const SIMULATION_STATUSES: readonly string[] = [
   "queued",
   "claimed",
@@ -112,8 +89,6 @@ export type PlatformSimulation = {
   readonly gradingState: GradingState | null;
   /** What the platform said about how it ended, or `null`. */
   readonly reason: string | null;
-  /** Null until the terminal simulation detail has been read. */
-  readonly gradeProjection: GradeProjection | null;
 };
 
 export type PlatformRun = {
@@ -136,27 +111,6 @@ export type PlatformRun = {
   /** Where a person opens what happened. No token ever rides it. */
   readonly resultsUrl: string;
   readonly simulations: readonly PlatformSimulation[];
-};
-
-/** One change to a run, in the order it happened. */
-export type RunEvent =
-  | {
-      readonly kind: "simulation";
-      readonly seq: number;
-      readonly simulationId: string;
-      readonly testName: string;
-      readonly personaName: string;
-      readonly status: SimulationStatus;
-      readonly reason: string | null;
-    }
-  | { readonly kind: "run"; readonly seq: number; readonly status: RunStatus };
-
-/** A page of changes, and where to ask from next. */
-export type RunEvents = {
-  readonly events: readonly RunEvent[];
-  readonly next: number;
-  /** True once execution and every completed trace's grading are terminal. */
-  readonly done: boolean;
 };
 
 /** What starting a run came back with. */
@@ -222,8 +176,7 @@ function runStatusOf(value: unknown): RunStatus {
 }
 
 type SimulationWire = ListRunSimulationsResponse["simulations"][number];
-type RunWire = CreateRunResponse | GetRunResponse;
-type RunEventWire = ListRunEventsResponse["events"][number];
+type RunWire = CancelRunResponse | CreateRunResponse;
 
 function simulationFrom(body: SimulationWire): PlatformSimulation {
   return {
@@ -236,9 +189,6 @@ function simulationFrom(body: SimulationWire): PlatformSimulation {
     gradingState: gradingStateOf(body.gradingState),
     reason:
       platformText(body.reason) === "" ? null : platformText(body.reason),
-    // The bounded run page carries only operational progress. The detail
-    // resource is read once grading is terminal.
-    gradeProjection: null,
   };
 }
 
@@ -302,65 +252,6 @@ export async function listRunSimulations(
   }
 }
 
-/** Add paged simulations to a bounded run header before following it. */
-export async function hydrateRun(
-  signedIn: SignedIn,
-  run: PlatformRun,
-  fetchImpl?: Fetch,
-  signal?: AbortSignal,
-): Promise<PlatformRun> {
-  return {
-    ...run,
-    simulations: await listRunSimulations(signedIn, run.id, fetchImpl, signal),
-  };
-}
-
-/** Read current grades and the display-only combined score for one trace. */
-export async function getSimulationGradeProjection(
-  signedIn: SignedIn,
-  simulationId: string,
-  fetchImpl?: Fetch,
-  signal?: AbortSignal,
-): Promise<GradeProjection> {
-  const answer = await getSimulationRequest(
-    { simulationId },
-    {
-      client: platformClient(signedIn, fetchImpl),
-      ...(signal === undefined ? {} : { signal }),
-    },
-  );
-  const response = platformResponse(answer, signedIn.url);
-  if (!response.ok || answer.data === undefined) {
-    throw new PlatformRefusedError(
-      response.status,
-      platformRefusalMessage(answer.error, response.status),
-    );
-  }
-  return {
-    grades: answer.data.grades,
-    combinedScore: answer.data.combinedScore,
-    expectedBehaviors: answer.data.test.expectedBehaviors,
-  };
-}
-
-function eventFrom(body: RunEventWire): RunEvent | null {
-  const seq = whole(body.seq);
-  if (body.kind === "run") {
-    return { kind: "run", seq, status: runStatusOf(body.status) };
-  }
-  if (body.kind !== "simulation") return null;
-  return {
-    kind: "simulation",
-    seq,
-    simulationId: platformText(body.simulationId),
-    testName: platformText(body.testName),
-    personaName: platformText(body.personaName),
-    status: statusOf(body.status),
-    reason:
-      platformText(body.reason) === "" ? null : platformText(body.reason),
-  };
-}
-
 /**
  * Start one complete-suite run with an optional exact-set precondition.
  *
@@ -373,6 +264,7 @@ export async function startRun(
   signedIn: SignedIn,
   input: NewRun,
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<StartRunAnswer> {
   const answer = await createRunRequest(
     {
@@ -385,7 +277,7 @@ export async function startRun(
       })),
       // Node's own, deliberately, and not `newId` from `@egma/ids`. That
       // package is private and never published, so an import of it survives
-      // into `dist/` — which this package ships unbundled — and `npx @egma/cli`
+      // into `dist/` — which this package ships unbundled — and `egma`
       // would fail to resolve it at the moment somebody started a run. The
       // build caught it here only because nothing built the package first; the
       // published crash would have had no such warning.
@@ -396,7 +288,10 @@ export async function startRun(
       idempotencyKey: input.idempotencyKey ?? `run_${randomUUID()}`,
       ...(input.name === undefined ? {} : { name: input.name }),
     },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
 
@@ -421,15 +316,24 @@ export async function startRun(
   };
 }
 
-/** One bounded run header as it now stands, or `null`. */
-export async function getRun(
+/** What the platform answered when one Run cancellation was requested. */
+export type CancelRunAnswer =
+  | { readonly kind: "canceled"; readonly run: PlatformRun }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "refused"; readonly reason: string };
+
+/** Cancel one Run through the public Run resource endpoint. */
+export async function cancelRun(
   signedIn: SignedIn,
-  runId: string,
+  input: {
+    readonly runId: string;
+    readonly projectId: string;
+  },
   fetchImpl?: Fetch,
   signal?: AbortSignal,
-): Promise<PlatformRun | null> {
-  const answer = await getRunRequest(
-    { runId },
+): Promise<CancelRunAnswer> {
+  const answer = await cancelRunRequest(
+    { runId: input.runId, projectId: input.projectId },
     {
       client: platformClient(signedIn, fetchImpl),
       ...(signal === undefined ? {} : { signal }),
@@ -437,32 +341,13 @@ export async function getRun(
   );
   const response = platformResponse(answer, signedIn.url);
 
-  if (response.status === 404) return null;
-  if (!response.ok || answer.data === undefined) {
-    throw new PlatformRefusedError(
-      response.status,
-      platformRefusalMessage(answer.error, response.status),
-    );
+  if (response.status === 404) return { kind: "not-found" };
+  if (response.status === 409 || response.status === 422) {
+    return {
+      kind: "refused",
+      reason: platformRefusalMessage(answer.error, response.status),
+    };
   }
-  return runFrom(answer.data);
-}
-
-/** Everything that has changed since `after`, in the order it happened. */
-export async function runEvents(
-  signedIn: SignedIn,
-  runId: string,
-  after: number,
-  options: { readonly fetchImpl?: Fetch; readonly signal?: AbortSignal } = {},
-): Promise<RunEvents> {
-  const answer = await listRunEventsRequest(
-    { runId, after },
-    {
-      client: platformClient(signedIn, options.fetchImpl),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    },
-  );
-  const response = platformResponse(answer, signedIn.url);
-
   if (!response.ok || answer.data === undefined) {
     throw new PlatformRefusedError(
       response.status,
@@ -470,15 +355,5 @@ export async function runEvents(
     );
   }
 
-  const events = answer.data.events.flatMap((entry) => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const event = eventFrom(entry);
-    return event === null ? [] : [event];
-  });
-
-  return {
-    events,
-    next: answer.data.next === 0 ? after : answer.data.next,
-    done: answer.data.done,
-  };
+  return { kind: "canceled", run: runFrom(answer.data) };
 }

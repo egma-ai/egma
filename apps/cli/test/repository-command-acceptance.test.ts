@@ -86,11 +86,11 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
           {
             id: registered.agent.id,
             name: registered.agent.name,
+            platform: "retell",
             connections: [
               {
                 id: registered.connection.id,
                 name: registered.connection.name,
-                modality: "chat",
               },
             ],
           },
@@ -143,18 +143,29 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
       ]),
     );
 
-    const beforePush = platform.records.length;
-    const pushed = await egma(workspace.dir, env, ["push"]);
-    expect(pushed.code, pushed.stderr).toBe(0);
-    const pushWrites = platform.records
-      .slice(beforePush)
+    const beforeRun = platform.records.length;
+    const started = await egma(workspace.dir, env, [
+      "run",
+      "create",
+      "release-gate",
+      "--agent",
+      registered.agent.id,
+      "--connection",
+      registered.connection.id,
+      "--name",
+      "Release gate",
+    ]);
+    expect(started.code, started.stderr).toBe(0);
+    const writes = platform.records
+      .slice(beforeRun)
       .filter((record) => record.method !== "GET")
       .map((record) => `${record.method} ${record.path}`);
-    expect(pushWrites).toEqual(["POST /v1/repository/change-set"]);
+    expect(writes).toEqual(["POST /v1/repository/change-set", "POST /v1/runs"]);
     expect(platform.tests.tests).toHaveLength(2);
     expect(platform.mocking.mockTools).toEqual([
       expect.objectContaining({ tool: "calendar", answer: { answer: { slots: [] } } }),
     ]);
+
     const repository = await readRepository(folderPathsIn(workspace.dir));
     expect(repository.suites).toHaveLength(1);
     expect(repository.suites[0]?.directory).toBe("release-gate");
@@ -164,22 +175,13 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
         (file) => file.test.version !== null && file.test.identityRevision !== null,
       ),
     ).toBe(true);
-
     const expectedPins = repository.suites[0]!.tests
       .map((file) => {
         const remote = platform.tests.seeded(file.test.name);
         return { testId: remote.id, versionId: file.test.version };
       })
       .sort((a, b) => a.testId.localeCompare(b.testId));
-    const beforeRun = platform.records.length;
-    const started = await egma(workspace.dir, env, [
-      "run",
-      "release-gate",
-      "--name",
-      "Release gate",
-      "--no-follow",
-    ]);
-    expect(started.code, started.stderr).toBe(0);
+
     const runRequest = platform.records
       .slice(beforeRun)
       .find((record) => record.method === "POST" && record.path === "/v1/runs");
@@ -201,6 +203,10 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
     expect(platform.running.runs).toEqual([
       expect.objectContaining({ suiteId, expectedSimulationCount: 2 }),
     ]);
+    const runId = platform.running.runs[0]?.id;
+    expect(started.stdout).toBe(
+      `run: ${runId}\nresults: ${platform.url}/projects/${registered.agent.projectId}/runs/${runId}\nstatus: started\n`,
+    );
   } finally {
     await Promise.all([platform.close(), workspace.remove()]);
   }

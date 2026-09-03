@@ -1,4 +1,4 @@
-/** The built CLI boundary: handoff, help, refusal, and version. */
+/** The built CLI boundary: help, refusal, and version. */
 
 import { execFile, spawn } from "node:child_process";
 import process from "node:process";
@@ -6,10 +6,6 @@ import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  INTEGRATION_HANDOFF,
-  SKILLS_INSTALL_COMMAND,
-} from "../src/commands/setup.ts";
 import {
   CLI_ENTRY,
   MANIFEST,
@@ -70,107 +66,26 @@ describe("the egma command", () => {
     expect(refused.stderr).not.toContain("Usage:");
   });
 
-  it("prints the coding-agent handoff without login or a terminal", async () => {
-    const result = await egma([], workspace);
+  it("prints help when no command is named", async () => {
+    const bare = await egma([], workspace);
+    const explicit = await egma(["--help"], workspace);
 
-    expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(result.stdout).toContain("setup: skills-and-cli");
-    expect(result.stdout).toContain(`skills: ${SKILLS_INSTALL_COMMAND}`);
-    expect(result.stdout).toContain(
-      "If integrate-egma is already available to this coding agent, keep it",
-    );
-    expect(result.stdout).toContain(`next: ${INTEGRATION_HANDOFF}`);
-    expect(result.stdout).toContain("status: ready-for-agent");
-    expect(result.stdout).not.toContain("approve_url:");
-    expect(result.stdout).not.toContain("waiting:");
-  });
-
-  it("keeps a named self-hosted URL in the agent handoff", async () => {
-    const result = await egma(["--url", "http://localhost:3101/"], workspace);
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("platform: http://localhost:3101");
-    expect(result.stdout).toContain("Use http://localhost:3101 as the Egma platform URL.");
-
-    const refused = await egma(
-      ["--url", "https://developer:must-not-be-repeated@example.com"],
-      workspace,
-    );
-    expect(refused.code).toBe(1);
-    expect(refused.stderr).toContain("--url is not a platform origin");
-    expect(refused.stderr).not.toContain("must-not-be-repeated");
-  });
-
-  it("documents the complete raw integration surface and no wizard controls", async () => {
-    const help = await egma(["--help"], workspace);
-
-    expect(help.code).toBe(0);
-    for (const command of [
-      "egma login",
-      "egma connect",
-      "egma init",
-      "egma personas",
-      "egma suite create",
-      "egma validate",
-      "egma pull",
-      "egma push",
-      "egma run",
-      "egma monitoring",
-      "egma livekit",
-      "egma self-host up",
-    ]) {
-      expect(help.stdout, command).toContain(command);
-    }
-    for (const option of [
-      "--show-context",
-      "--modality",
-      "--access-variant",
-      "--worker-entrypoint",
-      "--worker-dependency-manifest",
-      "--worker-dispatch-name",
-      "--idempotency-key",
-    ]) {
-      expect(help.stdout, option).toContain(option);
-    }
-    expect(help.stdout).not.toContain("--headless");
-    expect(help.stdout).not.toContain("--coding-agent");
-    expect(help.stdout).not.toContain("--existing-tests");
-    expect(help.stdout).not.toContain("Agent Client Protocol");
+    expect(bare).toMatchObject({ code: 0, stderr: "" });
+    expect(bare.stdout).toBe(explicit.stdout);
+    expect(bare.stdout).toContain("Usage:");
+    expect(bare.stdout).not.toContain("setup: skills-and-cli");
+    expect(bare.stdout).not.toContain("coding-agent handoff");
 
     const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/u);
   });
 
-  it("prints the versioned LiveKit source contract without login", async () => {
-    const result = await egma(["livekit"], workspace);
+  it("refuses options that have no command", async () => {
+    const result = await egma(["--url", "http://localhost:3101/"], workspace);
 
-    expect(result).toMatchObject({ code: 0, stderr: "" });
-    expect(result.stdout).toContain("integration: livekit");
-    expect(result.stdout).toContain(
-      "python_testing_call: await mockable(agent, ctx, session)",
-    );
-    expect(result.stdout).toContain(
-      "python_monitoring_call: monitor_livekit(ctx)",
-    );
-    expect(result.stdout).toContain("javascript_testing: supported");
-    expect(result.stdout).toContain(
-      "javascript_testing_package: @egma/livekit",
-    );
-    expect(result.stdout).toContain(
-      "javascript_testing_call: await mockable(agent, ctx, session)",
-    );
-    expect(result.stdout).toContain(
-      "javascript_monitoring_package: @egma/livekit",
-    );
-    expect(result.stdout).toContain(
-      "javascript_monitoring_call: monitorLiveKit(ctx)",
-    );
-    expect(result.stdout).toContain("chat_rule:");
-    expect(result.stdout).toContain("status: ready");
-    expect(result.stdout).not.toContain("dependency:");
-    expect(result.stdout).not.toContain("@egma/livekit@");
-    expect(result.stdout).not.toContain("javascript_testing_reason:");
-    expect(result.stdout).not.toContain("approve_url:");
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain('Egma does not know the command "--url"');
   });
 
   it("refuses unknown options and secrets in command arguments", async () => {
@@ -178,26 +93,16 @@ describe("the egma command", () => {
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toContain("--turbo");
 
-    const secret = await egma(
-      ["connect", "--livekit-api-secret", "must-not-be-repeated"],
-      workspace,
-    );
+    const secret = await egma([
+      "agent",
+      "register",
+      "--platform",
+      "livekit",
+      "--livekit-api-secret",
+      "must-not-be-repeated",
+    ], workspace);
     expect(secret.code).toBe(1);
     expect(secret.stderr).toContain("--livekit-api-secret");
     expect(secret.stderr).not.toContain("must-not-be-repeated");
-  });
-
-  it("refuses a missing or blank run idempotency key before platform access", async () => {
-    for (const args of [
-      ["run", "release", "--idempotency-key"],
-      ["run", "release", "--idempotency-key", ""],
-      ["run", "release", "--idempotency-key", "--no-follow"],
-    ]) {
-      const result = await egma(args, workspace);
-      expect(result.code, args.join(" ")).toBe(1);
-      expect(result.stderr, args.join(" ")).toContain(
-        "Give --idempotency-key one non-empty value.",
-      );
-    }
   });
 });

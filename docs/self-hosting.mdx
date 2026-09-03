@@ -8,7 +8,8 @@ Egma is fully self-hostable. One command starts the API, web application,
 simulator, grader, Postgres, ClickHouse, MinIO, LiveKit, SIP gateway, and Redis:
 
 ```bash
-npx @egma/cli self-host up
+npm install --global egma-cli
+egma self-host up
 ```
 
 ## Prerequisites
@@ -92,7 +93,7 @@ username and password in the trunk's credential list.
 ## Step 3 — Start the platform
 
 ```bash
-npx @egma/cli self-host up
+egma self-host up
 ```
 
 The command:
@@ -228,7 +229,7 @@ configured.
 Pull the new code, then run:
 
 ```bash
-npx @egma/cli self-host up
+egma self-host up
 ```
 
 The API applies database migrations during boot. Internal credentials and
@@ -263,7 +264,7 @@ than waiting for a run to complain.
 
   ```bash
   docker compose down --volumes
-  npx @egma/cli self-host up
+  egma self-host up
   ```
 
   `docker compose down --volumes` permanently deletes this installation's

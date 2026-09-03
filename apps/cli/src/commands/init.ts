@@ -1,99 +1,146 @@
-/**
- * `egma init`: make the folder this repository's tests live in.
- *
- * What it makes is a folder a team commits: a config file naming what the
- * folder points at, a file for the mock tools this project answers with, and a
- * directory for the tests. Nothing secret can land in any of them, so there is
- * no gitignore line to write.
- *
- * On its own it asks nothing, needs no key, and talks to nobody — a developer
- * with the network cable out gets the whole folder. Naming an address with
- * `--url` adds one thing to that: the selected platform URL, committed beside
- * the names. It is the only binding a repository can gain before sign-in.
- *
- * Running it twice is safe. A folder that is already here is recognised and
- * left as it is — the second developer to clone the repository runs the same
- * command as the first and changes nothing by it. The one exception is the
- * binding, which a folder committed before this repository was on any platform
- * can still gain.
- */
+/** `egma init`: bind this repository, then pull the Project into it. */
 
 import {
-  bindRepositoryPlatform,
+  CONFIG_FORMAT,
   createEgmaFolder,
-  EMPTY_CONFIG,
-  MEMORY_FOLDER_NAME,
+  folderPathsIn,
+  readConfig,
+  type FolderConfig,
   type PlatformBinding,
 } from "../folder/egma-folder.ts";
+import { PlatformUnreachableError } from "../platform/device-flow.ts";
+import { listProjects, readProject } from "../platform/projects.ts";
+import { PlatformRefusedError } from "../platform/refused.ts";
+import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
+import { pullRepository } from "../sync/pull.ts";
+import { readProjectTargets } from "../sync/targets.ts";
 import { FOLDER_EXIT, type FolderCommandOptions } from "./folder-verbs.ts";
 
 export type InitCommandOptions = FolderCommandOptions & {
-  /** The platform URL to commit, or `null` when the command named none. */
-  readonly binding: PlatformBinding | null;
+  readonly binding: PlatformBinding;
+  /** An explicit Project for an organization-scoped or legacy credential. */
+  readonly projectId?: string;
 };
 
+const DIFFERENT_PROJECT = [
+  "This repository is already initialized for another Egma Project.",
+  "",
+  "Move or delete egma/, then run egma init again.",
+  "",
+  "Nothing was changed.",
+].join("\n");
+
+async function existingConfig(file: string): Promise<FolderConfig | null> {
+  try {
+    return await readConfig(file);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw cause;
+  }
+}
+
+function failRemote(
+  result:
+    | { readonly kind: "not-authenticated" }
+    | { readonly kind: "refused" | "unreachable"; readonly reason: string },
+  url: string,
+): never {
+  if (result.kind === "unreachable") {
+    throw new PlatformUnreachableError(url, new Error(result.reason));
+  }
+  throw new PlatformRefusedError(
+    result.kind === "not-authenticated" ? 401 : 400,
+    result.kind === "not-authenticated"
+      ? "This Egma credential is not valid. Run egma login again."
+      : result.reason,
+  );
+}
+
+/** Initialize or refresh one repository without creating a Project. */
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
-  const config = { ...EMPTY_CONFIG, platform: options.binding };
+  options.out(`url: ${options.binding.origin}`);
+  const signedIn = await signedInAt(options.access);
+  if (signedIn === null) {
+    options.out("status: not-signed-in");
+    options.fail(notSignedInRefusal(options.access.url));
+    return FOLDER_EXIT.notSignedIn;
+  }
 
-  // Which egma this command talked to, first and in the shape every other verb
-  // says it in — and only when it talked to one. `init` on its own reaches no
-  // address at all, so it has none to print. What the folder *names* is a
-  // different fact, and it is printed below beside everything else the folder
-  // names, whether this run wrote it or found it.
-  if (options.binding !== null) options.out(`url: ${options.binding.origin}`);
+  const paths = folderPathsIn(options.cwd);
+  const held = await existingConfig(paths.config);
+  const askedProject = options.projectId?.trim() ?? "";
+  const credentialProject = signedIn.projectId ?? "";
 
-  const folder = await createEgmaFolder({ repository: options.cwd, config });
+  if (
+    held?.project !== null &&
+    held?.project !== undefined &&
+    ((askedProject !== "" && askedProject !== held.project.id) ||
+      (credentialProject !== "" && credentialProject !== held.project.id))
+  ) {
+    options.out("status: different-project");
+    options.fail(DIFFERENT_PROJECT);
+    return FOLDER_EXIT.nothing;
+  }
 
-  // A folder that is already here keeps every byte it has, with one exception,
-  // and the exception is why `--url` is worth typing on a second run. A folder
-  // somebody committed before this repository was on any platform is how a
-  // teammate ordinarily arrives, and recognising that folder and dropping the
-  // flag would be the silent no-op this command used to be, moved one case
-  // along.
-  //
-  // Through the same door `connect` binds through, so one function commits a
-  // selected platform URL and there is one place to read to know what it means.
-  // Nothing it can refuse is reachable from here: an address that disagrees
-  // with a binding already in this folder was turned away before any of this
-  // ran, and a binding that agrees is handed straight back unwritten.
-  const held = folder.config;
-  const committed =
-    options.binding !== null && held.platform === null
-      ? await bindRepositoryPlatform(options.cwd, options.binding)
-      : held;
-  const newlyBound = held.platform === null && committed.platform !== null;
+  if (credentialProject !== "" && askedProject !== "") {
+    options.out("status: project-option-not-used");
+    options.fail(
+      `This login already identifies Project ${credentialProject}. Remove --project and run egma init again. Nothing was changed.`,
+    );
+    return FOLDER_EXIT.nothing;
+  }
+
+  const projectId = held?.project?.id ?? (credentialProject || askedProject);
+  if (projectId === "") {
+    const listed = await listProjects(signedIn, options.fetchImpl);
+    if (listed.kind !== "projects") failRemote(listed, options.access.url);
+    for (const project of listed.projects) {
+      options.out(`project-option: ${project.id} ${project.name}`);
+    }
+    options.out("status: project-required");
+    options.fail(
+      "This credential does not identify one Project. Run egma init --project <Project ID>.",
+    );
+    return FOLDER_EXIT.nothing;
+  }
+
+  const project = await readProject(signedIn, projectId, options.fetchImpl);
+  const folder =
+    held === null
+      ? await createEgmaFolder({
+          repository: options.cwd,
+          config: {
+            format: CONFIG_FORMAT,
+            platform: options.binding,
+            project,
+            agents: [],
+          },
+        })
+      : { paths, created: false, config: held };
+
+  const targets = await readProjectTargets(project.id, {
+    ...signedIn,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  if (targets.kind !== "synced") failRemote(targets, options.access.url);
+
+  const pulled = await pullRepository({
+    signedIn,
+    paths: folder.paths,
+    config: {
+      format: CONFIG_FORMAT,
+      platform: folder.config.platform ?? options.binding,
+      project,
+      agents: targets.agents,
+    },
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
 
   options.out(`folder: ${folder.paths.root}`);
-  options.out(`config: ${folder.paths.config}`);
-  options.out(`mock-tools: ${folder.paths.mockTools}`);
-  options.out(`tests: ${folder.paths.tests}`);
-  // Read from the file for the same reason the names under it are: what this
-  // reports is what a teammate cloning the repository will get, not what this
-  // one run happened to be handed.
-  if (committed.platform !== null) options.out(`platform: ${committed.platform.origin}`);
-  if (committed.project !== null) {
-    options.out(`project: ${committed.project.name} ${committed.project.id}`);
-  }
-  for (const agent of committed.agents) {
-    options.out(`agent: ${agent.name} ${agent.id}`);
-    for (const connection of agent.connections) {
-      options.out(`connection: ${connection.name} ${connection.id} ${agent.id}`);
-    }
-  }
-  options.out("committable: yes");
-  options.out(`status: ${folder.created ? "created" : "already-there"}`);
-
-  if (!folder.created) {
-    // `already-there` on its own reads as a run that changed nothing, so the
-    // one run that changes something says which thing it changed.
-    options.out(
-      newlyBound
-        ? "note: the folder was already here, and gained the platform it names"
-        : "note: the folder was already here, and nothing in it was changed",
-    );
-  }
-  // Named so that nothing else claims it, and deliberately not made.
-  options.out(`reserved: ${MEMORY_FOLDER_NAME}`);
-
+  options.out(`project: ${project.id} ${project.name}`);
+  options.out(`agents: ${targets.agents.length}`);
+  options.out(`suites: ${pulled.suites.length}`);
+  options.out(`tests: ${pulled.tests.length}`);
+  options.out(`status: ${folder.created ? "initialized" : "pulled"}`);
   return FOLDER_EXIT.done;
 }
