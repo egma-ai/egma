@@ -1,16 +1,17 @@
 ---
 title: "Project graders"
 sidebarTitle: "Graders"
-description: "List a project's graders and update an individual pass threshold."
+description: "List a project's graders, update a grader's scope, settings, and pass threshold, and remove an optional grader."
 ---
 
 A project grader connects one project to one shared grader definition. It owns
-that project's scope and individual pass threshold. It does not copy Egma's
-prompt, code, or model choice.
+that project's scope, settings, and individual pass threshold. It does not copy
+Egma's prompt, code, or model choice.
 
 Egma automatically adds one **Expected behaviors** project grader to every
 project. Its fixed scope selects all simulations and no production traces, and
-it cannot be removed. Its pass threshold starts at `1` and is editable.
+it cannot be removed. Its pass threshold starts at `1` and is editable. Every
+other project grader starts from the [grader library](/api/grader-library).
 
 ## List graders
 
@@ -26,7 +27,7 @@ it cannot be removed. Its pass threshold starts at `1` and is editable.
 </ParamField>
 
 <ResponseField name="graders" type="array">
-  The project's active grader records.
+  The project's active grader records, ordered by name.
 </ResponseField>
 
 <ResponseField name="nextPageToken" type="string | null">
@@ -38,9 +39,11 @@ curl "https://your-egma-instance/v1/graders?projectId=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
-## Update the pass threshold
+## Update a grader
 
 **`PATCH /v1/graders/:graderId`**
+
+Send at least one of the three policy fields. A field you omit does not change.
 
 <ParamField path="graderId" type="string" required>
   The `grd_` project-grader identifier.
@@ -50,7 +53,17 @@ curl "https://your-egma-instance/v1/graders?projectId=prj_abc123" \
   The project identifier. Omit it when your API key is project-scoped.
 </ParamField>
 
-<ParamField body="passThreshold" type="number" required>
+<ParamField body="scope" type="object">
+  The complete scope object. Egma refuses a scope change on a grader whose
+  `scopeEditable` is `false`, such as Expected behaviors.
+</ParamField>
+
+<ParamField body="settings" type="object">
+  One value for each of the definition's settings. For Response latency, send
+  `maximum_response_time_ms` as a positive whole number.
+</ParamField>
+
+<ParamField body="passThreshold" type="number">
   A normalized value from `0` through `1`. A grade passes this individual
   grader when `score >= passThreshold`.
 </ParamField>
@@ -63,8 +76,29 @@ curl -X PATCH \
   -d '{ "passThreshold": 0.8 }'
 ```
 
-The update affects future grading work. Existing grades keep the threshold that
-was frozen when their work was selected.
+The update affects future grading work. Existing grades keep the scope,
+settings, and threshold that were frozen when their work was selected.
+
+## Remove a grader
+
+**`DELETE /v1/graders/:graderId`**
+
+Removes an optional project grader and returns status `204`. Grades it already
+wrote stay readable on their traces. Egma refuses to remove Expected behaviors.
+
+<ParamField path="graderId" type="string" required>
+  The `grd_` project-grader identifier.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+  The project identifier. Omit it when your API key is project-scoped.
+</ParamField>
+
+```bash
+curl -X DELETE \
+  "https://your-egma-instance/v1/graders/grd_abc123?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..."
+```
 
 ## The grader object
 
@@ -88,15 +122,34 @@ was frozen when their work was selected.
   What quality rule the grader applies and why.
 </ResponseField>
 
+<ResponseField name="owner" type="string">
+  `egma` for a predefined definition or `organization` for a custom definition.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  `llm_as_judge` or `code`.
+</ResponseField>
+
+<ResponseField name="modalities" type="array">
+  The conversation forms the grader supports: `chat`, `voice`, or both.
+</ResponseField>
+
 <ResponseField name="scopeEditable" type="boolean">
-  Whether customer APIs may change this project's scope. The first API does not
-  expose a scope-write operation.
+  Whether this project may change the scope.
+</ResponseField>
+
+<ResponseField name="removable" type="boolean">
+  Whether this project may remove the grader. `false` for Expected behaviors.
 </ResponseField>
 
 <ResponseField name="scope" type="object">
   The complete project scope. `simulations` contains `all`, `test_suite`, or
   `test` selectors. `production` is `null` or contains `samplePercent` from `1`
   through `100`.
+</ResponseField>
+
+<ResponseField name="settings" type="object">
+  The values this project supplies for the definition's settings.
 </ResponseField>
 
 <ResponseField name="passThreshold" type="number">
@@ -110,7 +163,3 @@ was frozen when their work was selected.
 <ResponseField name="updatedAt" type="string">
   ISO 8601 last-update time.
 </ResponseField>
-
-There is no create or delete operation in the first API. Egma adds Expected
-behaviors during project creation. Optional predefined graders and customer
-grader authoring will add explicit operations only when those products ship.

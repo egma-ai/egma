@@ -238,21 +238,21 @@ Deployment credentials continue to come from the current `.env` file.
 ### Keep the SDK and this checkout current
 
 Your simulator is built from this repository. The Egma Python SDK in a
-customer's LiveKit worker is an unpinned source dependency. A lockfile can keep
-an older resolved commit, so refresh that dependency when you update Egma.
+customer's LiveKit worker is the `egma` package from PyPI. A lockfile keeps the
+release it resolved, so upgrade that package when you update Egma.
 
 Older workers looked for Egma in dispatch metadata. The current simulator
 writes nothing there, so such a worker never finds Egma and its real tools can
-run inside a simulation. Update the unpinned SDK dependency and its lockfile;
-do not repair this by pinning an older SDK release.
+run inside a simulation. Upgrade the SDK package and its lockfile; do not
+repair this by pinning an older SDK release.
 
 The `egma-sim-` room-name prefix and the `egma-persona` participant identity
 are frozen contracts, so updating the worker first does not break an older
 simulator.
 
 An out-of-date worker does not fail loudly. The coverage stamp on the run is
-where it shows, so refresh the source dependency on your own schedule rather
-than waiting for a run to complain.
+where it shows, so upgrade the package on your own schedule rather than
+waiting for a run to complain.
 
 <Warning>
   There is no in-place self-host upgrade from a build before the current

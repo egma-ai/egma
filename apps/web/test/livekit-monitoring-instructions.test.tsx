@@ -57,9 +57,7 @@ describe("LiveKit monitoring instructions", () => {
     );
 
     const copy = container.textContent ?? "";
-    expect(copy).toContain(
-      "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'",
-    );
+    expect(copy).toContain("pip install egma");
     expect(copy).not.toContain("egma>=");
     expect(copy).toContain("from egma import monitor_livekit");
     expect(copy.indexOf("monitor_livekit(ctx)")).toBeLessThan(

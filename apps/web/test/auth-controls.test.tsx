@@ -145,7 +145,7 @@ describe("the shared controls on access pages", () => {
     expect(above[0]?.tagName).toBe("IMG");
     expect(above[0]?.getAttribute("alt")).toBe("Egma");
     expect(above[1]?.textContent).toBe(
-      "Trust the voice agents you ship in production.",
+      "Trust the voice agents you ship in production through monitoring, self-improvement and simulation testing.",
     );
     expect(above[2]?.getAttribute("data-slot")).toBe("auth-panel");
     expect(above[2]?.contains(screen.getByRole("heading", { name: "Sign in" }))).toBe(
@@ -168,7 +168,11 @@ describe("the shared controls on access pages", () => {
     expect(
       screen.getByRole("button", { name: "Create my Egma instance" }),
     ).toBeTruthy();
-    expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Trust the voice agents you ship in production through monitoring, self-improvement and simulation testing.",
+      ),
+    ).toBeTruthy();
     expect(document.querySelector("canvas")).toBeNull();
   });
 

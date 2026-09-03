@@ -7,7 +7,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Egma",
-  description: "Trust the voice agent you ship to production.",
+  description:
+    "Trust the voice agents you ship in production through monitoring, self-improvement and simulation testing.",
   icons: {
     icon: [
       {

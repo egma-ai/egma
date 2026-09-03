@@ -12,11 +12,10 @@ import type { LiveKitWorkerLanguage } from "@/lib/agent-setup-flow.ts";
 
 import { CopyBlock } from "./copy-block.tsx";
 
-// The repository's package manager resolves the latest SDK. The source URL is
-// unpinned for the same reason the public integration skill is unpinned: the
-// installed CLI owns the current LiveKit source contract.
-const PYTHON_INSTALL =
-  "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'";
+// The repository's package manager resolves the latest SDK from PyPI. The
+// request is unpinned for the same reason the public integration skill is
+// unpinned: the installed CLI owns the current LiveKit source contract.
+const PYTHON_INSTALL = "pip install egma";
 const PYTHON_HOOK = `from egma import monitor_livekit
 
 async def entrypoint(ctx):

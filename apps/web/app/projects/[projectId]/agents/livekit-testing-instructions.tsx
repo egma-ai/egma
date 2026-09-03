@@ -10,8 +10,7 @@ import type { LiveKitWorkerLanguage } from "@/lib/agent-setup-flow.ts";
 
 import { CopyBlock } from "./copy-block.tsx";
 
-export const PYTHON_TESTING_SETUP_INSTALL =
-  "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'";
+export const PYTHON_TESTING_SETUP_INSTALL = "pip install egma";
 
 export const PYTHON_VOICE_SETUP_SNIPPET = `from egma import mockable
 
@@ -43,7 +42,7 @@ const PYTHON_PROMPT_START = `Set up Egma simulation testing for this repository'
 
 Start by running \`egma livekit\` if it is available, or \`npx --yes @egma/cli livekit\` otherwise, and follow its current Python testing contract.
 
-Use the repository's existing dependency file and package manager to install the latest Egma Python SDK from \`egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python\`. Do not pin a version, tag, or commit.
+Use the repository's existing dependency file and package manager to install the latest Egma Python SDK, the \`egma\` package on PyPI. Do not pin a version.
 
 In the job entrypoint, import mockable from egma. After the initial agent and AgentSession exist, and before AgentSession.start, call await mockable(agent, ctx, session).`;
 

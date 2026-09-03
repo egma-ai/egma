@@ -202,12 +202,9 @@ describe("the public skill source", () => {
     expect(liveKitWorker).not.toMatch(
       /egma-sim-chat-|ctx\.job\.room\.name|AgentSession\.start|ctx\.connect\(\)/u,
     );
-    expect(liveKitWorker).toContain(
-      "egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python",
-    );
-    expect(liveKitWorker).toMatch(
-      /Do not add an\s+SDK version, tag, or commit/u,
-    );
+    expect(liveKitWorker).toMatch(/the latest `egma` package from PyPI/u);
+    expect(liveKitWorker).not.toContain("git+https://");
+    expect(liveKitWorker).toMatch(/Do not pin an\s+SDK version/u);
     expect([skill, onboarding, liveKitWorker].join("\n")).not.toMatch(
       /https:\/\/github\.com\/egma-ai\/egma\/archive\//u,
     );

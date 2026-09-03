@@ -40,7 +40,8 @@ export {
 } from "../ui/shell.tsx";
 
 /** The sentence the access surface says, and the only warm line on the page. */
-const STATEMENT = "Trust the voice agents you ship in production.";
+const STATEMENT =
+  "Trust the voice agents you ship in production through monitoring, self-improvement and simulation testing.";
 
 /**
  * The full Egma logo, which belongs here and in the signed-in sidebar.

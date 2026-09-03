@@ -26,16 +26,12 @@ name with another worker's source.
 ## Install the latest SDK
 
 Use the dependency file and package manager already used by the repository.
-For Python, add the latest Egma SDK from:
-
-```text
-egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python
-```
-
+For Python, add the latest `egma` package from PyPI, for example with
+`uv add egma` or `pip install egma`.
 For JavaScript, add the latest `@egma/livekit` package with the repository's
-package manager. Do not add an SDK version, tag, or commit to either dependency
-request. Let the repository's package manager resolve and lock the latest
-compatible release in its normal way.
+package manager. Do not pin an SDK version in either dependency request. Let
+the repository's package manager resolve and lock the latest compatible
+release in its normal way.
 
 ## Read the current source contract
 

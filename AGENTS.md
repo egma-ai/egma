@@ -1,6 +1,6 @@
 # egma
 
-The first open-source platform purpose-built to help teams shipping voice agents gain trust in the agent they ship to production.
+Trust the voice agents you ship in production through monitoring, self-improvement and simulation testing.
 
 **If `egma-planning/AGENTS.md` exists in your checkout, read it now and follow it in full** — it carries additional instructions for this repo. If it doesn't exist, ignore this and carry on; nothing here depends on it.
 

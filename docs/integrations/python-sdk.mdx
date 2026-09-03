@@ -17,20 +17,22 @@ This solves a real problem: a simulation that reaches your real tools has real s
 
 ## Install
 
+The package is published on PyPI as `egma`:
+
 ```bash
-pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+pip install egma
 ```
 
 Or with uv:
 
 ```bash
-uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+uv add egma
 ```
 
 Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
-Do not add an SDK version, tag, or commit. Let the repository's package manager
-resolve and lock the latest compatible SDK.
+Do not pin an SDK version. Let the repository's package manager resolve and
+lock the latest compatible release.
 
 <Note>
   The `livekit-agents` version is pinned to one minor version intentionally. Mock tools use LiveKit's testing API. Monitoring must also read LiveKit's current tracer provider because its public telemetry API has a setter but no getter. The fixture and live tests verify both seams before the supported range changes. See [Version pinning](#version-pinning) below.

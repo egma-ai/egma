@@ -16,6 +16,8 @@ the received evidence supports them.
 The same grading engine can grade simulations and production traces when a
 project grader's scope selects them. The predefined **Expected behaviors**
 grader selects simulations only, so it does not grade production traffic.
+**Response latency** and custom graders can select a percentage of production
+traces. See [Graders](/concepts/graders).
 
 ## How it works
 
@@ -75,7 +77,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20egma_your_project_key
 Install the Python SDK:
 
 ```bash
-pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+pip install egma
 ```
 
 The helper reads the job's room name and keeps a simulation's spans out of

@@ -12,12 +12,28 @@ normalized score from `0` through `1` to a completed trace. One completed
 grader result is a **grade**. The grade keeps its score, details, frozen pass
 threshold, and time.
 
+## The grader library
+
+Every grader starts as a definition in the **grader library**. Egma maintains
+two predefined definitions, **Expected behaviors** and **Response latency**.
+An organization can add its own custom LLM graders beside them.
+
+A project uses a definition through a **project grader**. The project grader
+holds that project's scope, settings, and pass threshold. It never copies the
+definition's prompt, code, or model choice.
+
+Open **Graders → Grader library** in a project and choose **Use in project**
+to add an optional grader. Remove it from **Active graders** when the project
+no longer needs it. Egma adds Expected behaviors to every project
+automatically, and it cannot be removed. See [Grader library](/api/grader-library)
+and [Project graders](/api/graders) for the API operations.
+
 ## Expected behaviors
 
-Egma automatically adds the **Expected behaviors** grader to every project. It
-is the only predefined grader in the current product. Its fixed scope selects
-all simulations and no production traces. You cannot change this scope or
-remove the grader. You can change its individual pass threshold.
+Egma automatically adds the **Expected behaviors** grader to every project.
+Its fixed scope selects all simulations and no production traces. You cannot
+change this scope or remove the grader. You can change its pass threshold,
+which starts at `1`.
 
 Expected behaviors reads the completed simulation and the behavior statements
 from the exact test version used by that simulation. It evaluates each statement
@@ -30,6 +46,41 @@ passed assertions / total assertions = normalized grade score
 
 If an assertion cannot be graded, the top-level score is unavailable and the
 grade contains an error. Egma does not turn a grading error into a zero score.
+
+## Response latency
+
+**Response latency** is an optional predefined grader. It is a code grader, so
+no model is involved. It reads the `turn_response_latency` metric across the
+measured turns of a completed trace, takes the p90, and compares it with the
+**Maximum response time (p90)** setting on the project grader. The default
+maximum is `3000` milliseconds.
+
+```text
+p90 response time <= maximum  → score 1
+p90 response time > maximum   → score 0
+```
+
+Below ten measured turns, the nearest-rank p90 is the slowest turn. A trace
+with no valid turn response latency measurement receives an error grade, not a
+zero.
+
+The scope is editable. It can select all simulations, individual test suites or
+tests, and a stable percentage of production traces. The grader supports chat
+and voice.
+
+## Custom graders
+
+An organization can create its own LLM-as-judge grader from **Graders → Grader
+library → Create grader** or with `POST /v1/grader-library/custom`. You write
+three parts: the grading instructions, what a passing conversation looks like,
+and what a failing conversation looks like. Egma compiles them into one
+immutable prompt, fixes the judge model and the compatible modalities, and adds
+the grader to the current project with the scope and pass threshold you give.
+
+The judge is binary. A `met` decision scores `1` and a `not_met` decision
+scores `0`. When the judge cannot decide, the grade contains an error instead
+of a zero. The definition belongs to the organization, so every project in it
+can use the grader from the library.
 
 ## Individual results
 
@@ -66,8 +117,9 @@ Several selectors can match the same trace, but one project grader still runs
 once. A scope or modality mismatch produces no grade row and is not pending
 grading work.
 
-Expected behaviors supports chat and voice. Egma can add other predefined
-graders later without copying their prompts or code into each project.
+Expected behaviors has a fixed scope. Response latency and custom graders have
+an editable scope. The two predefined graders support chat and voice, and the
+library entry of a custom grader lists its modalities.
 
 ## Stable history
 

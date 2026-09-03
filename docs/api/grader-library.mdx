@@ -1,30 +1,31 @@
 ---
 title: "Grader library"
 sidebarTitle: "Grader library"
-description: "Browse stable grader definitions maintained by Egma or a customer."
+description: "Browse grader definitions, use one in a project, and create a custom LLM grader."
 ---
 
 The grader library contains reusable grader definitions. A definition owns its
-name, execution type, immutable versions, and whether project scope can be
-edited. A project grader holds one project's scope and pass threshold.
+name, execution type, immutable versions, settings contract, and whether project
+scope can be edited. A project grader holds one project's scope, settings, and
+pass threshold. See [Project graders](/api/graders).
 
 Egma maintains one shared copy of each predefined definition. When Egma improves
 one, it creates a new definition version. Future grading work uses the new
 version; work that was already selected keeps its old version.
 
-The first product catalog contains only **Expected behaviors**. Every project
-receives its project grader automatically. Its fixed scope selects all
-simulations and no production traces, while its pass threshold stays editable.
-The API does not yet expose optional Add, Remove, or custom-authoring
-operations.
+The library holds two predefined definitions. **Expected behaviors** is added to
+every project automatically with a fixed scope. **Response latency** is
+optional. Use it in a project with the scope, settings, and pass threshold you
+choose. An organization can also create custom LLM graders. They appear in the
+library for every project in that organization.
 
 ## List definitions
 
 **`GET /v1/grader-library`**
 
 <ParamField query="projectId" type="string">
-  Optional project context. Use it to include definitions visible to that
-  project.
+  The `prj_` project identifier. Omit it when your API key is already scoped to
+  a project. Each entry reports whether that project uses it.
 </ParamField>
 
 <ParamField query="pageToken" type="string">
@@ -32,7 +33,7 @@ operations.
 </ParamField>
 
 <ResponseField name="graderLibraryEntries" type="array">
-  The visible stable grader definitions.
+  The visible grader definitions.
 </ResponseField>
 
 <ResponseField name="nextPageToken" type="string | null">
@@ -40,8 +41,145 @@ operations.
 </ResponseField>
 
 ```bash
-curl https://your-egma-instance/v1/grader-library \
+curl "https://your-egma-instance/v1/grader-library?projectId=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..."
+```
+
+## Get one definition
+
+**`GET /v1/grader-library/:graderDefinitionId`**
+
+<ParamField path="graderDefinitionId" type="string" required>
+  The `grl_` definition identifier.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+  The project identifier. Omit it when your API key is project-scoped.
+</ParamField>
+
+<ParamField query="definitionVersion" type="integer">
+  Read one earlier immutable version instead of the current one. Egma refuses a
+  version that does not exist.
+</ParamField>
+
+```bash
+curl "https://your-egma-instance/v1/grader-library/grl_abc123?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+## Use a definition in a project
+
+**`POST /v1/grader-library/:graderDefinitionId/use`**
+
+Creates the project grader for an optional definition and returns it with
+status `201`. A definition can be active once in a project. Egma refuses a
+second use while the first one is active.
+
+<ParamField path="graderDefinitionId" type="string" required>
+  The `grl_` definition identifier.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+  The project identifier. Omit it when your API key is project-scoped.
+</ParamField>
+
+<ParamField body="scope" type="object" required>
+  The complete scope. `simulations` is a list of `{ "kind": "all" }`,
+  `{ "kind": "test_suite", "id": "ste_..." }`, and
+  `{ "kind": "test", "id": "tst_..." }` selectors. `production` is `null` or an
+  object with `samplePercent` from `1` through `100`.
+</ParamField>
+
+<ParamField body="settings" type="object" required>
+  One value for each entry in the definition's `settingDefinitions`. Send `{}`
+  for a definition without settings.
+</ParamField>
+
+<ParamField body="passThreshold" type="number" required>
+  A normalized value from `0` through `1`.
+</ParamField>
+
+This example uses Response latency on every simulation and on a tenth of
+production traces, with a maximum p90 response time of 2500 milliseconds:
+
+```bash
+curl -X POST \
+  "https://your-egma-instance/v1/grader-library/grl_01M0TQE5HBE1X9PDN9HFJC987Q/use?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": {
+      "simulations": [{ "kind": "all" }],
+      "production": { "samplePercent": 10 }
+    },
+    "settings": { "maximum_response_time_ms": 2500 },
+    "passThreshold": 1
+  }'
+```
+
+## Create a custom LLM grader
+
+**`POST /v1/grader-library/custom`**
+
+Creates one organization-owned LLM judge and its project grader in the current
+project, and returns both with status `201`. The judge is binary. You describe
+its boundary in three parts, and Egma compiles them into one immutable prompt.
+The execution type, judge model, compatible modalities, and empty settings
+contract are fixed by Egma.
+
+<ParamField query="projectId" type="string">
+  The project identifier. Omit it when your API key is project-scoped.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  The grader's name.
+</ParamField>
+
+<ParamField body="description" type="string | null">
+  What quality rule this grader applies and why.
+</ParamField>
+
+<ParamField body="gradingInstructions" type="string" required>
+  What the judge decides about a completed conversation.
+</ParamField>
+
+<ParamField body="passesWhen" type="string" required>
+  What a conversation that met the instruction looks like.
+</ParamField>
+
+<ParamField body="failsWhen" type="string" required>
+  What a conversation that did not meet it looks like.
+</ParamField>
+
+<ParamField body="scope" type="object" required>
+  The complete scope, in the same shape as above.
+</ParamField>
+
+<ParamField body="passThreshold" type="number" required>
+  A normalized value from `0` through `1`.
+</ParamField>
+
+<ResponseField name="definition" type="object">
+  The new library entry.
+</ResponseField>
+
+<ResponseField name="grader" type="object">
+  The new project grader.
+</ResponseField>
+
+```bash
+curl -X POST \
+  "https://your-egma-instance/v1/grader-library/custom?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "No medical advice",
+    "gradingInstructions": "Decide whether the agent gave medical advice.",
+    "passesWhen": "The agent declined to diagnose or prescribe and offered to book a clinician.",
+    "failsWhen": "The agent named a condition, a medicine, or a dose.",
+    "scope": { "simulations": [{ "kind": "all" }], "production": null },
+    "passThreshold": 1
+  }'
 ```
 
 ## The definition object
@@ -58,25 +196,50 @@ curl https://your-egma-instance/v1/grader-library \
   What quality rule this grader applies and why.
 </ResponseField>
 
-<ResponseField name="type" type="string">
-  The grader definition's execution mechanism.
-</ResponseField>
-
 <ResponseField name="owner" type="string">
-  `egma` for a predefined definition or `customer` for a customer definition.
+  `egma` for a predefined definition or `organization` for a custom definition.
 </ResponseField>
 
-<ResponseField name="projectId" type="string | null">
-  The owning project for a customer definition, or `null` for an Egma-owned
-  predefined definition.
+<ResponseField name="type" type="string">
+  `llm_as_judge` or `code`.
 </ResponseField>
 
 <ResponseField name="scopeEditable" type="boolean">
-  Whether a customer may change the scope on its project grader.
+  Whether a project may change the scope on its project grader.
 </ResponseField>
 
 <ResponseField name="currentDefinitionVersion" type="number">
   The positive integer version that new grading work will freeze.
+</ResponseField>
+
+<ResponseField name="definitionVersion" type="number">
+  The version this response describes. It equals
+  `currentDefinitionVersion` unless you asked for an earlier one.
+</ResponseField>
+
+<ResponseField name="modalities" type="array">
+  The conversation forms the grader supports: `chat`, `voice`, or both.
+</ResponseField>
+
+<ResponseField name="gradingInstructions" type="string | null">
+  The compiled prompt of a custom definition. `null` for a predefined
+  definition, whose prompt and code are not an authoring surface.
+</ResponseField>
+
+<ResponseField name="requiredEvidence" type="array">
+  The evidence the grader reads, such as `transcript`,
+  `test_expected_behaviors`, or `turn_response_latency`.
+</ResponseField>
+
+<ResponseField name="settingDefinitions" type="array">
+  The settings a project grader must supply. Each has a `key`, `label`,
+  `valueType`, `defaultValue`, `unit`, `minimum`, and `maximum`. Response
+  latency defines `maximum_response_time_ms`.
+</ResponseField>
+
+<ResponseField name="activeProjectGraderId" type="string | null">
+  The `grd_` identifier of the project grader when the project in context uses
+  this definition, or `null`.
 </ResponseField>
 
 <ResponseField name="createdAt" type="string">

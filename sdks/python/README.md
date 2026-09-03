@@ -13,12 +13,20 @@ Calling one function never enables or changes the other.
 
 ## Install
 
+The package is published on PyPI as `egma`:
+
 ```bash
-pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+pip install egma
 ```
 
-This source request has no version, tag, or commit. Let the repository's
-package manager resolve and lock the latest compatible SDK.
+Or with uv:
+
+```bash
+uv add egma
+```
+
+Add it without a version pin. Let the repository's package manager resolve and
+lock the latest compatible release.
 
 For a LiveKit agent on Python 3.11 or newer.
 
