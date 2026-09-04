@@ -147,6 +147,7 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
     const workspace = await preparedWorkspace("https://egma.example");
     const controller = new AbortController();
     const output: string[] = [];
+    const failed: string[] = [];
     let requestSignal: AbortSignal | undefined;
     try {
       const code = await runCreateCommand({
@@ -160,7 +161,7 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
         connection: "con_one",
         signal: controller.signal,
         out: (line) => output.push(line),
-        fail: (line) => output.push(`stderr: ${line}`),
+        fail: (line) => failed.push(line),
         fetchImpl: async (input, init) => {
           const phase = phaseOf(String(input));
           if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
@@ -181,8 +182,12 @@ it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
 
       expect(requestSignal?.aborted).toBe(true);
       expect(code).toBe(130);
-      expect(output).toContain("status: interrupted");
-      expect(output).not.toContain("status: started");
+      expect(output).toEqual([]);
+      expect(failed).toEqual([
+        interruptedPhase === "push"
+          ? "Run creation was interrupted during the pre-run push. No Run was created. Run egma pull before you try again."
+          : "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
+      ]);
     } finally {
       await workspace.remove();
     }
@@ -194,6 +199,7 @@ it("writes returned push pins before it stops an interrupted command", async () 
   const controller = new AbortController();
   const calls: RemotePhase[] = [];
   const output: string[] = [];
+  const failed: string[] = [];
   try {
     const code = await runCreateCommand({
       access: {
@@ -206,7 +212,7 @@ it("writes returned push pins before it stops an interrupted command", async () 
       connection: "con_one",
       signal: controller.signal,
       out: (line) => output.push(line),
-      fail: (line) => output.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (input, init) => {
         const phase = phaseOf(String(input));
         if (phase === null) return new JsonResponse({ error: "not-found" }, 404);
@@ -221,7 +227,11 @@ it("writes returned push pins before it stops an interrupted command", async () 
 
     expect(code).toBe(130);
     expect(calls).toEqual(["push"]);
-    expect(output).toContain("status: interrupted");
+    expect(output.join("\n")).toContain(`Applied Test Books a visit (${TEST_ID}).`);
+    expect(output.join("\n")).toContain(`Version ID: ${VERSION_ID}`);
+    expect(failed).toEqual([
+      "Run creation was interrupted after Egma applied the pre-run push. Returned Test version IDs were saved locally. No Run was created. Run egma run create again when you are ready.",
+    ]);
     expect(
       await readFile(
         path.join(
@@ -241,6 +251,7 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
   const workspace = await preparedWorkspace("https://egma.example");
   const controller = new AbortController();
   const output: string[] = [];
+  const failed: string[] = [];
   let requestSignal: AbortSignal | undefined;
   try {
     const code = await runCancelCommand({
@@ -252,7 +263,7 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
       runId: "run_01K3XQ7M4E8YB2FVN0H9TZQWER",
       signal: controller.signal,
       out: (line) => output.push(line),
-      fail: (line) => output.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (_input, init) => {
         requestSignal = init?.signal ?? undefined;
         controller.abort("interrupt");
@@ -266,8 +277,10 @@ it("returns 130 when a Run cancellation request is interrupted", async () => {
 
     expect(requestSignal?.aborted).toBe(true);
     expect(code).toBe(130);
-    expect(output).toContain("status: interrupted");
-    expect(output).not.toContain("status: canceled");
+    expect(output).toEqual([]);
+    expect(failed).toEqual([
+      "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
+    ]);
   } finally {
     await workspace.remove();
   }
@@ -346,8 +359,11 @@ it("turns Ctrl-C during the pre-run push into process exit 130", async () => {
 
     expect(result.signal).toBeNull();
     expect(result.code).toBe(130);
-    expect(result.stdout).toContain("status: interrupted");
-    expect(result.stdout).not.toContain("status: started");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "Run creation was interrupted during the pre-run push. No Run was created.",
+    );
+    expect(result.stderr).toContain("Run egma pull before you try again.");
   } finally {
     server.closeAllConnections();
     await Promise.all([

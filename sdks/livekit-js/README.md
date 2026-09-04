@@ -74,9 +74,12 @@ Egma wraps exactly the tools the running test names. Every other tool runs its
 real implementation, and Egma is not in that path. A mock tool whose name never
 matches one of the agent's tools runs nothing and leaves no trace.
 
-Where Egma dispatches the job itself, the worker reads the running test's
-`job_dispatch_metadata` at `ctx.job.metadata`, as one compact JSON string. Egma
-adds no key of its own there and leaves the room's metadata empty.
+The worker reads the running test's `job_dispatch_metadata` at
+`ctx.job.metadata`, as one compact JSON string. With Project credentials, Egma
+writes it directly to the dispatch. With a token endpoint, Egma sends it in the
+request's `room_config` and the endpoint copies that configuration into the
+token it mints. Egma adds no key of its own there and leaves the room's metadata
+empty.
 
 In every other room, `mockable` returns before it connects, sends a message, or
 wraps a tool. That is the production safety boundary.

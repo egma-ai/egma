@@ -7,7 +7,7 @@
  * required fields or supported connection tuples.
  */
 
-import type { Readable } from "node:stream";
+import path from "node:path";
 
 import {
   folderPathsIn,
@@ -19,9 +19,11 @@ import {
 import {
   addConnection,
   readAgent,
-  registerAgent,
+  registerAgentIdentity,
   type NewConnection,
-  type Registered,
+  type RegisteredAgent,
+  type RegisteredConnection,
+  type RegisterOutcome,
   type RegisterOptions,
 } from "../platform/agents.ts";
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
@@ -45,6 +47,11 @@ import {
 import { refreshProjectTargets } from "../sync/targets.ts";
 import { connectionFieldIssue } from "../ui/connection-field-validation.ts";
 import { oneLineFactText } from "../ui/fact-value.ts";
+import {
+  readApiKeyCredential,
+  readCredentialStdin,
+  type CredentialStdin,
+} from "./credential-stdin.ts";
 
 export const RETELL_API_KEY_ACCESS = "retell-api-key";
 export const RETELL_PHONE_NUMBER_ACCESS = "retell-phone-number";
@@ -55,18 +62,16 @@ export const LIVEKIT_TOKEN_ENDPOINT_ACCESS = "livekit-token-endpoint";
 export const AGENT_EXIT = {
   done: 0,
   nothing: 1,
-  notSignedIn: 2,
-  refused: 4,
-  incomplete: 5,
-  noCredentials: 6,
-  localWriteFailed: 8,
+  notSignedIn: 1,
+  refused: 1,
+  incomplete: 1,
+  noCredentials: 1,
+  localWriteFailed: 1,
   interrupted: 130,
 } as const;
 
 type AgentPlatform = "retell" | "livekit";
 type Modality = "chat" | "voice";
-type CredentialStdin = Readable & { readonly isTTY?: boolean };
-
 type CommandIO = {
   readonly access: PlatformAccess;
   readonly cwd: string;
@@ -89,21 +94,19 @@ type ConnectionFlags = {
   /** The public `--access` value, not the API's internal access-variant id. */
   readonly accessMethod: string | null;
   readonly modality: string | null;
-  readonly connectionName: string | null;
-  readonly phoneNumber: string | null;
+  readonly name: string | null;
+  readonly retellAgentId: string | null;
+  readonly retellPhoneNumber: string | null;
   readonly livekitUrl: string | null;
-  readonly dispatchName: string | null;
-  readonly tokenEndpoint: string | null;
+  readonly livekitAgentName: string | null;
+  readonly livekitTokenEndpoint: string | null;
 };
 
-export type AgentRegisterCommandOptions = CommandIO &
-  ConnectionFlags & {
-    readonly platform: string | null;
-    /** Optional Egma name. Retell and LiveKit project credentials have defaults. */
-    readonly name: string | null;
-    /** The provider id printed by `agent connection options`. */
-    readonly retellAgentId: string | null;
-  };
+export type AgentRegisterCommandOptions = CommandIO & {
+  readonly platform: string | null;
+  /** Optional Egma name. The repository directory name is the default. */
+  readonly name: string | null;
+};
 
 export type AgentConnectionAddCommandOptions = CommandIO &
   ConnectionFlags & {
@@ -131,11 +134,10 @@ function clean(value: string | null | undefined): string {
 
 function sayFailure(
   options: Pick<CommandIO, "out" | "fail">,
-  status: string,
+  _status: string,
   message: string,
   code: number = AGENT_EXIT.refused,
 ): Stop {
-  options.out(`status: ${status}`);
   options.fail(message);
   return stopped(code);
 }
@@ -223,19 +225,34 @@ async function prepare(options: CommandIO): Promise<Ready | Stop> {
 }
 
 function publicAccess(option: ConnectionOption): string | null {
-  if (option.agentPlatform === "retell") {
-    return option.connectionType === "phone_number"
-      ? RETELL_PHONE_NUMBER_ACCESS
-      : RETELL_API_KEY_ACCESS;
+  if (
+    option.agentPlatform === "retell" &&
+    ((option.connectionType === "retell_chat_api" &&
+      option.accessVariant === "retell_chat_api.api_key") ||
+      (option.connectionType === "retell_text_mode" &&
+        option.accessVariant === "retell_text_mode.api_key") ||
+      (option.connectionType === "retell_web_call" &&
+        option.accessVariant === "retell_web_call.api_key"))
+  ) {
+    return RETELL_API_KEY_ACCESS;
+  }
+  if (
+    option.agentPlatform === "retell" &&
+    option.connectionType === "phone_number" &&
+    option.accessVariant === "phone_number.public_e164"
+  ) {
+    return RETELL_PHONE_NUMBER_ACCESS;
   }
   if (
     option.agentPlatform === "livekit" &&
+    option.connectionType === "livekit_room" &&
     option.accessVariant === "livekit_room.project_credentials"
   ) {
     return LIVEKIT_PROJECT_CREDENTIALS_ACCESS;
   }
   if (
     option.agentPlatform === "livekit" &&
+    option.connectionType === "livekit_room" &&
     option.accessVariant === "livekit_room.customer_token_endpoint"
   ) {
     return LIVEKIT_TOKEN_ENDPOINT_ACCESS;
@@ -271,7 +288,8 @@ function selectedOption(
       }),
     ),
   ];
-  for (const choice of available) options.out(`option: ${choice}`);
+  if (available.length > 0) options.out("Available Connections:");
+  for (const choice of available) options.out(`- ${choice}`);
   const message =
     matches.length === 0
       ? `Egma does not offer --access ${accessMethod} with --modality ${modality} on this platform.`
@@ -280,35 +298,52 @@ function selectedOption(
 }
 
 function connectionFlag(key: string): string | null {
-  switch (key) {
-    case "phoneNumber":
-      return "--phone-number";
-    case "url":
-      return "--livekit-url";
-    case "agentName":
-      return "--dispatch-name";
-    case "tokenEndpoint":
-      return "--token-endpoint";
-    case "retellAgentId":
-      return "--retell-agent";
-    default:
-      return null;
-  }
+  if (key === "retellAgentId") return "--retell-agent";
+  return CONFIG_FLAGS.find(([field]) => field === key)?.[1] ?? null;
 }
 
 function flagValue(key: string, flags: ConnectionFlags): string {
-  switch (key) {
-    case "phoneNumber":
-      return clean(flags.phoneNumber);
-    case "url":
-      return clean(flags.livekitUrl);
-    case "agentName":
-      return clean(flags.dispatchName);
-    case "tokenEndpoint":
-      return clean(flags.tokenEndpoint);
-    default:
-      return "";
+  const descriptor = CONFIG_FLAGS.find(([field]) => field === key);
+  return descriptor === undefined ? "" : clean(flags[descriptor[2]]);
+}
+
+const CONFIG_FLAGS = [
+  ["phoneNumber", "--retell-phone-number", "retellPhoneNumber"],
+  ["url", "--livekit-url", "livekitUrl"],
+  ["agentName", "--livekit-agent-name", "livekitAgentName"],
+  ["tokenEndpoint", "--livekit-token-endpoint", "livekitTokenEndpoint"],
+] as const;
+
+function irrelevantConnectionFlags(
+  platform: AgentPlatform,
+  option: ConnectionOption,
+  flags: ConnectionFlags,
+): readonly string[] {
+  const accepted = new Set(option.fields.map((field) => field.key));
+  const irrelevant: string[] = CONFIG_FLAGS.flatMap(
+    ([field, flag, property]) =>
+      clean(flags[property]) !== "" && !accepted.has(field) ? [flag] : [],
+  );
+  if (clean(flags.retellAgentId) !== "" && platform !== "retell") {
+    irrelevant.push("--retell-agent");
   }
+  return irrelevant;
+}
+
+function rejectIrrelevantConnectionFlags(
+  platform: AgentPlatform,
+  option: ConnectionOption,
+  flags: ConnectionFlags,
+  io: Pick<CommandIO, "out" | "fail">,
+): Stop | null {
+  const irrelevant = irrelevantConnectionFlags(platform, option, flags);
+  if (irrelevant.length === 0) return null;
+  return sayFailure(
+    io,
+    "unused-option",
+    `${irrelevant.join(", ")} ${irrelevant.length === 1 ? "does" : "do"} not apply to this Connection option. Remove ${irrelevant.length === 1 ? "it" : "them"}, then try again.`,
+    AGENT_EXIT.incomplete,
+  );
 }
 
 type BuiltConfig =
@@ -345,15 +380,6 @@ function configForOption(
   return { kind: "config", config };
 }
 
-async function readStdin(stdin: CredentialStdin | undefined): Promise<string> {
-  if (stdin === undefined || stdin.isTTY === true) return "";
-  const chunks: Buffer[] = [];
-  for await (const chunk of stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-  }
-  return Buffer.concat(chunks).toString("utf8").trim();
-}
-
 function retellCredentialFromEnvironment(env: NodeJS.ProcessEnv): string {
   return clean(env["EGMA_RETELL_API_KEY"]);
 }
@@ -361,20 +387,46 @@ function retellCredentialFromEnvironment(env: NodeJS.ProcessEnv): string {
 async function retellCredential(
   options: CommandIO,
 ): Promise<ConnectionCredentials | Stop> {
-  const raw = options.credentialsStdin
-    ? await readStdin(options.stdin)
-    : retellCredentialFromEnvironment(options.env);
-  if (raw === "") {
+  let apiKey: string;
+  if (options.credentialsStdin) {
+    const read = await readApiKeyCredential(options.stdin, options.signal);
+    if (read.kind === "interrupted") {
+      return sayFailure(
+        options,
+        "interrupted",
+        "The command was interrupted before credentials finished reading.",
+        AGENT_EXIT.interrupted,
+      );
+    }
+    if (read.kind === "missing") {
+      return sayFailure(
+        options,
+        "credentials-required",
+        'No credentials arrived on standard input. Pipe one JSON object such as {"apiKey":"..."}, or remove --credentials-stdin and set EGMA_RETELL_API_KEY.',
+        AGENT_EXIT.noCredentials,
+      );
+    }
+    if (read.kind === "invalid") {
+      return sayFailure(
+        options,
+        "invalid-credentials",
+        'Retell credentials on standard input must be one JSON object shaped {"apiKey":"..."}.',
+        AGENT_EXIT.noCredentials,
+      );
+    }
+    apiKey = read.apiKey;
+  } else {
+    apiKey = retellCredentialFromEnvironment(options.env);
+  }
+  if (apiKey === "") {
     return sayFailure(
       options,
       "credentials-required",
-      options.credentialsStdin
-        ? "No Retell API key arrived on standard input. Pipe the key into this command, or remove --credentials-stdin and set EGMA_RETELL_API_KEY."
-        : "Set EGMA_RETELL_API_KEY, or pipe the Retell API key into this command with --credentials-stdin.",
+      'Set EGMA_RETELL_API_KEY, or pipe {"apiKey":"..."} into this command with --credentials-stdin.',
       AGENT_EXIT.noCredentials,
     );
   }
-  return ConnectionCredentials.hold({ apiKey: raw });
+  return ConnectionCredentials.hold({ apiKey });
 }
 
 function credentialEnvironmentVariable(
@@ -391,9 +443,34 @@ function credentialEnvironmentVariable(
     return "EGMA_LIVEKIT_API_SECRET";
   }
   if (platform === "livekit" && field === "headers") {
-    return "EGMA_LIVEKIT_TOKEN_HEADERS";
+    return "EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS";
   }
   return null;
+}
+
+/** Refuse new server vocabulary before the CLI hides or mislabels any part. */
+function incompatibleCatalog(
+  platform: AgentPlatform,
+  catalog: readonly ConnectionOption[],
+  options: Pick<CommandIO, "out" | "fail">,
+): Stop | null {
+  const unsupported = catalog.some(
+    (option) =>
+      publicAccess(option) === null ||
+      option.fields.some((field) => connectionFlag(field.key) === null) ||
+      option.credentialFields.some(
+        (field) =>
+          credentialEnvironmentVariable(platform, field.field) === null,
+      ),
+  );
+  return unsupported
+    ? sayFailure(
+        options,
+        "unsupported-catalog",
+        "Egma returned a Connection option this CLI does not understand. Update egma-cli, then try again.",
+        AGENT_EXIT.incomplete,
+      )
+    : null;
 }
 
 type BuiltCredentials =
@@ -412,6 +489,13 @@ function objectFromStdin(
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { message: "Credentials on standard input must be one JSON object." };
+  }
+  const accepted = new Set(option.credentialFields.map((field) => field.field));
+  if (Object.keys(parsed).some((field) => !accepted.has(field))) {
+    return {
+      message:
+        "Credentials on standard input contain unsupported fields. Read the accepted fields with egma agent connection options.",
+    };
   }
   const values: Record<string, string> = {};
   for (const [field, value] of Object.entries(parsed)) {
@@ -452,7 +536,19 @@ async function credentialsForOption(
 
   let supplied: Readonly<Record<string, string>>;
   if (options.credentialsStdin) {
-    const document = await readStdin(options.stdin);
+    const read = await readCredentialStdin(options.stdin, options.signal);
+    if (read.kind === "interrupted") {
+      return {
+        kind: "stop",
+        stop: sayFailure(
+          options,
+          "interrupted",
+          "The command was interrupted before credentials finished reading.",
+          AGENT_EXIT.interrupted,
+        ),
+      };
+    }
+    const document = read.text;
     if (document === "") {
       return {
         kind: "stop",
@@ -486,6 +582,14 @@ async function credentialsForOption(
     supplied = fromEnvironment;
   }
 
+  if (
+    option.credentialRule === "optional" &&
+    !options.credentialsStdin &&
+    Object.values(supplied).every((value) => clean(value) === "")
+  ) {
+    return { kind: "credentials" };
+  }
+
   const allowed = new Set(option.credentialFields.map((field) => field.field));
   const unknown = Object.keys(supplied).filter((field) => !allowed.has(field));
   if (unknown.length > 0) {
@@ -494,7 +598,7 @@ async function credentialsForOption(
       stop: sayFailure(
         options,
         "invalid-credentials",
-        `This connection does not use credential ${unknown.join(", ")}. Read the accepted fields with egma agent connection options --platform ${platform}.`,
+        `Credentials contain unsupported fields. Read the accepted fields with egma agent connection options --platform ${platform}.`,
         AGENT_EXIT.noCredentials,
       ),
     };
@@ -547,12 +651,13 @@ async function credentialsForOption(
 
 function requestFailure(
   result:
-    | { readonly kind: "not-authenticated" }
+    | { readonly kind: "not-authenticated"; readonly reason: string }
     | { readonly kind: "refused"; readonly reason: string }
     | { readonly kind: "unreachable"; readonly reason: string },
   options: Pick<CommandIO, "out" | "fail">,
 ): Stop {
   if (result.kind === "not-authenticated") {
+    options.fail(result.reason);
     return sayFailure(
       options,
       "not-signed-in",
@@ -570,35 +675,30 @@ function shellWord(value: string): string {
 function optionCommand(
   platform: AgentPlatform,
   option: ConnectionOption,
-  command: "register" | "add",
-  fixed: readonly string[] = [],
 ): string {
   const access = publicAccess(option);
   if (access === null) return "";
   const parts = [
     "egma",
     "agent",
-    ...(command === "register" ? ["register"] : ["connection", "add"]),
-    ...(command === "register" ? ["--platform", platform] : []),
+    "connection",
+    "add",
+    "--agent",
+    shellWord("<Egma Agent ID>"),
     "--access",
     access,
     "--modality",
     option.modality,
-    ...fixed,
   ];
+  if (platform === "retell") {
+    parts.push("--retell-agent", shellWord("<Retell Agent ID>"));
+  }
   for (const field of option.fields) {
     if (!field.required || field.key === "retellAgentId") continue;
     const flag = connectionFlag(field.key);
     if (flag !== null && !parts.includes(flag)) {
       parts.push(flag, shellWord(`<${field.label}>`));
     }
-  }
-  if (
-    command === "register" &&
-    platform === "livekit" &&
-    !option.fields.some((field) => field.key === "agentName")
-  ) {
-    parts.push("--name", shellWord("<Egma Agent name>"));
   }
   return parts.join(" ");
 }
@@ -608,75 +708,80 @@ function sayCredentialSources(
   option: ConnectionOption,
   out: (line: string) => void,
 ): void {
+  if (option.credentialHelp !== "") {
+    out(`  Credential guidance: ${option.credentialHelp}`);
+  }
   if (option.credentialRule === "forbidden") {
     out("  Connection credential: none");
+    if (platform === "retell") {
+      out(
+        "  First Retell Connection verification: EGMA_RETELL_API_KEY or {\"apiKey\":\"...\"} with --credentials-stdin",
+      );
+    }
     return;
   }
+  out(`  Connection credential: ${option.credentialRule}`);
   const variables = option.credentialFields.flatMap((field) => {
     const variable = credentialEnvironmentVariable(platform, field.field);
     return variable === null ? [] : [variable];
   });
+  for (const field of option.credentialFields) {
+    const requirement = field.required ? "required" : "optional";
+    const help = field.help === "" ? field.label : field.help;
+    out(`  Credential field ${field.field} (${requirement}): ${help}`);
+  }
   if (variables.length > 0) out(`  Credential environment: ${variables.join(", ")}`);
   const shape = option.credentialFields
-    .map((field) => `\"${field.field}\":\"...\"`)
+    .map((field) =>
+      field.kind === "json"
+        ? `\"${field.field}\":{\"Authorization\":\"Bearer ...\"}`
+        : `\"${field.field}\":\"...\"`,
+    )
     .join(",");
   out(`  Credential stdin: {${shape}} with --credentials-stdin`);
 }
 
-function candidateOption(
-  candidate: DiscoveredConnection,
-  catalog: readonly ConnectionOption[],
-): ConnectionOption | null {
-  return (
-    catalog.find(
-      (option) =>
-        option.agentPlatform === candidate.agentPlatform &&
-        option.connectionType === candidate.connectionType &&
-        option.accessVariant === candidate.accessVariant &&
-        option.modality === candidate.modality,
-    ) ?? null
-  );
-}
-
 function sayRetellAgent(
   agent: DiscoveredAgent,
-  catalog: readonly ConnectionOption[],
-  egmaAgentId: string | null,
   out: (line: string) => void,
 ): void {
-  out(`Retell Agent: ${oneLineFactText(agent.name, "Unnamed")}`);
-  out(`  Retell Agent ID: ${oneLineFactText(agent.id, "unknown")}`);
+  out(`- ${oneLineFactText(agent.name, "Unnamed")} (${oneLineFactText(agent.id, "unknown")})`);
   const phones = agent.connections
     .filter((candidate) => candidate.connectionType === "phone_number")
-    .map((candidate) => clean(candidate.config["phoneNumber"]))
+    .map((candidate) =>
+      oneLineFactText(clean(candidate.config["phoneNumber"]), ""),
+    )
     .filter((phone) => phone !== "");
-  if (phones.length === 0) out("  Phone numbers: none");
-  else for (const phone of phones) out(`  Phone number: ${phone}`);
-  out(
-    egmaAgentId === null
-      ? "  Registration commands:"
-      : "  Connection add commands:",
-  );
-  for (const candidate of agent.connections) {
-    const option = candidateOption(candidate, catalog);
-    if (option === null) continue;
-    const fixed =
-      egmaAgentId === null
-        ? ["--retell-agent", shellWord(agent.id)]
-        : ["--agent", shellWord(egmaAgentId)];
-    if (candidate.connectionType === "phone_number") {
-      const phone = clean(candidate.config["phoneNumber"]);
-      if (phone !== "") fixed.push("--phone-number", shellWord(phone));
-    }
-    out(
-      `    ${optionCommand(
-        "retell",
-        option,
-        egmaAgentId === null ? "register" : "add",
-        fixed,
-      )}`,
-    );
+  out(`  Phone numbers: ${phones.length === 0 ? "none" : phones.join(", ")}`);
+}
+
+function sayConnectionOption(
+  platform: AgentPlatform,
+  option: ConnectionOption,
+  out: (line: string) => void,
+): void {
+  const access = publicAccess(option);
+  if (access === null) return;
+  out("");
+  out(`${option.productLabel} (${option.modality})`);
+  out(`  Access: ${access}`);
+  const required = option.fields
+    .filter((field) => field.required)
+    .flatMap((field) => connectionFlag(field.key) ?? []);
+  const optional = option.fields
+    .filter((field) => !field.required)
+    .flatMap((field) => connectionFlag(field.key) ?? []);
+  out(`  Required flags: ${required.length === 0 ? "none" : required.join(", ")}`);
+  out(`  Optional flags: ${optional.length === 0 ? "none" : optional.join(", ")}`);
+  for (const field of option.fields) {
+    const flag = connectionFlag(field.key);
+    if (flag === null) continue;
+    const requirement = field.required ? "required" : "optional";
+    const help = field.help === "" ? field.label : field.help;
+    out(`  ${flag} (${requirement}): ${help}`);
   }
+  sayCredentialSources(platform, option, out);
+  out(`  Command: ${optionCommand(platform, option)}`);
 }
 
 /** List server-owned connection choices and, for Retell, provider Agents. */
@@ -687,8 +792,6 @@ export async function runAgentConnectionOptionsCommand(
   if (stoppedBefore !== null) return stoppedBefore.code;
   const platform = platformWord(options.platform);
   if (platform === null || typeof platform === "object") {
-    options.out("platform: retell");
-    options.out("platform: livekit");
     return sayFailure(
       options,
       platform === null ? "platform-required" : "unsupported-platform",
@@ -698,11 +801,17 @@ export async function runAgentConnectionOptionsCommand(
   }
   const ready = await prepare(options);
   if ("code" in ready) return ready.code;
+  const stoppedAfterPrepare = interrupted(options);
+  if (stoppedAfterPrepare !== null) return stoppedAfterPrepare.code;
   const catalogResult = await readConnectionOptions(ready.request);
+  const stoppedAfterCatalog = interrupted(options);
+  if (stoppedAfterCatalog !== null) return stoppedAfterCatalog.code;
   if (catalogResult.kind !== "catalog") {
     return requestFailure(catalogResult, options).code;
   }
   const catalog = connectionOptionsForPlatform(catalogResult.catalog, platform);
+  const catalogProblem = incompatibleCatalog(platform, catalog, options);
+  if (catalogProblem !== null) return catalogProblem.code;
 
   if (platform === "retell") {
     const agentId = clean(options.agentId);
@@ -729,9 +838,12 @@ export async function runAgentConnectionOptionsCommand(
           AGENT_EXIT.incomplete,
         ).code;
       }
-      const remote = await readAgent(agentId, ready.request);
+      const remote = await readAgent(agentId, ready.project.id, ready.request);
+      const stoppedAfterRead = interrupted(options);
+      if (stoppedAfterRead !== null) return stoppedAfterRead.code;
       if (remote.kind !== "agent") {
         if (remote.kind === "not-found") {
+          options.fail(remote.reason);
           return sayFailure(
             options,
             "agent-not-found",
@@ -764,23 +876,23 @@ export async function runAgentConnectionOptionsCommand(
       discoveryInput,
       ready.request,
     );
+    const stoppedAfterDiscovery = interrupted(options);
+    if (stoppedAfterDiscovery !== null) return stoppedAfterDiscovery.code;
     if (discovered.kind !== "agents") {
       return requestFailure(discovered, options).code;
     }
     if (discovered.agents.length === 0) {
       options.out("Retell Agents: none");
     } else {
-      for (const [index, agent] of discovered.agents.entries()) {
-        if (index > 0) options.out("");
-        sayRetellAgent(
-          agent,
-          catalog,
-          agentId === "" ? null : agentId,
-          options.out,
-        );
+      options.out("Retell Agents");
+      for (const agent of discovered.agents) {
+        sayRetellAgent(agent, options.out);
       }
     }
-    options.out("status: listed");
+    options.out("");
+    options.out("Connection commands");
+    options.out("Use the selected Retell Agent ID on the first Connection. Later Connections may reuse the stored binding.");
+    for (const option of catalog) sayConnectionOption(platform, option, options.out);
     return AGENT_EXIT.done;
   }
 
@@ -794,24 +906,7 @@ export async function runAgentConnectionOptionsCommand(
   }
 
   options.out("LiveKit connection options");
-  for (const option of catalog) {
-    const access = publicAccess(option);
-    if (access === null) continue;
-    options.out("");
-    options.out(`${option.productLabel} (${option.modality})`);
-    options.out(`  Access: ${access}`);
-    const required = option.fields
-      .filter((field) => field.required)
-      .flatMap((field) => connectionFlag(field.key) ?? []);
-    const optional = option.fields
-      .filter((field) => !field.required)
-      .flatMap((field) => connectionFlag(field.key) ?? []);
-    options.out(`  Required flags: ${required.length === 0 ? "none" : required.join(", ")}`);
-    options.out(`  Optional flags: ${optional.length === 0 ? "none" : optional.join(", ")}`);
-    sayCredentialSources(platform, option, options.out);
-    options.out(`  Command: ${optionCommand(platform, option, "register")}`);
-  }
-  options.out("status: listed");
+  for (const option of catalog) sayConnectionOption(platform, option, options.out);
   return AGENT_EXIT.done;
 }
 
@@ -851,37 +946,19 @@ async function loadChoiceForReady(
     );
   }
   const result = await readConnectionOptions(ready.request);
+  const stoppedAfterCatalog = interrupted(options);
+  if (stoppedAfterCatalog !== null) return stoppedAfterCatalog;
   if (result.kind !== "catalog") return requestFailure(result, options);
+  const catalog = connectionOptionsForPlatform(result.catalog, platform);
+  const catalogProblem = incompatibleCatalog(platform, catalog, options);
+  if (catalogProblem !== null) return catalogProblem;
   return {
     ready,
     platform,
     modality,
     accessMethod,
-    catalog: connectionOptionsForPlatform(result.catalog, platform),
+    catalog,
   };
-}
-
-async function loadChoice(
-  options: CommandIO & {
-    readonly platform: string | null;
-    readonly modality: string | null;
-    readonly accessMethod: string | null;
-  },
-): Promise<LoadedCatalog | Stop> {
-  const before = interrupted(options);
-  if (before !== null) return before;
-  const platform = platformWord(options.platform);
-  if (platform === null || typeof platform === "object") {
-    return sayFailure(
-      options,
-      platform === null ? "platform-required" : "unsupported-platform",
-      "Choose --platform retell or --platform livekit.",
-      AGENT_EXIT.incomplete,
-    );
-  }
-  const ready = await prepare(options);
-  if ("code" in ready) return ready;
-  return await loadChoiceForReady(options, ready, platform);
 }
 
 function discoveredCandidate(
@@ -896,7 +973,7 @@ function discoveredCandidate(
       candidate.modality === option.modality,
   );
   if (option.connectionType !== "phone_number") return matching[0] ?? null;
-  const phone = clean(flags.phoneNumber);
+  const phone = clean(flags.retellPhoneNumber);
   if (phone === "") return null;
   return (
     matching.find(
@@ -939,46 +1016,88 @@ function retellAgentNamed(
   return agents.find((agent) => agent.id === id) ?? null;
 }
 
-function sayRegistered(registered: Registered, out: (line: string) => void): void {
-  out(`Agent: ${registered.agent.name} (${registered.agent.id})`);
-  out(`Connection: ${registered.connection.name} (${registered.connection.id})`);
+type WrittenResource = {
+  readonly result: RegisterOutcome;
+  readonly agent: RegisteredAgent;
+  readonly connection?: RegisteredConnection;
+};
+
+function sayWritten(written: WrittenResource, out: (line: string) => void): void {
+  const verb = written.result === "created" ? "Registered" : "Using";
+  out(`${verb} Agent ${JSON.stringify(written.agent.name)} (${written.agent.id}).`);
+  if (written.connection !== undefined) {
+    out(`Added Connection ${JSON.stringify(written.connection.name)} (${written.connection.id}).`);
+  }
 }
 
 async function refreshAfterWrite(
-  registered: Registered,
+  written: WrittenResource,
   ready: Ready,
   options: CommandIO,
 ): Promise<number> {
-  sayRegistered(registered, options.out);
+  sayWritten(written, options.out);
   try {
     const refreshed = await refreshProjectTargets(
-      { paths: ready.paths, project: ready.project },
+      {
+        paths: ready.paths,
+        project: ready.project,
+        expected: {
+          agentId: written.agent.id,
+          ...(written.connection === undefined
+            ? {}
+            : { connectionId: written.connection.id }),
+        },
+      },
       ready.request,
     );
     if (refreshed.kind !== "synced") {
+      if (options.signal.aborted) {
+        options.fail(
+          "The remote write succeeded, but egma/config.yaml was not refreshed. Run egma pull.",
+        );
+        options.fail(
+          "The command was interrupted before the refresh received a complete answer.",
+        );
+        return AGENT_EXIT.interrupted;
+      }
       const stopped = requestFailure(refreshed, options);
       options.fail(
         `The remote write succeeded, but egma/config.yaml was not refreshed. Run egma pull.`,
       );
       return stopped.code;
     }
-    const result =
-      registered.result === "connection_added"
-        ? "connection-added"
-        : registered.result;
-    options.out(`status: ${result}`);
+    options.out("Updated egma/config.yaml.");
     return AGENT_EXIT.done;
   } catch (cause) {
+    if (options.signal.aborted) {
+      options.fail(
+        "The remote write succeeded, but egma/config.yaml was not refreshed. Run egma pull.",
+      );
+      options.fail(
+        "The command was interrupted before the refresh received a complete answer.",
+      );
+      return AGENT_EXIT.interrupted;
+    }
     const detail = oneLineFactText(
       cause instanceof Error ? cause.message : String(cause),
       "unknown local write error",
     );
-    options.out("status: local-refresh-failed");
     options.fail(
       `The remote write succeeded, but egma/config.yaml was not refreshed: ${detail}. Run egma pull.`,
     );
     return AGENT_EXIT.localWriteFailed;
   }
+}
+
+function interruptedAfterWrite(
+  written: WrittenResource,
+  options: CommandIO,
+): number {
+  sayWritten(written, options.out);
+  options.fail(
+    "The command was interrupted after Egma answered, before egma/config.yaml was refreshed. Run egma pull.",
+  );
+  return AGENT_EXIT.interrupted;
 }
 
 function reportedConfig(
@@ -990,151 +1109,57 @@ function reportedConfig(
   return configForOption(option, flags, options, discovered);
 }
 
-/** Atomically register an Egma Agent and its first Connection. */
+/** Register one Egma Agent identity. Connections are separate resources. */
 export async function runAgentRegisterCommand(
   options: AgentRegisterCommandOptions,
 ): Promise<number> {
-  const loaded = await loadChoice(options);
-  if ("code" in loaded) return loaded.code;
-
-  if (loaded.platform === "retell") {
-    const retellAgentId = clean(options.retellAgentId);
-    if (retellAgentId === "") {
-      return sayFailure(
-        options,
-        "retell-agent-required",
-        "Choose a Retell Agent with --retell-agent. Run egma agent connection options --platform retell to list Agent IDs.",
-        AGENT_EXIT.incomplete,
-      ).code;
-    }
-    const credential = await retellCredential(options);
-    if ("code" in credential) return credential.code;
-    const discovered = await discoverRetellAgents(
-      { projectId: loaded.ready.project.id, credentials: credential },
-      loaded.ready.request,
-    );
-    if (discovered.kind !== "agents") {
-      return requestFailure(discovered, options).code;
-    }
-    const agent = retellAgentNamed(discovered.agents, retellAgentId);
-    if (agent === null) {
-      return sayFailure(
-        options,
-        "retell-agent-not-found",
-        `Retell did not list Agent ${retellAgentId}. Run egma agent connection options --platform retell again.`,
-        AGENT_EXIT.incomplete,
-      ).code;
-    }
-    const matches = discoveredChoices(
-      agent,
-      loaded.catalog,
-      loaded.accessMethod,
-      loaded.modality,
+  const before = interrupted(options);
+  if (before !== null) return before.code;
+  const platform = platformWord(options.platform);
+  if (platform === null || typeof platform === "object") {
+    return sayFailure(
       options,
-    );
-    if (matches.length !== 1) {
-      const message =
-        loaded.accessMethod === RETELL_PHONE_NUMBER_ACCESS &&
-        clean(options.phoneNumber) === ""
-          ? "--phone-number is required for a Retell phone connection."
-          : matches.length === 0
-            ? `Retell Agent ${retellAgentId} does not offer this connection. Run egma agent connection options --platform retell again.`
-            : `Retell Agent ${retellAgentId} offers more than one matching connection. Run egma agent connection options --platform retell again.`;
-      return sayFailure(
-        options,
-        "connection-not-found",
-        message,
-        AGENT_EXIT.incomplete,
-      ).code;
-    }
-    const { option: choice, candidate } = matches[0]!;
-    const builtConfig = reportedConfig(choice, options, options, candidate.config);
-    if (builtConfig.kind === "stop") return builtConfig.stop.code;
-    const config = builtConfig.config;
-    const connection: NewConnection = {
-      ...(clean(options.connectionName) === ""
-        ? {}
-        : { name: clean(options.connectionName) }),
-      agentPlatform: "retell",
-      connectionType: candidate.connectionType,
-      accessVariant: candidate.accessVariant,
-      modality: candidate.modality,
-      config,
-      platformAgentId: agent.id,
-      credentials: credential,
-    };
-    const result = await registerAgent(
-      {
-        name: clean(options.name) || agent.name,
-        agentPlatform: "retell",
-        project: loaded.ready.project.id,
-        connection,
-      },
-      loaded.ready.request,
-    );
-    if (result.kind !== "registered") {
-      if (result.kind === "name-taken") {
-        return sayFailure(
-          options,
-          "name-taken",
-          `An Egma Agent named ${JSON.stringify(result.name)} already exists. Choose another --name.`,
-          AGENT_EXIT.incomplete,
-        ).code;
-      }
-      return requestFailure(result, options).code;
-    }
-    return await refreshAfterWrite(result.registered, loaded.ready, options);
+      platform === null ? "platform-required" : "unsupported-platform",
+      "Choose --platform retell or --platform livekit.",
+      AGENT_EXIT.incomplete,
+    ).code;
   }
-
-  const choice = selectedOption(
-    loaded.catalog,
-    loaded.accessMethod,
-    loaded.modality,
-    options,
-  );
-  if ("code" in choice) return choice.code;
-  const builtConfig = reportedConfig(choice, options, options);
-  if (builtConfig.kind === "stop") return builtConfig.stop.code;
-  const config = builtConfig.config;
-  const credentials = await credentialsForOption(
-    loaded.platform,
-    choice,
-    options,
-  );
-  if (credentials.kind === "stop") return credentials.stop.code;
-  const defaultName = clean(options.dispatchName);
-  const name = clean(options.name) || defaultName;
+  const ready = await prepare(options);
+  if ("code" in ready) return ready.code;
+  const stoppedAfterPrepare = interrupted(options);
+  if (stoppedAfterPrepare !== null) return stoppedAfterPrepare.code;
+  const name = clean(options.name) || path.basename(path.resolve(options.cwd));
   if (name === "") {
     return sayFailure(
       options,
       "name-required",
-      "--name is required when this LiveKit connection has no --dispatch-name to use as its default.",
+      "Choose an Agent name with --name.",
       AGENT_EXIT.incomplete,
     ).code;
   }
-  const result = await registerAgent(
+  const result = await registerAgentIdentity(
     {
       name,
-      agentPlatform: "livekit",
-      project: loaded.ready.project.id,
-      connection: {
-        ...(clean(options.connectionName) === ""
-          ? {}
-          : { name: clean(options.connectionName) }),
-        agentPlatform: "livekit",
-        connectionType: choice.connectionType,
-        accessVariant: choice.accessVariant,
-        modality: choice.modality,
-        config,
-        ...(credentials.credentials === undefined
-          ? {}
-          : { credentials: credentials.credentials }),
-      },
+      agentPlatform: platform,
+      project: ready.project.id,
     },
-    loaded.ready.request,
+    ready.request,
   );
+  if (options.signal.aborted) {
+    if (result.kind === "registered") {
+      return interruptedAfterWrite(
+        { result: result.result, agent: result.agent },
+        options,
+      );
+    }
+    options.fail(
+      "The command was interrupted before it received a complete answer. Run egma pull before you try to register the Agent again.",
+    );
+    return AGENT_EXIT.interrupted;
+  }
   if (result.kind !== "registered") {
     if (result.kind === "name-taken") {
+      options.fail(result.reason);
       return sayFailure(
         options,
         "name-taken",
@@ -1142,9 +1167,16 @@ export async function runAgentRegisterCommand(
         AGENT_EXIT.incomplete,
       ).code;
     }
+    if (result.kind === "uncertain") {
+      return sayFailure(options, "uncertain", result.reason).code;
+    }
     return requestFailure(result, options).code;
   }
-  return await refreshAfterWrite(result.registered, loaded.ready, options);
+  return await refreshAfterWrite(
+    { result: result.result, agent: result.agent },
+    ready,
+    options,
+  );
 }
 
 function localAgent(
@@ -1171,6 +1203,8 @@ export async function runAgentConnectionAddCommand(
   }
   const ready = await prepare(options);
   if ("code" in ready) return ready.code;
+  const stoppedAfterPrepare = interrupted(options);
+  if (stoppedAfterPrepare !== null) return stoppedAfterPrepare.code;
   const local = localAgent(ready.config, agentId);
   if (local === null) {
     return sayFailure(
@@ -1181,9 +1215,12 @@ export async function runAgentConnectionAddCommand(
     ).code;
   }
 
-  const remote = await readAgent(agentId, ready.request);
+  const remote = await readAgent(agentId, ready.project.id, ready.request);
+  const stoppedAfterRead = interrupted(options);
+  if (stoppedAfterRead !== null) return stoppedAfterRead.code;
   if (remote.kind !== "agent") {
     if (remote.kind === "not-found") {
+      options.fail(remote.reason);
       return sayFailure(
         options,
         "agent-not-found",
@@ -1205,15 +1242,31 @@ export async function runAgentConnectionAddCommand(
 
   const loaded = await loadChoiceForReady(options, ready, platform);
   if ("code" in loaded) return loaded.code;
+  const stoppedAfterCatalog = interrupted(options);
+  if (stoppedAfterCatalog !== null) return stoppedAfterCatalog.code;
 
   let connection: NewConnection;
   if (loaded.platform === "retell") {
-    const providerAgentId = remote.agent.platformAgentId;
-    if (providerAgentId === null) {
+    const storedProviderAgentId = remote.agent.platformAgentId;
+    const suppliedProviderAgentId = clean(options.retellAgentId);
+    if (
+      storedProviderAgentId !== null &&
+      suppliedProviderAgentId !== "" &&
+      suppliedProviderAgentId !== storedProviderAgentId
+    ) {
+      return sayFailure(
+        options,
+        "retell-agent-mismatch",
+        `Agent ${agentId} is already bound to Retell Agent ${storedProviderAgentId}. Use that Retell Agent or register another Egma Agent.`,
+        AGENT_EXIT.incomplete,
+      ).code;
+    }
+    const providerAgentId = storedProviderAgentId ?? suppliedProviderAgentId;
+    if (providerAgentId === "") {
       return sayFailure(
         options,
         "retell-agent-not-bound",
-        `Agent ${agentId} has no Retell Agent ID. Register its first Retell connection before adding another one.`,
+        `Agent ${agentId} has no Retell Agent ID. Add --retell-agent <Retell Agent ID> to its first Connection.`,
         AGENT_EXIT.incomplete,
       ).code;
     }
@@ -1223,13 +1276,13 @@ export async function runAgentConnectionAddCommand(
     // shell variable cannot rotate a working credential by accident.
     const hasStoredCredential = remote.agent.monitoringKeyPresent === true;
     let credential: ConnectionCredentials | undefined;
-    if (!hasStoredCredential && remote.agent.monitoringKeyPresent === false) {
+    if (!hasStoredCredential) {
       const supplied = await retellCredential(options);
       if ("code" in supplied) return supplied.code;
       credential = supplied;
     }
     const discovered = await discoverRetellAgents(
-      hasStoredCredential || remote.agent.monitoringKeyPresent === undefined
+      hasStoredCredential
         ? { projectId: loaded.ready.project.id, agentId }
         : {
             projectId: loaded.ready.project.id,
@@ -1237,6 +1290,8 @@ export async function runAgentConnectionAddCommand(
           },
       loaded.ready.request,
     );
+    const stoppedAfterDiscovery = interrupted(options);
+    if (stoppedAfterDiscovery !== null) return stoppedAfterDiscovery.code;
     if (discovered.kind !== "agents") {
       return requestFailure(discovered, options).code;
     }
@@ -1259,8 +1314,8 @@ export async function runAgentConnectionAddCommand(
     if (matches.length !== 1) {
       const message =
         loaded.accessMethod === RETELL_PHONE_NUMBER_ACCESS &&
-        clean(options.phoneNumber) === ""
-          ? "--phone-number is required for a Retell phone connection."
+        clean(options.retellPhoneNumber) === ""
+          ? "--retell-phone-number is required for a Retell phone connection."
           : matches.length === 0
             ? `Retell Agent ${providerAgentId} does not offer this connection.`
             : `Retell Agent ${providerAgentId} offers more than one matching connection.`;
@@ -1272,13 +1327,18 @@ export async function runAgentConnectionAddCommand(
       ).code;
     }
     const { option: choice, candidate } = matches[0]!;
+    const irrelevant = rejectIrrelevantConnectionFlags(
+      loaded.platform,
+      choice,
+      options,
+      options,
+    );
+    if (irrelevant !== null) return irrelevant.code;
     const builtConfig = reportedConfig(choice, options, options, candidate.config);
     if (builtConfig.kind === "stop") return builtConfig.stop.code;
     const config = builtConfig.config;
     connection = {
-      ...(clean(options.connectionName) === ""
-        ? {}
-        : { name: clean(options.connectionName) }),
+      name: clean(options.name) || choice.productLabel,
       agentPlatform: "retell",
       connectionType: candidate.connectionType,
       accessVariant: candidate.accessVariant,
@@ -1295,6 +1355,13 @@ export async function runAgentConnectionAddCommand(
       options,
     );
     if ("code" in choice) return choice.code;
+    const irrelevant = rejectIrrelevantConnectionFlags(
+      loaded.platform,
+      choice,
+      options,
+      options,
+    );
+    if (irrelevant !== null) return irrelevant.code;
     const builtConfig = reportedConfig(choice, options, options);
     if (builtConfig.kind === "stop") return builtConfig.stop.code;
     const config = builtConfig.config;
@@ -1305,9 +1372,7 @@ export async function runAgentConnectionAddCommand(
     );
     if (credentials.kind === "stop") return credentials.stop.code;
     connection = {
-      ...(clean(options.connectionName) === ""
-        ? {}
-        : { name: clean(options.connectionName) }),
+      name: clean(options.name) || choice.productLabel,
       agentPlatform: "livekit",
       connectionType: choice.connectionType,
       accessVariant: choice.accessVariant,
@@ -1319,17 +1384,40 @@ export async function runAgentConnectionAddCommand(
     };
   }
 
-  const result = await addConnection(agentId, connection, loaded.ready.request);
+  const result = await addConnection(
+    agentId,
+    loaded.ready.project.id,
+    connection,
+    loaded.ready.request,
+  );
+  if (options.signal.aborted) {
+    if (result.kind === "added") {
+      return interruptedAfterWrite(
+        {
+          result: "connection_added",
+          agent: remote.agent,
+          connection: result.connection,
+        },
+        options,
+      );
+    }
+    options.fail(
+      "The command was interrupted before it received a complete answer. Run egma pull before you try to add the Connection again.",
+    );
+    return AGENT_EXIT.interrupted;
+  }
   if (result.kind !== "added") {
     if (result.kind === "name-taken") {
+      options.fail(result.reason);
       return sayFailure(
         options,
         "name-taken",
-        `A Connection named ${JSON.stringify(result.name)} already exists on Agent ${agentId}. Choose another --connection-name.`,
+        `A Connection named ${JSON.stringify(result.name)} already exists on Agent ${agentId}. Choose another --name.`,
         AGENT_EXIT.incomplete,
       ).code;
     }
     if (result.kind === "not-found") {
+      options.fail(result.reason);
       return sayFailure(
         options,
         "agent-not-found",

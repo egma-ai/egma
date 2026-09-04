@@ -165,7 +165,7 @@ describe("discovering simulation agents", () => {
     expect(response.statusCode).toBe(404);
   });
 
-  it("returns normalized text-mode, web-call and phone candidates for voice agents only, never provider data or the key", async () => {
+  it("returns every Retell Agent and adds connection candidates only where Egma supports them", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
@@ -268,6 +268,14 @@ describe("discovering simulation agents", () => {
               config: { phoneNumber: "+14155550100" },
             },
           ],
+        },
+        {
+          platformAgentId: "agent_chat_1",
+          name: "Chat only",
+          modality: "chat",
+          // Account discovery remains complete even though Egma does not
+          // currently offer a new Connection for this Retell product shape.
+          connectionCandidates: [],
         },
         {
           platformAgentId: "agent_voice_without_number",

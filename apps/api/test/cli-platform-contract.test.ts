@@ -155,6 +155,7 @@ describe("the CLI and API suite contract", () => {
     const started = await startRun(
       signedIn,
       {
+        projectId: customer.projectId,
         suiteId: suite.id,
         agentId,
         connectionId,
@@ -206,7 +207,7 @@ describe("the CLI and API suite contract", () => {
     expect(writes.map((call) => call.path)).toEqual([
       `/v1/test-suites?projectId=${customer.projectId}`,
       `/v1/repository/change-set?projectId=${customer.projectId}`,
-      "/v1/runs",
+      `/v1/runs?projectId=${customer.projectId}`,
     ]);
     expect(writes[0]?.body).toEqual({
       name: "Release",

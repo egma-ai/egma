@@ -167,7 +167,10 @@ describe("Run resource commands", () => {
           JSON.stringify({ tests: [platformTest()], nextPageToken: null }),
         );
       }
-      if (url === `${URL}/v1/runs` && init?.method === "POST") {
+      if (
+        url === `${URL}/v1/runs?projectId=${PROJECT_ID}` &&
+        init?.method === "POST"
+      ) {
         runInputs.push(JSON.parse(String(init.body)) as Record<string, unknown>);
         return new JsonResponse(JSON.stringify(runHeader("pending")), { status: 201 });
       }
@@ -176,6 +179,7 @@ describe("Run resource commands", () => {
       });
     };
     const out: string[] = [];
+    const failed: string[] = [];
 
     const code = await runCreateCommand({
       access: { url: URL, credentialsFile: workspace.credentialsFile },
@@ -185,7 +189,7 @@ describe("Run resource commands", () => {
       connection: "con_one",
       signal: new AbortController().signal,
       out: (line) => out.push(line),
-      fail: (line) => out.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl,
     });
 
@@ -204,12 +208,12 @@ describe("Run resource commands", () => {
       expectedTestVersions: [{ testId: TEST_ID, versionId: VERSION_ID }],
     });
     expect(runInputs[0]?.idempotencyKey).toMatch(/^run_[0-9a-f-]+$/u);
-    expect(out).toContain(`run: ${RUN_ID}`);
-    expect(out).toContain(
-      `results: ${URL}/projects/${PROJECT_ID}/runs/${RUN_ID}`,
-    );
-    expect(out).toContain("status: started");
-    expect(out.some((line) => line.startsWith("idempotency-key:"))).toBe(false);
+    expect(failed).toEqual([]);
+    expect(out).toEqual([
+      `Started Run ${RUN_ID}.`,
+      `View its progress in Egma: ${URL}/projects/${PROJECT_ID}/runs/${RUN_ID}`,
+    ]);
+    expect(out.join("\n")).not.toContain("idempotency");
     expect(calls.some((call) => call.includes("/simulations"))).toBe(false);
     expect(calls.some((call) => call.includes("/events"))).toBe(false);
     expect(
@@ -223,6 +227,7 @@ describe("Run resource commands", () => {
   it("does not create a run when the repository push is refused", async () => {
     const calls: string[] = [];
     const out: string[] = [];
+    const failed: string[] = [];
     const code = await runCreateCommand({
       access: { url: URL, credentialsFile: workspace.credentialsFile },
       cwd: workspace.dir,
@@ -231,7 +236,7 @@ describe("Run resource commands", () => {
       connection: "con_one",
       signal: new AbortController().signal,
       out: (line) => out.push(line),
-      fail: (line) => out.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (input, init) => {
         calls.push(`${init?.method ?? "GET"} ${String(input)}`);
         return new JsonResponse(
@@ -241,21 +246,24 @@ describe("Run resource commands", () => {
       },
     });
 
-    expect(code).toBe(5);
+    expect(code).toBe(1);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("/v1/repository/change-set");
-    expect(out).toContain("status: push-refused");
+    expect(out).toEqual([]);
+    expect(failed.join("\n")).toContain("pull first");
+    expect(failed.join("\n")).toContain("No Run was created.");
   });
 
   it("cancels one run in the configured project through the exact Run API", async () => {
     const calls: string[] = [];
     const out: string[] = [];
+    const failed: string[] = [];
     const code = await runCancelCommand({
       access: { url: URL, credentialsFile: workspace.credentialsFile },
       cwd: workspace.dir,
       runId: RUN_ID,
       out: (line) => out.push(line),
-      fail: (line) => out.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async (input, init) => {
         calls.push(`${init?.method ?? "GET"} ${String(input)}`);
         return new JsonResponse(JSON.stringify(runHeader("canceled")));
@@ -266,18 +274,19 @@ describe("Run resource commands", () => {
     expect(calls).toEqual([
       `POST ${URL}/v1/runs/${RUN_ID}/cancel?projectId=${PROJECT_ID}`,
     ]);
-    expect(out).toContain(`run: ${RUN_ID}`);
-    expect(out).toContain("status: canceled");
+    expect(failed).toEqual([]);
+    expect(out).toEqual([`Canceled Run ${RUN_ID}.`]);
   });
 
   it("reports a missing run without changing anything else", async () => {
     const out: string[] = [];
+    const failed: string[] = [];
     const code = await runCancelCommand({
       access: { url: URL, credentialsFile: workspace.credentialsFile },
       cwd: workspace.dir,
       runId: RUN_ID,
       out: (line) => out.push(line),
-      fail: (line) => out.push(`stderr: ${line}`),
+      fail: (line) => failed.push(line),
       fetchImpl: async () =>
         new JsonResponse(
           JSON.stringify({ error: "not_found", message: "no run of yours has that id" }),
@@ -286,6 +295,10 @@ describe("Run resource commands", () => {
     });
 
     expect(code).toBe(1);
-    expect(out).toContain("status: no-run");
+    expect(out).toEqual([]);
+    expect(failed).toEqual([
+      "no run of yours has that id",
+      `Egma has no Run ${RUN_ID} in this Project. Nothing was changed.`,
+    ]);
   });
 });

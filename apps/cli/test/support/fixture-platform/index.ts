@@ -18,7 +18,7 @@ import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { suiteRoutes, type SuiteControls } from "./suites.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
-export type { AgentControls } from "./agents.ts";
+export type { AgentControls, SeedRetellAgent } from "./agents.ts";
 export type { ApiKeyControls, MintedKey } from "./api-keys.ts";
 export type { DeviceControls } from "./device.ts";
 export type {
@@ -74,8 +74,8 @@ export type Platform = FixturePlatform & {
 };
 
 export type StartPlatformOptions = {
-  /** A synchronous race seam after remote creation and before the CLI writes. */
-  readonly afterSuiteCreate?: (suite: import("./suites.ts").SeededSuite) => void;
+  /** Replace the server catalog to prove how a built CLI handles new vocabulary. */
+  readonly connectionOptions?: readonly unknown[];
 };
 
 export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
@@ -105,9 +105,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       holdsKey,
       projectId,
       projectName: "Fixture project",
-      ...(options.afterSuiteCreate === undefined
-        ? {}
-        : { afterCreate: options.afterSuiteCreate }),
+      afterDelete: (suiteId) => tests.deleteInSuite(suiteId),
     });
     suites = suiteGroup.controls;
 
@@ -116,7 +114,13 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     const personaGroup = personaRoutes({ holdsKey, projectId });
     personas = personaGroup.controls;
 
-    const agentGroup = agentRoutes({ knowsKey: holdsKey, projectId });
+    const agentGroup = agentRoutes({
+      knowsKey: holdsKey,
+      projectId,
+      ...(options.connectionOptions === undefined
+        ? {}
+        : { connectionOptions: options.connectionOptions }),
+    });
     registered = agentGroup.controls;
 
     // Monitoring writes to the same agent rows the agent group answers reads
@@ -159,6 +163,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
       origin,
       projectId,
       testsInSuite: testGroup.testsInSuite,
+      testVersionById: testGroup.versionById,
+      suiteWasDeleted: suiteGroup.controls.wasDeleted,
       connectionById: agentGroup.connectionById,
     });
     running = runGroup.controls;

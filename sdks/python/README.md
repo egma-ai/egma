@@ -207,13 +207,14 @@ not a promise in this file.
 
 Your job's **dispatch metadata carries the test's own env**. This SDK
 writes nothing into it and reads nothing out of it — not one key, in any
-room, for any purpose. Where Egma dispatches your worker by name, it
-writes the running test's `job_dispatch_metadata` there as one compact
-JSON string, key for key, and nothing of its own beside it;
+room, for any purpose. With Project credentials, Egma writes the running
+test's `job_dispatch_metadata` directly to the dispatch. With a token
+endpoint, Egma sends the same value in `room_config` and the endpoint copies
+that configuration into the token it mints. Either way, the worker receives
+one compact JSON string, key for key, and nothing of Egma's beside it;
 `json.loads(ctx.job.metadata)["tenant"]` reads the value that scenario
-meant it to read. A test that names no env dispatches the empty string,
-and a room your own token endpoint dispatched into carries whatever your
-endpoint put there. The room's metadata Egma always leaves empty.
+meant it to read. A test that names no env dispatches the empty string. The
+room's metadata Egma always leaves empty.
 
 ### Where to call it
 

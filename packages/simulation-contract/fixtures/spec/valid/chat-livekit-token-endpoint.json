@@ -8,12 +8,15 @@
     "access_variant": "livekit_room.customer_token_endpoint",
     "config": {
       "tokenEndpoint": "https://lakeside-dental.example/egma/livekit-token",
-      "agentName": "front-desk",
-      "metadata": "{\"clinic\":\"lakeside\",\"locale\":\"en-GB\"}"
+      "agentName": "front-desk"
     },
     "credentials": {
       "headers": "{\"Authorization\":\"Bearer example0endpoint0token0not0a0real0one\"}"
     }
+  },
+  "job_dispatch_metadata": {
+    "clinic": "lakeside",
+    "locale": "en-GB"
   },
   "persona": {
     "name": "Eleanor",

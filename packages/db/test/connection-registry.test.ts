@@ -578,17 +578,6 @@ describe("a LiveKit room connection's modality", () => {
       '"telepathy" is not a modality; a livekit_room connection speaks voice or chat',
     );
 
-    // And on the narrowed variant it says what that variant speaks, because
-    // that is the list the caller is actually being held to.
-    expect(() =>
-      validModality(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-        "telepathy",
-      ),
-    ).toThrow(
-      '"telepathy" is not a modality; a livekit_room connection speaks voice',
-    );
   });
 
   /**

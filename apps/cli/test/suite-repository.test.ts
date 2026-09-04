@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -311,5 +311,50 @@ describe("the complete suite repository", () => {
         cwd: workspace.dir,
       }),
     ).rejects.toThrow(new RegExp(`${SUITE_ID}.*Nothing was sent`, "s"));
+  });
+
+  it("refuses a Suite identity when config.yaml is missing", async () => {
+    const paths = folderPathsIn(workspace.dir);
+    await rm(paths.config);
+    await suite("release-contract", {
+      id: SUITE_ID,
+      name: "Release contract",
+    });
+
+    await expect(
+      choosePlatform({
+        env: process.env,
+        flag: "https://other-egma.example",
+        cwd: workspace.dir,
+      }),
+    ).rejects.toThrow(new RegExp(`${SUITE_ID}.*Nothing was sent`, "s"));
+  });
+
+  it("uses a binding without validating Suite bodies or Tests", async () => {
+    const origin = "https://bound-egma.example";
+    await writeConfig(folderPathsIn(workspace.dir).config, {
+      ...EMPTY_CONFIG,
+      platform: { origin },
+    });
+    const root = await suite("release-contract", {
+      id: SUITE_ID,
+      name: "Release contract",
+    });
+    await writeFile(path.join(root, "suite.yaml"), "name: still in progress\n");
+    await writeFile(path.join(root, "work-in-progress.md"), "not a Test yet\n");
+    await expect(
+      choosePlatform({ env: process.env, flag: null, cwd: workspace.dir }),
+    ).resolves.toMatchObject({ url: origin, source: "binding" });
+  });
+
+  it("still reads Suite manifests because their ids belong to one platform", async () => {
+    await writeConfig(folderPathsIn(workspace.dir).config, EMPTY_CONFIG);
+    const root = path.join(folderPathsIn(workspace.dir).tests, "release-contract");
+    await mkdir(root, { recursive: true });
+    await writeFile(path.join(root, "suite.yaml"), "name: Release contract\n");
+
+    await expect(
+      choosePlatform({ env: process.env, flag: null, cwd: workspace.dir }),
+    ).rejects.toThrow(/config\.yaml.*Suite manifests under egma\/tests/i);
   });
 });

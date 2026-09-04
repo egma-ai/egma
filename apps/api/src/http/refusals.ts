@@ -240,6 +240,10 @@ export const REFUSALS = {
    */
   identityConflict,
 
+  identityConflictOnDelete: (resource: string, resourceId: string): string =>
+    `${resource} ${resourceId} changed after you opened it. Read it again ` +
+    "before deciding whether to delete it.",
+
   versionConflict: (
     resource: string,
     expected: string,

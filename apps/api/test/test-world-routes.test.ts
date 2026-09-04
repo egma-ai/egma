@@ -222,6 +222,125 @@ describe("the world a test carries", () => {
     expect(versions.body.versions).toHaveLength(4);
   });
 
+  it("deletes only while the Test content and identity still match the caller's read", async () => {
+    const { key } = await customer("test_delete_version_guard");
+    const suiteId = await suiteFor(key);
+    const created = await createTest(key, suiteId, {});
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+    const testId = String(created.body.id);
+    const firstVersionId = String(created.body.versionId);
+    const firstRevision = String(created.body.revision);
+
+    const missing = await request(api.app, "DELETE", `/v1/tests/${testId}`, key);
+    expect(missing.statusCode, JSON.stringify(missing.body)).toBe(422);
+    expect(String(missing.body.message)).toContain("expectedVersionId");
+
+    const missingRevision = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedVersionId=${firstVersionId}`,
+      key,
+    );
+    expect(missingRevision.statusCode, JSON.stringify(missingRevision.body)).toBe(422);
+    expect(String(missingRevision.body.message)).toContain("expectedRevision");
+
+    const missingVersion = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedRevision=${firstRevision}`,
+      key,
+    );
+    expect(missingVersion.statusCode, JSON.stringify(missingVersion.body)).toBe(422);
+    expect(String(missingVersion.body.message)).toContain("expectedVersionId");
+
+    const malformedVersion = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedVersionId=not-a-version&expectedRevision=${firstRevision}`,
+      key,
+    );
+    expect(malformedVersion.statusCode, JSON.stringify(malformedVersion.body)).toBe(422);
+
+    const malformedRevision = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedVersionId=${firstVersionId}&expectedRevision=not-a-revision`,
+      key,
+    );
+    expect(malformedRevision.statusCode, JSON.stringify(malformedRevision.body)).toBe(422);
+
+    const renamed = await request(api.app, "PATCH", `/v1/tests/${testId}`, key, {
+      name: "Reschedules a renamed booking",
+      expectedRevision: firstRevision,
+    });
+    expect(renamed.statusCode, JSON.stringify(renamed.body)).toBe(200);
+    const renamedRevision = String(renamed.body.revision);
+    expect(renamed.body.versionId).toBe(firstVersionId);
+
+    const staleIdentity = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedVersionId=${firstVersionId}&expectedRevision=${firstRevision}`,
+      key,
+    );
+    expect(staleIdentity.statusCode, JSON.stringify(staleIdentity.body)).toBe(409);
+    expect(staleIdentity.body).toEqual({
+      error: "identity_conflict",
+      message:
+        `Test ${testId} changed after you opened it. Read it again before ` +
+        "deciding whether to delete it.",
+    });
+    expect(
+      await request(api.app, "GET", `/v1/tests/${testId}`, key),
+    ).toMatchObject({
+      statusCode: 200,
+      body: {
+        name: "Reschedules a renamed booking",
+        revision: renamedRevision,
+        versionId: firstVersionId,
+      },
+    });
+
+    const edited = await request(api.app, "PATCH", `/v1/tests/${testId}`, key, {
+      scenario: "Move Friday's booking to next week.",
+      expectedVersionId: firstVersionId,
+      expectedRevision: renamedRevision,
+    });
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+    const currentVersionId = String(edited.body.versionId);
+    const currentRevision = String(edited.body.revision);
+
+    const stale = await request(
+      api.app,
+      "DELETE",
+      `/v1/tests/${testId}?expectedVersionId=${firstVersionId}&expectedRevision=${currentRevision}`,
+      key,
+    );
+    expect(stale.statusCode, JSON.stringify(stale.body)).toBe(409);
+    expect(stale.body).toMatchObject({
+      error: "version_conflict",
+      test: { id: testId, name: "Reschedules a renamed booking" },
+      expectedVersionId: firstVersionId,
+      currentVersionId,
+    });
+    expect(
+      await request(api.app, "GET", `/v1/tests/${testId}`, key),
+    ).toMatchObject({ statusCode: 200, body: { versionId: currentVersionId } });
+
+    const deleted = await api.app.inject({
+      method: "DELETE",
+      url:
+        `/v1/tests/${testId}?expectedVersionId=${currentVersionId}` +
+        `&expectedRevision=${currentRevision}`,
+      headers: { authorization: `Bearer ${key}` },
+    });
+    expect(deleted.statusCode, deleted.body).toBe(204);
+    expect(deleted.body).toBe("");
+    expect(
+      await request(api.app, "GET", `/v1/tests/${testId}`, key),
+    ).toMatchObject({ statusCode: 404 });
+  });
+
   it("refuses every world a test cannot have, and says which one and why", async () => {
     const { key } = await customer("test_world_refusals");
     const suiteId = await suiteFor(key);

@@ -152,6 +152,8 @@ export function runRoutes(options: {
   readonly origin: () => string;
   readonly projectId: string;
   readonly testsInSuite: (suiteId: string) => readonly FixtureTestVersion[];
+  readonly testVersionById: (versionId: string) => FixtureTestVersion | null;
+  readonly suiteWasDeleted: (suiteId: string) => boolean;
   readonly connectionById: (connectionId: string) => ReachableConnection | null;
 }): { readonly group: RouteGroup; readonly controls: RunControls } {
   const runs: StoredRun[] = [];
@@ -183,7 +185,7 @@ export function runRoutes(options: {
       return {
         projectId: options.projectId,
         suiteName: "Fixture suite",
-        suiteDeleted: false,
+        suiteDeleted: options.suiteWasDeleted(run.suiteId),
         agentPlatform: connection?.agentPlatform ?? null,
         connectionType: connection?.connectionType ?? "",
         accessVariant: connection?.accessVariant ?? "",
@@ -245,12 +247,7 @@ export function runRoutes(options: {
     const run = runById(simulation.runId);
     const connection =
       run === undefined ? null : options.connectionById(run.connectionId);
-    const version =
-      run === undefined
-        ? null
-        : (options
-            .testsInSuite(run.suiteId)
-            .find((one) => one.id === simulation.testVersionId) ?? null);
+    const version = options.testVersionById(simulation.testVersionId);
     return {
       ...simulationOut(simulation),
       projectId: options.projectId,
@@ -446,7 +443,11 @@ export function runRoutes(options: {
   const group: RouteGroup = {
     name: "runs",
     routes: [
-      { method: "POST", path: "/v1/runs", handle: (request) => behind(request, () => start(request.body ?? {})) },
+      {
+        method: "POST",
+        path: "/v1/runs",
+        handle: (request) => behind(request, () => start(request.body ?? {})),
+      },
       {
         method: "GET",
         path: "/v1/runs/:runId",

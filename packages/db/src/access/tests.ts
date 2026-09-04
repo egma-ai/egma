@@ -2009,12 +2009,31 @@ export async function listTests(
   };
 }
 
-/** Permanently remove a test from authoring while retaining its evidence. */
+/**
+ * Permanently remove a test from authoring while retaining its evidence.
+ *
+ * The expected version and identity revision are compared after the Test row
+ * is locked and before it is tombstoned. A caller cannot delete content or
+ * identity work that arrived after the Test it reviewed, even when that edit
+ * lands between the caller's read and delete.
+ */
 export async function deleteTest(
   auth: AuthContext,
   id: string,
+  expectedVersionId: string,
+  expectedRevision: string,
 ): Promise<boolean> {
   authorize(auth, "author_definitions", here(auth));
+  if (!isId("tstv", expectedVersionId)) {
+    throw new UnprocessableInputError(
+      `"${expectedVersionId}" is not a test version id`,
+    );
+  }
+  if (!isId("rev", expectedRevision)) {
+    throw new UnprocessableInputError(
+      `"${expectedRevision}" is not a revision id`,
+    );
+  }
   const projectId = auth.projectId;
   if (projectId === undefined) {
     throw new Error("deleting a test happens inside its project");
@@ -2037,12 +2056,24 @@ export async function deleteTest(
       .for("update");
 
     const [locked] = await tx
-      .select({ id: test.id })
+      .select({
+        id: test.id,
+        name: test.name,
+        currentVersionId: test.currentVersionId,
+        revision: test.revision,
+      })
       .from(test)
       .where(theTest(auth, id))
       .limit(1)
       .for("update");
     if (locked === undefined) return false;
+    expectRevision(locked, expectedRevision);
+    if (locked.currentVersionId !== expectedVersionId) {
+      throw new TestMovedOnError(locked, {
+        expected: expectedVersionId,
+        current: locked.currentVersionId,
+      });
+    }
 
     await tx
       .update(test)

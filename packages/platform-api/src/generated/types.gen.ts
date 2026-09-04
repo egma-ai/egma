@@ -5032,8 +5032,10 @@ export type DeleteTestData = {
     path: {
         testId: string;
     };
-    query?: {
+    query: {
         projectId?: string;
+        expectedVersionId: string;
+        expectedRevision: string;
     };
     url: '/v1/tests/{testId}';
 };
@@ -5056,9 +5058,18 @@ export type DeleteTestErrors = {
      */
     404: Refusal;
     /**
-     * The request was refused.
+     * The test content or identity moved after the write was based on it.
      */
-    409: Refusal;
+    409: {
+        error: 'version_conflict';
+        message: string;
+        test: {
+            id: string;
+            name: string;
+        };
+        expectedVersionId: string;
+        currentVersionId: string;
+    } | Refusal;
     /**
      * The request was refused.
      */
@@ -5218,7 +5229,7 @@ export type UpdateTestErrors = {
      */
     404: Refusal;
     /**
-     * The test moved after the version the edit was based on.
+     * The test content or identity moved after the write was based on it.
      */
     409: {
         error: 'version_conflict';

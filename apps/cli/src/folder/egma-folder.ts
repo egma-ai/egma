@@ -503,6 +503,11 @@ export type SuiteManifest = {
 const SUITE_ID = /^ste_[0-9A-HJKMNP-TV-Z]{26}$/u;
 const SUITE_MANIFEST_KEYS = ["id", "name"] as const;
 
+/** Whether a value can be stored as one platform-issued Suite identity. */
+export function isSuiteId(value: string): boolean {
+  return SUITE_ID.test(value);
+}
+
 export function serializeSuiteManifest(manifest: SuiteManifest): string {
   return `id: ${yamlScalar(manifest.id)}\nname: ${yamlScalar(manifest.name)}\n`;
 }
@@ -529,8 +534,9 @@ export function parseSuiteManifest(
   const id = textAt(mapping, "id");
   const writtenName = mapping["name"];
   const name = typeof writtenName === "string" ? writtenName : null;
-  if (id === null || !SUITE_ID.test(id)) {
-    throw new FolderProblem(where, 
+  if (id === null || !isSuiteId(id)) {
+    throw new FolderProblem(
+      where,
       `${where} has an invalid suite id. Expected ste_ followed by 26 Crockford base32 characters.`,
     );
   }

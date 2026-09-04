@@ -23,11 +23,11 @@ import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runCancelCommand, runCreateCommand } from "./commands/run.ts";
 import { runSelfHostCommand } from "./commands/self-host.ts";
-import { runSuiteCreateCommand } from "./commands/suite.ts";
+import { runSuiteCreateCommand, runSuiteDeleteCommand } from "./commands/suite.ts";
+import { runTestDeleteCommand } from "./commands/test.ts";
 import {
   BoundPlatformAddressError,
   choosePlatform,
-  KEYS_UNUSABLE,
   KeysUnusableError,
   RepositoryPlatformConfigError,
   UnboundPlatformIdentifiersError,
@@ -48,6 +48,7 @@ export const VERBS = [
   "project",
   "persona",
   "suite",
+  "test",
   "run",
   "self-host",
 ] as const;
@@ -68,6 +69,8 @@ export const COMMANDS = [
   "project api-key create",
   "persona list",
   "suite create",
+  "suite delete",
+  "test delete",
   "run create",
   "run cancel",
   "self-host up",
@@ -84,6 +87,7 @@ export const HELP_TOPICS = [
   "project api-key",
   "persona",
   "suite",
+  "test",
   "run",
   "self-host",
   ...COMMANDS,
@@ -120,7 +124,6 @@ const ACCESS_VALUES =
 const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   login: {
     values: ["--url", REPOSITORY_OPTION],
-    switches: ["--force"],
     positionals: 0,
   },
   logout: { values: ["--url", REPOSITORY_OPTION], positionals: 0 },
@@ -131,20 +134,7 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   pull: { values: [REPOSITORY_OPTION], positionals: 0 },
   push: { values: [REPOSITORY_OPTION], positionals: 0 },
   "agent register": {
-    values: [
-      "--platform",
-      "--access",
-      "--modality",
-      "--name",
-      "--connection-name",
-      "--retell-agent",
-      "--phone-number",
-      "--livekit-url",
-      "--dispatch-name",
-      "--token-endpoint",
-      REPOSITORY_OPTION,
-    ],
-    switches: ["--credentials-stdin"],
+    values: ["--platform", "--name", REPOSITORY_OPTION],
     positionals: 0,
   },
   "agent connection options": {
@@ -157,22 +147,24 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
       "--agent",
       "--access",
       "--modality",
-      "--connection-name",
-      "--phone-number",
+      "--name",
+      "--retell-agent",
+      "--retell-phone-number",
       "--livekit-url",
-      "--dispatch-name",
-      "--token-endpoint",
+      "--livekit-agent-name",
+      "--livekit-token-endpoint",
       REPOSITORY_OPTION,
     ],
     switches: ["--credentials-stdin"],
     positionals: 0,
   },
   "agent monitoring setup": {
-    values: ["--agent", "--platform", REPOSITORY_OPTION],
+    values: ["--agent", "--platform", "--retell-agent", REPOSITORY_OPTION],
+    switches: ["--credentials-stdin"],
     positionals: 0,
   },
   "agent monitoring stop": {
-    values: ["--agent", REPOSITORY_OPTION],
+    values: ["--agent", "--platform", REPOSITORY_OPTION],
     positionals: 0,
   },
   "project api-key create": {
@@ -184,6 +176,8 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
     values: ["--name", REPOSITORY_OPTION],
     positionals: 1,
   },
+  "suite delete": { values: [REPOSITORY_OPTION], positionals: 1 },
+  "test delete": { values: [REPOSITORY_OPTION], positionals: 1 },
   "run create": {
     values: ["--agent", "--connection", "--name", REPOSITORY_OPTION],
     positionals: 1,
@@ -204,6 +198,7 @@ const NODE_PATHS = [
   "project",
   "persona",
   "suite",
+  "test",
   "run",
   "self-host",
 ] as const;
@@ -349,10 +344,11 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  egma init                          Initialize or pull the repository's Egma Project.",
     "  egma pull                          Pull Agents, Connections, suites, and tests.",
     "  egma push                          Validate and push suites and tests.",
-    "  egma agent                         Register Agents, add Connections, and set up monitoring.",
+    "  egma agent                         Register Agents, add Connections, and configure monitoring.",
     "  egma project                       Manage the bound Egma Project.",
     "  egma persona                       Read the Project's test personas.",
-    "  egma suite                         Create local test suites.",
+    "  egma suite                         Create or delete test suites.",
+    "  egma test                          Delete tests explicitly.",
     "  egma run                           Create or cancel simulation Runs.",
     "  egma self-host                     Start a self-hosted Egma platform.",
     "",
@@ -367,8 +363,8 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  egma agent monitoring <command>",
     "",
     "Commands:",
-    "  register      Create or reuse an Egma Agent and add its first Connection.",
-    "  connection    List provider choices or add another Connection.",
+    "  register      Register an Egma Agent identity.",
+    "  connection    List provider choices or add one Connection.",
     "  monitoring    Set up or stop production monitoring for one Agent.",
   ],
   "agent connection": [
@@ -383,7 +379,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   "agent monitoring": [
     "Usage:",
     "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit>",
-    "  egma agent monitoring stop --agent <Egma Agent ID>",
+    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit>",
     "",
     "Retell setup uses the provider key already sealed on the Egma Agent.",
     "LiveKit prints the integrate-egma skill handoff; the CLI does not edit monitoring code.",
@@ -405,8 +401,15 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   suite: [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",
+    "  egma suite delete <directory> [--cwd <path>]",
     "",
     "The directory is one direct child of egma/tests, not a Suite ID.",
+  ],
+  test: [
+    "Usage:",
+    "  egma test delete <suite-directory>/<test-file.md> [--cwd <path>]",
+    "",
+    "The path names one local Markdown Test below egma/tests.",
   ],
   run: [
     "Usage:",
@@ -418,15 +421,14 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   "self-host": ["Usage:", "  egma self-host up [--cwd <platform-workspace>]"],
   login: [
     "Usage:",
-    "  egma login [--url <address>] [--force] [--cwd <path>]",
+    "  egma login [--url <address>] [--cwd <path>]",
     "",
     "Without --url, Egma uses this repository's platform URL or the hosted Egma URL.",
-    "--force replaces an existing saved login for the selected platform.",
+    "If this machine is already signed in, run egma logout before you sign in again.",
     "EGMA_HOME changes the machine-local folder that holds the saved login.",
     "",
-    "While approval is pending, the command prints code and approve_url facts.",
-    "Exit 0 means signed in, 2 means denied, 3 means expired, 4 means the platform",
-    "refused or did not answer, and 130 means interrupted.",
+    "While approval is pending, the command prints the code and approval URL.",
+    "Exit 0 means signed in, 1 means sign-in did not complete, and 130 means interrupted.",
   ],
   logout: [
     "Usage:",
@@ -457,40 +459,24 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   ],
   "agent register": [
     "Usage:",
-    "  egma agent register --platform <retell|livekit> --access <method> --modality <voice|chat> [options]",
+    "  egma agent register --platform <retell|livekit> [--name <name>] [--cwd <path>]",
     "",
-    "Creates or reuses one Egma Agent and adds its first Connection atomically.",
+    "Registers one Egma Agent identity. It does not add a Connection.",
     "",
-    "Identity:",
-    "  --name <name>                 Optional Egma Agent name; provider name is the default.",
-    "  --connection-name <name>      Optional Connection name.",
-    "  --retell-agent <id>           Retell Agent ID for initial Retell registration only.",
-    "",
-    "Connection:",
-    `  --access <method>             ${ACCESS_VALUES}.`,
-    "  --modality <voice|chat>       Connection Modality.",
-    "  --phone-number <E.164>        Retell phone number when the selected option requires it.",
-    "  --livekit-url <wss-url>       LiveKit project URL (project credentials).",
-    "  --dispatch-name <name>        LiveKit worker dispatch name.",
-    "  --token-endpoint <https-url>  LiveKit token endpoint.",
-    "",
-    "Credentials:",
-    "  --credentials-stdin           Retell: raw API key. LiveKit project: {\"apiKey\":\"...\",\"apiSecret\":\"...\"}.",
-    "                                LiveKit endpoint: {\"headers\":{\"Authorization\":\"Bearer ...\"}}.",
-    "  Otherwise use EGMA_RETELL_API_KEY, EGMA_LIVEKIT_API_KEY with",
-    "  EGMA_LIVEKIT_API_SECRET, or EGMA_LIVEKIT_TOKEN_HEADERS as applicable.",
-    "  Provider credentials are sent for setup and are never written to egma/config.yaml.",
-    "",
-    "Repository:",
+    "  --platform <retell|livekit>   Product or framework that runs the Agent.",
+    "  --name <name>                 Optional name. Default: repository directory name.",
     "  --cwd <path>                  Repository root. Default: current directory.",
+    "",
+    "Use egma agent connection add after registration to configure simulation access.",
   ],
   "agent connection options": [
     "Usage:",
     "  egma agent connection options --platform <retell|livekit> [options]",
     "",
     "Options:",
+    "  --platform <retell|livekit>  Agent platform whose Connection choices to list.",
     "  --agent <Egma Agent ID>       Reuse that Agent's stored provider credential.",
-    "  --credentials-stdin           Use the same standard-input forms as agent register.",
+    "  --credentials-stdin           Read one credential JSON object from standard input.",
     "  --cwd <path>                  Repository root. Default: current directory.",
     "",
     "Egma gets valid Access and Modality combinations and required fields from the platform API.",
@@ -500,32 +486,49 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "Usage:",
     "  egma agent connection add --agent <Egma Agent ID> --access <method> --modality <voice|chat> [options]",
     "",
-    "The Egma Agent supplies its platform and provider Agent ID. Do not pass --platform or --retell-agent.",
+    "The Egma Agent supplies its platform. Its first Retell Connection also needs --retell-agent.",
     "",
     "Options:",
     `  --access <method>             ${ACCESS_VALUES}.`,
     "  --modality <voice|chat>       Connection Modality.",
-    "  --connection-name <name>      Optional Connection name.",
-    "  --phone-number <E.164>        Retell phone number when required.",
-    "  --livekit-url <wss-url>       LiveKit project URL (project credentials).",
-    "  --dispatch-name <name>        LiveKit worker dispatch name.",
-    "  --token-endpoint <https-url>  LiveKit token endpoint.",
-    "  --credentials-stdin           Read provider credentials from standard input.",
+    "  --name <name>                 Optional Connection name.",
+    "  --retell-agent <id>           Retell Agent ID. Required on the first Retell Connection.",
+    "  --retell-phone-number <E.164> Retell phone number when required.",
+    "  --livekit-url <wss-url>       LiveKit Project URL. Project credentials only.",
+    "  --livekit-agent-name <name>   LiveKit worker dispatch name.",
+    "  --livekit-token-endpoint <https-url> LiveKit token endpoint.",
+    "  --credentials-stdin           Read one credential JSON object from standard input.",
     "  --cwd <path>                  Repository root. Default: current directory.",
     "",
     "The platform API supplies the valid combinations and required fields.",
+    "Otherwise use EGMA_RETELL_API_KEY, EGMA_LIVEKIT_API_KEY with",
+    "EGMA_LIVEKIT_API_SECRET, or EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS.",
   ],
   "agent monitoring setup": [
     "Usage:",
-    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit> [--cwd <path>]",
+    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit> [options]",
     "",
-    "Retell uses the provider key stored on the Agent. LiveKit prints the integrate-egma skill command.",
+    "Options:",
+    "  --agent <Egma Agent ID>      Agent from egma/config.yaml.",
+    "  --platform <retell|livekit>  Must match the selected Agent.",
+    "  --retell-agent <id>          Retell Agent ID for monitoring-only setup.",
+    "  --credentials-stdin          Read {\"apiKey\":\"...\"} from standard input.",
+    "  --cwd <path>                 Repository root. Default: current directory.",
+    "",
+    "Retell uses the provider key stored on the Agent. For monitoring-only setup,",
+    "pass --retell-agent and supply credentials through EGMA_RETELL_API_KEY or --credentials-stdin.",
+    "LiveKit prints the integrate-egma skill command and exits incomplete.",
   ],
   "agent monitoring stop": [
     "Usage:",
-    "  egma agent monitoring stop --agent <Egma Agent ID> [--cwd <path>]",
+    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit> [--cwd <path>]",
     "",
-    "The selected Agent supplies its platform.",
+    "Options:",
+    "  --agent <Egma Agent ID>      Agent from egma/config.yaml.",
+    "  --platform <retell|livekit>  Must match the selected Agent.",
+    "  --cwd <path>                 Repository root. Default: current directory.",
+    "",
+    "The explicit platform must match the selected Agent.",
   ],
   "project api-key create": [
     "Usage:",
@@ -541,13 +544,25 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "",
     "Creates egma/tests/<directory>/suite.yaml and its remote Suite.",
   ],
+  "suite delete": [
+    "Usage:",
+    "  egma suite delete <directory> [--cwd <path>]",
+    "",
+    "Permanently deletes the remote Suite and its Tests, then removes the exact local directory.",
+  ],
+  "test delete": [
+    "Usage:",
+    "  egma test delete <suite-directory>/<test-file.md> [--cwd <path>]",
+    "",
+    "Permanently deletes the remote Test, then removes the exact local Markdown file.",
+  ],
   "run create": [
     "Usage:",
     "  egma run create <suite-directory> --agent <Agent ID> --connection <Connection ID> [--name <name>] [--cwd <path>]",
     "",
     "The suite directory is the direct child under egma/tests, not a Suite ID.",
     "Egma pushes first. It creates no Run if the push fails.",
-    "On success it prints the Run ID, results URL, and status, then returns.",
+    "On success it prints the Run ID and results URL, then returns.",
   ],
   "run cancel": ["Usage:", "  egma run cancel <Run ID> [--cwd <path>]"],
   "self-host up": ["Usage:", "  egma self-host up [--cwd <platform-workspace>]"],
@@ -587,7 +602,7 @@ function requiredArguments(
 ): string | null {
   switch (invocation.command) {
     case "agent register":
-      return required(invocation, ["--platform", "--access", "--modality"]);
+      return required(invocation, ["--platform"]);
     case "agent connection options":
       return required(invocation, ["--platform"]);
     case "agent connection add":
@@ -595,7 +610,7 @@ function requiredArguments(
     case "agent monitoring setup":
       return required(invocation, ["--agent", "--platform"]);
     case "agent monitoring stop":
-      return required(invocation, ["--agent"]);
+      return required(invocation, ["--agent", "--platform"]);
     case "project api-key create":
     case "suite create":
       return required(invocation, ["--name"]);
@@ -618,11 +633,9 @@ function platformRefusal(error: unknown): "refused" | "unreachable" | null {
   return error instanceof PlatformUnreachableError ? "unreachable" : null;
 }
 
-function sayPlatformRefusal(status: "refused" | "unreachable", message: string): void {
-  const sentence = message.split("\n")[0] as string;
-  process.stdout.write(`status: ${status}\nreason: ${sentence}\n`);
+function sayPlatformRefusal(_status: "refused" | "unreachable", message: string): void {
   process.stderr.write(`${message}\n`);
-  process.exitCode = 4;
+  process.exitCode = 1;
 }
 
 function output(line: string): void {
@@ -672,7 +685,6 @@ async function dispatch(
       return withCommandSignal(async (signal) =>
         runLoginCommand({
           access,
-          force: switched(args, "--force"),
           env: process.env,
           signal,
           out: output,
@@ -700,15 +712,36 @@ async function dispatch(
     case "pull":
       return runPullCommand(options);
     case "push":
-      return runPushCommand(options);
+      return withCommandSignal(async (signal) =>
+        runPushCommand({ ...options, signal }),
+      );
     case "persona list":
       return runPersonasCommand(options);
     case "suite create":
-      return runSuiteCreateCommand({
-        ...options,
-        directory: args.positionals[0] as string,
-        name: value(args, "--name") as string,
-      });
+      return withCommandSignal(async (signal) =>
+        runSuiteCreateCommand({
+          ...options,
+          directory: args.positionals[0] as string,
+          name: value(args, "--name") as string,
+          signal,
+        }),
+      );
+    case "suite delete":
+      return withCommandSignal(async (signal) =>
+        runSuiteDeleteCommand({
+          ...options,
+          directory: args.positionals[0] as string,
+          signal,
+        }),
+      );
+    case "test delete":
+      return withCommandSignal(async (signal) =>
+        runTestDeleteCommand({
+          ...options,
+          file: args.positionals[0] as string,
+          signal,
+        }),
+      );
     case "run create": {
       const name = value(args, "--name");
       return withCommandSignal(async (signal) =>
@@ -735,16 +768,8 @@ async function dispatch(
         runAgentRegisterCommand({
           ...options,
           platform: value(args, "--platform"),
-          accessMethod: value(args, "--access"),
-          modality: value(args, "--modality"),
           name: value(args, "--name"),
-          connectionName: value(args, "--connection-name"),
-          retellAgentId: value(args, "--retell-agent"),
-          phoneNumber: value(args, "--phone-number"),
-          livekitUrl: value(args, "--livekit-url"),
-          dispatchName: value(args, "--dispatch-name"),
-          tokenEndpoint: value(args, "--token-endpoint"),
-          credentialsStdin: switched(args, "--credentials-stdin"),
+          credentialsStdin: false,
           env: process.env,
           stdin: process.stdin,
           signal,
@@ -769,11 +794,12 @@ async function dispatch(
           agentId: value(args, "--agent"),
           accessMethod: value(args, "--access"),
           modality: value(args, "--modality"),
-          connectionName: value(args, "--connection-name"),
-          phoneNumber: value(args, "--phone-number"),
+          name: value(args, "--name"),
+          retellAgentId: value(args, "--retell-agent"),
+          retellPhoneNumber: value(args, "--retell-phone-number"),
           livekitUrl: value(args, "--livekit-url"),
-          dispatchName: value(args, "--dispatch-name"),
-          tokenEndpoint: value(args, "--token-endpoint"),
+          livekitAgentName: value(args, "--livekit-agent-name"),
+          livekitTokenEndpoint: value(args, "--livekit-token-endpoint"),
           credentialsStdin: switched(args, "--credentials-stdin"),
           env: process.env,
           stdin: process.stdin,
@@ -786,6 +812,10 @@ async function dispatch(
           ...options,
           agent: value(args, "--agent") as string,
           platform: value(args, "--platform") as string,
+          retellAgentId: value(args, "--retell-agent"),
+          credentialsStdin: switched(args, "--credentials-stdin"),
+          env: process.env,
+          stdin: process.stdin,
           signal,
         }),
       );
@@ -794,6 +824,7 @@ async function dispatch(
         runAgentMonitoringStopCommand({
           ...options,
           agent: value(args, "--agent") as string,
+          platform: value(args, "--platform") as string,
           signal,
         }),
       );
@@ -884,7 +915,6 @@ export async function main(argv: readonly string[]): Promise<void> {
       return;
     }
     if (!(error instanceof KeysUnusableError)) throw error;
-    process.stdout.write(`status: ${KEYS_UNUSABLE}\nreason: ${error.message}\n`);
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
   }

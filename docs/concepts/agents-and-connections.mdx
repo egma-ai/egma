@@ -38,30 +38,11 @@ Current supported combinations include:
 | LiveKit | `livekit_room` | `livekit_room.project_credentials` | voice | LiveKit project credentials |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | voice | LiveKit token endpoint |
 | LiveKit | `livekit_room` | `livekit_room.customer_token_endpoint` | chat | LiveKit chat token endpoint |
-| LiveKit | `phone_number` | `phone_number.public_e164` | voice | Phone number |
-| Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
-The current connection catalog supplies the LiveKit rows available on one
-deployment. The CLI reads it iteratively: the bare LiveKit connect call lists
-modalities, `--modality` adds access-variant choices, and `--modality` plus
-`--access-variant` adds required field and secret facts. These incomplete calls
-write nothing.
-
-## Platform and connection type are independent
-
-A LiveKit worker can answer a public phone number. In that case:
-
-- agent platform is LiveKit;
-- connection type is `phone_number`;
-- access variant is `phone_number.public_e164`; and
-- modality is voice.
-
-The phone adapter does not need to know that LiveKit runs the agent. It dials
-the number with Egma's telephony configuration. The same agent can also have a
-`livekit_room` connection that joins a room directly.
-
-This model allows future paths, such as WebSocket or WebRTC adapters, without
-changing the meaning of agent platform.
+The current platform catalog supplies these combinations, their required
+fields, and their credential fields. Read it with
+`egma agent connection options --platform <retell|livekit>`. The command writes
+nothing.
 
 ## Current connection types
 
@@ -87,7 +68,7 @@ See [Retell](/integrations/retell#how-a-mocked-web-call-reaches-egma).
 
 ### Phone number
 
-`phone_number` is platform-independent and voice-only. Its
+The current Retell catalog offers a voice-only public phone Connection. Its
 `phone_number.public_e164` variant stores a public number such as
 `+15551234567`. It stores no provider credential. Egma dials it with the
 deployment's telephony route. Phone simulations reach real tools: this lane
@@ -150,61 +131,60 @@ A test carries its own world: the **mock tools** it answers for itself, and the
 
 **A run proceeds whatever its connection can carry, and says what it could not
 use.** Egma reads the connection and the tests' pinned versions and shows a
-short note when a run picks up something this connection cannot carry — mock
-tools on a phone run, dispatch metadata on a token-endpoint run — under the
-connection picker when you start the run, and again on the run page. Nothing is
-refused for it, and nothing is stored: the note is computed from what the run
-holds.
+short note when a run picks up something this connection cannot carry, such as
+mock tools or Retell dynamic variables on a phone run. It appears under the
+connection picker when you start the run, and again on the run page. Nothing
+is refused for it, and nothing is stored: the note is computed from what the
+run holds.
 
 "Not used" means the key belongs to the other platform. One test can carry both
 keys and run on either agent; the key the lane does not use is simply not
 passed.
 
-## Create connections with skills and the CLI
+## Create Connections with the CLI
 
-The public `integrate-egma` skill keeps repository discovery read-only. The
-developer's end-to-end request authorizes normal connection setup after discovery.
+The coding agent keeps repository discovery read-only. The developer's
+end-to-end request authorizes normal Connection setup after discovery.
 
-Retell setup includes provider context for test grounding:
+Registering an Agent and adding a Connection are separate operations. Retell
+example:
 
 ```bash
-EGMA_RETELL_API_KEY=... egma connect \
-  --platform retell \
-  --show-context \
-  --retell-agent agent_... \
-  --lanes text
+egma agent register --platform retell --name order-line
+
+EGMA_RETELL_API_KEY=... \
+  egma agent connection add \
+  --agent agt_... \
+  --access retell-api-key \
+  --modality chat \
+  --retell-agent agent_...
 ```
 
-LiveKit setup first reads modalities, then access variants, then required
-fields and secrets. Each incomplete call writes nothing:
+Read the current LiveKit catalog once, then register an Agent identity:
 
 ```bash
-egma connect --platform livekit
-
-egma connect --platform livekit --modality voice
-
-egma connect --platform livekit \
-  --modality voice \
-  --access-variant livekit_room.project_credentials
+egma agent connection options --platform livekit
+egma agent register --platform livekit --name front-desk
 ```
 
 The coding agent supplies the exact public fields and existing secrets in one
-complete call; it asks only when a required value is missing or ambiguous:
+Connection command. Project credentials are the normal path:
 
 ```bash
 EGMA_LIVEKIT_API_KEY=... \
 EGMA_LIVEKIT_API_SECRET=... \
-egma connect \
-  --platform livekit \
-  --name front-desk \
+egma agent connection add \
+  --agent agt_... \
+  --access livekit-project-credentials \
   --modality voice \
-  --access-variant livekit_room.project_credentials \
   --livekit-url wss://acme.livekit.cloud \
-  --dispatch-name receptionist
+  --livekit-agent-name receptionist
 ```
 
-The CLI also records the connection receipt in `egma/config.yaml`. Provider
-secrets never enter that file.
+`agent register` owns only Agent identity. `agent connection add` owns Access,
+Modality, provider fields, and setup credentials. The CLI refreshes the Agent
+and Connection IDs in `egma/config.yaml`. Provider secrets never enter that
+file.
 
 ## Create a connection through the API
 
@@ -284,9 +264,12 @@ Monitoring credentials and simulation connection credentials are separate.
 Rotating or disabling one path does not change the other. Turning Retell
 monitoring on or off never creates or changes a simulation connection.
 
-The copied monitoring or both prompt already authorizes
-`egma monitoring enable`. The coding agent confirms the result with
-`egma monitoring status`. A monitoring-only integration stops there. A both
-integration completes the test run and the monitoring status.
+The monitoring or both prompt already authorizes Agent-scoped setup. For
+Retell, the coding agent runs `egma agent monitoring setup` with an explicit
+Agent ID and `--platform retell`. For LiveKit, that command prints the public
+`integrate-egma` skill handoff and exits incomplete because repository
+instrumentation and deployment remain coding-agent work. That public guide is
+still being authored; use the Python or JavaScript SDK monitoring guide
+directly for now. The CLI does not invent a monitoring health state.
 
 See [Production telemetry](/concepts/telemetry) for the evidence path.

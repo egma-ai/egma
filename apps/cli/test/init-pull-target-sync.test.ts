@@ -42,6 +42,8 @@ type RemoteAgent = {
 
 type RemoteConnection = {
   readonly id: string;
+  readonly projectId: string;
+  readonly agentId: string;
   readonly name: string;
   readonly agentPlatform: "retell" | "livekit";
   readonly connectionType: "retell_text_mode" | "livekit_room";
@@ -62,6 +64,7 @@ type RemoteSuite = {
 
 type RemoteTest = {
   readonly id: string;
+  readonly projectId: string;
   readonly suiteId: string;
   readonly name: string;
   readonly description: string;
@@ -102,6 +105,8 @@ function connection(
   return platform === "retell"
     ? {
         id,
+        projectId: PROJECT_ONE,
+        agentId: RETELL_AGENT,
         name,
         agentPlatform: "retell",
         connectionType: "retell_text_mode",
@@ -113,6 +118,8 @@ function connection(
       }
     : {
         id,
+        projectId: PROJECT_ONE,
+        agentId: LIVEKIT_AGENT,
         name,
         agentPlatform: "livekit",
         connectionType: "livekit_room",
@@ -217,6 +224,7 @@ const PROJECT = { id: PROJECT_ONE, name: "Northside" } as const;
 const RELEASE = { id: SUITE_ID, projectId: PROJECT_ONE, name: "Release" } as const;
 const BOOKS_A_VISIT = {
   id: TEST_ID,
+  projectId: PROJECT_ONE,
   suiteId: SUITE_ID,
   name: "Books a visit",
   description: "",
@@ -255,12 +263,41 @@ describe("skills-first init and pull", () => {
       },
     });
 
-    expect(code).toBe(FOLDER_EXIT.notSignedIn);
+    expect(code).toBe(1);
     expect(requests).toBe(0);
-    expect(io.out).toContain("status: not-signed-in");
+    expect(io.out).toEqual([]);
+    expect(io.fail.join("\n")).toContain("egma login");
     await expect(stat(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("stops on an invalid existing config and leaves it unchanged", async () => {
+    await signInFromLogin(workspace, PROJECT_ONE);
+    const paths = folderPathsIn(workspace.dir);
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: EMPTY_CONFIG,
+    });
+    await writeFile(paths.config, "format: definitely-not-a-number\n", "utf8");
+    const before = await readFile(paths.config, "utf8");
+    const io = outputs();
+    let requests = 0;
+
+    const code = await runInitCommand({
+      ...commandOptions(workspace, io),
+      fetchImpl: async () => {
+        requests += 1;
+        return new JsonResponse({});
+      },
+    });
+
+    expect(code).toBe(FOLDER_EXIT.nothing);
+    expect(requests).toBe(0);
+    expect(io.out).toEqual([]);
+    expect(io.fail.join("\n")).toContain("egma/config.yaml");
+    expect(io.fail.join("\n")).toContain("Nothing was changed.");
+    expect(await readFile(paths.config, "utf8")).toBe(before);
   });
 
   it("uses the device-login Project and pulls targets, suites, and tests", async () => {
@@ -310,10 +347,11 @@ describe("skills-first init and pull", () => {
       name: "Release",
     });
     expect(repository.suites[0]?.tests[0]?.test.name).toBe("Books a visit");
-    expect(io.out).toContain("agents: 1");
-    expect(io.out).toContain("suites: 1");
-    expect(io.out).toContain("tests: 1");
-    expect(io.out.at(-1)).toBe("status: initialized");
+    expect(io.out).toContain(`Initialized Egma in ${folderPathsIn(workspace.dir).root}.`);
+    expect(io.out).toContain("Agents: 1");
+    expect(io.out).toContain("Suites: 1");
+    expect(io.out).toContain("Tests: 1");
+    expect(io.out.join("\n")).not.toContain("status:");
   });
 
   it("uses an explicit Project when stored authentication has no Project", async () => {
@@ -335,7 +373,56 @@ describe("skills-first init and pull", () => {
     expect(
       api.requests.map((request) => new globalThis.URL(request.url).pathname),
     ).not.toContain("/v1/projects");
-    expect(io.out.at(-1)).toBe("status: initialized");
+    expect(io.out).toContain(`Initialized Egma in ${folderPathsIn(workspace.dir).root}.`);
+  });
+
+  it("uses the only Project when stored authentication has no Project", async () => {
+    await workspace.signIn(URL, "egma_sk_organization");
+    const api = remoteApi({ projects: [PROJECT] });
+    const io = outputs();
+
+    const code = await runInitCommand({
+      ...commandOptions(workspace, io),
+      fetchImpl: api.fetchImpl,
+    });
+
+    expect(code).toBe(FOLDER_EXIT.done);
+    expect(
+      api.requests.map((request) => new globalThis.URL(request.url).pathname),
+    ).toEqual([
+      "/v1/projects",
+      `/v1/projects/${PROJECT_ONE}`,
+      "/v1/agents",
+      "/v1/test-suites",
+    ]);
+    expect((await readConfig(folderPathsIn(workspace.dir).config)).project).toEqual(
+      PROJECT,
+    );
+    expect(io.out).not.toContain("Available Egma Projects:");
+    expect(io.out).toContain(`Initialized Egma in ${folderPathsIn(workspace.dir).root}.`);
+  });
+
+  it("reports an account with no Project and creates nothing", async () => {
+    await workspace.signIn(URL, "egma_sk_organization");
+    const api = remoteApi({ projects: [] });
+    const io = outputs();
+
+    const code = await runInitCommand({
+      ...commandOptions(workspace, io),
+      fetchImpl: api.fetchImpl,
+    });
+
+    expect(code).toBe(1);
+    expect(
+      api.requests.map((request) => new globalThis.URL(request.url).pathname),
+    ).toEqual(["/v1/projects"]);
+    expect(io.out).toEqual([]);
+    expect(io.fail).toEqual([
+      "This Egma account has no Project. Create a Project in Egma, then run egma init again. Nothing was changed.",
+    ]);
+    await expect(stat(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("binds and pulls an existing empty format-4 config", async () => {
@@ -359,7 +446,9 @@ describe("skills-first init and pull", () => {
       project: PROJECT,
       agents: [],
     });
-    expect(io.out.at(-1)).toBe("status: pulled");
+    expect(io.out).toContain(
+      `Refreshed ${folderPathsIn(workspace.dir).root} from Egma.`,
+    );
   });
 
   it("does not let --project override the device-login Project", async () => {
@@ -400,9 +489,11 @@ describe("skills-first init and pull", () => {
     expect(
       api.requests.map((request) => new globalThis.URL(request.url).pathname),
     ).toEqual(["/v1/projects"]);
-    expect(io.out).toContain(`project-option: ${PROJECT_ONE} Northside`);
-    expect(io.out).toContain(`project-option: ${PROJECT_TWO} Westside`);
-    expect(io.out).toContain("status: project-required");
+    expect(io.out).toEqual([
+      "Available Egma Projects:",
+      `- Northside (${PROJECT_ONE})`,
+      `- Westside (${PROJECT_TWO})`,
+    ]);
     expect(io.fail).toEqual([
       "This credential does not identify one Project. Run egma init --project <Project ID>.",
     ]);
@@ -472,7 +563,13 @@ describe("skills-first init and pull", () => {
       "config.yaml",
       "tests",
     ]);
-    expect(io.out.at(-1)).toBe("status: pulled");
+    expect(io.out).toContain(
+      `Refreshed ${folderPathsIn(workspace.dir).root} from Egma.`,
+    );
+    expect(io.out).toContain("Agents: 1");
+    expect(io.out).toContain("Suites: 1");
+    expect(io.out.at(-1)).toBe("Tests: 1");
+    expect(io.out.join("\n")).not.toContain("status:");
   });
 
   it("refuses a different Project exactly and changes nothing", async () => {
@@ -502,7 +599,7 @@ describe("skills-first init and pull", () => {
 
     expect(code).toBe(FOLDER_EXIT.nothing);
     expect(requests).toBe(0);
-    expect(io.out.at(-1)).toBe("status: different-project");
+    expect(io.out).toEqual([]);
     expect(io.fail).toEqual([
       [
         "This repository is already initialized for another Egma Project.",
@@ -595,7 +692,10 @@ describe("skills-first init and pull", () => {
     ]) {
       expect(written).not.toContain(forbidden);
     }
-    expect(io.out).toContain("agents: 2");
-    expect(io.out.at(-1)).toBe("status: pulled");
+    expect(io.out.at(-1)).toBe(
+      "Pull complete: 0 suites, 0 tests, and 2 Agents.",
+    );
+    expect(io.out.join("\n")).not.toContain("status:");
   });
+
 });

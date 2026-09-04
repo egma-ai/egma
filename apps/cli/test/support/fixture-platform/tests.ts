@@ -77,6 +77,7 @@ export type FixtureTestVersion = {
 type StoredTest = {
   readonly id: string;
   readonly suiteId: string;
+  deleted: boolean;
   name: string;
   description: string;
   revision: string;
@@ -98,6 +99,9 @@ export type TestControls = {
   seeded(name: string): SeededTest;
   /** The world the current version of one test carries. */
   worldOf(name: string): SeededTestVersion;
+  version(id: string): FixtureTestVersion | null;
+  /** The server-side cascade when its owning Suite is deleted. */
+  deleteInSuite(suiteId: string): void;
 };
 
 export type TestRouteGroup = {
@@ -386,6 +390,7 @@ export function testRoutes(options: {
     const test: StoredTest = {
       id,
       suiteId,
+      deleted: false,
       name,
       description: text(value.description),
       revision: newId("rev"),
@@ -482,7 +487,7 @@ export function testRoutes(options: {
       );
     },
     editInDashboard(name, changes) {
-      const test = tests.find((one) => one.name === name);
+      const test = tests.find((one) => !one.deleted && one.name === name);
       if (test === undefined) throw new Error(`no test ${name}`);
       return seedOf(
         apply(test, {
@@ -497,7 +502,7 @@ export function testRoutes(options: {
       );
     },
     renameInDashboard(name, changes) {
-      const test = tests.find((one) => one.name === name);
+      const test = tests.find((one) => !one.deleted && one.name === name);
       if (test === undefined) throw new Error(`no test ${name}`);
       test.name = changes.name ?? test.name;
       test.description = changes.description ?? test.description;
@@ -513,13 +518,13 @@ export function testRoutes(options: {
       return created.id;
     },
     get tests() {
-      return tests.map(seedOf);
+      return tests.filter((test) => !test.deleted).map(seedOf);
     },
     versionsOf(name) {
-      return tests.find((one) => one.name === name)?.versions.length ?? 0;
+      return tests.find((one) => !one.deleted && one.name === name)?.versions.length ?? 0;
     },
     seeded(name) {
-      const test = tests.find((one) => one.name === name);
+      const test = tests.find((one) => !one.deleted && one.name === name);
       if (test === undefined) throw new Error(`no test ${name}`);
       return seedOf(test);
     },
@@ -532,6 +537,14 @@ export function testRoutes(options: {
         mockTools: version.mockTools.map((entry) => ({ ...entry })),
         env: version.env === null ? null : { ...version.env },
       };
+    },
+    version(id) {
+      return tests.flatMap((test) => test.versions).find((entry) => entry.id === id) ?? null;
+    },
+    deleteInSuite(suiteId) {
+      for (const test of tests) {
+        if (test.suiteId === suiteId) test.deleted = true;
+      }
     },
   };
 
@@ -557,7 +570,9 @@ export function testRoutes(options: {
             return {
               status: 200,
               body: {
-                tests: tests.filter((test) => test.suiteId === suite).map(described),
+                tests: tests
+                  .filter((test) => !test.deleted && test.suiteId === suite)
+                  .map(described),
                 nextPageToken: null,
               },
             };
@@ -568,7 +583,9 @@ export function testRoutes(options: {
         path: "/v1/tests/:testId",
         handle: (request) =>
           behind(request, () => {
-            const test = tests.find((one) => one.id === request.params.testId);
+            const test = tests.find(
+              (one) => !one.deleted && one.id === request.params.testId,
+            );
             return test === undefined
               ? refuse(404, "not_found", "there is no active test with that id")
               : { status: 200, body: described(test) };
@@ -579,10 +596,16 @@ export function testRoutes(options: {
         path: "/v1/test-versions/:versionId",
         handle: (request) =>
           behind(request, () => {
+            const projectId = given(request.url.searchParams.get("projectId"));
+            if (projectId !== undefined && projectId !== options.projectId) {
+              return refuse(403, "not_authorized", "this credential may not act in that project");
+            }
             const version = tests.flatMap((test) => test.versions).find((one) => one.id === request.params.versionId);
-            return version === undefined
-              ? refuse(404, "not_found", "there is no test version with that id")
-              : { status: 200, body: versionBody(version) };
+            if (version === undefined) {
+              return refuse(404, "not_found", "there is no test version with that id");
+            }
+            const body = versionBody(version);
+            return { status: 200, body };
           }),
       },
       {
@@ -606,7 +629,9 @@ export function testRoutes(options: {
             if ("suiteId" in said) {
               return refuse(422, "unprocessable", "a test cannot move between suites");
             }
-            const test = tests.find((one) => one.id === request.params.testId);
+            const test = tests.find(
+              (one) => !one.deleted && one.id === request.params.testId,
+            );
             if (test === undefined) return refuse(404, "not_found", "there is no active test with that id");
             return { status: 200, body: described(apply(test, said)) };
           }),
@@ -616,9 +641,57 @@ export function testRoutes(options: {
         path: "/v1/tests/:testId",
         handle: (request) =>
           behind(request, () => {
-            const at = tests.findIndex((one) => one.id === request.params.testId);
-            if (at < 0) return refuse(404, "not_found", "there is no active test with that id");
-            tests.splice(at, 1);
+            const projectId = given(request.url.searchParams.get("projectId"));
+            if (projectId !== undefined && projectId !== options.projectId) {
+              return refuse(403, "not_authorized", "this credential may not act in that project");
+            }
+            const expectedVersionId = given(
+              request.url.searchParams.get("expectedVersionId"),
+            );
+            if (expectedVersionId === undefined) {
+              return refuse(
+                422,
+                "unprocessable",
+                "expectedVersionId must name the Test version being deleted",
+              );
+            }
+            const expectedRevision = given(
+              request.url.searchParams.get("expectedRevision"),
+            );
+            if (expectedRevision === undefined) {
+              return refuse(
+                422,
+                "unprocessable",
+                "expectedRevision must name the Test identity revision being deleted",
+              );
+            }
+            const test = tests.find(
+              (one) => !one.deleted && one.id === request.params.testId,
+            );
+            if (test === undefined) return refuse(404, "not_found", "there is no active test with that id");
+            if (test.revision !== expectedRevision) {
+              return refuse(
+                409,
+                "identity_conflict",
+                `Test ${test.id} changed after you opened it. Read it again ` +
+                  "before deciding whether to delete it.",
+              );
+            }
+            if (test.currentVersionId !== expectedVersionId) {
+              return {
+                status: 409,
+                body: {
+                  error: "version_conflict",
+                  message:
+                    `this write was based on version ${expectedVersionId}, and ` +
+                    `test ${test.id} has moved on to ${test.currentVersionId}`,
+                  test: { id: test.id, name: test.name },
+                  expectedVersionId,
+                  currentVersionId: test.currentVersionId,
+                },
+              };
+            }
+            test.deleted = true;
             return { status: 204 };
           }),
       },
@@ -668,7 +741,11 @@ export function testRoutes(options: {
               const expected = text(value.expectedVersionId);
               const held = expected === ""
                 ? undefined
-                : tests.find((test) => test.versions.some((version) => version.id === expected));
+                : tests.find(
+                    (test) =>
+                      !test.deleted &&
+                      test.versions.some((version) => version.id === expected),
+                  );
               if (expected !== "" && held === undefined) {
                 return refuse(409, "repository_conflict", "a test version no longer exists");
               }
@@ -701,7 +778,9 @@ export function testRoutes(options: {
               });
             }
             const testNotInRepository = tests.find(
-              (test) => !planned.some((entry) => entry.held?.id === test.id),
+              (test) =>
+                !test.deleted &&
+                !planned.some((entry) => entry.held?.id === test.id),
             );
             if (testNotInRepository !== undefined) {
               return refuse(
@@ -730,9 +809,10 @@ export function testRoutes(options: {
   return {
     group,
     controls,
-    versionById: (id) =>
-      tests.flatMap((test) => test.versions).find((version) => version.id === id) ?? null,
+    versionById: controls.version,
     testsInSuite: (suiteId) =>
-      tests.filter((test) => test.suiteId === suiteId).map(current),
+      tests
+        .filter((test) => !test.deleted && test.suiteId === suiteId)
+        .map(current),
   };
 }

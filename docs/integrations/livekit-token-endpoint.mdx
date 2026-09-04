@@ -238,18 +238,27 @@ Three things about that body:
 - A `url` key is refused. The connection holds no server URL, because your
   endpoint's `server_url` is where Egma connects.
 
-Through the CLI, the secret comes from the environment:
+Through the CLI, register the Egma Agent identity only when it is not already
+listed in `egma/config.yaml`:
 
 ```bash
-EGMA_LIVEKIT_TOKEN_HEADERS='{"Authorization":"Bearer a-long-random-secret"}' \
-egma connect \
-  --platform livekit \
-  --name front-desk \
-  --modality voice \
-  --access-variant livekit_room.customer_token_endpoint \
-  --dispatch-name front-desk \
-  --token-endpoint https://acme.example/egma/livekit-token
+egma agent register --platform livekit --name "Front desk"
 ```
+
+Then add the token-endpoint Connection. The secret comes from the environment:
+
+```bash
+EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer a-long-random-secret"}' \
+egma agent connection add \
+  --agent agt_... \
+  --access livekit-token-endpoint \
+  --modality voice \
+  --livekit-agent-name front-desk \
+  --livekit-token-endpoint https://acme.example/egma/livekit-token
+```
+
+Use `--modality chat` for a chat Connection. Neither command takes a LiveKit
+server URL; the endpoint returns it for each simulation.
 
 ## Hardening your endpoint
 

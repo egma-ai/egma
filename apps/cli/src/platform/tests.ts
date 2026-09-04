@@ -2,6 +2,7 @@
 
 import {
   createTest as createTestRequest,
+  deleteTest as deleteTestRequest,
   getTest as getTestRequest,
   getTestVersion as getTestVersionRequest,
   listTests as listTestsRequest,
@@ -48,6 +49,7 @@ export type PlatformContent = {
 
 export type PlatformTest = PlatformContent & {
   readonly id: string;
+  readonly projectId: string;
   readonly suiteId: string;
   readonly name: string;
   readonly description: string;
@@ -64,6 +66,10 @@ export type PlatformTestVersion = PlatformContent & {
   readonly version: number;
   readonly current: boolean;
 };
+
+export type GetProjectTestVersionAnswer =
+  | { readonly kind: "version"; readonly version: PlatformTestVersion }
+  | { readonly kind: "not-found"; readonly reason: string };
 
 export type WriteAnswer =
   | { readonly kind: "written"; readonly test: PlatformTest }
@@ -145,9 +151,17 @@ function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformCo
 
 export function platformTestFrom(value: GetTestResponse): PlatformTest | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (
+    !Array.isArray(value.expectedBehaviors) ||
+    !Array.isArray(value.personas) ||
+    !Array.isArray(value.mockTools)
+  ) {
+    return null;
+  }
   const test: PlatformTest = {
     ...contentFrom(value),
     id: platformText(value.id),
+    projectId: platformText(value.projectId),
     suiteId: platformText(value.suiteId),
     name: platformText(value.name),
     description: platformText(value.description),
@@ -155,7 +169,19 @@ export function platformTestFrom(value: GetTestResponse): PlatformTest | null {
     version: typeof value.version === "number" ? value.version : 0,
     revision: platformText(value.revision),
   };
-  return test.id === "" || test.suiteId === "" || test.versionId === "" ? null : test;
+  return test.id === "" ||
+    test.projectId === "" ||
+    test.suiteId === "" ||
+    test.name === "" ||
+    test.versionId === "" ||
+    !Number.isInteger(test.version) ||
+    test.version < 1 ||
+    test.revision === "" ||
+    test.expectedBehaviors.length !== value.expectedBehaviors.length ||
+    test.personas.length !== value.personas.length ||
+    test.mockTools.length !== value.mockTools.length
+    ? null
+    : test;
 }
 
 export type ListOptions = {
@@ -192,7 +218,18 @@ export async function listTests(
         platformRefusalMessage(answer.error, response.status),
       );
     }
-    for (const entry of answer.data?.tests ?? []) {
+    const values = answer.data?.tests;
+    const next = answer.data?.nextPageToken;
+    if (
+      !Array.isArray(values) ||
+      (next !== null && typeof next !== "string")
+    ) {
+      throw new PlatformRefusedError(
+        response.status,
+        "Egma answered with a Test collection this CLI cannot read. Check that this Egma platform is up to date.",
+      );
+    }
+    for (const entry of values) {
       const test = platformTestFrom(entry);
       if (test === null) {
         throw new PlatformRefusedError(
@@ -202,7 +239,6 @@ export async function listTests(
       }
       found.push(test);
     }
-    const next = answer.data?.nextPageToken ?? null;
     if (next === null || next === "") return found;
     pageToken = next;
   }
@@ -235,6 +271,21 @@ export async function getTest(
   return test;
 }
 
+function testVersionFrom(body: GetTestVersionResponse): PlatformTestVersion | null {
+  const version: PlatformTestVersion = {
+    ...contentFrom(body),
+    id: platformText(body.id),
+    testId: platformText(body.testId),
+    suiteId: platformText(body.suiteId),
+    testName: platformText(body.testName),
+    version: typeof body.version === "number" ? body.version : 0,
+    current: body.current === true,
+  };
+  return version.id === "" || version.testId === "" || version.suiteId === ""
+    ? null
+    : version;
+}
+
 export async function getTestVersion(
   signedIn: SignedIn,
   versionId: string,
@@ -256,19 +307,77 @@ export async function getTestVersion(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  const body: GetTestVersionResponse = answer.data;
-  const version: PlatformTestVersion = {
-    ...contentFrom(body),
-    id: platformText(body.id),
-    testId: platformText(body.testId),
-    suiteId: platformText(body.suiteId),
-    testName: platformText(body.testName),
-    version: typeof body.version === "number" ? body.version : 0,
-    current: body.current === true,
-  };
-  return version.id === "" || version.testId === "" || version.suiteId === ""
-    ? null
-    : version;
+  return testVersionFrom(answer.data);
+}
+
+/** Resolve one committed local version inside its repository Project. */
+export async function getProjectTestVersion(
+  signedIn: SignedIn,
+  input: { readonly projectId: string; readonly versionId: string },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<GetProjectTestVersionAnswer> {
+  const answer = await getTestVersionRequest(
+    { versionId: input.versionId, projectId: input.projectId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  const version = testVersionFrom(answer.data);
+  if (version === null) {
+    throw new PlatformRefusedError(
+      response.status,
+      "Egma answered with a test version this CLI cannot read. Check that this Egma platform is up to date.",
+    );
+  }
+  return { kind: "version", version };
+}
+
+/** Permanently remove one project-owned test from authoring. */
+export async function deleteTest(
+  signedIn: SignedIn,
+  input: {
+    readonly projectId: string;
+    readonly testId: string;
+    readonly expectedVersionId: string;
+    readonly expectedRevision: string;
+  },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<void> {
+  const answer = await deleteTestRequest(
+    {
+      testId: input.testId,
+      projectId: input.projectId,
+      expectedVersionId: input.expectedVersionId,
+      expectedRevision: input.expectedRevision,
+    },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status !== 204) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
 }
 
 export type TestInput = PlatformContent & {

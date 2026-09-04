@@ -35,17 +35,16 @@ describe("egma self-host up", () => {
       const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
       expect(run.code).toBe(0);
-      expect(run.stdout).toContain(`url: ${platform.url}`);
-      expect(run.stdout).toContain("status: ready");
-      expect(run.stderr).toContain(`Egma is ready at ${platform.url}`);
-      expect(run.stdout).toContain(`login: egma login --url ${platform.url}`);
+      expect(run.stdout).toContain(platform.url);
+      expect(run.stdout).not.toMatch(/^(?:workspace|url|status|login):/mu);
+      expect(run.stdout).toContain(`Egma is ready at ${platform.url}.`);
+      expect(run.stdout).toContain(`egma login --url ${platform.url}`);
 
       // Every service it started, named. Five of them — the object store, the
       // simulator, the grader, the SIP gateway and its Redis — publish nothing
       // and have no page to visit, so this line is the only sign a person gets
       // that they are running at all.
-      const services = /^services: (.+)$/mu.exec(run.stdout)?.[1]?.split(" ") ?? [];
-      expect(services).toEqual([
+      const services = [
         "postgres",
         "clickhouse",
         "minio",
@@ -56,7 +55,8 @@ describe("egma self-host up", () => {
         "livekit",
         "livekit-sip",
         "livekit-redis",
-      ]);
+      ];
+      for (const service of services) expect(run.stdout).toContain(service);
 
       const calls = await workspace.dockerCalls();
       // Everything, in one stack. The local services are built from this
@@ -97,9 +97,9 @@ describe("egma self-host up", () => {
       });
 
       expect(first.code, first.stderr).toBe(0);
-      expect(first.stdout).toContain("platform_credentials: generated");
       expect(second.code, second.stderr).toBe(0);
-      expect(second.stdout).toContain("platform_credentials: existing");
+      expect(first.stdout).not.toMatch(/^platform_credentials:/mu);
+      expect(second.stdout).not.toMatch(/^platform_credentials:/mu);
       expect(await workspace.storedConfig()).toEqual(firstStored);
     } finally {
       await platform.close();
@@ -122,10 +122,11 @@ describe("egma self-host up", () => {
         EGMA_BASE_URL: platform.url,
       });
 
-      expect(run.code).toBe(4);
-      expect(run.stdout).toContain("phone carrier route in .env is incomplete");
-      expect(run.stdout).toContain("EGMA_PHONE_TRUNK_USERNAME");
-      expect(run.stdout).toContain("EGMA_PHONE_TRUNK_PASSWORD");
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain("phone carrier route in .env is incomplete");
+      expect(run.stderr).toContain("EGMA_PHONE_TRUNK_USERNAME");
+      expect(run.stderr).toContain("EGMA_PHONE_TRUNK_PASSWORD");
+      expect(run.stdout).not.toMatch(/^(?:status|reason):/mu);
       const calls = await workspace.dockerCalls();
       expect(calls).not.toContain(COMPOSE_BUILD);
       expect(calls).not.toContain(COMPOSE_UP);
@@ -159,7 +160,7 @@ describe("egma self-host up", () => {
       });
 
       expect(run.code, run.stderr).toBe(0);
-      expect(run.stdout).toContain("platform_credentials: existing");
+      expect(run.stdout).not.toMatch(/^platform_credentials:/mu);
       expect(await readFile(path.join(workspace.dir, ".env"), "utf8")).toBe(
         operatorFile,
       );
@@ -251,10 +252,11 @@ describe("egma self-host up", () => {
         EGMA_BASE_URL: platform.url,
       });
 
-      expect(run.code).not.toBe(0);
-      expect(run.stdout).toContain("Nothing was generated");
-      expect(run.stdout).toContain("egma_postgres-17-data");
-      expect(run.stdout).toContain("Restore .egma-platform/platform.env");
+      expect(run.code).toBe(1);
+      expect(run.stderr).toContain("Nothing was generated");
+      expect(run.stderr).toContain("egma_postgres-17-data");
+      expect(run.stderr).toContain("Restore .egma-platform/platform.env");
+      expect(run.stdout).not.toMatch(/^(?:status|reason):/mu);
       await expect(readFile(workspace.configFile, "utf8")).rejects.toThrow();
       const calls = await workspace.dockerCalls();
       expect(calls).not.toContain(COMPOSE_BUILD);
@@ -289,7 +291,8 @@ describe("egma self-host up", () => {
       const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
       expect(run.code).toBe(0);
-      expect(run.stdout).toContain("status: ready");
+      expect(run.stdout).not.toMatch(/^status:/mu);
+      expect(run.stdout).toContain(`Egma is ready at ${platform.url}.`);
       expect(run.stderr).toContain("did not come up on the first try");
       const said = await workspace.dockerCalls();
       expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
@@ -323,11 +326,11 @@ describe("egma self-host up", () => {
     try {
       const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
-      expect(run.code).not.toBe(0);
-      expect(run.stdout).toContain("status: failed");
-      expect(run.stdout).toContain("EGMA_ENCRYPTION_KEY");
-      expect(run.stdout).toContain("platform preparation error");
-      expect(run.stdout).not.toContain("Set it in .env");
+      expect(run.code).toBe(1);
+      expect(run.stdout).not.toMatch(/^(?:status|reason):/mu);
+      expect(run.stderr).toContain("EGMA_ENCRYPTION_KEY");
+      expect(run.stderr).toContain("platform preparation error");
+      expect(run.stderr).not.toContain("Set it in .env");
       // Compose's own sentence reached the operator too, because it carries
       // what to do about that particular variable.
       expect(run.stderr).toContain("required variable EGMA_ENCRYPTION_KEY");
@@ -358,8 +361,9 @@ describe("egma self-host up", () => {
         EGMA_BASE_URL: platform.url,
       });
 
-      expect(run.code).not.toBe(0);
-      expect(run.stdout).toContain("could not build the platform images");
+      expect(run.code).toBe(1);
+      expect(run.stdout).not.toMatch(/^(?:status|reason):/mu);
+      expect(run.stderr).toMatch(/could not build the platform images/i);
       expect(run.stderr).not.toContain("store's first boot");
       const said = await workspace.dockerCalls();
       expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
@@ -367,6 +371,34 @@ describe("egma self-host up", () => {
     } finally {
       await platform.close();
     }
+  });
+
+  it("returns 130 when Ctrl-C interrupts Docker Compose", async () => {
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    await writeFile(
+      workspace.dockerShim,
+      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        `case "$*" in *"config --environment"*) env; exit 0 ;; esac\n` +
+        `case "$*" in *"volume ls"*) exit 0 ;; esac\n` +
+        `if [ "$*" = "compose build" ]; then\n` +
+        `  trap 'exit 0' INT TERM\n` +
+        `  kill -INT "$PPID"\n` +
+        `  while :; do sleep 1; done\n` +
+        `fi\n` +
+        `exit 0\n`,
+    );
+    await chmod(workspace.dockerShim, 0o755);
+
+    const run = await runSelfHost(workspace, ["up"], {
+      EGMA_BASE_URL: "http://127.0.0.1:1",
+    });
+
+    expect(run.code).toBe(130);
+    expect(run.stderr).toContain("The command was interrupted before it finished.");
+    expect(run.stderr).not.toContain("within 300s");
+    expect(run.stderr).not.toContain("AbortError");
+    expect(run.stderr).not.toContain("at runUp");
+    expect(run.stdout).not.toContain("Egma is ready");
   });
 
   it("refuses in a directory that is not a platform workspace", async () => {

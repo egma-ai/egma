@@ -2,6 +2,7 @@
 
 import {
   createTestSuite as createTestSuiteRequest,
+  deleteTestSuite as deleteTestSuiteRequest,
   getTestSuite as getTestSuiteRequest,
   listTestSuites as listTestSuitesRequest,
   type GetTestSuiteResponse,
@@ -21,6 +22,10 @@ export type PlatformTestSuite = Readonly<
   Pick<GetTestSuiteResponse, "id" | "projectId" | "name">
 >;
 
+export type GetTestSuiteAnswer =
+  | { readonly kind: "suite"; readonly suite: PlatformTestSuite }
+  | { readonly kind: "not-found"; readonly reason: string };
+
 function suiteFrom(value: GetTestSuiteResponse): PlatformTestSuite | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const body = value as Record<string, unknown>;
@@ -35,10 +40,14 @@ export async function createTestSuite(
   signedIn: SignedIn,
   input: { readonly projectId: string; readonly name: string },
   fetchImpl?: Fetch,
+  signal?: AbortSignal,
 ): Promise<PlatformTestSuite> {
   const answer = await createTestSuiteRequest(
     { projectId: input.projectId, name: input.name },
-    { client: platformClient(signedIn, fetchImpl) },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
   );
   const response = platformResponse(answer, signedIn.url);
   if (!response.ok || answer.data === undefined) {
@@ -55,6 +64,29 @@ export async function createTestSuite(
     );
   }
   return suite;
+}
+
+/** Permanently remove one project-owned suite from authoring. */
+export async function deleteTestSuite(
+  signedIn: SignedIn,
+  input: { readonly projectId: string; readonly suiteId: string },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<void> {
+  const answer = await deleteTestSuiteRequest(
+    { suiteId: input.suiteId, projectId: input.projectId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (response.status !== 204) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
 }
 
 export async function listTestSuites(
@@ -102,7 +134,7 @@ export async function getTestSuite(
   suiteId: string,
   fetchImpl?: Fetch,
   signal?: AbortSignal,
-): Promise<PlatformTestSuite | null> {
+): Promise<GetTestSuiteAnswer> {
   const answer = await getTestSuiteRequest(
     { suiteId },
     {
@@ -111,7 +143,12 @@ export async function getTestSuite(
     },
   );
   const response = platformResponse(answer, signedIn.url);
-  if (response.status === 404) return null;
+  if (response.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
   if (!response.ok || answer.data === undefined) {
     throw new PlatformRefusedError(
       response.status,
@@ -125,5 +162,5 @@ export async function getTestSuite(
       "Egma answered with a suite this CLI cannot read. Check that this Egma platform is up to date.",
     );
   }
-  return suite;
+  return { kind: "suite", suite };
 }

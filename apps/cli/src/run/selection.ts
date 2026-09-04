@@ -8,7 +8,11 @@ import {
 import type { Fetch } from "../platform/device-flow.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import { getTestSuite } from "../platform/test-suites.ts";
-import { getTestVersion, listTests, type PlatformTest } from "../platform/tests.ts";
+import {
+  getProjectTestVersion,
+  listTests,
+  type PlatformTest,
+} from "../platform/tests.ts";
 import { sameAsPlatform } from "../sync/push.ts";
 
 export type Pinned = {
@@ -70,13 +74,20 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
     ]);
   }
 
-  const remoteSuite = await getTestSuite(
+  const remoteSuiteAnswer = await getTestSuite(
     options.signedIn,
     suite.manifest.id,
     options.fetchImpl,
     options.signal,
   );
-  if (remoteSuite === null || remoteSuite.projectId !== projectId) {
+  if (remoteSuiteAnswer.kind === "not-found") {
+    throw new RunSelectionError([
+      remoteSuiteAnswer.reason,
+      `Suite ${suite.manifest.id} does not exist in this project on Egma.`,
+    ]);
+  }
+  const remoteSuite = remoteSuiteAnswer.suite;
+  if (remoteSuite.projectId !== projectId) {
     throw new RunSelectionError([
       `Suite ${suite.manifest.id} does not exist in this project on Egma.`,
     ]);
@@ -106,14 +117,17 @@ export async function selectSuiteForRun(options: SelectOptions): Promise<Selecti
     }
     let test: PlatformTest | undefined = currentByVersion.get(pin);
     if (test === undefined) {
-      const version = await getTestVersion(
+      const versionAnswer = await getProjectTestVersion(
         options.signedIn,
-        pin,
+        { projectId, versionId: pin },
         options.fetchImpl,
         options.signal,
       );
-      if (version !== null && version.suiteId !== suite.manifest.id) {
-        issues.push(`${file.shown} belongs to suite ${version.suiteId}; tests cannot move between suites.`);
+      if (versionAnswer.kind === "not-found") {
+        issues.push(versionAnswer.reason);
+        issues.push(`${file.shown} does not pin the current platform version.`);
+      } else if (versionAnswer.version.suiteId !== suite.manifest.id) {
+        issues.push(`${file.shown} belongs to suite ${versionAnswer.version.suiteId}; tests cannot move between suites.`);
       } else {
         issues.push(`${file.shown} does not pin the current platform version.`);
       }

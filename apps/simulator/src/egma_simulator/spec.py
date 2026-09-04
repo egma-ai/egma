@@ -263,9 +263,10 @@ class SimulationSpec:
 
     ``None`` is the ordinary case. Nothing here reads it: it is the LiveKit
     agent's own channel, so it is carried to the plug and written to the
-    dispatch byte for byte, because a value the simulator tidied would be a
-    value the agent under test never saw. A plug with no dispatch of egma's
-    to carry it takes it and drops it.
+    worker byte for byte, because a value the simulator tidied would be a
+    value the agent under test never saw. LiveKit Project credentials carry it
+    on Egma's dispatch. A LiveKit token endpoint carries it in the room
+    configuration that the endpoint copies into the token.
     """
 
     mock_tools: tuple[MockTool, ...] = ()

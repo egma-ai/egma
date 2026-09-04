@@ -38,7 +38,7 @@ import {
   type CommonFailure,
   type RegisterOptions,
 } from "./agents.ts";
-import { platformText } from "./client.ts";
+import { platformRefusalMessage, platformText } from "./client.ts";
 
 /** Something holding a platform key, which has to be asked for its value. */
 export type RevealableKey = { reveal(): string };
@@ -144,12 +144,12 @@ export type AgentMonitoring = {
 
 export type ReadMonitoring =
   | { readonly kind: "monitoring"; readonly monitoring: AgentMonitoring }
-  | { readonly kind: "not-found" }
+  | { readonly kind: "not-found"; readonly reason: string }
   | CommonFailure;
 
 export type Stopped =
   | { readonly kind: "stopped"; readonly monitoring: AgentPullState }
-  | { readonly kind: "not-found" }
+  | { readonly kind: "not-found"; readonly reason: string }
   | CommonFailure;
 
 /** What stopping answers: the switch, the binding, the hint, the last arrival. */
@@ -164,6 +164,19 @@ export type AgentPullState = {
 
 const NOTHING_SAID =
   "Egma answered without saying what it holds. Check that this Egma platform is up to date.";
+const UNREADABLE_MONITORING =
+  "Egma answered with a monitoring receipt this CLI cannot read.";
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function nullableText(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string" ? value : undefined;
+}
 
 /**
  * The Retell account this key opens, with what this project already knows
@@ -253,20 +266,69 @@ export async function startMonitoring(
     return { kind: "refused", reason: NOTHING_SAID };
   }
 
+  const body = recordOf(answer.data);
+  const rawWatching = body?.["watching"];
+  const rawRefused = body?.["refused"];
+  if (!Array.isArray(rawWatching) || !Array.isArray(rawRefused)) {
+    return { kind: "refused", reason: UNREADABLE_MONITORING };
+  }
+
+  const watching: Watching[] = [];
+  for (const value of rawWatching) {
+    const one = recordOf(value);
+    const agentId = platformText(one?.["agentId"]);
+    const agentName = platformText(one?.["agentName"]);
+    const platformAgentId = platformText(one?.["platformAgentId"]);
+    if (
+      one === null ||
+      agentId === "" ||
+      agentName === "" ||
+      platformAgentId === "" ||
+      typeof one["created"] !== "boolean" ||
+      typeof one["pullProductionCalls"] !== "boolean"
+    ) {
+      return { kind: "refused", reason: UNREADABLE_MONITORING };
+    }
+    watching.push({
+      agentId,
+      agentName,
+      platformAgentId,
+      created: one["created"],
+      pullProductionCalls: one["pullProductionCalls"],
+    });
+  }
+
+  const allowedReasons: readonly string[] = [
+    "contested",
+    "name_taken",
+    "not_found",
+    "archived",
+  ];
+  const refused: StartRefusal[] = [];
+  for (const value of rawRefused) {
+    const one = recordOf(value);
+    const platformAgentId = platformText(one?.["platformAgentId"]);
+    const reason = platformText(one?.["reason"]);
+    const message = platformText(one?.["message"]);
+    if (
+      one === null ||
+      platformAgentId === "" ||
+      !allowedReasons.includes(reason) ||
+      message === ""
+    ) {
+      return { kind: "refused", reason: UNREADABLE_MONITORING };
+    }
+    refused.push({
+      platformAgentId,
+      reason: reason as StartRefusalReason,
+      message,
+    });
+  }
+
   return {
     kind: "started",
-    watching: answer.data.watching.map((one) => ({
-      agentId: platformText(one.agentId),
-      agentName: platformText(one.agentName),
-      platformAgentId: platformText(one.platformAgentId),
-      created: one.created,
-      pullProductionCalls: one.pullProductionCalls,
-    })),
-    refused: answer.data.refused.map((one) => ({
-      platformAgentId: platformText(one.platformAgentId),
-      reason: one.reason,
-      message: platformText(one.message),
-    })),
+    watching,
+    refused,
   };
 }
 
@@ -287,28 +349,45 @@ export async function stopMonitoring(
     requestOptions(options),
   );
 
-  if (answer.response?.status === 404) return { kind: "not-found" };
+  if (answer.response?.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;
   if (answer.data === undefined) {
     return { kind: "refused", reason: NOTHING_SAID };
   }
 
-  const state = answer.data.monitoring;
+  const body = recordOf(answer.data);
+  const state = recordOf(body?.["monitoring"]);
+  const agentIdFromReceipt = platformText(state?.["agentId"]);
+  const agentPlatform = nullableText(state?.["agentPlatform"]);
+  const platformAgentId = nullableText(state?.["platformAgentId"]);
+  const monitoringApiKeyHint = nullableText(state?.["monitoringApiKeyHint"]);
+  const lastReceivedAt = nullableText(state?.["lastReceivedAt"]);
+  if (
+    state === null ||
+    agentIdFromReceipt === "" ||
+    typeof state["pullProductionCalls"] !== "boolean" ||
+    agentPlatform === undefined ||
+    platformAgentId === undefined ||
+    monitoringApiKeyHint === undefined ||
+    lastReceivedAt === undefined
+  ) {
+    return { kind: "refused", reason: UNREADABLE_MONITORING };
+  }
   return {
     kind: "stopped",
     monitoring: {
-      agentId: platformText(state.agentId),
-      pullProductionCalls: state.pullProductionCalls,
-      agentPlatform:
-        state.agentPlatform === null ? null : platformText(state.agentPlatform),
-      platformAgentId:
-        state.platformAgentId === null ? null : platformText(state.platformAgentId),
-      monitoringApiKeyHint:
-        state.monitoringApiKeyHint === null
-          ? null
-          : platformText(state.monitoringApiKeyHint),
-      lastReceivedAt: state.lastReceivedAt,
+      agentId: agentIdFromReceipt,
+      pullProductionCalls: state["pullProductionCalls"],
+      agentPlatform,
+      platformAgentId,
+      monitoringApiKeyHint,
+      lastReceivedAt,
     },
   };
 }
@@ -330,7 +409,12 @@ export async function readAgentMonitoring(
     requestOptions(options),
   );
 
-  if (answer.response?.status === 404) return { kind: "not-found" };
+  if (answer.response?.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, 404),
+    };
+  }
   const failed = commonFailure(answer, options);
   if (failed !== null) return failed;
   if (answer.data === undefined) {
@@ -339,6 +423,12 @@ export async function readAgentMonitoring(
 
   const agent = answer.data.agent;
   const connections = answer.data.connections;
+  if (platformText(agent.id) !== agentId) {
+    return {
+      kind: "refused",
+      reason: `Egma answered with a different Agent than ${agentId}. Nothing was changed.`,
+    };
+  }
   return {
     kind: "monitoring",
     monitoring: {

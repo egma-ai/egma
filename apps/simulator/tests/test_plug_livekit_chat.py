@@ -1707,6 +1707,7 @@ async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
         greeting="Lakeside Dental, how can I help?",
         replies=["Of course — could I take your name?", "Booked for Thursday."],
     )
+    written = {"tenant": "acme"}
     with serving(token="minted.by.the.customer") as endpoint:
         conducted, turns, _calls, assembled = await chat_walk(
             tmp_path,
@@ -1714,6 +1715,7 @@ async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
             monkeypatch,
             built_by=chat_endpoint_spec,
             token_endpoint=endpoint.url,
+            job_dispatch_metadata=written,
             scenario=(
                 "I need to move my Tuesday cleaning to Thursday. "
                 "My name is Margaret Hale."
@@ -1739,7 +1741,14 @@ async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
     assert asked.body["room_name"] == f"egma-sim-chat-{A_SIMULATION}"
     assert asked.body["room_name"].startswith("egma-sim-")
     assert asked.body["participant_identity"] == f"{PERSONA_IDENTITY}-{A_SIMULATION}"
-    assert asked.body["room_config"] == {"agents": [{"agent_name": AN_AGENT}]}
+    assert asked.body["room_config"] == {
+        "agents": [
+            {
+                "agent_name": AN_AGENT,
+                "metadata": json.dumps(written, separators=(",", ":")),
+            }
+        ]
+    }
     assert asked.header("authorization") == "Bearer SENTINEL-chat-endpoint-bearer-2f7a"
     assert stub.joined_with[0].token == "minted.by.the.customer"
 

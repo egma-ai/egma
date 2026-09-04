@@ -19,11 +19,10 @@ import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 const URL = "https://egma.example";
 const PROJECT_ID = "prj_project";
 const AGENT_ID = "agt_agent";
-const CONNECTION_ID = "con_connection";
 const CONTROL_KEY = "egma_sk_control";
 const RETELL_KEY = "retell-secret-value";
 
-const RETELL_TEXT = {
+const RETELL_CHAT = {
   agentPlatform: "retell",
   agentPlatformLabel: "Retell",
   connectionType: "retell_text_mode",
@@ -33,84 +32,65 @@ const RETELL_TEXT = {
   productLabel: "Retell text mode",
   topology: "hosted-broker",
   simulatorAdapter: true,
-  fields: [
-    {
-      key: "retellAgentId",
-      label: "Retell Agent ID",
-      kind: "text",
-      required: true,
-      help: "The provider Agent ID.",
-      afterCredentials: false,
-    },
-  ],
+  fields: [{ key: "retellAgentId", label: "Retell Agent ID", kind: "text", required: true, help: "Provider Agent ID.", afterCredentials: false }],
   credentialRule: "required",
   credentialHelp: "Stored sealed.",
-  credentialFields: [
-    {
-      field: "apiKey",
-      label: "Retell API key",
-      kind: "secret",
-      required: true,
-      help: "The account key.",
-    },
-  ],
-} as const;
-
-const RETELL_CHAT_API = {
-  ...RETELL_TEXT,
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
-  productLabel: "Retell chat API",
+  credentialFields: [{ field: "apiKey", label: "Retell API key", kind: "secret", required: true, help: "Account key." }],
 } as const;
 
 const RETELL_WEB = {
-  ...RETELL_TEXT,
+  ...RETELL_CHAT,
   connectionType: "retell_web_call",
   accessVariant: "retell_web_call.api_key",
   modality: "voice",
   productLabel: "Retell web call",
 } as const;
 
-const LIVEKIT_TOKEN = {
-  agentPlatform: "livekit",
-  agentPlatformLabel: "LiveKit",
-  connectionType: "livekit_room",
-  accessVariant: "livekit_room.customer_token_endpoint",
-  accessVariantLabel: "Customer token endpoint",
+const RETELL_PHONE = {
+  ...RETELL_CHAT,
+  connectionType: "phone_number",
+  accessVariant: "phone_number.public_e164",
   modality: "voice",
-  productLabel: "LiveKit token endpoint",
-  topology: "agent-dials-out",
-  simulatorAdapter: true,
-  fields: [
-    {
-      key: "tokenEndpoint",
-      label: "Token endpoint",
-      kind: "url",
-      required: true,
-      help: "The endpoint.",
-      afterCredentials: false,
-    },
-    {
-      key: "agentName",
-      label: "LiveKit agent name",
-      kind: "text",
-      required: true,
-      help: "The worker.",
-      afterCredentials: false,
-    },
-  ],
-  credentialRule: "required",
-  credentialHelp: "Stored sealed.",
-  credentialFields: [
-    {
-      field: "headers",
-      label: "Auth headers",
-      kind: "json",
-      required: true,
-      help: "Headers sent to the endpoint.",
-    },
-  ],
+  productLabel: "Retell phone",
+  fields: [{ key: "phoneNumber", label: "Phone number", kind: "e164", required: true, help: "E.164 number.", afterCredentials: false }],
+  credentialRule: "forbidden",
+  credentialFields: [],
 } as const;
+
+function livekitOption(
+  access: "project_credentials" | "customer_token_endpoint",
+  modality: "voice" | "chat",
+) {
+  const token = access === "customer_token_endpoint";
+  return {
+    agentPlatform: "livekit",
+    agentPlatformLabel: "LiveKit",
+    connectionType: "livekit_room",
+    accessVariant: `livekit_room.${access}`,
+    accessVariantLabel: token ? "Customer token endpoint" : "Project credentials",
+    modality,
+    productLabel: token ? "LiveKit token endpoint" : "LiveKit project credentials",
+    topology: "agent-dials-out",
+    simulatorAdapter: true,
+    fields: token
+      ? [
+          { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Public HTTPS endpoint.", afterCredentials: false },
+          { key: "agentName", label: "LiveKit Agent name", kind: "text", required: true, help: "Worker name.", afterCredentials: false },
+        ]
+      : [
+          { key: "url", label: "LiveKit URL", kind: "url", required: true, help: "LiveKit server.", afterCredentials: false },
+          { key: "agentName", label: "LiveKit Agent name", kind: "text", required: true, help: "Worker name.", afterCredentials: false },
+        ],
+    credentialRule: "required",
+    credentialHelp: "Stored sealed.",
+    credentialFields: token
+      ? [{ field: "headers", label: "Auth headers", kind: "json", required: true, help: "Endpoint headers." }]
+      : [
+          { field: "apiKey", label: "API key", kind: "secret", required: true, help: "Project key." },
+          { field: "apiSecret", label: "API secret", kind: "secret", required: true, help: "Project secret." },
+        ],
+  } as const;
+}
 
 class JsonResponse extends Response {
   constructor(body: unknown, status = 200) {
@@ -136,471 +116,280 @@ beforeEach(async () => {
   });
 });
 
-afterEach(async () => {
-  await workspace.remove();
-});
+afterEach(async () => workspace.remove());
 
 function output() {
   const out: string[] = [];
   const fail: string[] = [];
-  return {
-    out,
-    fail,
-    say: (line: string) => out.push(line),
-    complain: (line: string) => fail.push(line),
-  };
+  return { out, fail, say: (line: string) => out.push(line), complain: (line: string) => fail.push(line) };
 }
 
-function registrationReceipt(input: {
-  readonly name: string;
-  readonly platform: "retell" | "livekit";
-  readonly platformAgentId: string | null;
-  readonly connectionType: string;
-  readonly accessVariant: string;
-  readonly modality: "chat" | "voice";
-  readonly config: Readonly<Record<string, string>>;
-}) {
+function base(io: ReturnType<typeof output>) {
   return {
-    result: "created",
-    agent: {
-      id: AGENT_ID,
-      name: input.name,
-      projectId: PROJECT_ID,
-      agentPlatform: input.platform,
-      platformAgentId: input.platformAgentId,
-      monitoringKeyPresent: input.platform === "retell",
-    },
-    connection: {
-      id: CONNECTION_ID,
-      name: "connection-1",
-      agentPlatform: input.platform,
-      connectionType: input.connectionType,
-      accessVariant: input.accessVariant,
-      modality: input.modality,
-      productLabel: "Connection",
-      credentialsHint: "hint",
-      config: input.config,
-    },
-  };
+    access: { url: URL, credentialsFile: workspace.credentialsFile },
+    cwd: workspace.dir,
+    credentialsStdin: false,
+    env: { EGMA_API_KEY: CONTROL_KEY },
+    signal: new AbortController().signal,
+    out: io.say,
+    fail: io.complain,
+  } as const;
 }
 
-describe("skills-led Agent commands", () => {
-  it("lists LiveKit flags and credential sources from the server catalog", async () => {
-    const io = output();
-    const code = await runAgentConnectionOptionsCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
+function agent(platform: "retell" | "livekit", monitoringKeyPresent = false) {
+  return {
+    id: AGENT_ID,
+    name: "Receptionist",
+    projectId: PROJECT_ID,
+    agentPlatform: platform,
+    platformAgentId: monitoringKeyPresent ? "agent_retell" : null,
+    monitoringKeyPresent,
+  } as const;
+}
+
+async function putLocalAgent(platform: "retell" | "livekit"): Promise<void> {
+  const paths = folderPathsIn(workspace.dir);
+  const config = await readConfig(paths.config);
+  await writeConfig(paths.config, {
+    ...config,
+    agents: [{ id: AGENT_ID, name: "Receptionist", platform, connections: [] }],
+  });
+}
+
+describe("skills-first Agent commands", () => {
+  it("prints server-owned options, Retell Agent IDs, and phone numbers", async () => {
+    const retellIo = output();
+    const retellCode = await runAgentConnectionOptionsCommand({
+      ...base(retellIo),
+      platform: "retell",
+      agentId: null,
+      env: { EGMA_API_KEY: CONTROL_KEY, EGMA_RETELL_API_KEY: RETELL_KEY },
+      fetchImpl: async (input, init) => {
+        const request = new globalThis.URL(String(input));
+        if (request.pathname === "/v1/connection-options") {
+          return new JsonResponse({ items: [RETELL_CHAT, RETELL_PHONE] });
+        }
+        expect(request.pathname).toBe("/v1/agents:discover");
+        expect(JSON.parse(String(init?.body))).toMatchObject({ credentials: { apiKey: RETELL_KEY } });
+        return new JsonResponse({
+          agents: [
+            {
+              platformAgentId: "agent_first",
+              name: "First desk",
+              modality: "voice",
+              connectionCandidates: [
+                { agentPlatform: "retell", connectionType: "retell_text_mode", accessVariant: "retell_text_mode.api_key", modality: "chat", productLabel: "Retell text mode", config: { retellAgentId: "agent_first" } },
+                { agentPlatform: "retell", connectionType: "phone_number", accessVariant: "phone_number.public_e164", modality: "voice", productLabel: "Retell phone", config: { phoneNumber: "+14155550100" } },
+              ],
+            },
+            { platformAgentId: "agent_second", name: "Second desk", modality: "voice", connectionCandidates: [] },
+          ],
+        });
+      },
+    });
+    const retellOutput = retellIo.out.join("\n");
+    expect(retellCode).toBe(0);
+    expect(retellOutput.match(/agent_first/gu)).toHaveLength(1);
+    expect(retellOutput.match(/agent_second/gu)).toHaveLength(1);
+    expect(retellOutput).toContain("Phone numbers: +14155550100");
+    expect(retellOutput).toContain("--retell-phone-number '<Phone number>'");
+
+    const livekitIo = output();
+    const livekitCode = await runAgentConnectionOptionsCommand({
+      ...base(livekitIo),
       platform: "livekit",
       agentId: null,
-      credentialsStdin: false,
-      env: { EGMA_API_KEY: CONTROL_KEY },
-      signal: new AbortController().signal,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl: async (input) => {
-        expect(new globalThis.URL(String(input)).pathname).toBe(
-          "/v1/connection-options",
-        );
-        return new JsonResponse({ items: [LIVEKIT_TOKEN] });
-      },
+      fetchImpl: async () =>
+        new JsonResponse({
+          items: [
+            livekitOption("project_credentials", "voice"),
+            livekitOption("project_credentials", "chat"),
+            livekitOption("customer_token_endpoint", "voice"),
+            livekitOption("customer_token_endpoint", "chat"),
+          ],
+        }),
     });
-
-    expect(code).toBe(0);
-    expect(io.fail).toEqual([]);
-    expect(io.out).toContain("  Access: livekit-token-endpoint");
-    expect(io.out).toContain(
-      "  Required flags: --token-endpoint, --dispatch-name",
-    );
-    expect(io.out).toContain("  Optional flags: none");
-    expect(io.out).toContain(
-      "  Credential environment: EGMA_LIVEKIT_TOKEN_HEADERS",
-    );
-    // The dispatch name is the Egma agent's default name on this variant, as
-    // it is on project credentials, so the suggested command asks for no
-    // --name of its own.
-    expect(io.out.join("\n")).toContain(
-      "--dispatch-name '<LiveKit agent name>'",
-    );
-    expect(io.out.join("\n")).not.toContain("--name '<Egma Agent name>'");
+    const livekitOutput = livekitIo.out.join("\n");
+    expect(livekitCode).toBe(0);
+    expect(livekitOutput).toContain("Access: livekit-project-credentials");
+    expect(livekitOutput).toContain("Access: livekit-token-endpoint");
+    expect(livekitOutput).toContain("LiveKit token endpoint (voice)");
+    expect(livekitOutput).toContain("LiveKit token endpoint (chat)");
+    expect(livekitOutput).toContain("--livekit-token-endpoint '<Token endpoint>'");
+    expect(livekitOutput).not.toContain("--livekit-url '<LiveKit URL>' --livekit-token-endpoint");
   });
 
-  it("prints add commands when Retell discovery reuses an Egma Agent key", async () => {
-    const paths = folderPathsIn(workspace.dir);
-    const config = await readConfig(paths.config);
-    await writeConfig(paths.config, {
-      ...config,
-      agents: [
-        {
-          id: AGENT_ID,
-          name: "Receptionist",
-          platform: "retell",
-          connections: [],
-        },
-      ],
-    });
+  it("registers only Agent identity and refreshes config.yaml", async () => {
     const io = output();
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const requested = new globalThis.URL(String(input));
-      if (requested.pathname === "/v1/connection-options") {
-        return new JsonResponse({ items: [RETELL_TEXT] });
-      }
-      if (requested.pathname === `/v1/agents/${AGENT_ID}`) {
-        return new JsonResponse({
-          agent: {
-            id: AGENT_ID,
-            name: "Receptionist",
-            projectId: PROJECT_ID,
-            agentPlatform: "retell",
-            platformAgentId: "agent_retell",
-            monitoringKeyPresent: true,
-          },
-          connections: [],
-        });
-      }
-      if (requested.pathname === "/v1/agents:discover") {
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          agentPlatform: "retell",
-          agentId: AGENT_ID,
-        });
-        return new JsonResponse({
-          agents: [
-            {
-              platformAgentId: "agent_retell",
-              name: "Receptionist",
-              modality: "voice",
-              connectionCandidates: [
-                {
-                  agentPlatform: "retell",
-                  connectionType: "retell_text_mode",
-                  accessVariant: "retell_text_mode.api_key",
-                  modality: "chat",
-                  productLabel: "Retell text mode",
-                  config: { retellAgentId: "agent_retell" },
-                },
-              ],
-            },
-          ],
-        });
-      }
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${requested}`);
-    };
-
-    const code = await runAgentConnectionOptionsCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      platform: "retell",
-      agentId: AGENT_ID,
-      credentialsStdin: false,
-      env: { EGMA_API_KEY: CONTROL_KEY },
-      signal: new AbortController().signal,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl,
-    });
-
-    const shown = io.out.join("\n");
-    expect(code).toBe(0);
-    expect(io.fail).toEqual([]);
-    expect(shown).toContain(
-      `egma agent connection add --access retell-api-key --modality chat --agent '${AGENT_ID}'`,
-    );
-    expect(shown).not.toContain("egma agent register");
-    expect(shown).not.toContain("--platform retell");
-    expect(shown).not.toContain("--retell-agent");
-  });
-
-  it("registers a discovered Retell Agent and refreshes config.yaml", async () => {
-    const io = output();
-    let registration: Record<string, unknown> | undefined;
-    const receipt = registrationReceipt({
-      name: "Receptionist",
-      platform: "retell",
-      platformAgentId: "agent_retell",
-      connectionType: "retell_text_mode",
-      accessVariant: "retell_text_mode.api_key",
-      modality: "chat",
-      config: { retellAgentId: "agent_retell" },
-    });
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const requested = new globalThis.URL(String(input));
-      if (requested.pathname === "/v1/connection-options") {
-        return new JsonResponse({ items: [RETELL_CHAT_API, RETELL_TEXT] });
-      }
-      if (requested.pathname === "/v1/agents:discover") {
-        const body = JSON.parse(String(init?.body)) as {
-          readonly credentials: { readonly apiKey: string };
-        };
-        expect(body.credentials.apiKey).toBe(RETELL_KEY);
-        expect(requested.searchParams.get("projectId")).toBe(PROJECT_ID);
-        return new JsonResponse({
-          agents: [
-            {
-              platformAgentId: "agent_retell",
-              name: "Receptionist",
-              modality: "voice",
-              connectionCandidates: [
-                {
-                  agentPlatform: "retell",
-                  connectionType: "retell_text_mode",
-                  accessVariant: "retell_text_mode.api_key",
-                  modality: "chat",
-                  productLabel: "Retell text mode",
-                  config: { retellAgentId: "agent_retell" },
-                },
-              ],
-            },
-          ],
-        });
-      }
-      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
-        expect(requested.searchParams.get("projectId")).toBe(PROJECT_ID);
-        registration = JSON.parse(String(init.body)) as Record<string, unknown>;
-        return new JsonResponse(receipt, 201);
-      }
-      if (requested.pathname === "/v1/agents") {
-        return new JsonResponse({
-          agents: [{ ...receipt.agent, connections: [receipt.connection] }],
-          nextPageToken: null,
-        });
-      }
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${requested}`);
-    };
-
+    const receipt = agent("retell");
+    let body: Record<string, unknown> | undefined;
     const code = await runAgentRegisterCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
+      ...base(io),
       platform: "retell",
-      accessMethod: "retell-api-key",
-      modality: "chat",
-      name: null,
-      connectionName: null,
-      retellAgentId: "agent_retell",
-      phoneNumber: null,
-      livekitUrl: null,
-      dispatchName: null,
-      tokenEndpoint: null,
-      credentialsStdin: false,
-      env: { EGMA_API_KEY: CONTROL_KEY, EGMA_RETELL_API_KEY: RETELL_KEY },
-      signal: new AbortController().signal,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl,
-    });
-
-    expect(code).toBe(0);
-    expect(registration).toMatchObject({
       name: "Receptionist",
-      agentPlatform: "retell",
-      connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_text_mode",
-        accessVariant: "retell_text_mode.api_key",
-        modality: "chat",
-        config: { retellAgentId: "agent_retell" },
-        platformAgentId: "agent_retell",
-        credentials: { apiKey: RETELL_KEY },
+      fetchImpl: async (input, init) => {
+        const request = new globalThis.URL(String(input));
+        if (init?.method === "POST") {
+          body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return new JsonResponse({ result: "created", agent: receipt }, 201);
+        }
+        expect(request.pathname).toBe("/v1/agents");
+        return new JsonResponse({ agents: [{ ...receipt, connections: [] }], nextPageToken: null });
       },
     });
-    expect(JSON.stringify(registration)).not.toContain("agentPlatformSelection");
-    const config = await readConfig(folderPathsIn(workspace.dir).config);
-    expect(config.agents).toEqual([
-      {
-        id: AGENT_ID,
-        name: "Receptionist",
-        platform: "retell",
-        connections: [{ id: CONNECTION_ID, name: "connection-1" }],
-      },
+    expect(code).toBe(0);
+    expect(body).toEqual({ name: "Receptionist", agentPlatform: "retell" });
+    expect(body).not.toHaveProperty("connection");
+    expect((await readConfig(folderPathsIn(workspace.dir).config)).agents).toEqual([
+      { id: AGENT_ID, name: "Receptionist", platform: "retell", connections: [] },
     ]);
-    expect(io.out).toContain("status: created");
   });
 
-  it("uses a Retell Agent's stored key when adding a Connection", async () => {
-    await createEgmaFolder({ repository: workspace.dir });
-    const paths = folderPathsIn(workspace.dir);
-    const existing = await readConfig(paths.config);
-    await writeConfig(paths.config, {
-      ...existing,
-      agents: [
-        {
-          id: AGENT_ID,
-          name: "Receptionist",
-          platform: "retell",
-          connections: [],
-        },
-      ],
-    });
-
+  it("uses a one-time Retell key once, then reuses the stored binding", async () => {
+    await putLocalAgent("retell");
     const io = output();
-    let discoveryBody: Record<string, unknown> | undefined;
-    let addBody: Record<string, unknown> | undefined;
-    const agent = {
-      id: AGENT_ID,
-      name: "Receptionist",
-      projectId: PROJECT_ID,
-      agentPlatform: "retell",
-      platformAgentId: "agent_retell",
-      monitoringKeyPresent: true,
-    } as const;
-    const connection = {
-      id: CONNECTION_ID,
-      name: "retell_web_call-1",
-      agentPlatform: "retell",
-      connectionType: "retell_web_call",
-      accessVariant: "retell_web_call.api_key",
-      modality: "voice",
-      productLabel: "Retell web call",
-      credentialsHint: "alue",
-      config: { retellAgentId: "agent_retell" },
-    } as const;
+    const connections: Record<string, unknown>[] = [];
+    const writes: Record<string, unknown>[] = [];
+    const discoveries: Record<string, unknown>[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
-      const requested = new globalThis.URL(String(input));
-      if (requested.pathname === "/v1/connection-options") {
-        return new JsonResponse({ items: [RETELL_WEB] });
+      const request = new globalThis.URL(String(input));
+      if (request.pathname === `/v1/agents/${AGENT_ID}`) {
+        return new JsonResponse({ agent: agent("retell", connections.length > 0), connections });
       }
-      if (requested.pathname === `/v1/agents/${AGENT_ID}`) {
-        return new JsonResponse({ agent, connections: [] });
+      if (request.pathname === "/v1/connection-options") {
+        return new JsonResponse({ items: [RETELL_CHAT, RETELL_WEB] });
       }
-      if (requested.pathname === "/v1/agents:discover") {
-        expect(requested.searchParams.get("projectId")).toBe(PROJECT_ID);
-        discoveryBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (request.pathname === "/v1/agents:discover") {
+        discoveries.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         return new JsonResponse({
-          agents: [
-            {
-              platformAgentId: "agent_retell",
-              name: "Receptionist",
-              modality: "voice",
-              connectionCandidates: [
-                {
-                  agentPlatform: "retell",
-                  connectionType: "retell_web_call",
-                  accessVariant: "retell_web_call.api_key",
-                  modality: "voice",
-                  productLabel: "Retell web call",
-                  config: { retellAgentId: "agent_retell" },
-                },
-              ],
-            },
-          ],
+          agents: [{
+            platformAgentId: "agent_retell",
+            name: "Receptionist",
+            modality: "voice",
+            connectionCandidates: [
+              { agentPlatform: "retell", connectionType: "retell_text_mode", accessVariant: "retell_text_mode.api_key", modality: "chat", productLabel: "Retell text mode", config: { retellAgentId: "agent_retell" } },
+              { agentPlatform: "retell", connectionType: "retell_web_call", accessVariant: "retell_web_call.api_key", modality: "voice", productLabel: "Retell web call", config: { retellAgentId: "agent_retell" } },
+            ],
+          }],
         });
       }
-      if (
-        requested.pathname === `/v1/agents/${AGENT_ID}/connections` &&
-        init?.method === "POST"
-      ) {
-        addBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+      if (request.pathname === `/v1/agents/${AGENT_ID}/connections`) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        writes.push(body);
+        const connection = { id: `con_${writes.length}`, agentId: AGENT_ID, projectId: PROJECT_ID, productLabel: "Retell", credentialsHint: "alue", ...body };
+        connections.push(connection);
         return new JsonResponse({ connection }, 201);
       }
-      if (requested.pathname === "/v1/agents") {
-        return new JsonResponse({
-          agents: [{ ...agent, connections: [connection] }],
-          nextPageToken: null,
-        });
-      }
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${requested}`);
+      return new JsonResponse({ agents: [{ ...agent("retell", true), connections }], nextPageToken: null });
     };
-
-    const code = await runAgentConnectionAddCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      agentId: AGENT_ID,
-      accessMethod: "retell-api-key",
-      modality: "voice",
-      connectionName: null,
-      phoneNumber: null,
-      livekitUrl: null,
-      dispatchName: null,
-      tokenEndpoint: null,
+    const common = {
+      ...base(io), agentId: AGENT_ID, accessMethod: "retell-api-key", name: null,
+      retellPhoneNumber: null, livekitUrl: null, livekitAgentName: null, livekitTokenEndpoint: null, fetchImpl,
+    } as const;
+    expect(await runAgentConnectionAddCommand({
+      ...common,
+      modality: "chat",
+      retellAgentId: "agent_retell",
       credentialsStdin: true,
-      stdin: Readable.from(["replacement-key-that-must-not-be-used"]),
-      env: {
-        EGMA_API_KEY: CONTROL_KEY,
-        EGMA_RETELL_API_KEY: "another-replacement-that-must-not-be-used",
-      },
-      signal: new AbortController().signal,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl,
-    });
-
-    expect(code).toBe(0);
-    expect(discoveryBody).toEqual({
-      agentPlatform: "retell",
-      agentId: AGENT_ID,
-    });
-    expect(addBody).toMatchObject({
-      agentPlatform: "retell",
-      connectionType: "retell_web_call",
-      accessVariant: "retell_web_call.api_key",
-      platformAgentId: "agent_retell",
-    });
-    expect(JSON.stringify(addBody)).not.toContain("replacement");
-    expect(io.out).toContain("status: connection-added");
+      stdin: Readable.from([JSON.stringify({ apiKey: RETELL_KEY })]),
+    })).toBe(0);
+    expect(await runAgentConnectionAddCommand({
+      ...common,
+      modality: "voice",
+      retellAgentId: null,
+      credentialsStdin: false,
+    })).toBe(0);
+    expect(discoveries[0]).toMatchObject({ credentials: { apiKey: RETELL_KEY } });
+    expect(discoveries[1]).toEqual({ agentPlatform: "retell", agentId: AGENT_ID });
+    expect(writes[0]).toHaveProperty("credentials", { apiKey: RETELL_KEY });
+    expect(writes[1]).not.toHaveProperty("credentials");
+    expect(JSON.stringify(await readConfig(folderPathsIn(workspace.dir).config))).not.toContain(RETELL_KEY);
   });
 
-  it("accepts structured token headers on standard input", async () => {
+  it.each([
+    ["project_credentials", "voice"],
+    ["project_credentials", "chat"],
+    ["customer_token_endpoint", "voice"],
+    ["customer_token_endpoint", "chat"],
+  ] as const)("adds LiveKit %s for %s", async (access, modality) => {
+    await putLocalAgent("livekit");
     const io = output();
-    let registration: Record<string, unknown> | undefined;
-    const receipt = registrationReceipt({
-      name: "Receptionist",
-      platform: "livekit",
-      platformAgentId: null,
-      connectionType: "livekit_room",
-      accessVariant: "livekit_room.customer_token_endpoint",
-      modality: "voice",
-      config: {
-        tokenEndpoint: "https://example.com/livekit/token",
-        agentName: "receptionist",
-      },
-    });
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const requested = new globalThis.URL(String(input));
-      if (requested.pathname === "/v1/connection-options") {
-        return new JsonResponse({ items: [LIVEKIT_TOKEN] });
-      }
-      if (requested.pathname === "/v1/agents" && init?.method === "POST") {
-        registration = JSON.parse(String(init.body)) as Record<string, unknown>;
-        return new JsonResponse(receipt, 201);
-      }
-      if (requested.pathname === "/v1/agents") {
-        return new JsonResponse({
-          agents: [{ ...receipt.agent, connections: [receipt.connection] }],
-          nextPageToken: null,
-        });
-      }
-      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${requested}`);
-    };
-
-    const code = await runAgentRegisterCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      platform: "livekit",
-      accessMethod: "livekit-token-endpoint",
-      modality: "voice",
-      name: "Receptionist",
-      connectionName: null,
+    const option = livekitOption(access, modality);
+    const token = access === "customer_token_endpoint";
+    let body: Record<string, unknown> | undefined;
+    const config = token
+      ? { tokenEndpoint: "https://tokens.example.com/egma", agentName: "receptionist" }
+      : { url: "wss://example.livekit.cloud", agentName: "receptionist" };
+    const connection = { id: "con_livekit", agentId: AGENT_ID, projectId: PROJECT_ID, name: `LiveKit ${modality}`, agentPlatform: "livekit", connectionType: "livekit_room", accessVariant: option.accessVariant, modality, productLabel: "LiveKit", credentialsHint: "hint", config };
+    const code = await runAgentConnectionAddCommand({
+      ...base(io),
+      agentId: AGENT_ID,
+      accessMethod: token ? "livekit-token-endpoint" : "livekit-project-credentials",
+      modality,
+      name: `LiveKit ${modality}`,
       retellAgentId: null,
-      phoneNumber: null,
-      livekitUrl: null,
-      dispatchName: "receptionist",
-      tokenEndpoint: "https://example.com/livekit/token",
-      credentialsStdin: true,
-      stdin: Readable.from([
-        JSON.stringify({ headers: { Authorization: "Bearer secret" } }),
-      ]),
-      env: { EGMA_API_KEY: CONTROL_KEY },
-      signal: new AbortController().signal,
-      out: io.say,
-      fail: io.complain,
-      fetchImpl,
-    });
-
-    expect(code).toBe(0);
-    expect(registration).toMatchObject({
-      connection: {
-        credentials: {
-          headers: JSON.stringify({ Authorization: "Bearer secret" }),
-        },
+      retellPhoneNumber: null,
+      livekitUrl: token ? null : "wss://example.livekit.cloud",
+      livekitAgentName: "receptionist",
+      livekitTokenEndpoint: token ? "https://tokens.example.com/egma" : null,
+      credentialsStdin: token,
+      ...(token
+        ? {
+            stdin: Readable.from([
+              JSON.stringify({ headers: { Authorization: "Bearer secret" } }),
+            ]),
+          }
+        : {}),
+      env: token ? { EGMA_API_KEY: CONTROL_KEY } : { EGMA_API_KEY: CONTROL_KEY, EGMA_LIVEKIT_API_KEY: "livekit-key", EGMA_LIVEKIT_API_SECRET: "livekit-secret" },
+      fetchImpl: async (input, init) => {
+        const request = new globalThis.URL(String(input));
+        if (request.pathname === `/v1/agents/${AGENT_ID}`) return new JsonResponse({ agent: agent("livekit"), connections: [] });
+        if (request.pathname === "/v1/connection-options") return new JsonResponse({ items: [option] });
+        if (request.pathname === `/v1/agents/${AGENT_ID}/connections`) {
+          body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return new JsonResponse({ connection }, 201);
+        }
+        return new JsonResponse({ agents: [{ ...agent("livekit"), connections: [connection] }], nextPageToken: null });
       },
     });
+    expect(code).toBe(0);
+    expect(body).toMatchObject({ accessVariant: option.accessVariant, modality, config });
+    if (token) {
+      expect(body?.["config"]).not.toHaveProperty("url");
+      expect(body?.["credentials"]).toEqual({ headers: JSON.stringify({ Authorization: "Bearer secret" }) });
+    } else {
+      expect(body?.["credentials"]).toEqual({ apiKey: "livekit-key", apiSecret: "livekit-secret" });
+    }
+  });
+
+  it("refuses unsupported credential fields before a Connection write", async () => {
+    await putLocalAgent("livekit");
+    const io = output();
+    let wrote = false;
+    const code = await runAgentConnectionAddCommand({
+      ...base(io),
+      agentId: AGENT_ID,
+      accessMethod: "livekit-token-endpoint",
+      modality: "chat",
+      name: null,
+      retellAgentId: null,
+      retellPhoneNumber: null,
+      livekitUrl: null,
+      livekitAgentName: "receptionist",
+      livekitTokenEndpoint: "https://tokens.example.com/egma",
+      credentialsStdin: true,
+      stdin: Readable.from([JSON.stringify({ apiKey: "must-not-print" })]),
+      fetchImpl: async (input) => {
+        const request = new globalThis.URL(String(input));
+        if (request.pathname === `/v1/agents/${AGENT_ID}`) return new JsonResponse({ agent: agent("livekit"), connections: [] });
+        if (request.pathname === "/v1/connection-options") return new JsonResponse({ items: [livekitOption("customer_token_endpoint", "chat")] });
+        wrote = true;
+        throw new Error("must not write");
+      },
+    });
+    expect(code).toBe(1);
+    expect(wrote).toBe(false);
+    expect(io.fail.join("\n")).toContain("unsupported fields");
+    expect(`${io.out.join("\n")}${io.fail.join("\n")}`).not.toContain("must-not-print");
   });
 });

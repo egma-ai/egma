@@ -80,6 +80,10 @@ export type Observation = {
   readonly seq: number;
   readonly method: string;
   readonly path: string;
+  /** The query string exactly as the CLI sent it, including the leading `?`. */
+  readonly query: string;
+  /** Request headers exactly as Node exposed them to the fixture route. */
+  readonly headers: Readonly<Record<string, string | undefined>>;
   readonly status: number;
   /** The JSON body exactly as the CLI sent it, or null for a bodyless request. */
   readonly body: Record<string, unknown> | null;
@@ -148,6 +152,8 @@ export async function startFixturePlatform(
         seq: records.length,
         method: incoming.method ?? "GET",
         path: at.pathname,
+        query: at.search,
+        headers: incoming.headers as Record<string, string | undefined>,
         status: answer.status,
         body,
       });

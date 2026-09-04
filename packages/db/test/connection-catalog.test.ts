@@ -236,15 +236,51 @@ describe("what a browser is told about a simulation connection", () => {
           modality: "voice",
           productLabel: "Retell phone",
         }),
+      ]),
+    );
+    expect(connectionOptionMetadata()).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           agentPlatform: null,
           connectionType: "phone_number",
-          accessVariant: "phone_number.public_e164",
-          modality: "voice",
-          productLabel: "Phone number",
         }),
       ]),
     );
+  });
+
+  it("keeps old phone rows readable without offering them for new connections", () => {
+    expect(
+      productLabelOf(
+        "livekit",
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toBe("Phone number");
+    expect(
+      productLabelOf(
+        null,
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toBe("Phone number");
+
+    const offered = connectionOptionMetadata();
+    expect(
+      offered.some(
+        (option) =>
+          option.agentPlatform === "livekit" &&
+          option.connectionType === "phone_number",
+      ),
+    ).toBe(false);
+    expect(
+      offered.some(
+        (option) =>
+          option.agentPlatform === null &&
+          option.connectionType === "phone_number",
+      ),
+    ).toBe(false);
   });
 
   it("refuses a platform that is not part of an explicit supported tuple", () => {

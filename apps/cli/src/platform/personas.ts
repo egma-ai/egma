@@ -50,7 +50,19 @@ export async function listProjectPersonas(
       );
     }
 
-    for (const persona of answer.data.personas) {
+    const values = answer.data.personas;
+    const next = answer.data.nextPageToken;
+    if (
+      !Array.isArray(values) ||
+      (next !== null && typeof next !== "string")
+    ) {
+      throw new PlatformRefusedError(
+        response.status,
+        "Egma answered with a Persona collection this CLI cannot read. Check that this Egma platform is up to date.",
+      );
+    }
+
+    for (const persona of values) {
       const id = platformText(persona.id);
       const name = platformText(persona.name);
       if (id === "" || name === "") {
@@ -69,8 +81,7 @@ export async function listProjectPersonas(
       found.push({ id, name });
     }
 
-    const next = platformText(answer.data.nextPageToken);
-    if (next === "") return found;
+    if (next === null || next === "") return found;
     if (seenTokens.has(next)) {
       throw new PlatformRefusedError(
         response.status,

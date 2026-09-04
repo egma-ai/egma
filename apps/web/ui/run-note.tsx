@@ -56,7 +56,6 @@ export type RunNoteTest = {
 /** The connection a run is conducted over, as this note reads it. */
 export type RunNoteConnection = {
   readonly connectionType: string;
-  readonly accessVariant: string;
 };
 
 /** At most this many lines, however many facts apply. */
@@ -163,8 +162,6 @@ export function runNoteLines(
     connection.connectionType === "retell_chat_api" ||
     connection.connectionType === "phone_number";
   const livekit = connection.connectionType === "livekit_room";
-  const tokenEndpoint =
-    connection.accessVariant === "livekit_room.customer_token_endpoint";
 
   /* A phone call is the customer's own published number answered by Retell. */
   if (

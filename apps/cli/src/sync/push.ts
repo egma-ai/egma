@@ -69,7 +69,31 @@ export type PushOptions = {
   readonly paths: FolderPaths;
   readonly fetchImpl?: Fetch;
   readonly signal?: AbortSignal;
+  /** Failure injection at the local pin-write boundary. */
+  readonly writeTestFile?: typeof writeTestFile;
 };
+
+/** The platform committed the whole change set, but local version pins did not. */
+export class PushMaterializationError extends Error {
+  public readonly tests: readonly PushedTest[];
+  public readonly file: string;
+  public readonly shown: string;
+
+  public constructor(
+    tests: readonly PushedTest[],
+    file: string,
+    shown: string,
+    cause: unknown,
+  ) {
+    super("Egma applied the repository, but its returned Test pins were not all written locally.", {
+      cause,
+    });
+    this.name = "PushMaterializationError";
+    this.tests = tests;
+    this.file = file;
+    this.shown = shown;
+  }
+}
 
 function inputFrom(test: TestFile): TestInput {
   return {
@@ -171,7 +195,7 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     const file = fileByRef.get(applied.clientRef);
     if (file === undefined) {
       throw new Error(
-        `Egma answered for ${applied.clientRef}, which was not in this repository. Pull to recover the applied change set.`,
+        `Egma answered for ${applied.clientRef}, which was not in this repository. Run egma pull to recover the applied change set.`,
       );
     }
     const before = file.test.version;
@@ -181,7 +205,6 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
         : before === applied.test.versionId && sameAsPlatform(file.test, applied.test)
           ? "unchanged"
           : "updated";
-    await writeTestFile(file.file, fileFromPlatform(applied.test));
     pushed.push({
       testId: applied.test.id,
       name: applied.test.name,
@@ -189,6 +212,18 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
       versionId: applied.test.versionId,
       state,
     });
+  }
+
+  const write = options.writeTestFile ?? writeTestFile;
+  // Keep the full receipt even when the first local write fails. The platform
+  // applied the complete change set atomically.
+  for (const applied of answer.tests) {
+    const file = fileByRef.get(applied.clientRef)!;
+    try {
+      await write(file.file, fileFromPlatform(applied.test));
+    } catch (cause) {
+      throw new PushMaterializationError(pushed, file.file, file.shown, cause);
+    }
   }
 
   return {

@@ -848,7 +848,6 @@ function RunDetailView({
               className="flex-none pb-4"
               connection={{
                 connectionType: read.connectionType,
-                accessVariant: read.accessVariant,
               }}
               tests={noteTests}
             />

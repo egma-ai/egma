@@ -16,16 +16,17 @@ import {
   selectSuiteForRun,
   type Selection,
 } from "../run/selection.ts";
-import { pushTests } from "../sync/push.ts";
+import { PushMaterializationError, pushTests, type PushedTest } from "../sync/push.ts";
+import { oneLineFactText } from "../ui/fact-value.ts";
 import type { FolderCommandOptions } from "./folder-verbs.ts";
 
 export const RUN_EXIT = {
   done: 0,
   nothing: 1,
-  notSignedIn: 2,
-  unreachable: 4,
-  refused: 5,
-  operational: 6,
+  notSignedIn: 1,
+  unreachable: 1,
+  refused: 1,
+  operational: 1,
   interrupted: 130,
 } as const;
 
@@ -48,13 +49,22 @@ function reportTargetRefusal(
   options: Pick<FolderCommandOptions, "out" | "fail">,
   refusal: RefusedTarget,
 ): void {
+  if (refusal.agents.length > 0) {
+    options.out("Available Agents:");
+  }
   for (const agent of refusal.agents) {
-    options.out(`agent-option: ${agent.id} ${agent.name}`);
+    options.out(
+      `- ${oneLineFactText(agent.name, "Unnamed")} (${oneLineFactText(agent.id, "unknown Agent ID")})`,
+    );
+  }
+  if (refusal.connections.length > 0) {
+    options.out("Available Connections:");
   }
   for (const connection of refusal.connections) {
-    options.out(`connection-option: ${connection.id} ${connection.name}`);
+    options.out(
+      `- ${oneLineFactText(connection.name, "Unnamed")} (${oneLineFactText(connection.id, "unknown Connection ID")})`,
+    );
   }
-  options.out(`status: ${refusal.status}`);
   options.fail(refusal.message);
 }
 
@@ -73,7 +83,6 @@ function runResultsUrl(
 function interrupted(
   options: Pick<FolderCommandOptions, "out" | "fail">,
 ): number {
-  options.out("status: interrupted");
   options.fail(
     "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
   );
@@ -82,6 +91,25 @@ function interrupted(
 
 function wasInterrupted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
+}
+
+function sayAppliedTest(test: PushedTest, out: (line: string) => void): void {
+  out(
+    `Applied Test ${oneLineFactText(test.name, "Unnamed")} (${oneLineFactText(test.testId, "unknown Test ID")}).`,
+  );
+  out(`  File: ${oneLineFactText(test.shown, "unknown local file")}`);
+  out(`  Version ID: ${oneLineFactText(test.versionId, "unknown Test version ID")}`);
+}
+
+function sayStartedRun(
+  options: Pick<FolderCommandOptions, "out">,
+  config: FolderConfig,
+  runId: string,
+): void {
+  options.out(`Started Run ${oneLineFactText(runId, "unknown Run ID")}.`);
+  options.out(
+    `View its progress in Egma: ${runResultsUrl(config.platform!.origin, config.project!.id, runId)}`,
+  );
 }
 
 /** Push the complete local repository before a Run is created. */
@@ -99,31 +127,51 @@ async function pushBeforeRun(
       signal: options.signal,
       ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     });
-    if (options.signal.aborted) return interrupted(options);
+    if (options.signal.aborted) {
+      for (const test of report.tests) sayAppliedTest(test, options.out);
+      options.fail(
+        "Run creation was interrupted after Egma applied the pre-run push. Returned Test version IDs were saved locally. No Run was created. Run egma run create again when you are ready.",
+      );
+      return RUN_EXIT.interrupted;
+    }
     if (report.turnedAway.length === 0) return null;
 
     for (const refused of report.turnedAway) {
-      options.out(`turned-away: ${refused.name}`);
-      options.out(`file: ${refused.shown}`);
-      options.out(`reason: ${refused.reason}`);
+      options.out(
+        `Could not push ${oneLineFactText(refused.name, "Unnamed")}.`,
+      );
+      options.out(`  File: ${oneLineFactText(refused.shown, "unknown local file")}`);
+      options.out(`  ${refused.reason}`);
     }
-    options.out("status: push-refused");
     options.fail(
       "The complete repository could not be pushed, so no Run was created.",
     );
     return RUN_EXIT.refused;
   } catch (cause) {
-    if (options.signal.aborted) return interrupted(options);
+    if (cause instanceof PushMaterializationError) {
+      for (const test of cause.tests) sayAppliedTest(test, options.out);
+      options.fail(
+        `Egma applied the pre-run push, but could not refresh ${oneLineFactText(cause.shown, "the local Test file")}. Run egma pull. No Run was created.`,
+      );
+      if (options.signal.aborted) {
+        options.fail("Run creation was interrupted after the pre-run push completed.");
+        return RUN_EXIT.interrupted;
+      }
+      return RUN_EXIT.nothing;
+    }
+    if (options.signal.aborted) {
+      options.fail(
+        "Run creation was interrupted during the pre-run push. No Run was created. Run egma pull before you try again.",
+      );
+      return RUN_EXIT.interrupted;
+    }
     if (cause instanceof RepositoryValidationError) {
-      options.out("status: invalid-folder");
-      for (const reason of cause.issues) options.out(`reason: ${reason}`);
       options.fail(cause.message);
       return RUN_EXIT.nothing;
     }
     if (cause instanceof PlatformRefusedError) {
-      options.out("status: push-refused");
-      options.out(`reason: ${cause.message}`);
-      options.fail(`${cause.message} No Run was created.`);
+      options.fail(cause.message);
+      options.fail("No Run was created.");
       return RUN_EXIT.refused;
     }
     if (cause instanceof PlatformUnreachableError) {
@@ -146,14 +194,22 @@ export async function runCreateCommand(
   let config: FolderConfig;
   try {
     config = await readConfig(paths.config);
-  } catch {
-    options.out("status: no-folder");
-    options.fail(`There is no valid egma folder in ${options.cwd}. Run egma init here first.`);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      options.fail(
+        `There is no egma/config.yaml in ${oneLineFactText(options.cwd, "this directory")}. Run egma init here first.`,
+      );
+    } else {
+      options.fail(
+        cause instanceof Error
+          ? cause.message
+          : "Egma could not read egma/config.yaml. Fix the file and run this again.",
+      );
+    }
     return RUN_EXIT.nothing;
   }
 
   if (config.platform === null || config.project === null) {
-    options.out("status: not-bound");
     options.fail(
       "egma/config.yaml does not name an Egma platform and Project. Run egma init here first.",
     );
@@ -162,7 +218,6 @@ export async function runCreateCommand(
 
   const signedIn = await signedInAt(options.access);
   if (signedIn === null) {
-    options.out("status: not-signed-in");
     options.fail(notSignedInRefusal(options.access.url));
     return RUN_EXIT.notSignedIn;
   }
@@ -191,8 +246,6 @@ export async function runCreateCommand(
   } catch (cause) {
     if (options.signal.aborted) return interrupted(options);
     if (cause instanceof RunSelectionError || cause instanceof RepositoryValidationError) {
-      options.out("status: not-matched");
-      for (const issue of cause.issues) options.out(`reason: ${issue}`);
       options.fail(cause.message);
       return RUN_EXIT.nothing;
     }
@@ -206,6 +259,7 @@ export async function runCreateCommand(
     answer = await startRun(
       signedIn,
       {
+        projectId: config.project.id,
         suiteId: selection.suiteId,
         agentId: target.agent.id,
         connectionId: target.connection.id,
@@ -224,17 +278,17 @@ export async function runCreateCommand(
   }
 
   if (answer.kind === "refused") {
-    options.out("status: refused");
-    options.out(`reason: ${answer.reason}`);
     options.fail(answer.reason);
     return RUN_EXIT.refused;
   }
 
-  options.out(`run: ${answer.run.id}`);
-  options.out(
-    `results: ${runResultsUrl(config.platform.origin, config.project.id, answer.run.id)}`,
-  );
-  options.out("status: started");
+  sayStartedRun(options, config, answer.run.id);
+  if (options.signal.aborted) {
+    options.fail(
+      "The command was interrupted after Egma started this Run. The Run is continuing. Use the printed Egma URL to view it, and do not start another Run for the same work.",
+    );
+    return RUN_EXIT.interrupted;
+  }
   return RUN_EXIT.done;
 }
 
@@ -246,7 +300,6 @@ export async function runCancelCommand(
 
   const runId = options.runId.trim();
   if (runId === "") {
-    options.out("status: invalid-run");
     options.fail("Name one Run ID. Nothing was changed.");
     return RUN_EXIT.nothing;
   }
@@ -254,20 +307,27 @@ export async function runCancelCommand(
   let config: FolderConfig;
   try {
     config = await readConfig(folderPathsIn(options.cwd).config);
-  } catch {
-    options.out("status: no-folder");
-    options.fail(`There is no valid egma folder in ${options.cwd}. Run egma init here first.`);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+      options.fail(
+        `There is no egma/config.yaml in ${oneLineFactText(options.cwd, "this directory")}. Run egma init here first.`,
+      );
+    } else {
+      options.fail(
+        cause instanceof Error
+          ? cause.message
+          : "Egma could not read egma/config.yaml. Fix the file and run this again.",
+      );
+    }
     return RUN_EXIT.nothing;
   }
   if (config.project === null) {
-    options.out("status: not-bound");
     options.fail("egma/config.yaml does not name an Egma Project. Run egma init here first.");
     return RUN_EXIT.nothing;
   }
 
   const signedIn = await signedInAt(options.access);
   if (signedIn === null) {
-    options.out("status: not-signed-in");
     options.fail(notSignedInRefusal(options.access.url));
     return RUN_EXIT.notSignedIn;
   }
@@ -287,17 +347,24 @@ export async function runCancelCommand(
 
   switch (answer.kind) {
     case "not-found":
-      options.out("status: no-run");
-      options.fail(`Egma has no Run ${runId} in this Project. Nothing was changed.`);
+      options.fail(answer.reason);
+      options.fail(
+        `Egma has no Run ${oneLineFactText(runId, "with that ID")} in this Project. Nothing was changed.`,
+      );
       return RUN_EXIT.nothing;
     case "refused":
-      options.out("status: refused");
-      options.out(`reason: ${answer.reason}`);
       options.fail(answer.reason);
       return RUN_EXIT.refused;
     case "canceled":
-      options.out(`run: ${answer.run.id}`);
-      options.out("status: canceled");
+      options.out(
+        `Canceled Run ${oneLineFactText(answer.run.id, "unknown Run ID")}.`,
+      );
+      if (wasInterrupted(options.signal)) {
+        options.fail(
+          "The command was interrupted after Egma canceled this Run. The cancellation is complete. Nothing needs to be retried.",
+        );
+        return RUN_EXIT.interrupted;
+      }
       return RUN_EXIT.done;
   }
 }
@@ -307,8 +374,6 @@ function unreachable(
   cause: unknown,
 ): number {
   if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) {
-    options.out("status: unreachable");
-    options.out(`reason: ${cause.message}`);
     options.fail(cause.message);
     return RUN_EXIT.unreachable;
   }

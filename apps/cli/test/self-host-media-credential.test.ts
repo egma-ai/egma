@@ -69,7 +69,8 @@ describe("the media server's credential", () => {
       const run = await runUp(workspace, platform);
 
       expect(run.code).toBe(0);
-      expect(run.stdout).toContain("media_credential: generated");
+      expect(run.stdout).toContain("Generated the LiveKit media credential.");
+      expect(run.stdout).not.toContain("Using the existing LiveKit media credential.");
 
       const stored = await workspace.storedConfig();
       const key = stored[KEY_VARIABLE] ?? "";
@@ -143,8 +144,8 @@ describe("the media server's credential", () => {
       ).toBe(0o700);
       // And it says which of the two happened, because "generated" on a running
       // deployment is the line that explains why its containers were replaced.
-      expect(second.stdout).toContain("media_credential: existing");
-      expect(second.stdout).not.toContain("media_credential: generated");
+      expect(second.stdout).toContain("Using the existing LiveKit media credential.");
+      expect(second.stdout).not.toContain("Generated the LiveKit media credential.");
     } finally {
       await platform.close();
     }
@@ -163,7 +164,8 @@ describe("the media server's credential", () => {
         [SECRET_VARIABLE]: "a-secret-the-operator-chose-that-is-long-enough",
       });
 
-      expect(run.stdout).toContain("media_credential: existing");
+      expect(run.stdout).toContain("Using the existing LiveKit media credential.");
+      expect(run.stdout).not.toContain("Generated the LiveKit media credential.");
       const stored = await workspace.storedConfig();
       expect(stored[KEY_VARIABLE]).toBe("a-key-the-operator-chose");
       expect(stored[SECRET_VARIABLE]).toBe("a-secret-the-operator-chose-that-is-long-enough");
@@ -195,8 +197,16 @@ describe("the media server's credential", () => {
       // Exactly one winner. The loser adopted what the winner recorded rather
       // than writing over it, which is the whole property.
       const runs = [first, second];
-      expect(runs.filter((run) => run.stdout.includes("media_credential: generated"))).toHaveLength(1);
-      expect(runs.filter((run) => run.stdout.includes("media_credential: existing"))).toHaveLength(1);
+      expect(
+        runs.filter((run) =>
+          run.stdout.includes("Generated the LiveKit media credential."),
+        ),
+      ).toHaveLength(1);
+      expect(
+        runs.filter((run) =>
+          run.stdout.includes("Using the existing LiveKit media credential."),
+        ),
+      ).toHaveLength(1);
 
       // One pair on disk, and every pair either command handed to Compose is
       // that pair. Read from what the docker stand-in wrote down, so this is
@@ -245,7 +255,8 @@ describe("the media server's credential", () => {
 
       const run = await runUp(workspace, platform);
 
-      expect(run.stdout).toContain("media_credential: generated");
+      expect(run.stdout).toContain("Generated the LiveKit media credential.");
+      expect(run.stdout).not.toContain("Using the existing LiveKit media credential.");
       const stored = await workspace.storedConfig();
       expect(stored[KEY_VARIABLE]).not.toBe("a-key-with-no-secret");
       expect(stored[SECRET_VARIABLE] ?? "").not.toBe("");

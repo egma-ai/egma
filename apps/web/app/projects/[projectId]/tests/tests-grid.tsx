@@ -1597,8 +1597,24 @@ export function TestsGrid(props: GridProps) {
   async function remove(test: ListedTest): Promise<void> {
     setDeleteInFlight(true);
     setDeleteRefused(null);
+    // A delete is another write on this Test. Let an already-submitted save
+    // finish first, then carry the version and identity revision that save
+    // returned rather than the row snapshot that opened this dialog.
+    await (queued.current.get(test.id) ?? Promise.resolve());
+    const guard = latest.current.get(test.id) ?? {
+      versionId: test.versionId,
+      revision: test.revision,
+    };
     const answer = await platformAnswer(
-      deleteTest({ testId: test.id, projectId }, { client: platformClient }),
+      deleteTest(
+        {
+          testId: test.id,
+          projectId,
+          expectedVersionId: guard.versionId,
+          expectedRevision: guard.revision,
+        },
+        { client: platformClient },
+      ),
     );
     setDeleteInFlight(false);
     if (answer.status === "signed-out") {
