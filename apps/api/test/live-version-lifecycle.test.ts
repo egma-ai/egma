@@ -1,17 +1,23 @@
 import {
   branchAgentVersion,
   canonicalJson,
+  isIntercepted,
   deleteAgentVersion,
+  EGMA_URL_VARIABLE_DEFAULT,
   LATEST_PUBLISHED,
   listAgentVersions,
   mockedToolsFor,
   mockToolUrl,
+  mockToolVariable,
   readEngineConfiguration,
   resolveAgentVersion,
   resolveServingAgentVersion,
+  RETELL_API,
+  toolsOf,
   writeEngineTools,
   type AgentVersionSummary,
   type EngineReference,
+  type MockToolVariable,
   type RetellCredential,
 } from "@egma/retell";
 import { afterAll, describe, expect, it } from "vitest";
@@ -53,10 +59,12 @@ import { afterAll, describe, expect, it } from "vitest";
  *
  * ## What it does to the account, and what it undoes
  *
- * It branches exactly one draft from the published version, writes the mocked
- * tool bodies onto **that draft's own engine version**, and deletes the draft.
- * It publishes nothing, binds no telephone number, and **never writes to the
- * version the agent serves** — the write names the branch's own engine version,
+ * It branches exactly one draft from the published version, writes the routed
+ * tool bodies and their routing defaults onto **that draft's own engine
+ * version**, creates two web calls against that draft which nobody joins (a
+ * web call nobody joins carries no media and expires within thirty seconds),
+ * and deletes the draft. It publishes nothing, binds no telephone number, and
+ * **never writes to the version the agent serves** — the write names the branch's own engine version,
  * read from the branch's own response, so a serving version cannot be the
  * target even by accident. The delete runs in an `afterAll`, so it runs on
  * every failure path too, and a crash between the branch and the delete leaves
@@ -75,8 +83,15 @@ import { afterAll, describe, expect, it } from "vitest";
  * 1. Capture the agent's version list as found.
  * 2. Resolve `latest_published`, and pin the number.
  * 3. Branch one draft from it; the list grew by exactly that draft.
- * 4. Write the mock tools onto the branch's flow, naming its own version; the
- *    list did **not** grow again — the write edited in place.
+ * 4. Write the routed tools **and their single-space defaults** onto the
+ *    branch's flow in one PATCH, naming its own version; the list did **not**
+ *    grow again — the write edited in place. Read it back: each custom tool's
+ *    URL is its own `{{egma_url_…}}` in front of the URL the customer wrote,
+ *    their headers and query params are untouched, and every routing default
+ *    is exactly one space. Then create two web calls against that version —
+ *    one with every routing variable `""`, one with a mock address on a single
+ *    tool — because Retell validates a rendered tool URL as it creates a call,
+ *    so a call it accepts is a call whose variables rendered.
  * 5. Delete the draft with the version as a query parameter; confirm the
  *    answer, then prove it with the read-back. Then read what Retell keeps:
  *    the branch's flow version is still there, and the flow's latest is
@@ -125,15 +140,17 @@ const key: RetellCredential = {
 };
 
 /**
- * Where the swapped tool URLs point for the length of this proof.
+ * Where one mocked call would be routed for the length of this proof.
  *
- * Nothing ever calls them: no run exists and no simulation is conducted. The
- * address only has to be a public one Retell will accept on a tool, and the run
- * segment only has to be a run-shaped identifier nothing can collide with.
+ * **Nothing on the version points here.** The draft carries only
+ * `{{egma_url_<tool>}}` in front of each tool's own URL; this is the value the
+ * claim would fill that variable with, and it is used below only to prove that
+ * Retell accepts such a value on `create-web-call`. No conversation is
+ * conducted, so nothing is ever posted to it.
  */
 const TARGET = {
   base: "https://live-version-lifecycle.egma.invalid/mock-tools",
-  runId: `run_live_version_lifecycle_${Date.now()}`,
+  simulationId: `sim_live_version_lifecycle_${Date.now()}`,
 };
 
 /** The one draft this proof made, so the teardown unmakes exactly that. */
@@ -172,6 +189,56 @@ async function flowLatest(reference: EngineReference): Promise<number | null> {
   if (read.kind !== "engine") return null;
   const named = read.engine.document["version"];
   return typeof named === "number" ? named : null;
+}
+
+/**
+ * Every routing variable, explicitly empty.
+ *
+ * The shape a run really sends for a test that mocks nothing: Retell tells a
+ * variable it was never given — placeholder left literal, braces and all —
+ * from one passed as `""`, which renders to nothing.
+ */
+function emptyValues(
+  variables: readonly MockToolVariable[],
+): Record<string, string> {
+  return Object.fromEntries(variables.map(({ variable }) => [variable, ""]));
+}
+
+/**
+ * One web call against a named version, with the variables a run would send.
+ *
+ * Written here rather than in the shared client because Egma's own web-call
+ * lane lives in the simulator, and this proof needs only the one request:
+ * Retell validates each tool's rendered URL as it creates the call, so the
+ * status code is the answer.
+ */
+async function webCall(
+  agentVersion: number,
+  variables: Record<string, string>,
+): Promise<{ status: number; document: Record<string, unknown> }> {
+  const response = await fetch(`${RETELL_API}/v2/create-web-call`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${named("EGMA_LIVE_RETELL_API_KEY")}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      agent_id: agentId,
+      agent_version: agentVersion,
+      retell_llm_dynamic_variables: variables,
+    }),
+  });
+  const text = await response.text();
+  let document: Record<string, unknown> = {};
+  try {
+    const held: unknown = JSON.parse(text);
+    if (typeof held === "object" && held !== null) {
+      document = held as Record<string, unknown>;
+    }
+  } catch {
+    document = { raw: text };
+  }
+  return { status: response.status, document };
 }
 
 afterAll(async () => {
@@ -311,7 +378,13 @@ live("the corrected version lifecycle, on the live agent", () => {
       "engine",
     );
     if (draftConfiguration.kind !== "engine") return;
-    const mocked = mockedToolsFor(draftConfiguration.engine, TARGET);
+    const draftTransform = mockedToolsFor(draftConfiguration.engine);
+    expect(
+      draftTransform.kind,
+      draftTransform.kind === "refused" ? draftTransform.reason : "",
+    ).toBe("mocked");
+    if (draftTransform.kind !== "mocked") return;
+    const mocked = draftTransform;
     const engineVersion = draftEngine.version;
     if (engineVersion === null) return;
 
@@ -321,6 +394,9 @@ live("the corrected version lifecycle, on the live agent", () => {
       // "latest", which is the exact accident this ticket retires.
       version: engineVersion,
       tools: mocked.tools,
+      // In the same PATCH as the tools: a version whose tools name a routing
+      // variable it has no default for is a call with nowhere to go.
+      defaults: mocked.defaults,
     });
     // **Retell says which version it wrote, and it is the one asked for.** The
     // reference documents neither in-place editing nor minting, and a PATCH
@@ -342,19 +418,98 @@ live("the corrected version lifecycle, on the live agent", () => {
       "the tool write minted a version instead of editing the branch in place",
     ).toBe(print(afterBranch.versions));
 
-    // And it landed where it was aimed: the draft's tools point at Egma.
+    // ── 4b. **The read-back guard, against Retell's own answer.** ──
+    //
+    // Every custom tool carries its own routing variable in front of the URL
+    // the customer wrote, byte for byte, with their headers and query params
+    // untouched — and every one of those variables is declared with a default
+    // of exactly one space. Retell stores an *empty* default as absent, and an
+    // absent variable leaves the braces literal, which is not a URL: this read
+    // is what proves Retell kept the space.
     const mockedDraft = await readEngineConfiguration(key, draftEngine);
     expect(mockedDraft.kind).toBe("engine");
     if (mockedDraft.kind !== "engine") return;
-    for (const name of mocked.coverage.mocked) {
-      expect(canonicalJson(mockedDraft.engine.document)).toContain(
-        mockToolUrl(TARGET, name),
+
+    const capturedTools = new Map(
+      toolsOf(draftConfiguration.engine).map((tool) => [
+        tool.name,
+        tool.verbatim,
+      ]),
+    );
+    for (const tool of toolsOf(mockedDraft.engine)) {
+      if (!isIntercepted(tool)) continue;
+      const captured = capturedTools.get(tool.name);
+      expect(String(tool.verbatim["url"]), `${tool.name}'s URL`).toBe(
+        `{{${mockToolVariable(tool.name)}}}${String(captured?.["url"] ?? "")}`,
       );
+      expect(
+        canonicalJson(tool.verbatim["headers"]),
+        `${tool.name}'s headers were changed`,
+      ).toBe(canonicalJson(captured?.["headers"]));
+      expect(
+        canonicalJson(tool.verbatim["query_params"]),
+        `${tool.name}'s query params were changed`,
+      ).toBe(canonicalJson(captured?.["query_params"]));
+    }
+
+    const storedDefaults = (mockedDraft.engine.document[
+      "default_dynamic_variables"
+    ] ?? {}) as Record<string, unknown>;
+    for (const { variable } of mocked.variables) {
+      expect(
+        storedDefaults[variable],
+        `Retell did not keep ${variable}'s default as a single space`,
+      ).toBe(EGMA_URL_VARIABLE_DEFAULT);
     }
     console.log(
-      `[live lifecycle] mocked ${String(mocked.coverage.mocked.length)} tools ` +
-        `on version ${draft.version} in place`,
+      `[live lifecycle] routed ${String(mocked.variables.length)} tools on ` +
+        `version ${draft.version} in place, each defaulted to one space`,
     );
+
+    // ── 4c. **The first owed check: what an explicit `""` renders to.** ──
+    //
+    // Retell validates a tool's *rendered* URL when the call is created — a
+    // variable it was never given stays literal and the call is refused with
+    // `Got invalid url` (proven by hand, 2026-09-03). So a call that Retell
+    // **accepts** against this version is a call whose tool URLs all rendered,
+    // and that is the whole of the question the ADR left owed: whether an
+    // explicit empty string renders the prefix to nothing on a voice call.
+    //
+    // Both shapes are asked, because both are what a run really sends: every
+    // routing variable empty, which is a test that mocks nothing, and one of
+    // them carrying Egma's address, which is a test that mocks one tool.
+    //
+    // Nothing joins these calls. A web call nobody joins carries no media and
+    // expires on its own within thirty seconds.
+    if (mocked.variables.length > 0) {
+      const everythingReal = await webCall(draft.version, emptyValues(mocked.variables));
+      expect(
+        everythingReal.status,
+        `Retell refused a call whose routing variables were all "": ` +
+          JSON.stringify(everythingReal.document),
+      ).toBeLessThan(300);
+
+      const one = mocked.variables[0];
+      if (one !== undefined) {
+        const mockedCall = await webCall(draft.version, {
+          ...emptyValues(mocked.variables),
+          [one.variable]: mockToolUrl(TARGET, one.tool),
+        });
+        expect(
+          mockedCall.status,
+          "Retell refused a call routing one tool at Egma: " +
+            JSON.stringify(mockedCall.document),
+        ).toBeLessThan(300);
+        console.log(
+          `[live lifecycle] create-web-call accepted version ${draft.version} ` +
+            `with every routing variable "" (call ` +
+            `${String(everythingReal.document["call_id"])}) and with ` +
+            `${one.variable} = the mock address (call ` +
+            `${String(mockedCall.document["call_id"])}). Retell validates a ` +
+            "rendered tool URL at call creation, so both rendered.",
+        );
+      }
+    }
 
     // The version real callers reach, mid-proof: the same configuration this
     // proof captured, compared key-order-insensitively.

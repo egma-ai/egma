@@ -11,6 +11,7 @@ import {
   listRunEvents,
   listRuns,
   listSimulations,
+  mockMetadataAsPublished,
   NotPermittedError,
   productLabelOf,
   ProjectOutsideOrganizationError,
@@ -243,10 +244,11 @@ function describedHeader(
       ? {
           tempMockAgentVersion: run.tempMockAgentVersion,
           tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
-          // The note in the wire's own spelling. The stored row keeps the
-          // record's, which is the one the decisions record settled; a reader
-          // of the API sees the same three facts either way.
-          mockMetadata: run.mockMetadata,
+          // The note in the wire's own spelling, and only the part the wire
+          // publishes: the engine this run's copy was built from. The claim's
+          // own reader of the same note keeps the routing-variable map beside
+          // it, which is machinery rather than anything a person acts on.
+          mockMetadata: mockMetadataAsPublished(run.mockMetadata),
         }
       : {}),
     expectedSimulationCount: run.expectedSimulationCount,
@@ -562,12 +564,9 @@ export async function runRoutes(
       const world = await buildRunMockedWorld(
         acting.auth,
         started,
-        {
-          baseUrl: options.baseUrl,
-          ...(options.retellFetch === undefined
-            ? {}
-            : { retellFetch: options.retellFetch }),
-        },
+        options.retellFetch === undefined
+          ? {}
+          : { retellFetch: options.retellFetch },
         request.log,
       );
       if (world.kind === "refused") {

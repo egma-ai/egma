@@ -619,6 +619,15 @@ describe("claiming work", () => {
       caller_name: "Margaret",
       account_tier: "gold",
     });
+    // **Nothing of Egma's rides beside them.** Egma's own variables route a
+    // mocked web call's tools to its endpoint, and there is no such tool path
+    // here: a lane Egma cannot answer a call on has nothing to route, so it
+    // carries no `egma_` name at all.
+    for (const name of Object.keys(
+      spec.dynamic_variables as Record<string, unknown>,
+    )) {
+      expect(name.startsWith("egma_"), name).toBe(false);
+    }
     expect("job_dispatch_metadata" in spec).toBe(false);
   });
 

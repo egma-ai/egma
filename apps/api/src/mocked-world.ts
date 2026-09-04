@@ -22,7 +22,6 @@ import {
   type RetellCredential,
 } from "@egma/retell";
 
-import { mockToolBase } from "./routes/mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "./platform-log.ts";
 
 /**
@@ -67,10 +66,15 @@ import { platformEvent, safeExceptionType } from "./platform-log.ts";
  * swept.
  */
 
-/** How the world reaches the platform, and how tests stand in for it. */
+/**
+ * How the world reaches the platform, and how tests stand in for it.
+ *
+ * **No public origin.** The temporary version carries no address of Egma's at
+ * all: every custom tool's URL grows a per-call variable in front of the
+ * customer's own, and Egma's address is filled into that variable per call, in
+ * the claim (ADR-0022). So the builder needs nothing but a way to reach Retell.
+ */
 export type MockedWorldReach = {
-  /** This deployment's own public origin, where the mock endpoint answers. */
-  readonly baseUrl: string;
   readonly retellFetch?: ProviderFetch | undefined;
 };
 
@@ -266,7 +270,6 @@ export async function buildRunMockedWorld(
           key,
           {
             agentId: platformAgentId,
-            target: { base: mockToolBase(reach.baseUrl), runId: run.id },
             record: async (state) => {
               await recordMockState(auth, run.id, asStoredState(state));
             },

@@ -29,6 +29,16 @@ import {
   type RetellReach,
 } from "./transport.ts";
 
+/**
+ * Where an engine of either kind keeps the values it renders variables from.
+ *
+ * One top-level key with one spelling on a conversation flow and on a Retell
+ * LLM alike, which is why it is named once here rather than at each end: the
+ * read that captures a version's defaults and the write that puts them back
+ * must be looking at the same field.
+ */
+export const DEFAULT_DYNAMIC_VARIABLES = "default_dynamic_variables";
+
 /** Retell's three response engines, by the words Retell itself uses. */
 export const ENGINE_TYPES = [
   "retell-llm",
@@ -441,6 +451,11 @@ export async function branchAgentVersion(
  * "latest", and after a branch the latest version is the branch — so a write
  * that leaned on it would land on whichever version was minted most recently
  * anywhere on the account.
+ *
+ * **The tools and the defaults go in one PATCH**, because they are one change:
+ * a tool whose URL names a routing variable and a version with no default for
+ * that variable is a call with nowhere to go, and two writes would leave the
+ * version in exactly that state in between.
  */
 export async function writeEngineTools(
   key: RetellCredential,
@@ -450,6 +465,15 @@ export async function writeEngineTools(
     readonly version: number;
     /** Only the tool arrays. Everything else on the version is left alone. */
     readonly tools: Readonly<Record<string, unknown>>;
+    /**
+     * The whole `default_dynamic_variables` map, where this write sets one.
+     *
+     * Whole rather than a patch of it, because Retell replaces the map: a
+     * write of Egma's entries alone would delete the customer's. Left out —
+     * or empty — and the key is not sent at all, so a write that has no
+     * routing variables to declare never touches the customer's defaults.
+     */
+    readonly defaults?: Readonly<Record<string, unknown>> | undefined;
   },
   reach: RetellReach = {},
 ): Promise<WroteEngineTools> {
@@ -470,12 +494,18 @@ export async function writeEngineTools(
       ? `/update-conversation-flow/${id}`
       : `/update-retell-llm/${id}`;
 
+  const defaults = target.defaults ?? {};
   let answer;
   try {
     answer = await ask(key, reach, {
       method: "PATCH",
       path: `${path}?version=${target.version}`,
-      body: target.tools,
+      body: {
+        ...target.tools,
+        ...(Object.keys(defaults).length === 0
+          ? {}
+          : { [DEFAULT_DYNAMIC_VARIABLES]: defaults }),
+      },
     });
   } catch (cause) {
     return unreachableFrom(cause);

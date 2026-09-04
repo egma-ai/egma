@@ -438,6 +438,10 @@ export function buildApi(options: ServerOptions): Api {
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
+    // Where the mock endpoint answers. A mocked web call's tool URLs carry no
+    // address of Egma's at all — the claim fills one in per call, for exactly
+    // the tools that simulation's own test names.
+    baseUrl: config.baseUrl,
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
@@ -458,12 +462,10 @@ export function buildApi(options: ServerOptions): Api {
     // A landing that finished a mocked run gives the account back: the
     // temporary version deleted, then any pin restored. The next run's sweep
     // is the same act and finishes whatever this one could not.
-    mockedWorldReach: {
-      baseUrl: config.baseUrl,
-      ...(options.retellFetch === undefined
+    mockedWorldReach:
+      options.retellFetch === undefined
         ? {}
-        : { retellFetch: options.retellFetch }),
-    },
+        : { retellFetch: options.retellFetch },
   });
 
   // The mock endpoint: the seam's one new public surface. Registered without

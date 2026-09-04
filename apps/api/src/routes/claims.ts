@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   claimSimulations,
   catalogEntry,
+  connectionTypeBranchesMockDraft,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
@@ -16,19 +17,22 @@ import {
   type Run,
   type SimulationClaim,
   type TestEnv,
+  type TestMockTool,
+  type MockToolVariable,
 } from "@egma/db";
 import {
   ProviderCredentialSourceUnavailableError,
   credentialFor,
   type ProviderCredentialSource,
 } from "@egma/provider-credentials";
-import { SIMULATION_VARIABLE } from "@egma/retell";
+import { mockToolUrl } from "@egma/retell";
 import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
 import { acceptsServiceToken } from "../auth/service-token.ts";
 import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
+import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
   verifyRetellChatAgent,
@@ -83,6 +87,15 @@ import {
 export type ClaimRoutesOptions = {
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
+  /**
+   * This deployment's own public origin, where the mock endpoint answers.
+   *
+   * Read here rather than written onto the temporary version, because which
+   * tools point at Egma is decided **per call**: the version carries one
+   * per-call variable in front of every custom tool's own URL, and this claim
+   * fills each of them with Egma's address or with nothing (ADR-0022).
+   */
+  readonly baseUrl: string;
   /** Current provider keys, read once for each simulation work order. */
   readonly providerCredentials: ProviderCredentialSource;
   /** Complete phone route, or absent when phone simulations are unavailable. */
@@ -260,86 +273,107 @@ const LANES_SERVING_MOCK_TOOLS: readonly string[] = [
  *
  * **The version** is named explicitly, because the platform's own default is
  * "the newest version" — which a concurrent edit or a branch can move between
- * one simulation and the next. Where it comes from is the only thing the two
- * lanes differ on:
+ * one simulation and the next. Where it comes from is decided per simulation
+ * rather than per run:
  *
- * - **the draft lane** hands the DRAFT version Egma branched, so the
- *   conversation reaches the mocked tools on the temporary version;
- * - **the text-mode lane** hands the RESOLVED serving version the run read
- *   once at start, so every simulation of the run tests the one version a real
- *   caller reaches.
+ * - a **web-call simulation whose own test mocks at least one tool** is placed
+ *   against the run's temporary version, which is where the routing variables
+ *   live;
+ * - **every other simulation** is placed against the serving version the run
+ *   resolved once at start — the version a real caller reaches. That includes
+ *   a test that mocks nothing inside a run that did branch a copy: it has
+ *   nothing to route, so it is conducted against the customer's own version.
  *
- * The temporary version wins when both are present, because a run that branched
- * one is being conducted against the mocked tools on it and nothing else would
- * be honest: the serving version beside it is what the copy was branched from.
+ * **The variables** are what the platform renders per call, and there are two
+ * sources. The test's own `retell_dynamic_variables` are the caller context it
+ * carries with it. Egma's own are the routing variables the mocked web-call
+ * lane needs: one per custom tool the run's temporary version declares, filled
+ * with Egma's address for the tools this simulation's test names and with the
+ * empty string for every other, which renders to nothing and leaves the
+ * customer's own URL exactly as they wrote it.
  *
- * **The variables** are what the platform renders per call, and there are now
- * two sources: the test's own `retell_dynamic_variables` — the caller context a
- * test carries with it — and Egma's own attribution variable, which carries this
- * simulation's identifier into the tool URL. Egma's own is written last, so no
- * authored name can take its place; the save door refuses an `egma_` name
- * anyway, and the two guards are one rule said at both ends.
+ * The two travel differently, because they are for different things. The
+ * test's own variables go wherever the platform renders variables at all,
+ * named version or not: the test asked for them. Egma's routing variables go
+ * only where a temporary version was branched, which is the same thing as
+ * saying only where Egma is in the tool path.
  *
- * The two travel differently, because they are for different things. The test's
- * own variables go wherever the platform renders variables at all, named
- * version or not: the test asked for them. Egma's attribution variable goes
- * only where a version is named, which is the same thing as saying only where
- * Egma may be in the tool path — a lane that reaches the customer's real
- * backend has nothing to attribute.
- *
- * The attribution variable is **asserted rather than assumed**. The whole tool
- * record of a mocked simulation rides on it: the swapped URL carries
- * `{{egma_simulation}}` as a path segment, and a spec that omitted it would send
- * every tool call to a path naming no simulation — which the endpoint refuses,
- * silently losing every tool fact the run exists to collect. Nothing else
- * catches that, so it is caught here, where the value is put in.
+ * **Egma's are written last**, so no authored name can take a routing
+ * variable's place; the save door refuses an `egma_` name anyway, and the two
+ * guards are one rule said at both ends.
  */
 function runVersionSpecOf(
   run: Run,
   simulationId: string,
+  connectionType: string,
   agentPlatform: string | null,
   env: TestEnv | null,
+  /** What this simulation's own test mocks, in the order it named them. */
+  mockTools: readonly TestMockTool[],
+  baseUrl: string,
 ): Record<string, unknown> {
-  const version = run.tempMockAgentVersion ?? run.agentVersion ?? undefined;
+  const routing = urlVariablesFor(run, connectionType, simulationId, mockTools, baseUrl);
+  const variables = {
+    ...authoredVariables(agentPlatform, env),
+    ...routing,
+  };
+  // The temporary version is what carries the routing variables, so it is
+  // named exactly where there are routing values to render on it.
+  const version =
+    Object.keys(routing).length > 0 && mockTools.length > 0
+      ? (run.tempMockAgentVersion ?? run.agentVersion)
+      : run.agentVersion;
+
   if (version === null || version === undefined) {
-    const authored = authoredVariables(agentPlatform, env);
-    return Object.keys(authored).length === 0
+    return Object.keys(variables).length === 0
       ? {}
-      : { dynamic_variables: authored };
+      : { dynamic_variables: variables };
   }
-
-  const variables = dynamicVariablesFor(simulationId, agentPlatform, env);
-  if (variables[SIMULATION_VARIABLE] !== simulationId) {
-    throw new Error(
-      `simulation ${simulationId} would be conducted against a named version ` +
-        `whose variables do not carry ${SIMULATION_VARIABLE}, so no tool call ` +
-        "it made could be traced back to it",
-    );
-  }
-
   return {
     agent_version: version,
-    dynamic_variables: variables,
+    ...(Object.keys(variables).length === 0
+      ? {}
+      : { dynamic_variables: variables }),
   };
 }
 
 /**
- * The variables one simulation is conducted with: the test's own, then Egma's.
+ * Every routing variable this run's temporary version declares, with the value
+ * this simulation is conducted with.
  *
- * The merge is here rather than at the call site so the assertion above is on
- * this function's whole answer: a second source is exactly what could drop the
- * first, and the day a third arrives the check is still looking at the result
- * of all of them.
+ * **Every one of them, on every call.** The platform distinguishes a variable
+ * it was never given — whose placeholder stays literal, braces and all — from
+ * one passed explicitly as the empty string, which renders to nothing. So a
+ * value is passed for each of them and rendering never depends on the
+ * single-space default the version carries; that default is the proven
+ * fallback for a variable Egma somehow failed to pass.
+ *
+ * Empty for every lane but a mocked web call, and empty on a run that branched
+ * no copy — there is nothing on those versions for a routing variable to
+ * render into.
  */
-function dynamicVariablesFor(
+function urlVariablesFor(
+  run: Run,
+  connectionType: string,
   simulationId: string,
-  agentPlatform: string | null,
-  env: TestEnv | null,
+  mockTools: readonly TestMockTool[],
+  baseUrl: string,
 ): Record<string, string> {
-  return {
-    ...authoredVariables(agentPlatform, env),
-    [SIMULATION_VARIABLE]: simulationId,
-  };
+  // The same authority the builder and the queue's gate read: a routing
+  // variable exists exactly on the lanes that branch a temporary copy, because
+  // the copy is the only place one is written.
+  if (!connectionTypeBranchesMockDraft(connectionType)) return {};
+  const declared: readonly MockToolVariable[] =
+    run.mockMetadata?.urlVariables ?? [];
+  if (declared.length === 0 || run.tempMockAgentVersion === null) return {};
+
+  const mocked = new Set(mockTools.map((entry) => entry.tool));
+  const target = { base: mockToolBase(baseUrl), simulationId };
+  const variables: Record<string, string> = {};
+  for (const { tool, variable } of declared) {
+    variables[variable] = mocked.has(tool) ? mockToolUrl(target, tool) : "";
+  }
+  return variables;
 }
 
 /**
@@ -477,6 +511,8 @@ async function assembledSpec(
   retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
   providerCredentials: ProviderCredentialSource,
   carrierRoute: CarrierRoute | undefined,
+  /** Where the mock endpoint answers, for the routing variables below. */
+  baseUrl: string,
   retellFetch?: typeof fetch,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
@@ -580,15 +616,18 @@ async function assembledSpec(
     throw fault;
   }
 
-  // The version this simulation is placed against and the variables it carries,
-  // for whichever lane named a version — the draft lane's temporary version or
-  // the text-mode lane's resolved serving version, in one code path, with the
-  // test's own caller context merged in.
+  // The version this simulation is placed against and the variables it carries:
+  // the temporary version where this test mocks something on the draft lane,
+  // the run's resolved serving version otherwise, with the test's own caller
+  // context and — on a mocked web call — Egma's own routing variables.
   const versionSpec = runVersionSpecOf(
     run,
     claim.id,
+    connection.connectionType,
     connection.agentPlatform,
     evidence.env,
+    evidence.mockTools,
+    baseUrl,
   );
 
   // What the room's agent is dispatched with, straight off the test's env and
@@ -737,6 +776,7 @@ export async function claimRoutes(
             retellTargets,
             options.providerCredentials,
             options.carrierRoute,
+            options.baseUrl,
             options.retellFetch,
             responseDeadline,
           ).catch(

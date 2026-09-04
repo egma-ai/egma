@@ -588,6 +588,10 @@ const THE_MOCKED_WORLD = [
   "serializedJobDispatchMetadata",
   "mockMetadataFrom",
   "mockMetadataRow",
+  // The note has two readers and two shapes: the run model keeps the routing
+  // variables, because the claim fills every one of them on every call it
+  // creates, and the API publishes the engine capture alone.
+  "mockMetadataAsPublished",
 ];
 
 /**

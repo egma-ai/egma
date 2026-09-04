@@ -1129,7 +1129,7 @@ describe("what a version-pinned run's landing records", () => {
 });
 
 describe("the work order a version-pinned run hands over", () => {
-  it("carries the version, this simulation's variables, and the test's own world", async () => {
+  it("carries the version, the test's own variables, and the test's own world", async () => {
     // The test carries its world: one answer per class of tool the agent has,
     // and the caller context this conversation is conducted with.
     const { key, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
@@ -1185,12 +1185,11 @@ describe("the work order a version-pinned run hands over", () => {
     // then choose its newest version, which a concurrent edit can move.
     expect(spec.agent_version).toBe(SERVING_VERSION);
 
-    // The test's own caller context, and Egma's attribution variable beside
-    // it — the one a tool call the platform makes rides back on.
-    expect(spec.dynamic_variables).toEqual({
-      caller_name: "Margaret",
-      egma_simulation: spec.simulation_id,
-    });
+    // **The test's own caller context, and nothing of Egma's.** Text mode
+    // carries its answers on the request itself, so Egma is never in this
+    // lane's tool path and has nothing to route: no `egma_` variable rides
+    // here at all.
+    expect(spec.dynamic_variables).toEqual({ caller_name: "Margaret" });
 
     // **What the test named, unfiltered.** Retell answers for a name or runs
     // the customer's real implementation, and the record marks a call `mocked`
@@ -1248,12 +1247,11 @@ describe("the work order a version-pinned run hands over", () => {
 
     // No answers at all — an empty list would be a claim about tools where
     // there is nothing to claim. The version is still named, because a chat
-    // result speaks for the version real traffic reaches either way, and so
-    // are this simulation's variables.
+    // result speaks for the version real traffic reaches either way. And a
+    // test that authored no variables carries no `dynamic_variables` key: this
+    // lane never adds one of Egma's own.
     expect(spec.mock_tools).toBeUndefined();
     expect(spec.agent_version).toBe(SERVING_VERSION);
-    expect(spec.dynamic_variables).toEqual({
-      egma_simulation: spec.simulation_id,
-    });
+    expect("dynamic_variables" in spec).toBe(false);
   });
 });

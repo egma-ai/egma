@@ -69,10 +69,12 @@ export {
  * it reads and writes no store.
  */
 export {
+  mockMetadataAsPublished,
   mockMetadataFrom,
   mockMetadataRow,
   type MockEngineNote,
   type MockMetadata,
+  type MockToolVariable,
 } from "./mock-tools/record.ts";
 /**
  * Which connection lanes branch a temporary copy when the tests they conduct

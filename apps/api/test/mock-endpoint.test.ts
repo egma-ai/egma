@@ -102,10 +102,13 @@ type Ready = {
 async function aRunningSimulation(
   label: string,
   mockTools: readonly AuthoredMockTool[] = ONE_FREE_SLOT,
+  /** Where this deployment's log lines go, for the proof that reads them. */
+  logTo?: { write(line: string): void },
 ): Promise<Ready> {
   api = await createApi(label, {
     traceStore: true,
     retellFetch: RETELL_CHAT_FETCH,
+    ...(logTo === undefined ? {} : { logTo }),
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
@@ -233,6 +236,8 @@ async function call(
     /** A GET tool's arguments ride the query string, so a GET sends no body. */
     readonly method?: "GET" | "POST";
     readonly query?: string;
+    /** Whatever the customer's own tool configuration would send along. */
+    readonly headers?: Readonly<Record<string, string>>;
   } = {},
 ): Promise<{ statusCode: number; raw: string; json: unknown }> {
   const method = options.method ?? "POST";
@@ -243,6 +248,7 @@ async function call(
     url: options.query === undefined ? path : `${path}?${options.query}`,
     headers: {
       ...(method === "GET" ? {} : { "content-type": "application/json" }),
+      ...(options.headers ?? {}),
       ...(options.signature === undefined
         ? {}
         : { [SIGNATURE_HEADER]: options.signature }),
@@ -394,7 +400,7 @@ describe("a tool the customer wrote as a GET", () => {
    * with a 404 indistinguishable from an unmocked tool, and a developer would
    * go looking for a mock tool they had already authored.
    */
-  it("is answered, with its arguments read off the query string", async () => {
+  it("is answered, and its query string is not read at all", async () => {
     const ready = await aRunningSimulation("mock_endpoint_get_tool");
 
     const answered = await call(
@@ -410,13 +416,16 @@ describe("a tool the customer wrote as a GET", () => {
 
     const spans = await toolSpansOf(ready.simulationId);
     expect(spans).toHaveLength(1);
-    // The arguments land in the one shape every reader of this column parses.
-    expect(JSON.parse(spans[0]!.tool_arguments)).toEqual({
-      service: "facial",
-      date: "2026-09-01",
-    });
+    // **The cost of dropping the query string, paid where it falls.** A GET
+    // tool's arguments ride in the same string as the customer's own static
+    // parameters — their credentials among them — and egma cannot tell one
+    // from the other, so it reads none of it. The call, the answer and the
+    // provenance are on the record; the arguments are not.
+    expect(spans[0]?.tool_arguments).toBe("");
+    expect(JSON.stringify(spans[0])).not.toContain("facial");
     const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
     expect(payload["egma.tool.provenance"]).toBe("mocked");
+    expect(payload["egma.tool.arguments"]).toBe("");
   });
 
   it("keeps every refusal distinct on a GET too", async () => {
@@ -454,6 +463,66 @@ describe("a tool the customer wrote as a GET", () => {
       { ...asGet, signature: signatureFor("", PLATFORM_KEY, Date.now()) },
     );
     expect(properly.statusCode, properly.raw).toBe(200);
+  });
+});
+
+describe("what the customer's own tool configuration sends along", () => {
+  /**
+   * The credentials arrive, and egma reads none of them.
+   *
+   * The temporary version keeps each tool's own headers and query params byte
+   * for byte, because that same version serves the tools a test does **not**
+   * mock and those calls have to authenticate exactly as production does. So a
+   * mocked call carries the customer's backend credentials into egma's
+   * ingress, and what this endpoint promises is that nothing of them is read,
+   * logged, stored, or put on the record (ADR-0022).
+   *
+   * The sentinel is one string, looked for in every log line this deployment
+   * wrote and in every column of the span that landed — so the proof does not
+   * depend on knowing which field a leak would come out of.
+   */
+  it("drops every header and query value at the door, and writes none of them anywhere", async () => {
+    const lines: string[] = [];
+    const ready = await aRunningSimulation("mock_endpoint_drops_secrets", ONE_FREE_SLOT, {
+      write: (line) => {
+        lines.push(line);
+      },
+    });
+
+    const answered = await call(
+      { simulationId: ready.simulationId, toolName: "get_availability" },
+      {
+        query: "api_key=FIXTURESECRET_in_the_query",
+        headers: {
+          authorization: "Bearer FIXTURESECRET_in_the_header",
+          "x-tenant-key": "FIXTURESECRET_in_another_header",
+        },
+      },
+    );
+
+    // The call is served: dropping the credentials is not refusing the call.
+    expect(answered.statusCode, answered.raw).toBe(200);
+    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
+
+    // Nothing of them in anything this deployment logged.
+    expect(lines.length, "the deployment logged nothing at all").toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line, "a log line carries the customer's own credential").not.toContain(
+        "FIXTURESECRET",
+      );
+    }
+
+    // Nothing of them on the record either — every column of the span, so the
+    // proof does not depend on guessing which field a leak would use.
+    const spans = await toolSpansOf(ready.simulationId);
+    expect(spans).toHaveLength(1);
+    expect(JSON.stringify(spans[0])).not.toContain("FIXTURESECRET");
+    // The arguments column is the POST body and nothing else: the body is
+    // egma's to read, and it landed.
+    expect(JSON.parse(spans[0]!.tool_arguments)).toEqual({
+      service: "facial",
+      date: "2026-09-01",
+    });
   });
 });
 

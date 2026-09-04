@@ -1,6 +1,6 @@
 import { newId } from "@egma/ids";
 import { createPersona } from "@egma/db";
-import { SIMULATION_VARIABLE } from "@egma/retell";
+import { mockToolVariable } from "@egma/retell";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -45,6 +45,7 @@ const CONDUCTOR = "sim-under-test";
 const KEY = "retell-secret-A1B2C3D4WXYZ";
 
 const LIVE_TOOL_URL = "https://backend.example.com/tools/get_availability";
+const LIVE_BOOKING_URL = "https://backend.example.com/tools/book_appointment";
 
 const FLOW_TOOLS = [
   {
@@ -57,6 +58,18 @@ const FLOW_TOOLS = [
     headers: { Authorization: "Bearer sk_live_FIXTURESECRET" },
     parameters: { type: "object", properties: {} },
     response_variables: { slots: "$.slots" },
+  },
+  {
+    // A second custom tool, because the whole design turns on two tests of one
+    // run mocking **different** tools on one temporary version.
+    tool_id: "tool-book_appointment",
+    type: "custom",
+    name: "book_appointment",
+    description: "Book a slot.",
+    url: LIVE_BOOKING_URL,
+    method: "POST",
+    headers: { Authorization: "Bearer sk_live_FIXTURESECRET_booking" },
+    parameters: { type: "object", properties: {} },
   },
   {
     tool_id: "tool-transfer",
@@ -309,6 +322,16 @@ async function anAgentReadyToRun(
     published?: boolean;
     /** What the one test mocks. An empty list is a test that mocks nothing. */
     mockTools?: readonly Record<string, unknown>[];
+    /**
+     * Several tests instead of one, each with its own world.
+     *
+     * The shape the design turns on: one run, two tests, two different sets of
+     * mocked tools, one temporary version.
+     */
+    tests?: readonly {
+      readonly name: string;
+      readonly mockTools: readonly Record<string, unknown>[];
+    }[];
   } = {},
 ): Promise<Ready> {
   const account = anAccount(options);
@@ -344,17 +367,25 @@ async function anAgentReadyToRun(
     name: "Impatient Rita",
     ...NEUTRAL_PERSON,
   });
-  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
-    name: "Books an appointment",
-    scenario: "Wants the first free afternoon slot next week.",
-    expectedBehaviors: ["confirms the time back before finishing"],
-    suiteId: String(suite.body.id),
-    personas: ["Impatient Rita"],
-    mockTools: options.mockTools ?? [
-      { tool: "get_availability", answer: { slots: ["Tuesday 14:00"] } },
-    ],
-  });
-  expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+  const authored = options.tests ?? [
+    {
+      name: "Books an appointment",
+      mockTools: options.mockTools ?? [
+        { tool: "get_availability", answer: { slots: ["Tuesday 14:00"] } },
+      ],
+    },
+  ];
+  for (const test of authored) {
+    const pushed = await ask(api.app, "POST", "/v1/tests", key, {
+      name: test.name,
+      scenario: "Wants the first free afternoon slot next week.",
+      expectedBehaviors: ["confirms the time back before finishing"],
+      suiteId: String(suite.body.id),
+      personas: ["Impatient Rita"],
+      mockTools: test.mockTools,
+    });
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+  }
 
   return {
     ada,
@@ -439,6 +470,7 @@ describe("one mocked run, from the test to the teardown", () => {
 
     // The four fields, as the run recorded them.
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, ready.key);
+    expect(header.statusCode, JSON.stringify(header.body)).toBe(200);
     expect(header.body.agentVersion).toBe(105);
     expect(header.body.tempMockAgentVersion).toBe(106);
     expect(header.body.tempMockAgentVersionCleanup).toBe(false);
@@ -453,31 +485,53 @@ describe("one mocked run, from the test to the teardown", () => {
       },
     });
 
-    // The account, as it stands mid-run: the temporary version points at Egma,
-    // the serving version is exactly as it was, and the number that rides
-    // `latest` is exactly as the customer left it.
+    // The account, as it stands mid-run: the temporary version carries a
+    // per-call variable in front of each custom tool's own URL, the serving
+    // version is exactly as it was, and the number that rides `latest` is
+    // exactly as the customer left it.
     const draftTools = (ready.state.engines.get(106)?.["tools"] ??
       []) as Record<string, unknown>[];
-    expect(String(draftTools[0]?.["url"])).toContain(
-      `${MOCK_TOOL_PREFIX}/${runId}/{{${SIMULATION_VARIABLE}}}/get_availability`,
+    expect(draftTools[0]?.["url"]).toBe(
+      `{{egma_url_get_availability}}${LIVE_TOOL_URL}`,
     );
-    expect(draftTools[0]?.["headers"]).toEqual({});
-    expect(draftTools[0]?.["query_params"]).toEqual({});
+    expect(draftTools[1]?.["url"]).toBe(
+      `{{egma_url_book_appointment}}${LIVE_BOOKING_URL}`,
+    );
+    // The customer's own headers are carried through, because this same
+    // version serves the tools this run does not mock.
+    expect(draftTools[0]?.["headers"]).toEqual({
+      Authorization: "Bearer sk_live_FIXTURESECRET",
+    });
+    // And every routing variable is declared with a single-space default, so
+    // an unmocked call reaches the customer's backend rather than a literal
+    // placeholder.
+    expect(ready.state.engines.get(106)?.["default_dynamic_variables"]).toEqual({
+      egma_url_get_availability: " ",
+      egma_url_book_appointment: " ",
+    });
     const servingTools = (ready.state.engines.get(105)?.["tools"] ??
       []) as Record<string, unknown>[];
     expect(servingTools[0]?.["url"]).toBe(LIVE_TOOL_URL);
+    expect(servingTools[1]?.["url"]).toBe(LIVE_BOOKING_URL);
+    expect(ready.state.engines.get(105)?.["default_dynamic_variables"]).toBeUndefined();
     expect(ready.state.bindings.get("+12567332874")).toEqual([
       { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
     ]);
 
-    // The claim hands the simulation the temporary version and its variables.
+    // The claim hands the simulation the temporary version and, on it, the one
+    // routing value per tool: Egma's address for the tool this test named and
+    // nothing at all for the tool it did not, which renders the placeholder
+    // away and leaves the customer's own URL.
     const specs = await claim();
     expect(specs).toHaveLength(1);
     const spec = specs[0] as Record<string, unknown>;
     const simulationId = String(spec["simulation_id"]);
     expect(spec["agent_version"]).toBe(106);
     expect(spec["dynamic_variables"]).toEqual({
-      [SIMULATION_VARIABLE]: simulationId,
+      egma_url_get_availability:
+        `${api.config.baseUrl}${MOCK_TOOL_PREFIX}/${simulationId}` +
+        "/get_availability#",
+      egma_url_book_appointment: "",
     });
     // And its answers, straight off the pinned test version.
     expect(spec["mock_tools"]).toEqual([
@@ -489,15 +543,19 @@ describe("one mocked run, from the test to the teardown", () => {
 
     await report(simulationId, "running");
 
-    // The tool call, arriving the way Retell's would. The endpoint is keyed on
-    // the simulation alone; the URL the transform writes still carries the run
-    // as well, and the two are joined back up when the transform is rewritten
-    // onto per-tool variables.
+    // The tool call, arriving the way Retell's would: at the address the claim
+    // put in this simulation's own routing variable, fragment and all. Retell
+    // drops the fragment, so what arrives is the path below.
+    const routed = new URL(
+      String(
+        (spec["dynamic_variables"] as Record<string, string>)[
+          "egma_url_get_availability"
+        ],
+      ),
+    );
     const answered = await api.app.inject({
       method: "POST",
-      url:
-        `${MOCK_TOOL_PREFIX}/${encodeURIComponent(simulationId)}` +
-        `/get_availability`,
+      url: routed.pathname,
       headers: { "content-type": "application/json" },
       payload: JSON.stringify({ service: "facial" }),
     });
@@ -554,6 +612,134 @@ describe("one mocked run, from the test to the teardown", () => {
     // they are the record of what this run branched and what it put back.
     expect(settled.body.tempMockAgentVersionCleanup).toBe(true);
     expect(settled.body.tempMockAgentVersion).toBe(106);
+  });
+});
+
+describe("two tests of one run, mocking different tools", () => {
+  it("share one temporary version and each get their own routing values", async () => {
+    // The shape ADR-0022 exists for: one copy in the customer's dashboard,
+    // two tests with different worlds, and a third that mocks nothing and must
+    // reach the customer's own backend from the same account.
+    const ready = await anAgentReadyToRun("mocked_run_two_worlds", {
+      tests: [
+        {
+          name: "Checks availability",
+          mockTools: [
+            { tool: "get_availability", answer: { slots: ["Tuesday 14:00"] } },
+          ],
+        },
+        {
+          name: "Books a slot",
+          mockTools: [{ tool: "book_appointment", answer: { booked: true } }],
+        },
+        { name: "Reaches the real backend", mockTools: [] },
+      ],
+    });
+
+    const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
+      suiteId: ready.suiteId,
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      idempotencyKey: newId("run"),
+    });
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    const runId = String(started.body.id);
+
+    // **One copy, not three.** The customer's version panel sees exactly one
+    // temporary version for the whole run.
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, ready.key);
+    expect(header.body.tempMockAgentVersion).toBe(106);
+    expect([...ready.state.versions].sort((a, b) => a - b)).toEqual([105, 106]);
+
+    const specs = await claim();
+    expect(specs).toHaveLength(3);
+
+    const mockedTools = (spec: Record<string, unknown>): readonly string[] =>
+      ((spec["mock_tools"] ?? []) as { tool_name: string }[]).map(
+        (one) => one.tool_name,
+      );
+    const availability = specs.find((spec) =>
+      mockedTools(spec).includes("get_availability"),
+    );
+    const booking = specs.find((spec) =>
+      mockedTools(spec).includes("book_appointment"),
+    );
+    const real = specs.find((spec) => mockedTools(spec).length === 0);
+    expect(availability).toBeDefined();
+    expect(booking).toBeDefined();
+    expect(real).toBeDefined();
+    if (availability === undefined || booking === undefined || real === undefined) {
+      return;
+    }
+
+    const addressOf = (spec: Record<string, unknown>, tool: string): string =>
+      `${api.config.baseUrl}${MOCK_TOOL_PREFIX}` +
+      `/${String(spec["simulation_id"])}/${tool}#`;
+
+    // Each simulation carries **every** routing variable, and the two disagree
+    // about which of them points at Egma — on one and the same version.
+    expect(availability["agent_version"]).toBe(106);
+    expect(availability["dynamic_variables"]).toEqual({
+      egma_url_get_availability: addressOf(availability, "get_availability"),
+      egma_url_book_appointment: "",
+    });
+    expect(booking["agent_version"]).toBe(106);
+    expect(booking["dynamic_variables"]).toEqual({
+      egma_url_get_availability: "",
+      egma_url_book_appointment: addressOf(booking, "book_appointment"),
+    });
+
+    // **A test that mocks nothing is conducted against the serving version**,
+    // even inside a run that branched a copy: it has nothing to route, so
+    // there is no reason to put it on a version the customer did not make.
+    expect(real["agent_version"]).toBe(105);
+    expect(real["dynamic_variables"]).toEqual({
+      egma_url_get_availability: "",
+      egma_url_book_appointment: "",
+    });
+    expect("mock_tools" in real).toBe(false);
+
+    // And the endpoint agrees with the addresses: each simulation answers for
+    // its own tool and refuses the other's, which is the whole promise.
+    for (const simulationId of specs.map((spec) =>
+      String(spec["simulation_id"]),
+    )) {
+      await report(simulationId, "running");
+    }
+
+    const served = await api.app.inject({
+      method: "POST",
+      url: new URL(addressOf(availability, "get_availability")).pathname,
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(served.statusCode, served.body).toBe(200);
+    expect(JSON.parse(served.body)).toEqual({ slots: ["Tuesday 14:00"] });
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: new URL(addressOf(availability, "book_appointment")).pathname,
+      headers: { "content-type": "application/json" },
+      payload: "{}",
+    });
+    expect(refused.statusCode).toBe(404);
+    expect(
+      (JSON.parse(refused.body) as { refusal: string }).refusal,
+    ).toBe("tool_not_mocked");
+
+    for (const simulationId of specs.map((spec) =>
+      String(spec["simulation_id"]),
+    )) {
+      await report(simulationId, "completed");
+    }
+
+    // The one copy is gone, and the serving version never moved.
+    expect(ready.state.versions.has(106)).toBe(false);
+    expect(
+      (ready.state.engines.get(105)?.["tools"] as Record<string, unknown>[])[0]?.[
+        "url"
+      ],
+    ).toBe(LIVE_TOOL_URL);
   });
 });
 

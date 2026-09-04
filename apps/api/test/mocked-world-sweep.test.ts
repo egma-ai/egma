@@ -279,7 +279,7 @@ describe("the sweep, over a run that is pending", () => {
     const { runId, simulationId } = await seedRun(ready, CLAIMED, 20);
     const auth = contextFor(ready.ada, "member");
 
-    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     // The stuck run is canceled, so its unclaimable simulations stop waiting.
     expect((await getRun(auth, runId))?.status).toBe("canceled");
@@ -294,7 +294,7 @@ describe("the sweep, over a run that is pending", () => {
     const { runId, simulationId } = await seedRun(ready, BRANCHED, 20);
     const auth = contextFor(ready.ada, "member");
 
-    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     // Untouched: still pending, its simulation still claimable, and its draft
     // never torn down. Cancelling it for queue wait would be a fate no other
@@ -311,7 +311,7 @@ describe("the sweep, over a run that is pending", () => {
     const { runId } = await seedRun(ready, CLAIMED, 2);
     const auth = contextFor(ready.ada, "member");
 
-    await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     expect((await getRun(auth, runId))?.status).toBe("pending");
   });
@@ -327,7 +327,7 @@ describe("what the sweep answers", () => {
     const ready = await anAgentReadyToRun("sweep_answers_clean");
     const auth = contextFor(ready.ada, "member");
 
-    const swept = await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    const swept = await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     expect(swept).toEqual({ kind: "settled" });
   });
@@ -339,7 +339,7 @@ describe("what the sweep answers", () => {
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
 
-    const swept = await settleOwedMockCleanups(auth, ready.agentId, { baseUrl: "https://egma.test", retellFetch: RETELL }, SWEEP_LOG);
+    const swept = await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     expect(swept).toEqual({ kind: "settled" });
     // The copy is gone from Retell, and the flag says the account is back.
@@ -355,7 +355,7 @@ describe("what the sweep answers", () => {
     const swept = await settleOwedMockCleanups(
       auth,
       ready.agentId,
-      { baseUrl: "https://egma.test", retellFetch: RETELL_DELETE_REFUSED },
+      { retellFetch: RETELL_DELETE_REFUSED },
       SWEEP_LOG,
     );
 
@@ -421,7 +421,7 @@ describe("a teardown resumed from the note alone", () => {
     const swept = await settleOwedMockCleanups(
       auth,
       ready.agentId,
-      { baseUrl: "https://egma.test", retellFetch: anAccountServing(TOOLS) },
+      { retellFetch: anAccountServing(TOOLS) },
       SWEEP_LOG,
     );
 
@@ -447,7 +447,6 @@ describe("a teardown resumed from the note alone", () => {
       auth,
       ready.agentId,
       {
-        baseUrl: "https://egma.test",
         retellFetch: anAccountServing([
           { tool_id: "tool-sms", type: "send_sms", name: "text_the_caller" },
         ]),
@@ -483,7 +482,7 @@ describe("a settle that arrives after somebody else settled the run", () => {
     const account = anAccountCountingDeletes();
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
-    const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
+    const reach = { retellFetch: account.fetchImpl };
 
     const first = await settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG);
     const second = await settleOwedMockCleanups(auth, ready.agentId, reach, SWEEP_LOG);
@@ -500,7 +499,7 @@ describe("a settle that arrives after somebody else settled the run", () => {
     const account = anAccountCountingDeletes();
     const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
     const auth = contextFor(ready.ada, "member");
-    const reach = { baseUrl: "https://egma.test", retellFetch: account.fetchImpl };
+    const reach = { retellFetch: account.fetchImpl };
 
     // The real shape of it: a terminal report landing while the next run's
     // sweep is already inside the teardown. The fence makes them take turns,

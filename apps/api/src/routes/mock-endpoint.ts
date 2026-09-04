@@ -13,8 +13,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 /**
  * The mock endpoint: the one new **public** surface this seam adds.
  *
- * A mocked run points the agent's own tool URLs at this address, so the calls
- * arrive here from the agent's platform rather than from anything of egma's.
+ * A mocked run points the agent's own tool URLs at this address for exactly
+ * the tools a test names, so the calls arrive here from the agent's platform
+ * rather than from anything of egma's.
  * That is not a design choice: Retell refuses localhost and private addresses
  * for a tool URL, so a mocked run needs an address its infrastructure can
  * reach. Self-hosters are told this plainly, and it is the only new inbound
@@ -28,21 +29,41 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  *
  * `/mock-tools/{simulation}/{tool}`. A custom tool configured args-at-root
  * posts no call envelope at all, so the URL is the only channel identity can
- * ride. The simulation is a dynamic variable the platform fills per call; the
+ * ride. The whole address arrives as the value of that tool's own per-call
+ * variable — the temporary version carries no address of Egma's, only
+ * `{{egma_url_<tool>}}` in front of the customer's own URL — so which
+ * simulation is in the path is decided per call, in the claim (ADR-0022). The
  * tool's name is percent-encoded on the way in and decoded here, and matched
- * byte-exactly — so any name the platform accepts routes correctly, reserved
+ * byte-exactly, so any name the platform accepts routes correctly, reserved
  * characters included.
  *
  * The simulation names its own run, so there is no second identifier to agree
  * with: a call cannot be moved from one customer's run to another's, because
  * the run is read from the row rather than read off the URL.
  *
+ * ## What is dropped at the door, and why
+ *
+ * **Every header and every query parameter that arrives, unread.** The
+ * temporary version keeps each tool's own headers and query params byte for
+ * byte, because that same version serves the tools a test does *not* mock and
+ * those calls have to authenticate exactly as production does. So on a mocked
+ * call the customer's backend credentials arrive here — and nothing here reads
+ * them, logs them, stores them or puts them on the record. The one header this
+ * endpoint reads is the platform's own signature.
+ *
+ * That has a cost, and it is paid deliberately: a tool the customer wrote as a
+ * **GET** carries the model's arguments in the same query string as their own
+ * static parameters, and Egma cannot tell one from the other — so a GET tool's
+ * arguments are not written down at all. The record shows the call, the answer
+ * and the provenance, and no arguments. A POST tool's arguments are its body,
+ * which is Egma's to read, and they land in full.
+ *
  * ## Three gates, in order
  *
  * 1. **The simulation named belongs to a live run.** A simulation nobody has
  *    heard of and one whose run has finished are the same answer: a finished
- *    run's temporary version has been deleted and its numbers put back, so an
- *    answer served after it would come from a world that no longer exists.
+ *    run's temporary version has been deleted, so an answer served after it
+ *    would come from a world that no longer exists.
  * 2. **The signature verifies**, where the platform sent one.
  * 3. **The tool is one this simulation's own test named.** The pinned test
  *    version carries the answers, so one temporary version serves every test of
@@ -79,7 +100,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
  * ## The record
  *
  * Every exchange is written onto the simulation's own record by the control
- * plane: the arguments as they arrived, the answer served, the elapsed time
+ * plane: the arguments as they arrived in the body, the answer served, the
+ * elapsed time
  * bracketed by the span itself, and the provenance `mocked` naming the tool
  * that answered. A refused call for a simulation this endpoint could identify
  * lands as `refused` — no answer and no mock tool, but egma was in the path and
@@ -96,10 +118,10 @@ export const MOCK_TOOL_PREFIX = "/mock-tools";
 export const MOCK_TOOL_PATH = `${MOCK_TOOL_PREFIX}/:simulationId/:toolName`;
 
 /**
- * The base a temporary version's tool URLs are written against.
+ * The base a mocked call's routing value is built against.
  *
- * The one place the address is spelled, so the writer and the endpoint cannot
- * disagree about it.
+ * The one place the address is spelled, so the claim that fills it into a
+ * per-call variable and the endpoint that answers it cannot disagree about it.
  */
 export function mockToolBase(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}${MOCK_TOOL_PREFIX}`;
@@ -346,20 +368,16 @@ export async function mockEndpointRoutes(app: FastifyInstance): Promise<void> {
     const beganAtMicroseconds = nowMicroseconds();
     const params = request.params as Params;
     const rawBody = typeof request.body === "string" ? request.body : "";
-    // What the agent asked with, in the one shape the record is read in.
+    // What the agent asked with, in the one shape the record is read in: the
+    // body's own bytes, exactly as they arrived.
     //
-    // A POST carries its arguments as the body's own bytes and they are kept
-    // exactly as they arrived. A GET carries them in the query string, and they
-    // are written down as the JSON object they are — because every reader of a
-    // tool call's arguments parses this column as JSON, and one row that was a
-    // query string instead would be the row that breaks them. The **signature**
-    // is a separate matter and is still checked over the raw body, which on a
-    // GET is empty; conflating the two would be checking a signature over bytes
-    // that never travelled.
-    const heardArguments =
-      request.method === "GET"
-        ? JSON.stringify(request.query ?? {})
-        : rawBody;
+    // **The query string is not read, on either method.** It is the customer's
+    // own — their static parameters travel in it, credentials among them —
+    // and on a GET tool the model's arguments are mixed into the same string
+    // with nothing to tell them apart. So a GET lands with no arguments rather
+    // than with the customer's secrets on the record, which is the trade this
+    // endpoint makes everywhere (see the note at the top of this file).
+    const heardArguments = rawBody;
     // Decoded here, and matched byte-exactly against the authored name from
     // here on. Fastify decodes a path segment for us; a segment that is not
     // valid percent-encoding arrives as it was sent and simply matches nothing.
