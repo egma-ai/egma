@@ -259,8 +259,20 @@ export function mockToolsSummary(mockTools: readonly TestMockTool[]): string {
     : `${String(mockTools.length)} mock tools`;
 }
 
-/** The env keys present, in the platforms' own words. Nothing when there are none. */
+/**
+ * What an Env cell says at rest, and nothing when it holds none.
+ *
+ * **It names the way in rather than the keys.** The cell used to list the
+ * platforms' own key names — `retell_dynamic_variables, job_dispatch_metadata`
+ * is 47 characters of identifier — in the narrowest lane of the grid, where it
+ * ran out through the column and told a reader nothing they could act on. The
+ * cell is a button that opens the editor, so it says what pressing it does and
+ * the keys are read where they can be read whole (founder, 2026-09-04).
+ *
+ * An env of empty objects still says nothing: `readEnv` never stores one, and
+ * a cell that announced a value nobody wrote would be a lie about the row.
+ */
 export function envSummary(env: TestEnv | null): string {
   if (env === null) return "";
-  return ENV_KEYS.filter((key) => env[key] !== undefined).join(", ");
+  return ENV_KEYS.some((key) => env[key] !== undefined) ? "View env variables" : "";
 }

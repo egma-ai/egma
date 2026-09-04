@@ -95,8 +95,13 @@ import { ConfirmDialog } from "./parts.tsx";
  *
  * The look is `LNC-0`, `LUT-0` and boards 10–14 of Paper page 04B: a Pure Paper
  * panel inside one hairline, hairlines between every cell, a woken cell inside
- * a 2px ink edge, add-affordances only on the woken cell, and a ghost row at
- * the foot that opens the entry row.
+ * a 2px ink edge, add-affordances on the woken cell, and a ghost row at the
+ * foot that opens the entry row.
+ *
+ * The two JSON cells are the exception to "only when woken", and the founder
+ * made it on 2026-09-04: they are not cells anybody types in, so they never
+ * wake, and an empty one that showed nothing was a control with no sign it was
+ * one. They carry the same add-affordance at rest.
  */
 
 /** A persona as a cell needs it: an id to send and a name to show. */
@@ -117,7 +122,8 @@ type Field =
  * **They are cells that open something, not cells you type in.** A mock tool's
  * answer is arbitrary JSON and an env is two nested objects, and neither fits
  * on a table row that has to stay scannable beside a scenario. So the cell
- * carries the summary and the writing happens in the smallest dialog that
+ * carries one short summary — or, while it holds nothing, the line that offers
+ * to write the first one — and the writing happens in the smallest dialog that
  * holds a monospace editor, a reason when there is one, and Save and Cancel.
  */
 type JsonField = "mockTools" | "env";
@@ -126,21 +132,54 @@ function isJsonField(field: Field): field is JsonField {
   return field === "mockTools" || field === "env";
 }
 
-/** What each JSON dialog is called, and what its empty editor shows. */
+/**
+ * What each JSON dialog is called, what its empty cell offers, and what its
+ * empty editor shows.
+ *
+ * **The example is written by the same call the editor is.** A stored value
+ * opens as `JSON.stringify(value, null, 2)`, so a one-line example taught the
+ * shape in a grammar this field never writes back: somebody copied it, saved,
+ * reopened, and read a document that looked nothing like the one they had
+ * pasted. Running a real value through the same call is what keeps the empty
+ * editor and the full one the same shape — it cannot drift, because there is
+ * no second copy of the formatting to drift from (founder, 2026-09-04).
+ *
+ * `add` is the empty cell's own line, and it is a verb rather than the column
+ * heading again: the cell says what pressing it does.
+ */
 const JSON_FIELD: Readonly<
-  Record<JsonField, { readonly title: string; readonly example: string }>
+  Record<
+    JsonField,
+    {
+      readonly title: string;
+      readonly add: string;
+      readonly example: string;
+    }
+  >
 > = {
   mockTools: {
     title: "Mock tools",
-    example:
-      '[{ "tool": "get_availability", "answer": { "slots": [] } }, ' +
-      '{ "tool": "book", "error": "calendar down" }]',
+    add: "Add mock tools",
+    example: JSON.stringify(
+      [
+        { tool: "get_availability", answer: { slots: [] } },
+        { tool: "book", error: "calendar down" },
+      ],
+      null,
+      2,
+    ),
   },
   env: {
     title: "Env",
-    example:
-      '{ "retell_dynamic_variables": { "caller_name": "Margaret" }, ' +
-      '"job_dispatch_metadata": { "tenant": "acme" } }',
+    add: "Add env variables",
+    example: JSON.stringify(
+      {
+        retell_dynamic_variables: { caller_name: "Margaret" },
+        job_dispatch_metadata: { tenant: "acme" },
+      },
+      null,
+      2,
+    ),
   },
 };
 
@@ -168,25 +207,74 @@ function isContent(field: Field): boolean {
  * The columns, at the proportions `LNC-0` draws them, rebalanced for two more.
  *
  * **Every column holds its own heading on one line at the grid's floor**, and
- * that is what set these numbers rather than taste. `Mock tools` wants about
- * 100px inside `--row-padding-x` either side, and `Personas` about the same, so
- * the two narrow content lanes are 13% and 12% of the usable width — with the
- * floor in `tailwind-theme.css` raised to the 900px that makes 13% reach 100.
- * The four that were here keep their order; what they gave up is the room the
- * two new lanes needed to stay readable.
+ * that is what set these numbers rather than taste. At the 900px floor the
+ * headings want, inside `--row-padding-x` either side, about 100px for
+ * `Mock tools` and about 90px for `Personas`; `Expected behaviors` is the
+ * widest word in the row and wants about 150.
+ *
+ * **The two JSON lanes are 15% each, and the sentences in them are why**
+ * (founder, 2026-09-04). Their cells no longer hold a bare count and a list of
+ * key names: an empty one offers `+ Add mock tools` or `+ Add env variables`,
+ * and a full Env says `View env variables`. That is about 130px of words in a
+ * lane that was 8%, which is 72px at the floor — so Env was the one column in
+ * the grid whose content could not be drawn inside it at any width. Scenario
+ * and Expected behaviors gave up the five and four points, because they are
+ * the two lanes with room to give and their own headings still fit.
  */
 const COLUMNS: readonly {
   readonly field: Field;
   readonly header: string;
   readonly width: string;
+  /** Whether a test cannot be saved without this column, which four cannot. */
+  readonly required: boolean;
 }[] = [
-  { field: "name", header: "Name", width: "12%" },
-  { field: "scenario", header: "Scenario", width: "27%" },
-  { field: "expectedBehaviors", header: "Expected behaviors", width: "28%" },
-  { field: "personas", header: "Personas", width: "12%" },
-  { field: "mockTools", header: "Mock tools", width: "13%" },
-  { field: "env", header: "Env", width: "8%" },
+  { field: "name", header: "Name", width: "12%", required: true },
+  { field: "scenario", header: "Scenario", width: "22%", required: true },
+  {
+    field: "expectedBehaviors",
+    header: "Expected behaviors",
+    width: "24%",
+    required: true,
+  },
+  { field: "personas", header: "Personas", width: "12%", required: true },
+  { field: "mockTools", header: "Mock tools", width: "15%", required: false },
+  { field: "env", header: "Env", width: "15%", required: false },
 ];
+
+/**
+ * The star over a column a test cannot be saved without.
+ *
+ * **It is the product's own label grammar, moved up to the heading.** The grid
+ * has no field labels — a cell is the value and the column heading is its only
+ * name — so the four mandatory fields had no way of saying so until the Save
+ * button refused. `DESIGN.md` already sets the grammar: a mandatory field's
+ * label ends in `*`.
+ *
+ * **The star wears the heading's own colour, not Ember** (founder,
+ * 2026-09-04). A form draws its star in the brand colour, where it is one mark
+ * on a quiet column of labels. A heading row is six labels side by side, and
+ * four orange marks across it read as a state the table is in rather than a
+ * fact about four fields. `ui/form.tsx` keeps the Ember star for forms.
+ *
+ * **And it is never only a picture**, which is the other half of the same
+ * rule. A `<th>` takes no `aria-required`, so the heading says the word
+ * instead, and it says it through the cell's own name rather than a hidden
+ * span beside the star: the name a `<th>` computes from its contents runs the
+ * text nodes together, so a hidden `(required)` was announced as
+ * `Name(required)`. `columnHeading` below is the one place that name is built.
+ */
+function RequiredMark() {
+  return (
+    <span className="pl-1" aria-hidden="true" data-required-mark="">
+      *
+    </span>
+  );
+}
+
+/** What a screen reader hears for one column, star and all. */
+function columnHeading(header: string, required: boolean): string | undefined {
+  return required ? `${header}, required` : undefined;
+}
 
 const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
 /*
@@ -233,9 +321,33 @@ const WOKEN =
 const QUIET_INPUT =
   "w-full resize-none border-0 bg-transparent p-0 text-sm leading-(--line-caption) text-foreground outline-none placeholder:text-faint";
 
-/** The ember affordance a woken cell grows, and nothing else on the screen. */
+/**
+ * The one ember affordance on this screen, and every way in wears it.
+ *
+ * A woken Expected behaviors or Personas cell grows it, an empty Mock tools or
+ * Env cell rests as it, and the ghost row at the foot of the table is it. One
+ * class rather than four is what keeps them a single grammar: a person learns
+ * "the orange line adds the thing beside it" once, on whichever cell they meet
+ * first.
+ */
 const ADD_LINE =
   "cursor-pointer bg-transparent p-0 text-left text-sm leading-(--line-caption) text-primary underline-offset-4 pointer-hover:underline";
+
+/**
+ * Where a press is *not* leaving the woken cell.
+ *
+ * The cell itself, obviously. The persona picker, because it is the cell's own
+ * panel and shutting it is what commits — the blur handler makes the same
+ * exception for the same reason. And a dialog, scrim included, because a save
+ * still in flight can leave a cell woken while one is opened over it, and a
+ * press meant for Save is not a press meant for the table.
+ */
+const KEEPS_THE_CELL = [
+  "[data-woken-cell]",
+  '[data-slot="popover-content"]',
+  '[data-slot="dialog-content"]',
+  '[data-slot="dialog-overlay"]',
+].join(",");
 
 type Draft = {
   readonly name: string;
@@ -930,33 +1042,50 @@ function CellBody({
   );
 }
 
+/** What one JSON field of a row says at rest, or `""` when it holds nothing. */
+function jsonSaid(
+  field: JsonField,
+  held: Pick<Draft, "mockTools" | "env">,
+): string {
+  return field === "mockTools"
+    ? mockToolsSummary(held.mockTools)
+    : envSummary(held.env);
+}
+
 /**
- * The quiet summary a JSON cell shows at rest, and nothing when it holds none.
+ * What a JSON cell shows at rest: the summary, or the way to write the first one.
  *
  * Muted text rather than a chip (founder, 2026-09-03): a chip in a table lane
  * this narrow is decoration, and what a reader needs is one short fact they can
- * scan past. The env's keys are the platforms' own words and are drawn as the
- * identifiers they are.
+ * scan past.
+ *
+ * **An empty cell says how to fill it** (founder, 2026-09-04). It used to be
+ * blank, so the only thing that said a mock tool or an env could be written
+ * here was the pointer changing shape over it — which a person has to already
+ * suspect the cell is a control to find. The line is `ADD_LINE`, the same ember
+ * affordance the Expected behaviors and Personas cells grow, so the four
+ * writable things on a row are offered in one grammar.
+ *
+ * A reader who cannot author is offered nothing, because there is nothing they
+ * could do with the offer. Their cell stays the summary or stays blank.
  */
 function JsonSummary({
   field,
   test,
+  add,
 }: {
   readonly field: JsonField;
   readonly test: Pick<Draft, "mockTools" | "env">;
+  /** Whether an empty cell offers to be filled, which only an author may do. */
+  readonly add: boolean;
 }) {
-  if (field === "mockTools") {
-    const said = mockToolsSummary(test.mockTools);
-    return said === "" ? null : (
-      <span className="text-sm leading-(--line-caption) text-faint">{said}</span>
-    );
+  const said = jsonSaid(field, test);
+  if (said !== "") {
+    return <span className="text-sm leading-(--line-caption) text-faint">{said}</span>;
   }
-  const keys = envSummary(test.env);
-  return keys === "" ? null : (
-    <span className="font-mono text-sm leading-(--line-caption) text-faint">
-      {keys}
-    </span>
-  );
+  return add ? (
+    <span className={ADD_LINE}>{`+ ${JSON_FIELD[field].add}`}</span>
+  ) : null;
 }
 
 /**
@@ -1001,7 +1130,13 @@ function JsonDialog({
             className="resize-y font-mono text-sm"
             placeholder={JSON_FIELD[field].example}
             ref={editor}
-            rows={12}
+            /*
+             * Fourteen, because the examples are pretty-printed now: the mock
+             * tools one is twelve lines, and a box that ends exactly where its
+             * own placeholder does gives a reader no way to tell a whole
+             * example from a clipped one.
+             */
+            rows={14}
             spellCheck={false}
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -1446,6 +1581,55 @@ export function TestsGrid(props: GridProps) {
     await run;
   }
 
+  /**
+   * A press anywhere else is leaving the cell, and leaving a cell commits it.
+   *
+   * **Blur alone does not close a cell, because most of a page takes no
+   * focus.** The canvas beside the table, the table's own headings, the page
+   * title: pressing any of them moves focus nowhere, so no blur fires and the
+   * woken cell sat there wearing its ink edge over words nobody had saved
+   * (founder, 2026-09-04). A press is what a person means by "I am done with
+   * that cell", whether or not the browser had anywhere to put the caret.
+   *
+   * **It runs the same `commit` a blur runs**, so every rule that governs a
+   * save governs this one: the identical-resubmit guard that makes a press
+   * followed by a blur one request rather than two, the per-test queue, the
+   * version the queue hands it, and the refusal shown in place. Escape is
+   * untouched and still reverts.
+   *
+   * The handler is rebuilt every render and reached through a ref, because it
+   * has to run *this* render's `commit` over *this* render's draft — a
+   * listener captured once would save whatever was in the cell when it was
+   * woken.
+   */
+  const outsidePress = useRef<((event: Event) => void) | null>(null);
+  useEffect(() => {
+    outsidePress.current = (event: Event): void => {
+      if (active === null) return;
+      // Its own picker being open is the blur handler's exception too: Radix
+      // shuts the panel on this same press, and shutting it is the commit.
+      if (picking === active.testId) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(KEEPS_THE_CELL) !== null) return;
+      const test = tests.find((one) => one.id === active.testId);
+      if (test === undefined) return;
+      void commit(test, active.field);
+    };
+  });
+
+  useEffect(() => {
+    if (active === null) return undefined;
+    const press = (event: Event): void => outsidePress.current?.(event);
+    /*
+     * Capture, so the cell is committed on the way down to whatever was
+     * pressed rather than after it has had its turn — a press that opens a
+     * dialog or navigates away must carry the save with it.
+     */
+    document.addEventListener("pointerdown", press, true);
+    return () => document.removeEventListener("pointerdown", press, true);
+  }, [active]);
+
   async function write(): Promise<void> {
     if (entry === null || entrySaving) return;
     if (whatIsMissing(entry) !== null) return;
@@ -1659,6 +1843,7 @@ export function TestsGrid(props: GridProps) {
    * the unlayered rule in `globals.css`. The cell adds none of its own.
    */
   function jsonCell(test: ListedTest, field: JsonField): ReactNode {
+    const said = jsonSaid(field, test);
     return (
       <td className={CELL} key={field}>
         {mayAuthor ? (
@@ -1668,14 +1853,24 @@ export function TestsGrid(props: GridProps) {
               "block w-full cursor-pointer bg-transparent text-left",
             )}
             type="button"
-            aria-label={`${JSON_FIELD[field].title} for ${test.name}`}
+            /*
+             * The name follows what the cell shows, because the cell shows
+             * words now: a button reading "+ Add env variables" announced as
+             * "Env for Books service" is the one control on the row whose
+             * spoken name does not contain its written one.
+             */
+            aria-label={
+              said === ""
+                ? `${JSON_FIELD[field].add} for ${test.name}`
+                : `${JSON_FIELD[field].title} for ${test.name}`
+            }
             onClick={() => openJson(test, field)}
           >
-            <JsonSummary field={field} test={test} />
+            <JsonSummary field={field} test={test} add />
           </button>
         ) : (
           <div className={PAD}>
-            <JsonSummary field={field} test={test} />
+            <JsonSummary field={field} test={test} add={false} />
           </div>
         )}
       </td>
@@ -1690,6 +1885,7 @@ export function TestsGrid(props: GridProps) {
       <td
         className={cn(CELL, woken && WOKEN)}
         key={field}
+        {...(woken ? { "data-woken-cell": "" } : {})}
         onClick={woken ? undefined : () => wake(test, field)}
         onBlur={
           woken
@@ -1795,6 +1991,7 @@ export function TestsGrid(props: GridProps) {
     if (isJsonField(field)) {
       // From the entry row the dialog edits the draft, because there is no
       // test to save against yet. The row's own Save carries what it holds.
+      const said = jsonSaid(field, entry);
       return (
         <td className={CELL} key={field}>
           <button
@@ -1803,10 +2000,14 @@ export function TestsGrid(props: GridProps) {
               "block w-full cursor-pointer bg-transparent text-left",
             )}
             type="button"
-            aria-label={`${JSON_FIELD[field].title} for the new test`}
+            aria-label={
+              said === ""
+                ? `${JSON_FIELD[field].add} for the new test`
+                : `${JSON_FIELD[field].title} for the new test`
+            }
             onClick={() => openJson(null, field)}
           >
-            <JsonSummary field={field} test={entry} />
+            <JsonSummary field={field} test={entry} add />
           </button>
         </td>
       );
@@ -1946,8 +2147,10 @@ export function TestsGrid(props: GridProps) {
                 )}
                 key={column.field}
                 scope="col"
+                aria-label={columnHeading(column.header, column.required)}
               >
                 {column.header}
+                {column.required ? <RequiredMark /> : null}
               </th>
             ))}
             {/*

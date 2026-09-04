@@ -364,9 +364,14 @@
    * tools and Env are two more columns of the test's own content, and six
    * columns plus the lane do not hold their headings inside a tablet — the
    * arithmetic is `Mock tools` at 14px inside `--row-padding-x` either side,
-   * which wants about 100px, and 13% of the usable width reaches that at 900.
-   * A tablet scrolls the grid now. A table that scrolls inside its own panel
-   * is the honest failure here; headings broken across two lines are not.
+   * which wants about 100px, and `Personas` about 90. A tablet scrolls the
+   * grid now. A table that scrolls inside its own panel is the honest failure
+   * here; headings broken across two lines are not.
+   *
+   * The proportions moved on 2026-09-04, when the two JSON cells started
+   * saying sentences rather than counts, and the floor did not have to move
+   * with them: `Personas` at 12% is 108px here and is now the tightest
+   * heading of the six.
    */
   --tests-grid-min-width: 900px;
 
